@@ -25,6 +25,7 @@ VInterpP1F32Vintrp::VInterpP1F32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -45,14 +46,14 @@ VInterpP2F32Vintrp::VInterpP2F32Vintrp(const MachineInst *inst)
       vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       attr(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->attr),
       m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &vsrc;
-  src_operands_[2] = &attr;
-  src_operands_[3] = &m0;
-  num_src_ = 4;
+  src_operands_[0] = &vsrc;
+  src_operands_[1] = &attr;
+  src_operands_[2] = &m0;
+  num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {
@@ -80,6 +81,7 @@ VInterpMovF32Vintrp::VInterpMovF32Vintrp(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
 namespace detail {

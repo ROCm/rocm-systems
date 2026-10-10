@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi.h"
 
@@ -40,6 +21,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -1433,10 +1415,10 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // pp_dpm_* without flagging any level as current ('*' marker absent).
   // Treat that as "current unknown" rather than discarding the parsed
   // table: keep f->num_supported / f->frequency populated and signal
-  // "no current level" via f->current = -1 so callers can still report
+  // "no current level" via f->current = UINT32_MAX so callers can still report
   // the frequency table.
   if (f->current >= f->num_supported) {
-    f->current = -1;
+    f->current = UINT32_MAX;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -2001,11 +1983,18 @@ static rsmi_status_t set_power_profile(uint32_t dv_ind, rsmi_power_profile_prese
 }
 
 static rsmi_status_t topo_get_numa_node_number(uint32_t dv_ind, uint32_t* numa_node_number) {
+  if (numa_node_number == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
   TRY
 
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * numa_node_number = kfd_node->numa_node_number();
+  if (*numa_node_number == amd::smi::kInvalidNumaNode) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -2017,6 +2006,9 @@ static rsmi_status_t topo_get_numa_node_weight(uint32_t dv_ind, uint64_t* weight
       GET_DEV_AND_KFDNODE_FROM_INDX
 
           * weight = kfd_node->numa_node_weight();
+  if (*weight == amd::smi::kInvalidNumaNodeWeight) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -2252,7 +2244,7 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind, uint32_t* pisolate
     LOG_ERROR(ss);
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  *pisolate = partition_status[partition_id];
+  *pisolate = static_cast<uint32_t>(partition_status[partition_id]);
   return RSMI_STATUS_SUCCESS;
 }
 
@@ -2304,7 +2296,7 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind, uint32_t pisolate)
   }
 
   // (3) Create the complete list with the update
-  partition_status[partition_id] = pisolate;
+  partition_status[partition_id] = static_cast<int>(pisolate);
   std::stringstream result;
   std::copy(partition_status.begin(), partition_status.end(),
             std::ostream_iterator<int>(result, " "));
@@ -2398,7 +2390,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy)
       return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
-    policy->policies[policy->num_supported].policy_id = value;
+    policy->policies[policy->num_supported].policy_id = static_cast<uint32_t>(value);
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
       description.pop_back();          // remove last *
@@ -2503,7 +2495,7 @@ rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind, rsmi_dpm_policy_t* policy
       return RSMI_STATUS_UNEXPECTED_DATA;
     }
 
-    policy->policies[policy->num_supported].policy_id = value;
+    policy->policies[policy->num_supported].policy_id = static_cast<uint32_t>(value);
     std::string description = amd::smi::trim(tokens[1]);
     if (current_line.back() == '*') {  // current policy
       description.pop_back();          // remove last *
@@ -2642,7 +2634,7 @@ static rsmi_status_t get_dev_name_from_file(uint32_t dv_ind, char* name, size_t 
   rsmi_status_t ret = get_dev_value_line(amd::smi::kDevDevProdName, dv_ind, &val_str);
 
   if (ret != 0) {
-    return amd::smi::ErrnoToRsmiStatus(ret);
+    return amd::smi::ErrnoToRsmiStatus(static_cast<int>(ret));
   }
   size_t ct = val_str.copy(name, len);
 
@@ -3085,7 +3077,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
       static_cast<uint32_t>(speed_index) * WIDTH_DATA_LENGTH + static_cast<uint32_t>(width_index);
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
     b->transfer_rate.frequency[cur_index] =
-        static_cast<long>(link_speed[cur_index / WIDTH_DATA_LENGTH]) * 100 * 1000000L;
+        static_cast<uint64_t>(link_speed[cur_index / WIDTH_DATA_LENGTH]) * 100UL * 1000000UL;
     b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
   }
   /*
@@ -3260,6 +3252,29 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   rsmi_status_t ubb_status =
       amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
 
+  // Get platform max node power limit (optional - don't fail if not available).
+  // This is descriptive metadata (used by callers, e.g. amd-smi CLI, to bound
+  // requests to rsmi_dev_npm_limit_set()), not on the critical read path.
+  uint64_t npm_max_limit = UINT64_MAX;
+  rsmi_status_t max_limit_status =
+      amd::smi::get_npm_board_max_limit(*board_path_str, &npm_max_limit);
+  if (max_limit_status != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_max_limit returned "
+       << getRSMIStatusString(max_limit_status) << " ; using sentinel max limit";
+    LOG_DEBUG(ss);
+    npm_max_limit = UINT64_MAX;
+  }
+
+  // Get current node power (optional - don't fail if not available). This is
+  // descriptive telemetry, not on the critical read path.
+  uint64_t node_power_raw = UINT64_MAX;
+  rsmi_status_t node_power_status = amd::smi::get_npm_node_power(*board_path_str, &node_power_raw);
+  if (node_power_status != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_node_power returned "
+       << getRSMIStatusString(node_power_status) << " ; using sentinel node power";
+    LOG_DEBUG(ss);
+  }
+
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
@@ -3269,6 +3284,266 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
       (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
           ? static_cast<uint32_t>(ubb_power_threshold_raw)
           : std::numeric_limits<uint32_t>::max();
+  npm_info->max_node_power_limit = npm_max_limit;
+  npm_info->current_node_power =
+      (node_power_status == RSMI_STATUS_SUCCESS && node_power_raw <= kU32Max)
+          ? static_cast<uint32_t>(node_power_raw)
+          : std::numeric_limits<uint32_t>::max();
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (mode == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(mode)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string mode_str;
+  rsmi_status_t ret = amd::smi::get_npm_board_mode(*board_path_str, &mode_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_mode failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  *mode = (mode_str == "2") ? RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
+                            : RSMI_NPM_BALANCING_MODE_POWER_BALANCING;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", mode=" << mode;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+
+  CHECK_DV_IND_RANGE
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  if (mode != RSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    ss << __PRETTY_FUNCTION__ << " | invalid mode=" << mode << " -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // supported_mode is not yet implemented on all platforms, so its absence
+  // (RSMI_STATUS_NOT_SUPPORTED) must not block the write. Any other read
+  // failure (e.g. corrupt content) fails closed with RSMI_STATUS_SETTING_UNAVAILABLE,
+  // since we can't confirm the requested mode is allowed.
+  uint64_t supported_modes = 0;
+  rsmi_status_t supported_ret =
+      amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
+  if (supported_ret != RSMI_STATUS_NOT_SUPPORTED) {
+    if (supported_ret != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | get_npm_supported_modes failed: " << getRSMIStatusString(supported_ret, false)
+         << " -> rejecting write (fail closed)";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+    if ((supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
+      ss << __PRETTY_FUNCTION__ << " | mode=" << mode
+         << " not in supported_modes bitmask=" << supported_modes << " -> returning "
+         << getRSMIStatusString(RSMI_STATUS_SETTING_UNAVAILABLE);
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+  }
+
+  // Fail closed and NEVER touch sysfs when NPM is disabled on this node.
+  // Unlike rsmi_dev_npm_limit_set()'s analogous check (which returns
+  // RSMI_STATUS_INVALID_ARGS), balancing mode requires RSMI_STATUS_NOT_SUPPORTED
+  // here so it surfaces as AMDSMI_STATUS_NOT_SUPPORTED at the public API.
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string mode_str = (mode == RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ? "2" : "1";
+  rsmi_status_t ret = amd::smi::set_npm_board_mode(*board_path_str, mode_str);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", limit=" << limit;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+
+  CHECK_DV_IND_RANGE
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Reject the write outright when NPM is disabled on this node: writing
+  // board/cur_node_power_limit has no defined effect in that state. This is
+  // the authoritative check -- the CLI's own pre-check (amdsmi_helpers.py)
+  // is a fail-fast convenience for that one caller, not a substitute for
+  // enforcing this here for every caller of rsmi_dev_npm_limit_set().
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return status_ret;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Mirror rsmi_dev_power_cap_set(): query the platform bound before ever
+  // touching sysfs, and reject out-of-range requests with
+  // RSMI_STATUS_INVALID_ARGS. Fail closed if the bound itself can't be
+  // read (e.g. sysfs missing/unexpected contents) -- propagate that error
+  // and do not fall through to the write, rather than silently allowing an
+  // unbounded value through, consistent with the CLI layer's own
+  // fail-closed handling of an unreadable platform max.
+  uint64_t max_limit = 0;
+  rsmi_status_t ret = amd::smi::get_npm_board_max_limit(*board_path_str, &max_limit);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_max_limit failed: " << getRSMIStatusString(ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  if (limit == 0 || limit > max_limit) {
+    ss << __PRETTY_FUNCTION__ << " | limit=" << limit << " out of range (valid range is "
+       << "1.." << max_limit << ") -> returning " << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  ret = amd::smi::set_npm_board_limit(*board_path_str, limit);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (bitmask == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(bitmask)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret = amd::smi::get_npm_supported_modes(*board_path_str, bitmask);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_supported_modes failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
@@ -5009,6 +5284,9 @@ rsmi_status_t rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_command_t cmd,
                                    void* /*unused*/) {
+  if (evt_handle == 0) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   TRY
 
       amd::smi::evt::Event* evt = reinterpret_cast<amd::smi::evt::Event*>(evt_handle);
@@ -5018,10 +5296,6 @@ rsmi_status_t rsmi_counter_control(rsmi_event_handle_t evt_handle, rsmi_counter_
   REQUIRE_ROOT_ACCESS
 
   int ret = 0;
-
-  if (evt_handle == 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
 
   switch (cmd) {
     case RSMI_CNTR_CMD_START:
@@ -5467,12 +5741,10 @@ rsmi_status_t rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst
           }
           status = RSMI_STATUS_SUCCESS;
         } else {
-          assert(false);  // Error to read numa node number
-          status = RSMI_STATUS_INIT_ERROR;
+          status = RSMI_STATUS_NOT_SUPPORTED;
         }
       } else {
-        assert(false);  // Error to read numa node weight
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;
@@ -5546,7 +5818,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
   // handle the link type for CPU
   if (dv_ind_dst == CPU_NODE_INDEX) {
     // No CPU connected
-    if (kfd_node->numa_node_weight() == 0) {
+    if (kfd_node->numa_node_weight() == amd::smi::kInvalidNumaNodeWeight) {
       return RSMI_STATUS_NOT_SUPPORTED;
     }
     amd::smi::IO_LINK_TYPE io_link_type = kfd_node->numa_node_type();
@@ -5597,8 +5869,7 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
         *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
         status = RSMI_STATUS_SUCCESS;
       } else {
-        assert(false);  // Error to get numa node number
-        status = RSMI_STATUS_INIT_ERROR;
+        status = RSMI_STATUS_NOT_SUPPORTED;
       }
     } else {
       status = RSMI_STATUS_NOT_SUPPORTED;
@@ -5691,6 +5962,8 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   bool node_is_find = false;
+  // Keep the matched link alive; io_link_map_tmp.clear() invalidates the iterator.
+  std::shared_ptr<amd::smi::IOLink> found_link;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>> io_link_map_tmp;
   std::map<uint32_t, std::shared_ptr<amd::smi::IOLink>>::iterator it;
   // Iterate over P2P links
@@ -5698,6 +5971,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
       if (it->first == node_ind_dst) {
         node_is_find = true;
+        found_link = it->second;
         break;
       }
     }
@@ -5712,6 +5986,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
       for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++) {
         if (it->first == node_ind_dst) {
           node_is_find = true;
+          found_link = it->second;
           break;
         }
       }
@@ -5722,7 +5997,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
 
   if (node_is_find) {
-    amd::smi::IO_LINK_TYPE io_link_type = it->second->type();
+    amd::smi::IO_LINK_TYPE io_link_type = found_link->type();
     if (io_link_type == amd::smi::IOLINK_TYPE_PCIEXPRESS) {
       *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
     } else if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
@@ -5743,7 +6018,7 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
      *          some time to implement and test it, should we consider it is *really necessary*.
      *
      */
-    auto tmp_capability = it->second->get_link_capability();
+    auto tmp_capability = found_link->get_link_capability();
     if (auto link_direction_result =
             amd::smi::DiscoverIOLinkPerNodeDirection(node_ind_src, node_ind_dst);
         link_direction_result == amd::smi::IOLinkDirectionType_t::kBiDirectional) {
@@ -6685,7 +6960,7 @@ rsmi_status_t rsmi_dev_memory_partition_get(uint32_t dv_ind, char* memory_partit
     return ret;
   }
 
-  std::size_t buff_size = returning_memory_partition.copy(memory_partition, len);
+  std::size_t buff_size = returning_memory_partition.copy(memory_partition, len - 1);
   memory_partition[buff_size] = '\0';
 
   if (len < (returning_memory_partition.size() + 1)) {
@@ -7624,7 +7899,6 @@ rsmi_status_t rsmi_dev_metrics_header_info_get(uint32_t dv_ind,
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(header_value != nullptr);
   if (header_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }
@@ -7648,7 +7922,6 @@ rsmi_status_t rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_co
   ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ostrstream);
 
-  assert(xcd_counter_value != nullptr);
   if (xcd_counter_value == nullptr) {
     return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
   }

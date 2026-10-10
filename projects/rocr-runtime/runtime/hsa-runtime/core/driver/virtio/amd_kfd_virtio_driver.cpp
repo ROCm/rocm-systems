@@ -57,17 +57,16 @@ namespace rocr {
 namespace AMD {
 
 __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return AMDGPU_VM_PAGE_READABLE;
-  case HSA_ACCESS_PERMISSION_WO:
-    return AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_ACCESS_PERMISSION_RW:
-    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return 0;
-  }
+  uint64_t flags = 0;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= AMDGPU_VM_PAGE_READABLE;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= AMDGPU_VM_PAGE_WRITEABLE;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= AMDGPU_VM_PAGE_EXECUTABLE;
+
+  return flags;
 }
 
 KfdVirtioDriver::KfdVirtioDriver(std::string devnode_name)
@@ -236,6 +235,8 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -530,6 +531,9 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
 
     *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // vamdgpu_bo_import creates a distinct bo per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE:

@@ -81,6 +81,10 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
     break;
+  case OperandType::OPR_GPUMEM:
+    if (!((encoding_value >= 0 && encoding_value <= 0)))
+      defer_encoding_error(EncodingError::InvalidSelector);
+    break;
   case OperandType::OPR_PC:
     if (!((encoding_value >= 0 && encoding_value <= 0)))
       defer_encoding_error(EncodingError::InvalidSelector);
@@ -112,16 +116,32 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
           (encoding_value >= 253 && encoding_value <= 253) ||
           (encoding_value >= 255 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrc::OPR_SRC_VGPR_MIN &&
+        encoding_value <= OpSelSrc::OPR_SRC_VGPR_MAX) {
+      initialize_vgpr_reference((encoding_value - OpSelSrc::OPR_SRC_VGPR_MIN + 0) &
+                                ((size_bits == 16 && (packed_16bit_source)) ? 127 : 255));
+      if (size_bits == 16 && (packed_16bit_source))
+        set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+    }
     break;
   case OperandType::OPR_SRC_VGPR:
     if (!((encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidVgprSourceSelector);
+    if (encoding_value >= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value - OpSelSrcVgpr::OPR_SRC_VGPR_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SRC_VGPR_OR_INLINE:
     if (!((encoding_value >= 128 && encoding_value <= 208) ||
           (encoding_value >= 240 && encoding_value <= 248) ||
           (encoding_value >= 256 && encoding_value <= 511)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN &&
+        encoding_value <= OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MAX) {
+      initialize_vgpr_reference(encoding_value -
+                                OpSelSrcVgprOrInline::OPR_SRC_VGPR_OR_INLINE_VGPR_MIN + 0);
+    }
     break;
   case OperandType::OPR_SREG:
     if (!((encoding_value >= 0 && encoding_value <= 124)))
@@ -143,7 +163,8 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
     break;
   case OperandType::OPR_SSRC_LANESEL:
     if (!((encoding_value >= 0 && encoding_value <= 125) ||
-          (encoding_value >= 128 && encoding_value <= 191)))
+          (encoding_value >= 128 && encoding_value <= 192) ||
+          (encoding_value >= 255 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidLaneSelector);
     break;
   case OperandType::OPR_SSRC_SPECIAL_SCC:
@@ -163,6 +184,14 @@ Operand::Operand(int size_bits, OperandType opr_type, int encoding_value, bool p
   case OperandType::OPR_VGPR:
     if (!((encoding_value >= 0 && encoding_value <= 255)))
       defer_encoding_error(EncodingError::InvalidSelector);
+    if (encoding_value >= OpSelVgpr::OPR_VGPR_VGPR_MIN &&
+        encoding_value <= OpSelVgpr::OPR_VGPR_VGPR_MAX) {
+      initialize_vgpr_reference(
+          (encoding_value - OpSelVgpr::OPR_VGPR_VGPR_MIN + 0) &
+          ((size_bits == 16 && (packed_16bit_source || packed_16bit_dst)) ? 127 : 255));
+      if (size_bits == 16 && (packed_16bit_source || packed_16bit_dst))
+        set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);
+    }
     break;
   default:
     break;
@@ -320,6 +349,11 @@ std::string Operand::name() const {
   case OperandType::OPR_FLAT_SCRATCH: {
     if (encoding_value_ == OpSelFlatScratch::OPR_FLAT_SCRATCH_FLAT_SCRATCH)
       return "flat_scratch";
+    break;
+  }
+  case OperandType::OPR_GPUMEM: {
+    if (encoding_value_ == OpSelGpumem::OPR_GPUMEM_GPUMEM)
+      return "gpumem";
     break;
   }
   case OperandType::OPR_PC: {
@@ -597,6 +631,8 @@ std::string Operand::name() const {
     break;
   }
   case OperandType::OPR_SSRC_LANESEL: {
+    if (encoding_value_ == 192u)
+      return "64";
     if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN &&
         encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MAX)
       return reg_name("s", encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN,
@@ -735,6 +771,9 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
   case OperandType::OPR_FLAT_SCRATCH: {
     break;
   }
+  case OperandType::OPR_GPUMEM: {
+    break;
+  }
   case OperandType::OPR_PC: {
     break;
   }
@@ -743,6 +782,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSdst::OPR_SDST_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSdst::OPR_SDST_TTMP_MIN &&
+        encoding_value_ <= OpSelSdst::OPR_SDST_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSdst::OPR_SDST_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSdst::OPR_SDST_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -770,6 +814,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN &&
+        encoding_value_ <= OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSmemOffset::OPR_SMEM_OFFSET_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SRC: {
@@ -777,6 +827,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSrc::OPR_SRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSrc::OPR_SRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSrc::OPR_SRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSrc::OPR_SRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSrc::OPR_SRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -813,6 +868,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_SGPR_MIN),
                          reg_width};
+    if (encoding_value_ >= OpSelSreg::OPR_SREG_TTMP_MIN &&
+        encoding_value_ <= OpSelSreg::OPR_SREG_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSreg::OPR_SREG_TTMP_MIN),
+                         reg_width};
     break;
   }
   case OperandType::OPR_SREG_M0_INL: {
@@ -822,6 +882,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_SGPR_MIN),
           reg_width};
+    if (encoding_value_ >= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN &&
+        encoding_value_ <= OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSregM0Inl::OPR_SREG_M0_INL_TTMP_MIN),
+          reg_width};
     break;
   }
   case OperandType::OPR_SSRC: {
@@ -829,6 +895,11 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
         encoding_value_ <= OpSelSsrc::OPR_SSRC_SGPR_MAX)
       return RegisterRef{RegClass::SGPR,
                          static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_SGPR_MIN),
+                         reg_width};
+    if (encoding_value_ >= OpSelSsrc::OPR_SSRC_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrc::OPR_SSRC_TTMP_MAX)
+      return RegisterRef{RegClass::TTMP,
+                         static_cast<uint16_t>(encoding_value_ - OpSelSsrc::OPR_SSRC_TTMP_MIN),
                          reg_width};
     if (encoding_value_ == OpSelSsrc::OPR_SSRC_EXEC_LO)
       return RegisterRef{RegClass::EXEC, 0, reg_width};
@@ -842,6 +913,12 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
       return RegisterRef{
           RegClass::SGPR,
           static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_SGPR_MIN),
+          reg_width};
+    if (encoding_value_ >= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN &&
+        encoding_value_ <= OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MAX)
+      return RegisterRef{
+          RegClass::TTMP,
+          static_cast<uint16_t>(encoding_value_ - OpSelSsrcLanesel::OPR_SSRC_LANESEL_TTMP_MIN),
           reg_width};
     break;
   }
@@ -866,6 +943,47 @@ std::optional<RegisterRef> Operand::to_register_ref() const {
     break;
   }
   return std::nullopt;
+}
+
+std::optional<RegClass> Operand::to_special_reg_class() const {
+  switch (opr_type_) {
+  case OperandType::OPR_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_PC:
+    return RegClass::PC;
+  case OperandType::OPR_SDST_EXEC:
+    return RegClass::EXEC;
+  case OperandType::OPR_SDST_M0:
+    return RegClass::M0;
+  case OperandType::OPR_SSRC_SPECIAL_SCC:
+    return RegClass::SCC;
+  case OperandType::OPR_VCC:
+    return RegClass::VCC;
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+bool Operand::has_register_selector() const {
+  switch (opr_type_) {
+  case OperandType::OPR_SDST:
+    return !fieldless_;
+  case OperandType::OPR_SMEM_OFFSET:
+    return !fieldless_;
+  case OperandType::OPR_SRC:
+    return !fieldless_;
+  case OperandType::OPR_SREG:
+    return !fieldless_;
+  case OperandType::OPR_SREG_M0_INL:
+    return !fieldless_;
+  case OperandType::OPR_SSRC:
+    return !fieldless_;
+  case OperandType::OPR_SSRC_LANESEL:
+    return !fieldless_;
+  default:
+    return false;
+  }
 }
 
 bool Operand::simd_capable() const {

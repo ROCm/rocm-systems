@@ -1,21 +1,5 @@
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import ctypes
 import math
@@ -24,10 +8,11 @@ import re
 import warnings
 from collections.abc import Iterable
 from ctypes import POINTER, c_void_p
+from datetime import datetime, timezone
 from enum import IntEnum, Enum
 from pathlib import Path
 from time import asctime, localtime, time
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
@@ -628,6 +613,26 @@ class AmdSmiGpuBlock(IntEnum):
     JPEG = amdsmi_wrapper.AMDSMI_GPU_BLOCK_JPEG
     IH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_IH
     MPIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIO
+    MMSCH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MMSCH
+    MP5 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP5
+    ATU = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ATU
+    DACC_BE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_DACC_BE
+    ECLR = amdsmi_wrapper.AMDSMI_GPU_BLOCK_ECLR
+    KPX_SERDES = amdsmi_wrapper.AMDSMI_GPU_BLOCK_KPX_SERDES
+    LSDMA = amdsmi_wrapper.AMDSMI_GPU_BLOCK_LSDMA
+    MPART = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPART
+    MPIFOE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIFOE
+    MPRAS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPRAS
+    NBIF = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIF
+    NBIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_NBIO
+    OXRP = amdsmi_wrapper.AMDSMI_GPU_BLOCK_OXRP
+    PCIE_PL = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCIE_PL
+    PCS_XGMI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PCS_XGMI
+    PIE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_PIE
+    CS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_CS
+    SHUB = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SHUB
+    SSBDCI = amdsmi_wrapper.AMDSMI_GPU_BLOCK_SSBDCI
+    UCIE_PCS = amdsmi_wrapper.AMDSMI_GPU_BLOCK_UCIE_PCS
     RESERVED = amdsmi_wrapper.AMDSMI_GPU_BLOCK_RESERVED
 
 
@@ -735,6 +740,8 @@ class AmdSmiVramType(IntEnum):
     HBM2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2
     HBM2E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM2E
     HBM3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3
+    HBM3E = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM3E
+    HBM4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_HBM4
     DDR2 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR2
     DDR3 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR3
     DDR4 = amdsmi_wrapper.AMDSMI_VRAM_TYPE_DDR4
@@ -767,6 +774,12 @@ class AmdSmiPtlData(IntEnum):
 class AmdSmiPowerCapType(IntEnum):
     PPT0 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT0
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
+
+
+class AmdSmiNpmBalancingMode(IntEnum):
+    INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
+    POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
+    FREQUENCY_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
 
 
 class AmdSmiEventReader:
@@ -804,18 +817,21 @@ class AmdSmiEventReader:
             )
         )
 
+        receipt_time = int(datetime.now(timezone.utc).timestamp())
         ret = []
+        event_values = {event.value for event in AmdSmiEvtNotificationType}
         for i in range(c_count.value):
-            unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
-            if event_info[i].event in unique_event_values:
-                if AmdSmiEvtNotificationType(event_info[i].event).name != "NONE":
+            if event_info[i].event in event_values:
+                event_type = AmdSmiEvtNotificationType(event_info[i].event)
+                if event_type.name != "NONE":
                     processor_handle = amdsmi_wrapper.amdsmi_processor_handle(
                         event_info[i].processor_handle
                     )
                     ret.append(
                         {
+                            "timestamp": receipt_time,
                             "processor_handle": processor_handle,
-                            "event": AmdSmiEvtNotificationType(event_info[i].event).name,
+                            "event": event_type.name,
                             "message": event_info[i].message.decode("utf-8"),
                         }
                     )
@@ -2828,6 +2844,9 @@ def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dic
         "hip_id": _validate_if_max_uint(enumeration_info.hip_id, MaxUIntegerTypes.UINT32_T),
         "hip_uuid": enumeration_info.hip_uuid.decode("utf-8"),
         "oam_id": _validate_if_max_uint(enumeration_info.oam_id, MaxUIntegerTypes.UINT32_T),
+        "physical_acc_id": _validate_if_max_uint(
+            enumeration_info.physical_acc_id, MaxUIntegerTypes.UINT32_T
+        ),
     }
 
     return enumeration_info
@@ -2863,6 +2882,11 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
+    # A DRM libamd_smi predating these fields leaves the reserved slots as the
+    # caller passed them, so seed N/A rather than the ctypes zero. A WSL library
+    # that old clears the whole structure and still reports zero.
+    asic_info_struct.chip_rev_id = MaxUIntegerTypes.UINT32_T
+    asic_info_struct.external_rev_id = MaxUIntegerTypes.UINT32_T
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_asic_info(processor_handle, ctypes.byref(asic_info_struct))
     )
@@ -2871,19 +2895,35 @@ def amdsmi_get_gpu_asic_info(processor_handle: processor_handle_t) -> Dict[str, 
     target_graphics_version = hex(asic_info_struct.target_graphics_version)[2:]
     subsystem_id = _validate_if_max_uint(asic_info_struct.subsystem_id, MaxUIntegerTypes.UINT32_T)
     subvendor_id = _validate_if_max_uint(asic_info_struct.subvendor_id, MaxUIntegerTypes.UINT32_T)
+    rev_id = _validate_if_max_uint(asic_info_struct.rev_id, MaxUIntegerTypes.UINT32_T)
+    chip_rev_id = _validate_if_max_uint(asic_info_struct.chip_rev_id, MaxUIntegerTypes.UINT32_T)
+    external_rev_id = _validate_if_max_uint(
+        asic_info_struct.external_rev_id, MaxUIntegerTypes.UINT32_T
+    )
     if isinstance(subsystem_id, int):
         subsystem_id = _pad_hex_value(hex(subsystem_id), 4)
     if isinstance(subvendor_id, int):
         subvendor_id = _pad_hex_value(hex(subvendor_id), 4)
+    if isinstance(rev_id, int):
+        rev_id = _pad_hex_value(hex(rev_id), 2)
+    if isinstance(chip_rev_id, int):
+        chip_rev_id = _pad_hex_value(hex(chip_rev_id), 2)
+    if isinstance(external_rev_id, int):
+        external_rev_id = _pad_hex_value(hex(external_rev_id), 2)
     asic_info = {
         "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": subvendor_id,
         "device_id": asic_info_struct.device_id,
-        "rev_id": _pad_hex_value(hex(asic_info_struct.rev_id), 2),
+        "rev_id": rev_id,
+        "chip_rev_id": chip_rev_id,
+        "external_rev_id": external_rev_id,
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": _validate_if_max_uint(asic_info_struct.oam_id, MaxUIntegerTypes.UINT32_T),
+        "physical_acc_id": _validate_if_max_uint(
+            asic_info_struct.physical_acc_id, MaxUIntegerTypes.UINT32_T
+        ),
         "num_compute_units": _validate_if_max_uint(
             asic_info_struct.num_of_compute_units, MaxUIntegerTypes.UINT32_T
         ),
@@ -3666,7 +3706,7 @@ def amdsmi_get_gpu_ras_block_features_enabled(
             continue
         gpu_block_name = gpu_block.name
         if gpu_block.name == "LAST":
-            gpu_block_name = "MPIO"
+            gpu_block_name = "UCIE_PCS"
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_ras_block_features_enabled(
                 processor_handle,
@@ -3875,6 +3915,10 @@ def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str
         "driver_name": info.driver_name.decode("utf-8"),
         "driver_version": info.driver_version.decode("utf-8"),
         "driver_date": info.driver_date.decode("utf-8"),
+        "driver_kernel_version": info.driver_kernel_version.decode("utf-8"),
+        "amdgpu_driver_version": info.amdgpu_driver_version.decode("utf-8"),
+        "driver_build_version": info.driver_build_version.decode("utf-8"),
+        "driver_full_version": info.driver_full_version.decode("utf-8"),
     }
 
     for key, value in driver_info.items():
@@ -5342,6 +5386,32 @@ def amdsmi_get_node_handle(processor_handle):
 
 
 def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get NPM (Node Power Management) status and power limit info for the node
+    associated with node_handle.
+
+    Parameters:
+        node_handle(node_handle_t): Node handle obtained via
+            amdsmi_get_node_handle()
+
+    Returns:
+        `Dict[str, Any]`: Dictionary with keys:
+            - ``limit`` (`int`): Current NPM power limit in Watts.
+            - ``status`` (`int`): NPM status (enabled/disabled), see
+                ``amdsmi_npm_status_t``.
+            - ``ubb_power_threshold`` (`int`): UBB node power threshold in
+                Watts.
+            - ``max_node_power_limit`` (`int`): The platform max bound
+                consumed by amdsmi_set_npm_limit(): callers should ensure any
+                limit passed to that function does not exceed this value.
+            - ``current_node_power`` (`int`): The current (instantaneous) node
+                power in Watts (board/node_power), MI450+. Queried once per
+                node rather than once per GPU.
+
+    Raises:
+        AmdSmiParameterException: If the node handle is invalid.
+        AmdSmiLibraryException: If the underlying library call fails.
+    """
     if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
         raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
 
@@ -5354,9 +5424,163 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
         "ubb_power_threshold": _validate_if_max_uint(
             npm_info.ubb_power_threshold, MaxUIntegerTypes.UINT32_T
         ),
+        "max_node_power_limit": _validate_if_max_uint(
+            npm_info.max_node_power_limit, MaxUIntegerTypes.UINT64_T
+        ),
+        "current_node_power": _validate_if_max_uint(
+            npm_info.current_node_power, MaxUIntegerTypes.UINT32_T
+        ),
     }
 
     return dict_ret
+
+
+_NPM_BALANCING_MODE_TO_STR = {
+    AmdSmiNpmBalancingMode.POWER_BALANCING: "PB",
+    AmdSmiNpmBalancingMode.FREQUENCY_BALANCING: "FB",
+    AmdSmiNpmBalancingMode.INVALID: "N/A",
+}
+
+_STR_TO_NPM_BALANCING_MODE = {
+    "PB": AmdSmiNpmBalancingMode.POWER_BALANCING,
+    "FB": AmdSmiNpmBalancingMode.FREQUENCY_BALANCING,
+}
+
+
+def amdsmi_get_npm_balancing_mode(node_handle: processor_handle_t) -> str:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    mode = amdsmi_wrapper.amdsmi_npm_balancing_mode_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_npm_balancing_mode(node_handle, ctypes.byref(mode)))
+
+    return _NPM_BALANCING_MODE_TO_STR.get(mode.value, "N/A")
+
+
+def amdsmi_set_npm_balancing_mode(node_handle: processor_handle_t, mode: str) -> None:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    if mode not in _STR_TO_NPM_BALANCING_MODE:
+        raise AmdSmiParameterException(mode, str)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_npm_balancing_mode(node_handle, _STR_TO_NPM_BALANCING_MODE[mode])
+    )
+
+
+def amdsmi_get_npm_supported_balancing_modes(node_handle: processor_handle_t) -> List[str]:
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    supported_modes = amdsmi_wrapper.amdsmi_bit_field_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_npm_supported_balancing_modes(
+            node_handle, ctypes.byref(supported_modes)
+        )
+    )
+
+    # Iterate the full enum range (up to AMDSMI_NPM_BALANCING_MODE_MAX) so
+    # modes added in the future decode without changing this loop.
+    modes = []
+    for mode in range(
+        AmdSmiNpmBalancingMode.POWER_BALANCING, amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_MAX
+    ):
+        if supported_modes.value & (1 << mode):
+            modes.append(_NPM_BALANCING_MODE_TO_STR.get(mode, "N/A"))
+    return modes
+
+
+def amdsmi_get_tray_info(
+    node_handle: Optional[amdsmi_wrapper.amdsmi_node_handle] = None,
+) -> Dict[str, Any]:
+    """
+    Return tray-wide compute-tray type and accelerator count from UALoE.
+
+    node_handle is reserved for future use and MUST be NULL.
+
+    Raises AmdSmiLibraryException (AMDSMI_STATUS_NOT_SUPPORTED) when no
+    UALoE session is active.
+    """
+    if node_handle is not None and not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+
+    tray_info = amdsmi_wrapper.amdsmi_tray_info_t()
+    _check_res(amdsmi_wrapper.amdsmi_get_tray_info(node_handle, ctypes.byref(tray_info)))
+
+    return {
+        "max_acc_per_tray": _validate_if_max_uint(
+            tray_info.max_acc_per_tray, MaxUIntegerTypes.UINT32_T
+        ),
+        "tray_type": amdsmi_wrapper.amdsmi_compute_tray_type_t__enumvalues.get(
+            tray_info.tray_type, "AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN"
+        ).replace("AMDSMI_COMPUTE_TRAY_TYPE_", ""),
+    }
+
+
+def amdsmi_set_npm_limit(node_handle: processor_handle_t, limit: int) -> None:
+    """
+    Set the NPM (Node Power Management) power limit for the node associated
+    with node_handle by writing to the board's cur_node_power_limit sysfs
+    interface.
+
+    This function rejects the request with AmdSmiLibraryException
+    (AMDSMI_STATUS_INVAL) if NPM is disabled on the node
+    (amdsmi_get_npm_info()'s "status" == AMDSMI_NPM_STATUS_DISABLED), since
+    writing board/cur_node_power_limit while NPM is disabled has no defined
+    effect. It also validates `limit` against the platform max bound
+    (amdsmi_get_npm_info()'s "max_node_power_limit", sourced from
+    board/max_node_power_limit) internally before ever issuing the write,
+    raising AmdSmiLibraryException with AMDSMI_STATUS_INVAL if `limit` is `0`
+    or greater than that bound. If the platform max bound itself cannot be
+    read (e.g. the sysfs interface is missing or returns unexpected data),
+    this function fails closed and raises that underlying error rather than
+    silently allowing an unbounded `limit` through. The amd-smi CLI's
+    `set --node-power-limit` additionally performs the same checks itself
+    ahead of calling this function, purely to fail fast and present a
+    friendlier, earlier user-facing error message; it is not the only
+    validation and is not required for correctness.
+
+    Parameters:
+        node_handle(node_handle_t): Node handle obtained via
+            amdsmi_get_node_handle()
+        limit(int): New NPM power limit value to request (units match the
+            board/cur_node_power_limit sysfs interface). Must satisfy
+            0 < limit <= UINT64_MAX; out-of-range values raise
+            AmdSmiParameterException rather than silently wrapping modulo
+            2**64 the way a raw ctypes.c_uint64() conversion would. Values
+            that pass this local bound check but are `0` or exceed the
+            platform max are rejected by the underlying library call instead
+            (see Raises below).
+
+    Returns:
+        None: This function raises an exception if the call did not succeed
+        (e.g. AmdSmiLibraryException with AMDSMI_STATUS_INVAL if `limit` is
+        `0` or exceeds the platform max bound, AMDSMI_STATUS_NOT_SUPPORTED if
+        the sysfs interface is unavailable, or AMDSMI_STATUS_NO_PERM if the
+        write was rejected)
+
+    Raises:
+        AmdSmiParameterException: If `node_handle` or `limit` is the wrong
+            type, or `limit` is outside `0 < limit <= UINT64_MAX`.
+        AmdSmiLibraryException: If the underlying library call fails,
+            including AMDSMI_STATUS_INVAL when `limit` is `0` or exceeds the
+            platform max bound (or when that bound itself cannot be read).
+    """
+    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
+        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
+    if not isinstance(limit, int):
+        raise AmdSmiParameterException(limit, int)
+    if not 0 < limit <= 0xFFFFFFFFFFFFFFFF:
+        # ctypes.c_uint64() silently wraps out-of-range values modulo 2**64
+        # instead of raising (e.g. ctypes.c_uint64(2**64 + 12345).value ==
+        # 12345); reject explicitly here so a bad value is never wrapped into
+        # an unrelated one and written to hardware.
+        raise AmdSmiParameterException(
+            limit, int, msg=f"limit must satisfy 0 < limit <= {0xFFFFFFFFFFFFFFFF} (got {limit})"
+        )
+
+    _check_res(amdsmi_wrapper.amdsmi_set_npm_limit(node_handle, ctypes.c_uint64(limit)))
 
 
 def amdsmi_get_temp_metric(
@@ -5448,10 +5672,7 @@ def amdsmi_get_utilization_count(
             counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
             counter_type = "AMDSMI_FINE_DECODER_ACTIVITY"
-        counter_value = _validate_if_max_uint(
-            util_counter_list[index].value, MaxUIntegerTypes.UINT64_T
-        )
-        result.append({"type": counter_type, "value": counter_value})
+        result.append({"type": counter_type, "value": util_counter_list[index].value})
 
     return result
 
@@ -7129,7 +7350,7 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_busy_percent(processor_handle, ctypes.byref(gpu_busy_percent))
     )
-    return _validate_if_max_uint(gpu_busy_percent.value, MaxUIntegerTypes.UINT32_T)
+    return gpu_busy_percent.value
 
 
 def amdsmi_get_vcn_busy_percent(processor_handle: processor_handle_t):

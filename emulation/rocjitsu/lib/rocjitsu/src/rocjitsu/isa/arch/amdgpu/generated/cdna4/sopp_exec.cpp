@@ -7,7 +7,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sopp.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
-#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 #include "util/except.h"
@@ -45,8 +44,7 @@ void SCbranchScc1Sopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc == 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -54,8 +52,7 @@ void SCbranchVcczSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCbranchVccnzSopp::execute_impl(amdgpu::Wavefront &wf) {
-  const uint64_t live_vcc =
-      wf.vcc() & (wf.wf_size() >= 64 ? ~0ULL : ((1ULL << wf.wf_size()) - 1ULL));
+  const uint64_t live_vcc = wf.vcc_mask();
   if (live_vcc != 0) {
     int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
     wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
@@ -151,13 +148,14 @@ void SSetGprIdxOffSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSetGprIdxModeSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.set_m0((wf.m0() & 0xFFFF0FFFu) |
-            ((amdgpu::RegisterAccess(wf).read_scalar(simm16) & 0xF) << 12));
+  amdgpu::execute_s_set_gpr_idx_mode_sopp(*this, wf);
 }
 
 void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
-void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SSetValuCoexecModeSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_set_valu_coexec_mode_sopp(*this, wf);
+}
 
 } // namespace cdna4
 } // namespace rocjitsu

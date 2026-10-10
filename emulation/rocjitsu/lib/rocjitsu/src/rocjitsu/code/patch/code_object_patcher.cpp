@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -165,10 +166,12 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return text_index;
 }
 
-[[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
+[[nodiscard]] bool target_has_wavefront_size_bit(rj_code_arch_t arch) {
+  // ENABLE_WAVEFRONT_SIZE32 selects between two supported wave sizes. Wave32-only
+  // gfx125x reserves the bit and requires it to be zero.
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
 [[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
@@ -264,7 +267,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
     AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
   }
 
-  if (target_supports_wave32(target_arch)) {
+  if (target_has_wavefront_size_bit(target_arch)) {
     const uint32_t wave32 = translation.target_wave_size == 32 ? 1u : 0u;
     AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     wave32);
@@ -362,8 +365,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   // sidecars: their packet LDS is zero, but stale descriptor bits can still be
   // ORed into hardware command streams on some runtime paths.
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 0);
-  AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
-                  translation.target_user_sgpr_count);
+  set_kernel_descriptor_user_sgpr_count(target_arch, desc, translation.target_user_sgpr_count);
   // Fixed private size can be zero for a kernel that requests its call stack
   // dynamically through the AQL packet. Preserve an existing scratch-enable
   // requirement and also enable it whenever DBT introduces fixed spill space.

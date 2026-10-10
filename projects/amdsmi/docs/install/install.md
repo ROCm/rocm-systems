@@ -16,7 +16,9 @@ AMD SMI supports:
 
 - {ref}`AMD GPUs <rocm:release-supported-hw>` on Linux bare metal systems
 - AMD GPUs in Linux virtual machine guests
-- AMD EPYC™ CPUs through the [esmi_ib_library](https://github.com/amd/esmi_ib_library)
+- AMD EPYC™ CPUs through the
+  [esmi_ib_library](https://github.com/amd/esmi_ib_library) (requires the
+  `amd_hsmp` kernel module with HSMP enabled in BIOS at runtime)
 
 For AMD SMI on Linux SR-IOV hosts, refer to
 the [AMD SMI for Virtualization documentation](https://instinct.docs.amd.com/projects/amd-smi-virt/en/latest/index.html).
@@ -57,7 +59,10 @@ To run AMD SMI, the following components need to be installed on your system:
     <cli-output-na>` for more information.
     :::
 - The `amd_hsmp` or `hsmp_acpi` driver
+  - Required for `amdsmi_init(AMDSMI_INIT_AMD_CPUS)` and `amd-smi` CPU commands.
   - See [amd_hsmp](https://github.com/amd/amd_hsmp) for more information.
+  - Without it, CPU discovery is skipped non-fatally and only GPU and NIC data
+    is reported.
 
 Also confirm that your Linux kernel version matches the system requirements
 described in {ref}`Operating system support <rocm:release-supported-os>`.

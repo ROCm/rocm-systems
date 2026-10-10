@@ -76,10 +76,12 @@ If there is future strong request to return CSV support, we may implement it und
 Gzip is short-term storage-size reduction for CSV artifacts that still exist
 after CSV profile backend removal.
 
-We introduce gzip streaming for three csv artifacts, written through its own compression interface used by both python and backend:
+We introduce gzip streaming for five csv artifacts, written through its own compression interface used by both python and backend:
  - the results_*.csv(s), written by compute's Python side (utils_profile.stream_csv_to_file) at the end of a pass, and the artifact analyze reads today.
  - the per-pass out/pmc_1/*_counter_collection.csv
+ - the per-pass out/pmc_1/*_marker_api_trace.csv and its ml_api_trace_* copy in the workload dir, written alongside the counter CSV from the same rocpd databases.
  - the native tool counter output (countersData), written by the native tool / backend (rocprofiler-compute-tool.so via the counters writer) during in-process collection. This is an early per-process intermediate.
+ - the merged pmc_perf.csv analyze intermediate, written by analyze from the results_*.csv(s) and read back on the next run.
 
 Compression belongs at CSV read/write, where profile writes compressed CSV
 and analyze reads compressed CSV. Other profile and analyze code should not take
@@ -113,23 +115,20 @@ data from its storage path, and does all merging in memory: across processes
 writer. Collectors write their raw per-process artifacts directly and the reader is
 the only boundary that combines them.
 
-### AD-5: Analyze scripts don't generate intermediate `pmc_perf.csv` by default anymore
+### AD-5: Analyze scripts don't generate intermediate `pmc_perf.csv`
 
 Eliminate `pmc_perf.csv` generation step, so analysis converts profile output directly to pandas dataframe in memory.
 
-Currently, EVERY analyze run materializes `pmc_perf.csv` and then reads it back.
+The first analyze run of a workload writes `pmc_perf.csv` and every later run reads it back.
 Therefore all profile formats go through a CSV regardless of how they were stored.
-This has performance cost and defeats the point of supporting varied storage and adds large csv pivot cost on big workloads.
+This keeps a full second on-disk copy of the counter data, which is significant on big workloads.
+It is also reused whenever it is present, so re-profiling into an existing workload directory leaves analyze reading stale counters.
 Also this introduces unnecessary dependency as any output format reader is forced to also produce a CSV just so downstream analyze code can read it.
 
 Essentially, `pmc_perf.csv` is an intermediate not a public contract, so analyze should not depend on it.
 
 The merged frame depends on the user's **analysis filters**, so a one time materialize and reuse does not work.
-The reader builds the frame from source **per analysis run** with filters applied in memory and the `pmc_perf.csv` export is derived from that frame.
-
-However, `pmc_perf.csv` generation could be useful for debugging purposes and some users may use it in their flow.
-Therefore, we will add a new debug option `--gen-pmc` which implements one-way export of this file.
-However, analysis scripts will not read its back.
+The reader builds the frame from source **per analysis run** with filters applied in memory.
 
 ### AD-6: Native counter storage moves behind the Profiler Hub
 
@@ -336,10 +335,13 @@ and the `--join-type` references in the docs.
 
 Status: implemented.
 
-Gzip streaming reduces size of the two large counter CSV intermediates from AD-2.
+Gzip streaming reduces size of the counter and marker CSV intermediates from AD-2.
 Phase B does not change the profile/analyze contract shape. Python and the native
-tool each compress at CSV read/write over a shared format contract; analyze accepts
-plain `.csv` for backward compatibility.
+tool each compress at CSV read/write over a shared format contract. Compressed
+artifacts are gzip-only: `csv_compression` opens nothing plain, and analyze
+discovers them by their `.csv.gz` name rather than sniffing file contents.
+The `pmc_perf.csv.gz` analyze intermediate goes through the same interface.
+`sysinfo.csv` stays plain and is opened by its callers with the builtin `open`.
 
 ```mermaid
 sequenceDiagram
@@ -355,7 +357,7 @@ sequenceDiagram
     participant countersData as [Storage: Compressed CSV]<br>[per-process & per-pass]<br>Counters Data
     participant resultDb as [Storage:SQL]<br>[per-pass]<br>Result
     participant resultCsv as [Storage:Compressed CSV]<br>[per-pass]<br>Result
-    participant pmcPerf as [Storage:CSV]<br>pmc_perf.csv
+    participant pmcPerf as [Storage:Compressed CSV]<br>pmc_perf.csv.gz
     participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
 
     loop each collection pass
@@ -412,7 +414,7 @@ sequenceDiagram
             resultCsv-->>compression: Data
             compression-->>computeAnalyze: Data
         end
-        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv.gz (concat + pivot)
         computeAnalyze->>pmcPerf: Read back
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe
@@ -429,7 +431,7 @@ stops consolidating per-process artifacts:
 
 There is no per-process -> per-pass merge in profile; each process keeps its own
 artifact, so profile needs no writer. Analyze reads all per-process artifacts
-across both lanes, merges them, and still materializes `pmc_perf.csv`; the reader
+across both lanes, merges them, and still materializes `pmc_perf.csv.gz`; the reader
 interface and dropping `pmc_perf.csv` come in Phase D.
 
 ```mermaid
@@ -443,7 +445,7 @@ sequenceDiagram
     participant compression as [Interface]<br>Compression (gzip impl)
     participant sdkData as [Storage: SQL]<br>[per-process & per-pass]<br>Kernels Data
     participant countersData as [Storage: Compressed CSV]<br>[per-process & per-pass]<br>Counters Data
-    participant pmcPerf as [Storage:CSV]<br>pmc_perf.csv
+    participant pmcPerf as [Storage:Compressed CSV]<br>pmc_perf.csv.gz
     participant computeAnalyze as [rocprof-compute]<br>[Analyze phase]<br>analysis_base.py
 
     loop each collection pass
@@ -471,7 +473,7 @@ sequenceDiagram
             compression-->>computeAnalyze: Counter data
         end
         computeAnalyze->>computeAnalyze: merge kernels + counters (all processes)
-        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv (concat + pivot)
+        computeAnalyze->>pmcPerf: Materialize pmc_perf.csv.gz (concat + pivot)
         computeAnalyze->>pmcPerf: Read back
         pmcPerf-->>computeAnalyze: Data
         computeAnalyze->>computeAnalyze: build pandas dataframe

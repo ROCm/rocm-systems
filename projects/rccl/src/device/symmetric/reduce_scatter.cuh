@@ -30,46 +30,38 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   int const& nRanks = handler.comm.nRanks;
   ncclSymPtr<Pack> inpPacks = (ncclSymPtr<Pack>)input + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
 
   ncclSymPtr<Pack> outPacks = (ncclSymPtr<Pack>)output + intptr_t(w) * UnrollPacks * WARP_SIZE +
                               (
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
                                 EnableTma ? 0 :
 #endif
                                             lane);
 
   Pack acc0[UnrollPacks];
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
   int lw = threadIdx.x / WARP_SIZE;
-  extern __shared__ char smemScratch[];
   using tmaSmemStruct_t = tmaSmemStruct<Pack, UnrollPacks, UnrollPeers>;
-  constexpr int smemSizePerWarp = ncclTmaShmemScratchWarpSize();
-  tmaSmemStruct_t* tmaSmem = reinterpret_cast<tmaSmemStruct_t*>(smemScratch + lw * smemSizePerWarp);
+  tmaSmemStruct_t* tmaSmem = ncclSymkTileSmem<tmaSmemStruct_t>(lw);
   constexpr size_t tilePack = UnrollPacks * WARP_SIZE;
   constexpr size_t tileSize = tilePack * BytePerPack;
   size_t tmaSize = 0;
 
   if NCCL_IF_CONSTEXPR (EnableTma) {
-    if (lane == 0) {
-      init(&tmaSmem->bar, WARP_SIZE);
-    }
+    ncclSymkTileBarInit(&tmaSmem->bar, /*arrivers=*/WARP_SIZE, lane);
   }
 #endif
 
   nIters -= w;
   if (0 < nIters) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      if (lane == 0) {
-        cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks.peerPtr(world, rank),
-                                      cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-        tmaSize += tileSize;
-      }
+      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
@@ -89,17 +81,10 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
       if (r == nRanks) r = 0;
       {
         Pack tmp1[UnrollPacks];
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          if (lane == 0) {
-            cuda::device::memcpy_async_tx(tmaSmem->buff[1], inpPacks.peerPtr(world, r),
-                                          cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-            tmaSize += tileSize;
-          }
-          cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-            cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tmaSize);
-          tmaSmem->bar.wait(std::move(token));
-          tmaSize = 0;
+          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
         {
@@ -110,7 +95,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
         }
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
             acc0[u] = tmaSmem->buff[0][lane + WARP_SIZE * u];
             tmp1[u] = tmaSmem->buff[1][lane + WARP_SIZE * u];
@@ -131,9 +116,10 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
           if (partial && dr == nRanks) break;
 
           Pack tmp1[UnrollPeers][UnrollPacks];
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            // lane0 waits for all threads to reduce tmp1 before next batch of TMA loads
+            // The next batch reloads these same tiles, so hold until every lane has
+            // finished reducing out of them.
             __syncwarp();
           }
 #endif
@@ -141,13 +127,9 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
           NVCC_PRAGMA_UNROLL_AUTO
           for (int ur = 0; ur < UnrollPeers - partial; ur++) {
             if (partial && ur != 0 && dr + ur == nRanks) break;
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              if (lane == 0) {
-                cuda::device::memcpy_async_tx(tmaSmem->buff[ur], inpPacks.peerPtr(world, r),
-                                              cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-                tmaSize += tileSize;
-              }
+              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
@@ -159,12 +141,9 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
             r += 1;
             if (r == nRanks) r = 0;
           }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
           if NCCL_IF_CONSTEXPR (EnableTma) {
-            cuda::barrier<cuda::thread_scope_block>::arrival_token token =
-              cuda::device::barrier_arrive_tx(tmaSmem->bar, 1, tmaSize);
-            tmaSmem->bar.wait(std::move(token));
-            tmaSize = 0;
+            ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
           }
 #endif
           NVCC_PRAGMA_UNROLL_AUTO
@@ -172,7 +151,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
             if (partial && ur != 0 && dr + ur == nRanks) break;
             NVCC_PRAGMA_UNROLL(UnrollPacks)
             for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
               if NCCL_IF_CONSTEXPR (EnableTma) {
                 tmp1[ur][u] = tmaSmem->buff[ur][lane + WARP_SIZE * u];
               }
@@ -190,7 +169,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
 
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
           tmaSmem->buff[0][lane + WARP_SIZE * u] = applyCast<Acc, T>(acc1[u]);
         } else
@@ -199,19 +178,13 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
           acc0[u] = applyCast<Acc, T>(acc1[u]);
         }
       }
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        // threads flush data to point of consistency for async proxy
-        ptx::fence_proxy_async(ptx::space_shared);
-        __syncwarp();
-
-        if (lane == 0) {
-          ptx::cp_async_bulk(ptx::space_global, ptx::space_shared, outPacks.localPtr(), tmaSmem->buff[0], tileSize);
-          ptx::cp_async_bulk_commit_group();
-          ptx::cp_async_bulk_wait_group_read(ptx::n32_t<0>());
-        }
-
-        // threads wait for shared memory to be consumed by async proxy before reusing it
+        // Publish the lanes' reduced tile to the engine that is about to read it.
+        ncclSymkTileFenceSmem();
+        ncclSymkTileStore(outPacks.localPtr(), tmaSmem->buff[0], tileSize, lane);
+        // Drain before the next iteration refills the tile.
+        ncclSymkTileStoreWait(lane);
         __syncwarp();
       } else
 #endif
@@ -225,13 +198,9 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
       nIters -= wn;
       if (nIters <= 0) break;
 
-#if __CUDA_ARCH__ >= 1000
+#if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        if (lane == 0) {
-          cuda::device::memcpy_async_tx(tmaSmem->buff[0], inpPacks.peerPtr(world, rank),
-                                        cuda::aligned_size_t<16>(tileSize), tmaSmem->bar);
-          tmaSize += tileSize;
-        }
+        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {
@@ -303,9 +272,20 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
                               ncclLsaBarrierSession<ncclCoopCta>& bar, Red red, ncclSymPtr<T> input,
                               ncclSymPtr<T> output, size_t nElts) {
   int const& nRanks = handler.comm.nRanks;
+
+#if defined(__gfx950__)
+  // Engage on a floor instead of trimming, so the partial final wave is kept rather than handed to
+  // the per-element tail. The floor is the old trim modulus, so the deep path engages where it did.
+  uint32_t const chunkFloor = uint32_t(nRanks * nBlocks);
+#else
   int const& nRanks_rcp32 = handler.nRanks_rcp32;
   uint32_t nBlocks_rcp32 = nccl::utility::idivRcp32_upto64(nBlocks);
   uint32_t nRanks_nBlocks_rcp32 = nccl::utility::imulRcp32(nRanks, nRanks_rcp32, nBlocks, nBlocks_rcp32);
+  uint32_t const chunkFloor = 1;
+#endif
+
+  // True only where the deep loop really stages through a TDM engine.
+  constexpr bool AsyncTile = ncclSymkAsyncTile && EnableTma;
 
   uint32_t alignment = uint32_t(input.offset - output.offset);
   size_t nBytes = nElts * sizeof(T);
@@ -314,41 +294,53 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   nPreBytes = min((size_t)nPreBytes, nBytes);
   uintptr_t cursor = nPreBytes;
 
-  constexpr int MinWarpPerBlock = 4;
-
   if (alignment % 16 == 0) {
-    constexpr int BytePerPack = 16,
-                  UnrollPacks =
-#if __CUDA_ARCH__ >= 1000
-                    EnableTma ? 8 :
+#if defined(__gfx950__)
+    // Dropping to one pack cuts BytePerChunk to a quarter, which brings 16 MB within this tier's
+    // floor instead of falling through to 4-byte packs, and doubles iterations per warp at 32 MB.
+    constexpr int UnrollPacksPlain = 1, UnrollPeers = 8;
+#else
+    constexpr int UnrollPacksPlain = ncclSymkUnrollPacks, UnrollPeers = 2;
 #endif
-                                4,
-                  UnrollPeers = 2;
+    constexpr int BytePerPack = ncclSymkBytePerPack,
+                  UnrollPacks = AsyncTile ? ncclSymkDeepUnrollPacks(sizeof(T)) : UnrollPacksPlain;
 
-    constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
+    // Derived from UnrollPacks so the two cannot disagree: a chunk wider than what reduceDeep()
+    // reduces would leave the difference unreduced.
+    constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<BytePerPack, UnrollPacks, UnrollPeers, T, EnableTma>(handler, tn, t, waitNeeded, bar, red,
                                                                       (ncclSymPtr<char>)input + cursor,
                                                                       (ncclSymPtr<char>)output + cursor,
-                                                                      chunks * MinWarpPerBlock);
+                                                                      chunks * ncclSymkMinWarpsPerBlock);
       cursor = cursorAfter;
       waitNeeded = false;
     }
   }
 
   if (sizeof(T) == 4 || (sizeof(T) < 4 && alignment % 4 == 0)) {
-    constexpr int BytePerPack = 4, UnrollPacks = 4, UnrollPeers = 4;
-    constexpr int BytePerChunk = MinWarpPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
+#if defined(__gfx950__)
+    // Only reached by 16-byte misaligned buffers, since the tier above shares this chunk size.
+    constexpr int UnrollPeers = 8;
+#else
+    constexpr int UnrollPeers = 4;
+#endif
+    constexpr int BytePerPack = 4, UnrollPacks = 4;
+    constexpr int BytePerChunk = ncclSymkMinWarpsPerBlock * UnrollPacks * WARP_SIZE * BytePerPack;
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+#if !defined(__gfx950__)
     chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
-    if (chunks != 0) {
+#endif
+    if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
       reduceDeep<(sizeof(T) <= BytePerPack ? BytePerPack : 0), UnrollPacks, UnrollPeers, T, false>(
         handler, tn, t, waitNeeded, bar, red, (ncclSymPtr<char>)input + cursor, (ncclSymPtr<char>)output + cursor,
-        chunks * MinWarpPerBlock);
+        chunks * ncclSymkMinWarpsPerBlock);
       cursor = cursorAfter;
       waitNeeded = false;
     }
@@ -361,7 +353,7 @@ static __device__ void reduce(ncclSymkArgsHandler const& handler, int tn, int t,
   reduceEnds<UnrollPeers>(handler, tn, t, red, input, output, nElts, nPreBytes / sizeof(T), nSufElts);
 }
 
-template <template <typename> typename Red, typename T, bool EnableTma>
+template <bool EnableProfiler, template <typename> typename Red, typename T, bool EnableTma>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD_impl(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x};
@@ -369,8 +361,15 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD_impl(ncclSymkDevWor
   int const& rank = handler.comm.rank;
 
   bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) {
+    // Finish the opening barrier here so AFTER_OPEN marks the end of the peer sync.
+    // Same barrier ops as the default variant (which fuses the wait into reduce),
+    // so the two stay barrier-compatible when peers disagree on profiling.
+    bar.wait(ncclCoopCta(), cuda::memory_order_acquire);
+    ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+  }
 
-  bool waitNeeded = true;
+  bool waitNeeded = !EnableProfiler;
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
                                         ncclSymPtr<T> output) {
         // Round robin warps over blocks.
@@ -384,21 +383,22 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD_impl(ncclSymkDevWor
     waitNeeded = false;
   });
 
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_ReduceScatter_LD_impl<Red, T, /*EnableTma=*/false>(args);
+  ncclSymkRun_ReduceScatter_LD_impl<EnableProfiler, Red, T, /*EnableTma=*/false>(args);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaLD(ncclSymkDevWorkArgs const* args) {
-  ncclSymkRun_ReduceScatter_LD_impl<Red, T, /*EnableTma=*/true>(args);
+  ncclSymkRun_ReduceScatter_LD_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
 }
 
 template <typename Red, typename T>
-static __device__ void reduceMultimem(int tn, int t, Red red, T* input, T* output, size_t nElts) {
+static __device__ void reduceMultimem(int tn, int t, Red red, T* input, T* output, size_t nElts, uint32_t rank = 0) {
   uintptr_t inputUptr = reinterpret_cast<uintptr_t>(input);
   uintptr_t outputUptr = reinterpret_cast<uintptr_t>(output);
   size_t nBytes = nElts * sizeof(T);
@@ -411,15 +411,24 @@ static __device__ void reduceMultimem(int tn, int t, Red red, T* input, T* outpu
   if (sizeof(T) == BytePerPack || (inputUptr - outputUptr) % BytePerPack == 0) {
     constexpr int UnrollPacks = 8 * (16 / BytePerPack);
     constexpr int BytePerChunk = UnrollPacks * WARP_SIZE * BytePerPack;
-    uintptr_t cursor = nPreBytes;
-    uint32_t nChunks = (nBytes - cursor) / BytePerChunk;
-    uintptr_t cursorAfter = cursor + uintptr_t(nChunks) * BytePerChunk;
+    static_assert(ncclSymkMcPerRankOffsetBytes % BytePerChunk == 0);
+    uint32_t nChunks = (nBytes - nPreBytes) / BytePerChunk;
+    uintptr_t cursorAfter = nPreBytes + uintptr_t(nChunks) * BytePerChunk;
     nSufBytes = nBytes - cursorAfter;
+    size_t nMainBytes = nBytes - nPreBytes - nSufBytes;
+
+    // Ranks use offset multipliers 0 1 3 2 4 5 7 6 etc. This ensures proper address distribution even if
+    // each rank has only 64MiB to process.
+    uint32_t startOffsetMultiplier = rank ^ ((rank >> 1) & 1);
+    size_t startBytes = nMainBytes > 0 ? (size_t)startOffsetMultiplier * ncclSymkMcPerRankOffsetBytes % nMainBytes : 0;
+    uintptr_t wrapAt = cursorAfter + (t % WARP_SIZE) * BytePerPack;
+    uintptr_t cursor = nPreBytes + uintptr_t(startBytes / BytePerChunk) * BytePerChunk;
     cursor += (t / WARP_SIZE) * UnrollPacks * WARP_SIZE * BytePerPack;
     cursor += (t % WARP_SIZE) * BytePerPack;
-    int nIters = nChunks - t / WARP_SIZE;
+    int nIters = (int)nChunks - (int)(t / WARP_SIZE);
     NVCC_PRAGMA_UNROLL_DISABLED
     while (0 < nIters) {
+      if (cursor >= wrapAt) cursor -= nMainBytes;
       BytePack<BytePerPack> tmp[UnrollPacks];
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
@@ -447,7 +456,7 @@ static __device__ void reduceMultimem(int tn, int t, Red red, T* input, T* outpu
   }
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), handler.comm, ncclTeamTagLsa(), blockIdx.x, /*multimem=*/true};
@@ -457,6 +466,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
   auto const& multimem = handler.comm.lsaMultimem;
 
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
   handler.forEachWork<T>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts, ncclSymPtr<T> input,
                                         ncclSymPtr<T> output) {
@@ -465,18 +475,18 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
       flattenIx(threadIdx.x % WARP_SIZE, WARP_SIZE, block, nBlocks, threadIdx.x / WARP_SIZE, blockDim.x / WARP_SIZE);
     int tn = nBlocks * blockDim.x;
 
-    reduceMultimem(tn, t, red, input.multimemPtr(multimem) + rank * nAllElts, output.localPtr(), nElts);
+    reduceMultimem(tn, t, red, input.multimemPtr(multimem) + rank * nAllElts, output.localPtr(), nElts, rank);
   });
 
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 }
 
 // T is user type, EltType is the most aligned type
-template <typename T, typename Red, typename EltType>
-__device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(ncclSymkArgsHandler& handler,
-                                                                  ncclLLA2ASession<ncclCoopCta>& lla2a, Red red,
-                                                                  EltType* input, EltType* output, int nElts,
-                                                                  int nPacks, int nStrideElts) {
+template <bool EnableProfiler, typename T, typename Red, typename EltType>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(
+  ncclSymkDevWorkArgs const* args, ncclSymkArgsHandler& handler, ncclLLA2ASession<ncclCoopCta>& lla2a, Red red,
+  EltType* input, EltType* output, int nElts, int nPacks, int nStrideElts) {
   using Pack = BytePack<8>;
   using Acc = typename Red::EltType;
   using AccPack = BytePack<8 * sizeof(Acc) / sizeof(T)>;
@@ -485,8 +495,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(ncclSymkArgsHa
   int const& nRanks = handler.comm.nRanks;
   int const& rank = handler.comm.rank;
   int t = threadIdx.x;
-  constexpr int tn = ncclSymkMaxThreads;
+  int tn = blockDim.x;
   ncclCoopCta cta;
+  // LL fuses the peer sync into the first epoch, so AFTER_OPEN is stamped once, at the
+  // first endEpoch below (see ncclDevProfilerPhases in device.h); BEGIN marks the start.
+  [[maybe_unused]] bool profilerPhase1Done = false;
 
   NVCC_PRAGMA_UNROLL_DISABLED
   while (0 < nElts) {
@@ -517,15 +530,22 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL_body(ncclSymkArgsHa
       storePack(output, t * EltPerPack, nElts, applyCast<Acc, T>(got));
     }
     lla2a.endEpoch(cta);
+    if NCCL_IF_CONSTEXPR (EnableProfiler) {
+      if (!profilerPhase1Done) {
+        ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+        profilerPhase1Done = true;
+      }
+    }
 
     input += tn * EltPerPack;
     output += tn * EltPerPack;
     nElts -= tn * EltPerPack;
     nPacks -= tn;
   }
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
 }
 
-template <template <typename> typename Red, typename T>
+template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(ncclSymkDevWorkArgs const* args) {
   ncclSymkArgsHandler handler{args};
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
@@ -544,10 +564,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(ncclSymkDevWorkArgs
     lowBits |= (uintptr_t)input;
     lowBits |= (uintptr_t)output;
     if (__builtin_expect(lowBits % 8 == 0, true)) {
-      ncclSymkRun_ReduceScatter_LL_body<T>(handler, lla2a, red, (Pack*)input, (Pack*)output, nPacks, nPacks,
-                                           divUp(nAllElts, EltPerPack));
+      ncclSymkRun_ReduceScatter_LL_body<EnableProfiler, T>(args, handler, lla2a, red, (Pack*)input, (Pack*)output,
+                                                           nPacks, nPacks, divUp(nAllElts, EltPerPack));
     } else {
-      ncclSymkRun_ReduceScatter_LL_body<T>(handler, lla2a, red, input, output, nElts, nPacks, nAllElts);
+      ncclSymkRun_ReduceScatter_LL_body<EnableProfiler, T>(args, handler, lla2a, red, input, output, nElts, nPacks,
+                                                           nAllElts);
     }
   });
 }

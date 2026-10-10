@@ -23,6 +23,7 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -48,6 +49,7 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -73,6 +75,7 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -98,6 +101,7 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -123,6 +127,7 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -148,6 +153,7 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -173,6 +179,7 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -198,6 +205,7 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -223,6 +231,7 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -248,6 +257,7 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -268,17 +278,17 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -299,17 +309,17 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -330,17 +340,17 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -361,17 +371,17 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -392,17 +402,17 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -423,17 +433,17 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -454,17 +464,17 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -485,17 +495,17 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -516,17 +526,17 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -547,17 +557,17 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -578,17 +588,17 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -609,17 +619,17 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -640,17 +650,17 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -676,6 +686,7 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -701,6 +712,7 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -726,6 +738,7 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -747,12 +760,12 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -774,12 +787,12 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  src_operands_[0] = &vaddr;
   dst_operands_[1] = &vaddr;
-  src_operands_[1] = &rsrc;
-  num_src_ = 2;
+  src_operands_[0] = &rsrc;
+  num_src_ = 1;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -800,17 +813,17 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -831,17 +844,17 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -862,17 +875,17 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -893,17 +906,17 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -924,17 +937,17 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
       vaddr(128, OperandType::OPR_VGPR, 0),
       rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
-  src_operands_[0] = &vdata;
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &rsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
   dst_operands_[1] = &gpumem;
-  src_operands_[3] = &gpumem_in;
-  num_src_ = 4;
+  src_operands_[2] = &gpumem_in;
+  num_src_ = 3;
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

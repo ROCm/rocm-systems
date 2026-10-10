@@ -14,7 +14,7 @@ namespace cdna1 {
 ExpExp::ExpExp(const MachineInst *inst)
     : Exp("exp", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::ExpExp)),
-      tgt(32, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
+      tgt(128, OperandType::OPR_TGT, reinterpret_cast<const OpEncoding *>(inst)->tgt),
       vsrc0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc0),
       vsrc1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc1),
       vsrc2(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc2),
@@ -29,6 +29,7 @@ ExpExp::ExpExp(const MachineInst *inst)
   num_src_ = 5;
   num_dst_ = 1;
   sdst_exec.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

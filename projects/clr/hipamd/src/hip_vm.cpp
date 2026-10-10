@@ -130,17 +130,18 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     ihipFlags |= CL_MEM_SVM_ATOMICS | ROCCLR_MEM_HSA_UNCACHED;
   }
 
-  const bool isHostNuma = (prop->location.type == hipMemLocationTypeHostNuma ||
-                           prop->location.type == hipMemLocationTypeHostNumaCurrent);
-  bool useHostDevice = (prop->location.type == hipMemLocationTypeHost) || isHostNuma;
+  const bool isHostMemBacked = (prop->location.type == hipMemLocationTypeHost ||
+                                prop->location.type == hipMemLocationTypeHostNuma ||
+                                prop->location.type == hipMemLocationTypeHostNumaCurrent);
+  bool useHostDevice = isHostMemBacked;
   // NUMA node selector handed to ROCclr: explicit node for HostNuma; -1 (default/
-  // resolve-current) for HostNumaCurrent and non-NUMA allocations.
+  // resolve-current) for Host, HostNumaCurrent, and non-NUMA allocations.
   const int numaNode =
       (prop->location.type == hipMemLocationTypeHostNuma) ? prop->location.id : -1;
-  if (isHostNuma) {
+  if (isHostMemBacked) {
     // Pack the host-NUMA marker + node into the upper bits so roc::Memory::create
-    // routes to the CPU-pool allocator. Stored node value is (node + 1); 0 means
-    // "resolve current node" (HostNumaCurrent, numaNode == -1).
+    // routes to the CPU-pool allocator (hostVmemAlloc). Stored node value is
+    // (node + 1); 0 means "resolve current node" (Host/HostNumaCurrent, numaNode == -1).
     ihipFlags |= ROCCLR_MEM_HOST_NUMA;
     ihipFlags |= (static_cast<cl_svm_mem_flags>(numaNode + 1) << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT) &
                  ROCCLR_MEM_HOST_NUMA_NODE_MASK;
@@ -321,14 +322,33 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  hip::Device* dev = hip::getCurrentDevice();
+
+  // Recover the real location and size from ROCr. On failure keep the historical
+  // device-memory assumption so existing callers do not regress.
+  amd::Device::VmmLocationType location_type = amd::Device::VmmLocationType::kDevice;
+  int owner_device_id = static_cast<int>(amd::InvalidDeviceId);
+  size_t alloc_size = 0;
+  if (!device->getVmmAllocInfo(*phys_mem_obj, &location_type, &owner_device_id, &alloc_size)) {
+    // Supported fallback, not a failure: the import still succeeds.
+    LogPrintfInfo("Could not recover allocation properties for imported handle %p, "
+                  "reporting device memory", osHandle);
+    owner_device_id = dev->deviceId();
+  }
+
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = hip::getCurrentDevice()->deviceId();
+  prop.location.type = static_cast<hipMemLocationType>(location_type);
+  // location.id names the owning device for device memory; host memory has none.
+  prop.location.id =
+      (location_type == amd::Device::VmmLocationType::kDevice) ? owner_device_id : 0;
   prop.requestedHandleTypes = shHandleType;
 
-  phys_mem_obj->getUserData().deviceId = hip::getCurrentDevice()->deviceId();
-  phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, 0, prop);
+  phys_mem_obj->getUserData().deviceId = dev->deviceId();
+  phys_mem_obj->getUserData().locationType = prop.location.type;
+  phys_mem_obj->getUserData().numaNode = -1;   // not recoverable from the handle
+  phys_mem_obj->getUserData().data =
+      new hip::GenericAllocation(*phys_mem_obj, alloc_size, prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   if (!amd::MemObjMap::FindMemObj(phys_mem_obj->getSvmPtr())) {

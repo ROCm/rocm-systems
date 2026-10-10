@@ -189,6 +189,10 @@ void ncclIntruQueueEnqueue(ncclIntruQueue<T, next>* me, T* x);
 template <typename T, T* T::* next>
 void ncclIntruQueueEnqueueFront(ncclIntruQueue<T, next>* me, T* x);
 template <typename T, T* T::* next>
+void ncclIntruQueueInsertSorted(ncclIntruQueue<T, next>* me, T* x, bool (*less)(T*, T*));
+template <typename T, T* T::* next>
+T* ncclIntruQueueDeleteNext(ncclIntruQueue<T, next>* me, T* prev);
+template <typename T, T* T::* next>
 T* ncclIntruQueueDequeue(ncclIntruQueue<T, next>* me);
 template <typename T, T* T::* next>
 T* ncclIntruQueueTryDequeue(ncclIntruQueue<T, next>* me);
@@ -374,12 +378,14 @@ inline void ncclMemoryPoolTakeAll(struct ncclMemoryPool* me, struct ncclMemoryPo
 template <typename T, T* T::* next>
 struct ncclIntruQueue {
   T *head, *tail;
+  int nElems;
 };
 
 template <typename T, T* T::* next>
 inline void ncclIntruQueueConstruct(ncclIntruQueue<T, next>* me) {
   me->head = nullptr;
   me->tail = nullptr;
+  me->nElems = 0;
 }
 
 template <typename T, T* T::* next>
@@ -402,6 +408,7 @@ inline void ncclIntruQueueEnqueue(ncclIntruQueue<T, next>* me, T* x) {
   x->*next = nullptr;
   (me->head ? me->tail->*next : me->head) = x;
   me->tail = x;
+  me->nElems += 1;
 }
 
 template <typename T, T* T::* next>
@@ -409,6 +416,38 @@ inline void ncclIntruQueueEnqueueFront(ncclIntruQueue<T, next>* me, T* x) {
   if (me->head == nullptr) me->tail = x;
   x->*next = me->head;
   me->head = x;
+  me->nElems += 1;
+}
+
+// Insert x before the first element for which less(element, x) is false; a queue built
+// solely from such inserts stays sorted by less.
+template <typename T, T* T::* next>
+inline void ncclIntruQueueInsertSorted(ncclIntruQueue<T, next>* me, T* x, bool (*less)(T*, T*)) {
+  T* prev = nullptr;
+  T* cur = me->head;
+  while (cur && less(cur, x)) {
+    prev = cur;
+    cur = cur->*next;
+  }
+  x->*next = cur;
+  (prev ? prev->*next : me->head) = x;
+  if (cur == nullptr) me->tail = x;
+  me->nElems += 1;
+}
+
+// Unlink and return the element following prev, which must be in the queue. Does nothing
+// (returns nullptr) when prev is nullptr or has no successor; erase the head with
+// ncclIntruQueueDequeue instead. Lets a caller already walking the queue erase in place
+// instead of rescanning from the head.
+template <typename T, T* T::* next>
+inline T* ncclIntruQueueDeleteNext(ncclIntruQueue<T, next>* me, T* prev) {
+  T* x = nullptr;
+  if (prev == nullptr || prev->*next == nullptr) return x;
+  x = prev->*next;
+  prev->*next = x->*next;
+  if (me->tail == x) me->tail = prev;
+  me->nElems -= 1;
+  return x;
 }
 
 template <typename T, T* T::* next>
@@ -416,6 +455,7 @@ inline T* ncclIntruQueueDequeue(ncclIntruQueue<T, next>* me) {
   T* ans = me->head;
   me->head = ans->*next;
   if (me->head == nullptr) me->tail = nullptr;
+  me->nElems -= 1;
   return ans;
 }
 
@@ -438,6 +478,7 @@ inline T* ncclIntruQueueDelete(ncclIntruQueue<T, next>* me, T* x, bool (*cmp)(T*
     if (prev == nullptr) me->head = cur->*next;
     else prev->*next = cur->*next;
     if (cur == me->tail) me->tail = prev;
+    me->nElems -= 1;
   }
   return cur;
 }
@@ -448,6 +489,7 @@ inline T* ncclIntruQueueTryDequeue(ncclIntruQueue<T, next>* me) {
   if (ans != nullptr) {
     me->head = ans->*next;
     if (me->head == nullptr) me->tail = nullptr;
+    me->nElems -= 1;
   }
   return ans;
 }
@@ -456,8 +498,10 @@ template <typename T, T* T::* next>
 void ncclIntruQueueTransfer(ncclIntruQueue<T, next>* dst, ncclIntruQueue<T, next>* src) {
   (dst->tail ? dst->tail->next : dst->head) = src->head;
   if (src->tail) dst->tail = src->tail;
+  dst->nElems += src->nElems;
   src->head = nullptr;
   src->tail = nullptr;
+  src->nElems = 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

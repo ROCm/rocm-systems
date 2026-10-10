@@ -2,26 +2,59 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10.1.0 for ROCm 10.1.0
+## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
 * New HIP APIs
-    - Device Management: support for querying a device identifier.
-      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for a device
-    - Device Management: support for API parity with corresponding CUDA API.
-      * `hipInitDevice` initializes the runtime state for the requested device, but does not make the device current for the calling thread. It also sets the requested flags and ensures the device's default stream is created.
+    - Module Management: support for API parity with corresponding CUDA API.
+      * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
+    - Library Management: support for API parity with corresponding CUDA API.
+      * `hipLibraryGetModule` returns the module handle associated with a library.
+* Disable HRR capture feature
+* Support for recovering the allocation properties of an imported virtual memory handle. `hipMemGetAllocationPropertiesFromHandle()` now reports `hipMemLocationTypeHost` for a host-backed allocation obtained from `hipMemImportFromShareableHandle()`, instead of always reporting device memory. For a device-backed allocation it reports the owning device rather than whichever device was current when the handle was imported.
 
-## HIP 10.0.0 for ROCm 10.0.0
+### Resolved issues
+
+* A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
+* Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
+
+### Changed
+
+* Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
+
+## HIP 7.16.0 for ROCm 10.1.0
 
 ### Added
 * New HIP APIs
+    - Device Management: Support for the following APIs for parity with corresponding CUDA APIs.
+      * `hipDeviceGetLuid` returns the locally unique identifier (LUID) and device node mask for the specified device.
+      * `hipInitDevice` initializes the runtime state for the specified device without making it the current device for the calling thread. It also applies to the requested flags and ensures the device's default stream is created.
+* New HIP device attribute
+    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
+* Support for host-NUMA virtual memory management (VMM) in `hipMemCreate()` and related VMM APIs. These APIs now support `hipMemLocationTypeHostNuma` and `hipMemLocationTypeHostNumaCurrent`, enabling allocations backed by physical host memory on the selected NUMA node. Previously, support was limited to GPU VMM pools with deferred host access. This enhancement aligns HIP behavior with the corresponding CUDA APIs and expands support for NUMA-aware memory allocation.
+* Support for coarse-grained memory coherency on Windows. In supported Windows configurations, applications can now leverage unified memory to reduce memory footprint by up to 30% by eliminating unnecessary host-device data copies. Components interacting with the device can directly access host memory pointers and enable coarse-grained memory coherency by registering and pinning the associated host allocations using `hipHostRegister()` with the `hipExtHostRegisterCoarseGrained` flag. This provides behavior on Windows that is consistent with the existing Linux implementation while improving memory efficiency. 
+
+### Resolved issues
+* On Windows, HIP runtime now correctly handles non-P2P data transfers between GPUs and coordinates multi-GPU kernel execution, eliminates deadlocks and invalid values in multi-process workloads and resolve issues observed when running LLMs, such as Llama, on multi-GPU Windows configurations.
+* Resolved an out-of-memory issue affecting certain AMD APUs, such as Strix Halo, on Windows when loading large language models (LLMs) that could exceed dedicated graphics memory and spill into shared memory. The HIP runtime now correctly utilizes the full unified memory pool available on high-memory APUs, enabling system RAM to be dynamically allocated as graphics memory. This enhancement improves memory utilization and supports the execution of larger AI models on affected APU platforms.
+* Fixed a memory leak in the HIP/HSA runtime that could occur during stream and signal creation on certain GPUs. The issue was triggered by hipStreamCreate(), resulting in allocated signal objects not being properly released.
+The HIP/HSA runtime now correctly releases allocated signal objects during stream destruction and runtime cleanup, eliminating the memory leak and improving resource management.
+
+### Known issues
+
+* Under WSL2 (Windows Subsystem for Linux 2), GPU device-side memory faults may not be reported correctly and can result in the process hanging.
+
+## HIP 7.15.0 for ROCm 10.0.0
+
+### Added
+* New HIP APIs
+    - GPUDirect RDMA: support for API parity with the corresponding CUDA API.
+      * `hipDeviceFlushGPUDirectRDMAWrites` blocks until GPUDirect RDMA writes issued by a third-party device, such as an RDMA-capable NIC, are visible to the requested scope. Capability is reported by the new device attributes `hipDeviceAttributeGPUDirectRDMASupported`, `hipDeviceAttributeGPUDirectRDMAFlushWritesOptions` and `hipDeviceAttributeGPUDirectRDMAWritesOrdering`, which are also mirrored in `hipDeviceProp_t`.
     - Stream Ordered Memory Allocator: support for API parity with corresponding CUDA API.
       * `hipMemGetDefaultMemPool` returns the default memory pool for the specified location and allocation type
     - Cooperative Groups scan functions are now supported, providing feature parity with CUDA.
       * `cooperative_groups::exclusive_scan` performs an exclusive prefix scan across the threads in a cooperative group. For each thread, the result is computed from the values of all preceding threads using a binary operation (addition by default), excluding the current thread's own value.
       * `cooperative_groups::inclusive_scan` performs an inclusive prefix scan across the threads in a cooperative group. For each thread, the result includes the current thread's value in addition to the values of all preceding threads.
-* HIP Record and Replay (HRR) is now available as an initial implementation. HRR captures HIP API calls made by an application and stores them in a binary archive (.hrr). The recorded workload can then be replayed on a GPU, reproducing application behavior, including multi-threaded execution, graph launches, and GPU memory transfers.
-This capability enables efficient bug reproduction, performance regression testing, and kernel benchmarking without requiring access to the original application. To help developers get started, documentation is provided that describes HRR's architecture, design, implementation details, and replay workflow, along with a comprehensive README guide.
 * Added stream capture support for the following APIs, enabling `BatchMemOp` operations to be captured as graph nodes instead of executing immediately. Also improved `BatchMemOp` graph replay reliability through fixes to parameter handling and operation ordering, aligning behavior more closely with CUDA.
     - `hipStreamWaitValue32`
     - `hipStreamWaitValue64`
@@ -166,7 +199,6 @@ The HIP runtime now includes the hostname, GPU index, and kernel name in GPU fau
 * New HIP device attributes
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs.
     - `hipDeviceAttributeDmaBufSupported` is now supported, enabling buffer sharing.
-    - `hipDeviceAttributeHostAllocDmaBufSupported` is now supported, enabling host-allocated buffer sharing.
 
 ### Removed
 * roc-obj* tools and Perl dependency.

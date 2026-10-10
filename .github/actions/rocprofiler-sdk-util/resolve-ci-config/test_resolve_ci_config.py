@@ -14,7 +14,14 @@ from resolve_ci_config import GPU_FAMILIES, TRIGGER_TYPES, load_gpu_configs, mai
 
 SAMPLE_RUNNER_CONFIG = {
     "version": "1",
-    "build_runners": {"linux": {"default": []}},
+    "build_runners": {
+        "linux": {
+            "default": [
+                {"label": "disabled-linux-runner", "weight": 0.0},
+                {"label": "configured-linux-runner", "weight": 1.0},
+            ]
+        }
+    },
     "gpu_families": {
         "presubmit": {
             "gfx94x": {
@@ -85,7 +92,7 @@ def _write_config(tmpdir: Path, config: dict) -> None:
         from typing import Any
 
         @dataclass
-        class ConfigV1:
+        class Config:
             build_runners: dict
             gpu_families: dict
             _raw: dict
@@ -97,12 +104,12 @@ def _write_config(tmpdir: Path, config: dict) -> None:
                             result[name] = cfg
                 return result
 
-        def load_config_v1(config_path=None):
+        def load_config(version=2, config_path=None):
             if config_path is None:
                 config_path = Path(__file__).parent
             with open(config_path / "runner-config.json") as f:
                 raw = json.load(f)
-            return ConfigV1(
+            return Config(
                 build_runners=raw["build_runners"],
                 gpu_families=raw["gpu_families"],
                 _raw=raw,
@@ -224,6 +231,7 @@ class TestMain(unittest.TestCase):
                 "FALLBACK_GFX110X_RUNNER": "fallback-gfx110x",
                 "FALLBACK_GFX120X_RUNNER": "fallback-gfx120x",
                 "FALLBACK_GFX1151_RUNNER": "fallback-gfx1151",
+                "FALLBACK_LINUX_BUILD_RUNNER": "fallback-linux-runner",
             }
             if env_overrides:
                 env.update(env_overrides)
@@ -240,6 +248,7 @@ class TestMain(unittest.TestCase):
     def test_uses_config_values_when_available(self):
         outputs = self._run_main(config=SAMPLE_RUNNER_CONFIG)
 
+        self.assertEqual(outputs["linux_build_runner"], "configured-linux-runner")
         self.assertEqual(
             outputs["gfx94x_runner"], "linux-gfx942-1gpu-ccs-csp-ossci-rocm"
         )
@@ -256,6 +265,7 @@ class TestMain(unittest.TestCase):
     def test_falls_back_to_env_when_config_missing(self):
         outputs = self._run_main(config=None)
 
+        self.assertEqual(outputs["linux_build_runner"], "fallback-linux-runner")
         self.assertEqual(outputs["gfx94x_runner"], "fallback-gfx94x")
         self.assertEqual(outputs["gfx950_runner"], "fallback-gfx950")
         self.assertEqual(outputs["gfx90a_runner"], "fallback-gfx90a")
@@ -284,6 +294,7 @@ class TestMain(unittest.TestCase):
         }
         outputs = self._run_main(config=partial_config)
 
+        self.assertEqual(outputs["linux_build_runner"], "fallback-linux-runner")
         self.assertEqual(outputs["gfx94x_runner"], "configured-gfx94x")
         self.assertEqual(outputs["gfx94x_sandbox_runner"], "configured-sandbox")
         self.assertEqual(outputs["gfx950_runner"], "fallback-gfx950")

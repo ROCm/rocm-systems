@@ -65,16 +65,6 @@ static int initializeHIP() {
   return 0;
 }
 
-// Test GPU_ENABLE_PAL - logs which backend initialized
-static int checkGpuEnablePal(const char* value) {
-  return initializeHIP();
-}
-
-// Test generic environment variable
-static int testEnvironmentVariable(const std::string& envName, const char* value) {
-  return initializeHIP();
-}
-
 int main(int argc, char** argv) {
   if (argc != 3) {
     std::cerr << "Usage: " << argv[0] << " <env_var_name> <env_var_value>" << std::endl;
@@ -95,13 +85,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Run the test
-  int result;
-  if (envName == "GPU_ENABLE_PAL") {
-    result = checkGpuEnablePal(envValue);
-  } else {
-    result = testEnvironmentVariable(envName, envValue);
-  }
-
-  return result;
+  // Initialize HIP so the runtime logs which backend was selected; the parent
+  // process inspects stdout to verify the expected backend.
+  return initializeHIP();
 }

@@ -8,6 +8,8 @@
 #include <unistd.h>
 #endif
 
+#include <cinttypes>
+
 #include "CL/cl_ext.h"
 
 #include "utils/util.hpp"
@@ -740,11 +742,11 @@ void Buffer::destroy() {
     return;
   }
 
+  // The root buffer owns this descriptor even if interop mapping failed before
+  // kind_ could be changed to MEMORY_KIND_INTEROP.
+  freeInteropImageDescriptor();
+
   if (kind_ == MEMORY_KIND_INTEROP) {
-    // Owns the interop image descriptor allocated in Buffer::create for swizzle-metadata SRD
-    // reconstruction. Image views borrow it and early-return in Image::destroy without freeing,
-    // and the backing buffer is torn down after its views, so freeing it here is safe.
-    freeInteropImageDescriptor();
     destroyInteropBuffer();
     return;
   }
@@ -1274,9 +1276,22 @@ bool Buffer::ExportHandle(void* handle) const {
 }
 
 // ================================================================================================
-bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
+static amd::HandleExportResult MapHsaExportError(hsa_status_t status) {
+  return (status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+      ? amd::HandleExportResult::kNotSupported
+      : amd::HandleExportResult::kError;
+}
+
+// ================================================================================================
+amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm,
+                                                  void* handle, unsigned long long flags) {
   int dmabuffd = -1;
   size_t offset = 0;
+
+  uint64_t dmabuf_mapping_type = HSA_AMD_DMABUF_MAPPING_TYPE_NONE;
+  if ((flags & amd::MemRangeDmaBufMappingTypePcie) != 0) {
+    dmabuf_mapping_type = HSA_AMD_DMABUF_MAPPING_TYPE_PCIE;
+  }
 
   // In case of vmm, we use a different set of APIs for retrieving the dmabuffd.
   if (vmm) {
@@ -1285,37 +1300,57 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
     hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+      LogPrintfError("Cannot retain alloc handle for dev_ptr: %p hsa returned status: %d",
                      dev_ptr, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
-    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0);
+    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, dmabuf_mapping_type);
+
+    // hsa_amd_vmem_retain_alloc_handle() must be balanced by hsa_amd_vmem_handle_release(),
+    // regardless of whether the export above succeeded. A successfully exported dmabuf fd
+    // owns its own reference to the backing allocation, so releasing mem_handle here does
+    // not invalidate it.
+    hsa_status_t release_status = Hsa::vmem_handle_release(mem_handle);
+
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
-                     mem_handle, hsa_status);
-      return false;
+      LogPrintfError("Cannot get shareable handle for mem_handle: %" PRIu64
+                     ", hsa returned status: %d",
+                     mem_handle.handle, hsa_status);
+      return MapHsaExportError(hsa_status);
+    }
+    if (release_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError(
+          "Cannot release retained alloc handle for dev_ptr: %p hsa returned status: %d",
+          dev_ptr, release_status);
+      // The retained handle could not be balanced after a successful export. Don't hand back
+      // a fd whose backing allocation's reference count is now in an unknown state.
+#if !IS_WINDOWS
+      close(dmabuffd);
+#endif
+      return amd::HandleExportResult::kError;
     }
   } else {
     // Retrieve a shareable handle for the device ptr.
-    hsa_status_t hsa_status = Hsa::portable_export_dmabuf(dev_ptr, size, &dmabuffd, &offset);
+    hsa_status_t hsa_status = Hsa::portable_export_dmabuf_v2(dev_ptr, size, &dmabuffd,
+                                                             &offset, dmabuf_mapping_type);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"
+          "Cannot export a portable fd for dev_ptr: %p with size: %zu, "
           "hsa returned status: %d",
           dev_ptr, size, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
   }
   if (dmabuffd <= 0) {
     LogPrintfError("Invalid file descriptor handle: %d returned", dmabuffd);
-    return false;
+    return amd::HandleExportResult::kError;
   }
 
   // As per spec, handle passed through HIP API is ptr to int.
   *(reinterpret_cast<int*>(handle)) = dmabuffd;
-  return true;
+  return amd::HandleExportResult::kSuccess;
 }
 
 // ======================================= roc::Image =============================================

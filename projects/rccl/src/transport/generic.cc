@@ -66,22 +66,86 @@ fail:
   goto exit;
 }
 
+// Build a node-major rank order with the supplied transport heads first.
+ncclResult_t ncclTransportInitRankMap(struct ncclComm* comm, int nHeads, const int* heads) {
+  ncclResult_t ret = ncclSuccess;
+  if (comm->denseToUserRank != nullptr) return ncclSuccess;
+
+  int rank = comm->rank;
+  int* userToDenseRank = NULL;
+
+  NCCLCHECKGOTO(ncclCalloc(&userToDenseRank, comm->nRanks), ret, exit);
+  userToDenseRank[rank] = -1;
+
+  for (int h = 0; h < nHeads; h++) {
+    if (heads[h] == rank) userToDenseRank[rank] = h;
+  }
+  if (userToDenseRank[rank] == -1) {
+    int denseLocalRank = nHeads;
+    for (int localRank = 0; localRank < comm->localRank; localRank++) {
+      bool isHead = false;
+      for (int h = 0; h < nHeads; h++) isHead |= comm->rankToLocalRank[heads[h]] == localRank;
+      if (!isHead) denseLocalRank++;
+    }
+    userToDenseRank[rank] = denseLocalRank;
+  }
+  userToDenseRank[rank] += comm->node * comm->localRanks;
+
+  NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, userToDenseRank, sizeof(int)), ret, exit);
+  comm->denseToUserRank = ncclMemoryStackAlloc<int>(&comm->memPermanent, comm->nRanks);
+  for (int r = 0; r < comm->nRanks; r++) {
+    comm->denseToUserRank[userToDenseRank[r]] = r;
+  }
+exit:
+  free(userToDenseRank);
+  return ret;
+}
+
 ncclResult_t ncclTransportPatConnect(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
+  if (ncclPatEnable(comm) == 0) goto exit;
   if (comm && comm->nRanks > 1) {
-    for (int mask = 1; mask < comm->nRanks; mask <<= 1) {
-      int prevPeer = (comm->rank + mask) % comm->nRanks;
-      int nextPeer = (comm->rank + comm->nRanks - mask) % comm->nRanks;
-      for (int c = 0; c < comm->nChannels; c++) {
-        NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &prevPeer, 1, &nextPeer, 0), ret, fail); // ReduceScatter
+    // Skip PAT setup on every rank for uneven local-rank layouts, so that no
+    // rank enters connection setup while another skips it.
+    if (comm->minLocalRanks != comm->maxLocalRanks) goto exit;
+    int denseLocalRank = 0;
+    // Connect corresponding NVLS-dense rails across nodes.
+    if (!comm->isOneRPN) {
+      if (!ncclNvlsTransportEnabled(comm) || comm->channels[0].nvls.nHeads != comm->localRanks ||
+          comm->channels[0].nvls.headRank < 0 || comm->channels[0].nvls.headRank >= comm->localRanks) {
+        goto exit;
       }
-      NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_TREE], 0), ret, fail);
-      for (int c = 0; c < comm->nChannels; c++) {
-        NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &nextPeer, 1, &prevPeer, 0), ret, fail); // AllGather
-      }
-      NCCLCHECKGOTO(ncclTransportP2pSetup(comm, &comm->graphs[NCCL_ALGO_TREE], 0), ret, fail);
+      denseLocalRank = comm->channels[0].nvls.headRank;
     }
-    INFO(NCCL_INIT, "Connected binomial trees");
+
+    // Use the NVLS graph for multi-RPN PAT, similar to NVLS_TREE.
+    struct ncclTopoGraph* graph = !comm->isOneRPN ? &comm->graphs[NCCL_ALGO_NVLS] : &comm->graphs[NCCL_ALGO_TREE];
+    int nChannels = !comm->isOneRPN ? comm->nvlsChannels : comm->nChannels;
+
+    for (int mask = 1; mask < comm->nNodes; mask <<= 1) {
+      int prevNode = (comm->node + mask) % comm->nNodes;
+      int numLocalRanks = comm->localRanks;
+      int nextNode = (comm->node + comm->nNodes - mask) % comm->nNodes;
+      int prevPeer = prevNode;
+      int nextPeer = nextNode;
+      if (!comm->isOneRPN) {
+        prevPeer = comm->denseToUserRank[prevNode * numLocalRanks + denseLocalRank];
+        nextPeer = comm->denseToUserRank[nextNode * numLocalRanks + denseLocalRank];
+      }
+      for (int c = 0; c < nChannels; c++) {
+        // AllGather keeps its own mirrored connection set unless QPs are shared (RCCL_PAT_SHARED_QPS).
+        if (!comm->patSharedQps) {
+          NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &prevPeer, 1, &nextPeer, 0), ret, fail); // ReduceScatter
+        }
+        // When sharing, RS and AG both recv from nextPeer and send to prevPeer, so one pass connects both.
+        NCCLCHECKGOTO(ncclTransportP2pConnect(comm, c, 1, &nextPeer, 1, &prevPeer, 0), ret, fail); // AllGather / shared
+      }
+    }
+    if (comm->nNodes > 1) {
+      NCCLCHECKGOTO(ncclTransportP2pSetup(comm, graph, 0), ret, fail);
+    }
+    INFO(NCCL_INIT, "Connected binomial trees%s",
+         comm->patSharedQps ? "" : " with separate ReduceScatter and AllGather connections");
   }
 exit:
   return ret;

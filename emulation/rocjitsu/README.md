@@ -46,7 +46,7 @@ lib/
       code/             Code object loader, basic block analysis
       code/dbt/         Dynamic binary translator
       code/patch/       Code object patcher, spill manager
-      analysis/         Register liveness and def-use analysis
+      code/analysis/    Register liveness and def-use analysis
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
@@ -55,7 +55,18 @@ configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
 docs/                   Design documents and guides
+website/                Public web applications
+  dashboard/            React dashboard source and web tests
+  handbook/             Markdown documentation and blog site
 ```
+
+When adding a guide under `docs/`, also register it in the handbook navigation.
+See [Adding a guide](website/handbook/README.md#adding-a-guide) for the steps and
+local validation command.
+
+See [website/handbook/README.md](website/handbook/README.md) to build and preview the
+Handbook. The simulation-performance dashboard has its own
+[website/dashboard/README.md](website/dashboard/README.md).
 
 ## Building
 
@@ -76,6 +87,29 @@ ctest --test-dir build
 HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when `hipcc` or `libhsa-runtime64` is
 not found.
+
+Floating-point mode tests run in 16 batches to share process startup and
+GoogleTest registration. Per-case fixtures and assertions are unchanged.
+Run all batches with:
+
+```bash
+ctest --test-dir build -L '^fp-mode$' --output-on-failure
+```
+
+Each batch writes per-case GoogleTest results under `build/tests/gtest-results/`.
+Installed tests use the same batches and write results under `gtest-results/`
+in the installed test directory. The launcher removes each batch's previous XML
+before starting GoogleTest to avoid stale results after a crash or timeout.
+Cleanup errors fail the batch before GoogleTest starts.
+If the launcher cannot start or finish cleanup, an older report may remain;
+use CTest's status alongside the XML.
+CTest batches ignore an inherited `GTEST_FILTER` and suppress passing-case output;
+failure diagnostics and per-case XML are retained. To select individual cases or
+a family, run the dedicated executable with a GoogleTest filter:
+
+```bash
+build/tests/rocjitsu_fp_mode_tests --gtest_filter='BinaryF32/ValuFpModeTest.*'
+```
 
 ## Running HIP workloads
 
@@ -119,7 +153,9 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | Document | Description |
 |---|---|
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
+| [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
+| [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
 | [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |
@@ -134,7 +170,6 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Simdojo Engine](docs/simdojo.md) | PDES simulation framework |
 | [DBT Design](docs/dbt-design.md) | Binary translator architecture |
 | [DBI Design](docs/dbi-design.md) | Binary instrumentation (in progress) |
-| [CDNA5 Tensor DMA](docs/tensor-dma.md) | gfx1250 tensor descriptor, bounds, iteration, gather, and padding model |
 | [Codegen](docs/codegen.md) | ISA codegen pipeline and regen commands |
 | [ISA Target Providers](docs/isa-target-providers.md) | Static target registration and per-component subsets |
 

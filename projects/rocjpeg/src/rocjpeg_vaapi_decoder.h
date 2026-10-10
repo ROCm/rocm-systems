@@ -43,6 +43,9 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCJPEG_USE_DLOPEN_VA
+#include "rocjpeg_vaapi_loader.h"
+#endif
 #include "rocjpeg_commons.h"
 #include "rocjpeg_parser.h"
 #include "../api/rocjpeg/rocjpeg.h"
@@ -65,7 +68,7 @@ typedef enum {
  * whether it can convert to RGB, and whether it supports ROI (Region of Interest) decoding.
  */
 typedef struct {
-    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. */
+    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. Always >= 1: it is the stride used to group work into sub-batches, so a zero would stall those loops. */
     bool can_convert_to_rgb; /**< Flag indicating whether the VCN JPEG decoder can convert to RGB. */
     bool can_roi_decode; /**< Flag indicating whether the VCN JPEG decoder supports ROI decoding. */
 } VcnJpegSpec;
@@ -336,6 +339,12 @@ public:
      */
     RocJpegStatus SetSurfaceAsIdle(VASurfaceID surface_id);
 private:
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Shared reference to the process-wide VA loader. The dlopen handle stays
+    // open as long as at least one decoder instance exists; dlclose runs when
+    // the last shared_ptr is destroyed.
+    std::shared_ptr<RocJpegVaapiLoader> va_loader_;
+#endif
     int device_id_; // The ID of the device
     int drm_fd_; // The file descriptor for the DRM device
     uint32_t min_picture_width_; // The minimum width of the picture

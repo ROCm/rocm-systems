@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 #include "core/perfetto/sinks/single_file_sink.hpp"
-#include "core/perfetto/sinks/io_helpers.hpp"
+#include "core/perfetto/sinks/file_output.hpp"
 
 #include "core/config.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto/locked_file_append.hpp"
 #include "core/perfetto/packet_framing.hpp"
 #include "logger/debug.hpp"
 
 #include <cstdint>
+#include <span>
 #include <utility>
 
 namespace rocprofsys::core
@@ -57,9 +57,12 @@ single_file_sink::set_append_mode(append_mode_config config) noexcept
 }
 
 void
-single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
+single_file_sink::on_source_drained(int source_id, std::span<const char> bytes)
 {
-    if(bytes.empty()) return;
+    if(bytes.empty())
+    {
+        return;
+    }
 
     if(m_output_disabled)
     {
@@ -70,7 +73,9 @@ single_file_sink::on_source_drained(int source_id, std::vector<char> bytes)
     }
 
     if(m_buffer.capacity() < m_buffer.size() + bytes.size())
+    {
         m_buffer.reserve(m_buffer.size() + bytes.size() + bytes.size() / 8);
+    }
 
     static constexpr std::size_t SINGLE_FILE_BUFFER_WARN_THRESHOLD =
         std::size_t{ 1 } * 1024 * 1024 * 1024;  // 1 GiB
@@ -162,6 +167,9 @@ single_file_sink::finalize()
         return;
     }
 
+    // An explicit output path without append mode never occurs in a configured
+    // runtime, so the rank filter is skipped rather than consulted -- reading the
+    // config before rocprofsys_init_library throws.
     const auto explicit_non_append_output =
         !m_output_filename_override.empty() && !m_append_mode;
     if(!explicit_non_append_output &&
@@ -176,8 +184,10 @@ single_file_sink::finalize()
     if(m_buffer.empty())
     {
         if(dmp::rank() == 0)
+        {
             LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
                       filename);
+        }
         m_output_disabled = false;
         return;
     }
@@ -188,20 +198,15 @@ single_file_sink::finalize()
             append_with_file_lock(filename, m_buffer.data(), m_buffer.size());
         if(status == locked_append_status::success)
         {
-            perfetto_sink_detail::emit_size_line(filename, m_buffer.size());
             m_registry.get().register_file(filename, output_format::perfetto);
         }
         else
         {
-            if(status == locked_append_status::open_failed)
-                perfetto_sink_detail::emit_open_error_line(filename);
             LOG_ERROR("single_file_sink: append-with-flock failed for {} ({})", filename,
                       status_name(status));
         }
     }
-    else if(!perfetto_sink_detail::write_proto_to(filename, m_buffer.data(),
-                                                  m_buffer.size(), m_registry.get(),
-                                                  !explicit_non_append_output))
+    else if(!write_proto_to(filename, m_buffer.data(), m_buffer.size(), m_registry.get()))
     {
         LOG_ERROR("single_file_sink: failed to open '{}'", filename);
     }

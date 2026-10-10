@@ -11,8 +11,32 @@
 # The gfx950 race detector cases include CDNA-specific inline assembly
 # sequences for LDS and waitcnt coverage. Keep that binary on gfx950 even when
 # generic HIP smoke tests are overridden for local validation on another ISA.
-rj_add_hip_test(hip_race_tests_gfx950 ARCH gfx950 SOURCE hip_race_gfx950_test.hip)
-rj_add_hip_test(hip_race_tests_gfx1151 ARCH gfx1151 SOURCE hip_race_gfx1151_test.hip)
+set(RJ_RACE_TEST_SUPPORT_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_log_expectation.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/race_test_support.hpp
+)
+
+function(rj_add_hip_race_test TEST_NAME)
+    rj_add_hip_test(${TEST_NAME} ${ARGN})
+    # The race plugin is loaded at runtime, so no link dependency pulls its
+    # shared object into focused builds of the HIP race-test targets.
+    if(TARGET rocjitsu_plugin_race_so)
+        add_dependencies(${TEST_NAME}_target rocjitsu_plugin_race_so)
+    endif()
+endfunction()
+
+rj_add_hip_race_test(
+    hip_race_tests_gfx950
+    ARCH gfx950
+    SOURCE hip_race_gfx950_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
+rj_add_hip_race_test(
+    hip_race_tests_gfx1151
+    ARCH gfx1151
+    SOURCE hip_race_gfx1151_test.hip
+    DEPENDENCIES ${RJ_RACE_TEST_SUPPORT_HEADERS}
+)
 set(RJ_RACE_GFX950_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/race_test_config.json)
 if(RJ_INSTALL_TESTS)
     install(
@@ -116,8 +140,36 @@ endfunction()
 
 rj_add_gfx950_race_test_case(vgpr_waitcnt)
 rj_add_gfx950_race_test_case(vgpr_waitcnt_race)
+rj_add_gfx950_race_test_case(flat_global_wait_both)
+rj_add_gfx950_race_test_case(flat_global_vmcnt_only)
+rj_add_gfx950_race_test_case(flat_global_lgkmcnt_only_race)
+rj_add_gfx950_race_test_case(flat_lds_wait_both)
+rj_add_gfx950_race_test_case(flat_lds_vmcnt_only_race)
+rj_add_gfx950_race_test_case(flat_lds_lgkmcnt_only)
+rj_add_gfx950_race_test_case(flat_global_copy_vmcnt)
+rj_add_gfx950_race_test_case(flat_global_copy_missing_vmcnt_race)
+rj_add_gfx950_race_test_case(flat_global_does_not_advance_lgkmcnt_race)
+rj_add_gfx950_race_test_case(flat_global_full_lgkmcnt_waited)
+rj_add_gfx950_race_test_case(flat_lds_advances_lgkmcnt_at_capacity)
+rj_add_gfx950_race_test_case(flat_lds_does_not_advance_vmcnt_race)
+rj_add_gfx950_race_test_case(flat_lds_full_vmcnt_waited)
+rj_add_gfx950_race_test_case(flat_global_advances_vmcnt_at_capacity)
+rj_add_gfx950_race_test_case(vmcnt_no_wait_race)
+rj_add_gfx950_race_test_case(lgkmcnt_no_wait_race)
+rj_add_gfx950_race_test_case(vmcnt_capacity_boundary)
+rj_add_gfx950_race_test_case(vmcnt_below_capacity_race)
+rj_add_gfx950_race_test_case(lgkmcnt_capacity_boundary)
+rj_add_gfx950_race_test_case(lgkmcnt_below_capacity_race)
+rj_add_gfx950_race_test_case(mixed_lgkmcnt_capacity_boundary)
+rj_add_gfx950_race_test_case(mixed_lgkmcnt_below_capacity_race)
+rj_add_gfx950_race_test_case(wide_scalar_lgkmcnt_capacity_boundary)
+rj_add_gfx950_race_test_case(wide_scalar_lgkmcnt_below_capacity_race)
 rj_add_gfx950_race_test_case(sgpr_waitcnt)
 rj_add_gfx950_race_test_case(sgpr_waitcnt_race)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_mov)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_mov_race)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_load)
+rj_add_gfx950_race_test_case(sgpr_waw_load_then_load_race)
 rj_add_gfx950_race_test_case(lds_cross_wave)
 rj_add_gfx950_race_test_case(lds_cross_wave_race)
 rj_add_gfx950_race_test_case(lds_same_wave_order)
@@ -152,6 +204,19 @@ rj_add_gfx950_race_test_case(f64_vgpr_waw)
 
 rj_add_gfx1151_race_test_case(vgpr_waitcnt)
 rj_add_gfx1151_race_test_case(vgpr_waitcnt_race)
+rj_add_gfx1151_race_test_case(standalone_vmcnt_waits_for_vmem)
+rj_add_gfx1151_race_test_case(standalone_vmcnt_does_not_wait_for_lds)
+rj_add_gfx1151_race_test_case(standalone_lgkmcnt_waits_for_lds)
+rj_add_gfx1151_race_test_case(standalone_lgkmcnt_does_not_wait_for_vmem)
+rj_add_gfx1151_race_test_case(vmcnt_capacity_boundary)
+rj_add_gfx1151_race_test_case(vmcnt_below_capacity_race)
+rj_add_gfx1151_race_test_case(vscnt_pressure_does_not_advance_vmcnt)
+rj_add_gfx1151_race_test_case(lgkmcnt_capacity_boundary)
+rj_add_gfx1151_race_test_case(lgkmcnt_below_capacity_race)
+rj_add_gfx1151_race_test_case(mixed_lgkmcnt_capacity_boundary)
+rj_add_gfx1151_race_test_case(mixed_lgkmcnt_below_capacity_race)
+rj_add_gfx1151_race_test_case(wide_scalar_lgkmcnt_capacity_boundary)
+rj_add_gfx1151_race_test_case(wide_scalar_lgkmcnt_below_capacity_race)
 rj_add_gfx1151_race_test_case(d16_global_load_merge_no_race)
 rj_add_gfx1151_race_test_case(d16_global_load_hi_merge_no_race)
 rj_add_gfx1151_race_test_case(d16_global_load_missing_waitcnt_race)

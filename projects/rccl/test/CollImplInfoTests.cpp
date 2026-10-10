@@ -38,9 +38,11 @@
 #include <vector>
 
 #include "StandaloneUtils.hpp"
+#include "common/CeAllReduceTestHelpers.hpp"  // isCeRuntimeDriverSupported
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
+#include "sym_kernels.h"  // ncclSymkMaxBlocks
 
 // rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
 // live in void functions, so use a gtest-friendly, non-returning check instead.
@@ -121,6 +123,26 @@ namespace RcclUnitTesting
         if (line.find(func + " impl selected: algo ") != std::string::npos)
         {
           addon = {true, TokenAfter(line, "algo "), false, "", false, 0};
+        }
+
+        // "<Func> [Copy Engine]:" confirms a CE dispatch but does not name the
+        // variant. "impl selected: algo CE-Scratch" (or CE / CE2) is the name
+        // rcclGetAlgoName returns, so keep it. Use "CE" only when that line is
+        // absent, which is the registered-window path.
+        if (line.find(func + " [Copy Engine]:") != std::string::npos && addon.algoName.empty())
+        {
+          addon = {true, "CE", false, "", false, 0};
+        }
+
+        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N"
+        if (line.find(func + " [Symmetric]:") != std::string::npos)
+        {
+          std::string kernel = TokenAfter(line, "Kernel ");
+          std::string proto;
+          if (kernel.find("LL128") != std::string::npos) proto = "LL128";
+          else if (kernel.find("LL") != std::string::npos) proto = "LL";
+          else if (!kernel.empty()) proto = "SIMPLE";
+          addon = {true, "SYM", !proto.empty(), proto, false, 0};
         }
 
         if (func == "AllGather")
@@ -256,14 +278,57 @@ namespace RcclUnitTesting
       bool checkSymk   = false;  // also assert rcclSymKGetInfo agrees with the dispatch log
       bool expectNoSym = false;  // additionally assert the symk reporter never returns SYM
       bool cumemOff    = false;  // force NCCL_CUMEM_ENABLE=0 before comm init
+      bool ceAllReduce = false;  // force CE AllReduce; registers recv only so symk cannot claim it
     };
+
+    // Names the file a child writes its skip reason to, since a GTEST_SKIP in an isolated child scores as a pass.
+    constexpr char kSkipFileEnv[] = "RCCL_UT_COLLIMPL_SKIP_FILE";
+
+    // Skips here, or hands the reason to the parent when it asked for one via kSkipFileEnv.
+    void SkipSweep(const std::string& reason)
+    {
+      const char* path = getenv(kSkipFileEnv);
+      if (path == nullptr)
+      {
+        GTEST_SKIP() << reason;
+      }
+      std::ofstream out(path);
+      out << reason;
+      EXPECT_TRUE(out.good()) << "cannot hand the skip to the parent via " << path << ": " << reason;
+    }
+
+    // Why CE-registered AllReduce can never be selected on these comms, or "" when it can.
+    std::string CeAllReduceUnselectableReason(const std::vector<ncclComm_t>& comms)
+    {
+      for (ncclComm_t c : comms)
+      {
+        // ncclCeAvailable needs symmetric memory, so cuMem; NCCL_CUMEM_ENABLE=1 still yields off on e.g. kernels < 6.8.
+        if (!c->symmetricSupport)
+        {
+          return "no symmetric memory (cuMem unavailable on this host), so CE AllReduce is never selected";
+        }
+        // The arch table's ceRegMax caps CE-registered AllReduce, so an arch without a table never selects it.
+        if (c->archThresholds == nullptr)
+        {
+          return "no arch thresholds table, so CE AllReduce is never selected";
+        }
+      }
+      return "";
+    }
+
+    // Element count for one swept size; CE AllReduce needs it to divide evenly across ranks.
+    size_t SweepCount(size_t bytes, size_t denom, int nRanks, const SweepMode& mode)
+    {
+      const size_t count = bytes / denom;
+      return mode.ceAllReduce ? count - count % (size_t)nRanks : count;
+    }
 
     // Runs one collective across all comms, captures its selection log to a fresh
     // per-size file, then asserts rcclGetCollImplInfo reports what was logged.
     void CheckSizeMatchesLog(const char* funcStr, ncclFunc_t coll, int idx, int nRanks,
                              const std::vector<ncclComm_t>& comms, const std::vector<hipStream_t>& streams,
                              const std::vector<void*>& sbuf, const std::vector<void*>& rbuf, size_t count,
-                             ncclDataType_t dt, const SweepMode& mode, bool* sawSym)
+                             ncclDataType_t dt, const SweepMode& mode, bool* sawSym, int* nCe)
     {
       char path[256];
       snprintf(path, sizeof(path), "/tmp/rccl_collimpl_%d_%s_%d.log", (int)getpid(), funcStr, idx);
@@ -313,6 +378,10 @@ namespace RcclUnitTesting
       NCCLCHECK(ncclGroupEnd());
 
       if (sawSym && sel.algoName == "SYM") *sawSym = true;
+      if (nCe && sel.algoName == "CE")
+      {
+        (*nCe)++;
+      }
 
       EXPECT_EQ(rep.algoName, sel.algoName)
         << "reported algo != logged-selected algo\nLOG:\n" << log;
@@ -354,6 +423,15 @@ namespace RcclUnitTesting
           // -- queried with the real registered buffers -- covers the rest.)
           EXPECT_EQ(symk.algoName, "SYM")
             << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+
+          // Symmetric block count: at least 1 because the model rejects a zero count, at most
+          // ncclSymkMaxBlocks. Device independent, since the model clamps to that constant and to
+          // maxCTAs and never to the CU count. Was -1 before the model set maxChannels, which is
+          // the regression this guards.
+          EXPECT_GE(symk.channels, 1)
+            << "symk reported SYM without a channel count\nLOG:\n" << log;
+          EXPECT_LE(symk.channels, ncclSymkMaxBlocks)
+            << "symk channel count above ncclSymkMaxBlocks\nLOG:\n" << log;
         }
       }
 
@@ -371,14 +449,39 @@ namespace RcclUnitTesting
       HIPCALL(hipGetDeviceCount(&numDevices));
       if (numDevices < 2)
       {
-        GTEST_SKIP() << "This test requires at least 2 GPUs.";
+        SkipSweep("This test requires at least 2 GPUs.");
+        return;
       }
       const int nRanks = std::min(numDevices, 8);
+      if (mode.ceAllReduce)
+      {
+        for (int dev = 0; dev < nRanks; ++dev)
+        {
+          hipDeviceProp_t prop;
+          HIPCALL(hipGetDeviceProperties(&prop, dev));
+          // gcnArchName reads like "gfx942:sramecc+:xnack-".
+          if (std::strncmp(prop.gcnArchName, "gfx942", 6) == 0)
+          {
+            SkipSweep("CE AllReduce regression sweep is not enabled on gfx942");
+            return;
+          }
+        }
+      }
+      if (mode.ceAllReduce && !isCeRuntimeDriverSupported())
+      {
+        SkipSweep("CE driver not in supported range");
+        return;
+      }
 
       // Force cuMem off before init so comm->symmetricSupport is false: the -R 2
       // reporter (rcclSymKGetInfo) must then fall back to the real backend and
       // never claim SYM. Set in the isolated child only (fresh param cache).
       if (mode.cumemOff) setenv("NCCL_CUMEM_ENABLE", "0", 1);
+      if (mode.ceAllReduce)
+      {
+        setenv("RCCL_CE_ALLREDUCE", "1", 1);
+        setenv("RCCL_FORCE_CE_ALLREDUCE", "1", 1);
+      }
 
       // Ground truth = the library's own selection log. COLL covers the addon
       // backend lines; TUNING covers the native-kernel algo/proto/channel line.
@@ -387,6 +490,17 @@ namespace RcclUnitTesting
 
       std::vector<ncclComm_t> comms(nRanks);
       ASSERT_EQ(ncclCommInitAll(comms.data(), nRanks, nullptr), ncclSuccess);
+
+      const std::string ceSkip = mode.ceAllReduce ? CeAllReduceUnselectableReason(comms) : "";
+      if (!ceSkip.empty())
+      {
+        for (auto& c : comms)
+        {
+          NCCLCHECK(ncclCommDestroy(c));
+        }
+        SkipSweep(ceSkip);
+        return;
+      }
 
       const std::vector<ncclDataType_t> dtypes = {ncclFloat32, ncclBfloat16};
 
@@ -439,8 +553,11 @@ namespace RcclUnitTesting
           for (int i = 0; i < nRanks; i++)
           {
             HIPCALL(hipSetDevice(i));
-            rr[2 * i]     = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
-                                                   &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
+            if (!mode.ceAllReduce)
+            {
+              rr[2 * i] = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
+                                                 &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
+            }
             rr[2 * i + 1] = ncclCommWindowRegister(comms[i], symRecv[i].ptr, recvBytes,
                                                    &symRecv[i].win, NCCL_WIN_COLL_SYMMETRIC);
           }
@@ -463,8 +580,9 @@ namespace RcclUnitTesting
             hipStreamDestroy(streams[j]);
           }
           for (auto& c : comms) ncclCommDestroy(c);
-          GTEST_SKIP() << "symmetric windows unavailable (cuMem/VMM off or unsupported): "
-                       << ncclGetErrorString(regRes);
+          SkipSweep(std::string("symmetric windows unavailable (cuMem/VMM off or unsupported): ") +
+                    ncclGetErrorString(regRes));
+          return;
         }
 
         for (int i = 0; i < nRanks; i++)
@@ -501,7 +619,7 @@ namespace RcclUnitTesting
           elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
-          const size_t count = bytes / denom;
+          const size_t count = SweepCount(bytes, denom, nRanks, mode);
           if (count == 0) continue;
           NCCLCHECK(ncclGroupStart());
           for (int i = 0; i < nRanks; i++)
@@ -525,6 +643,7 @@ namespace RcclUnitTesting
 
       int  idx    = 0;
       bool sawSym = false;
+      int  nCe    = 0;
       for (ncclDataType_t dt : dtypes)
       {
         const size_t elemSize = (dt == ncclFloat32 ? 4 : 2);
@@ -533,10 +652,10 @@ namespace RcclUnitTesting
           elemSize * ((coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) ? (size_t)nRanks : 1);
         for (size_t bytes = loBytes; bytes <= hiBytes; bytes <<= 1)
         {
-          const size_t count = bytes / denom;
+          const size_t count = SweepCount(bytes, denom, nRanks, mode);
           if (count == 0) continue;  // total too small to split across ranks for this dtype
           CheckSizeMatchesLog(funcStr, coll, idx++, nRanks, comms, streams, sbuf, rbuf, count, dt,
-                              mode, &sawSym);
+                              mode, &sawSym, &nCe);
         }
       }
 
@@ -551,6 +670,12 @@ namespace RcclUnitTesting
                 "[ NOTE     ] %s: symmetric windows registered but SYM never dispatched "
                 "on this arch/config (reporter still matched the dispatch log at every size)\n",
                 funcStr);
+
+      if (mode.ceAllReduce)
+      {
+        fprintf(stderr, "[ NOTE     ] %s: CE AllReduce dispatched at %d sizes\n", funcStr, nCe);
+        EXPECT_GT(nCe, 0) << "CE AllReduce was forced but never dispatched; the sweep tested nothing";
+      }
 
       // Restore default debug target before teardown.
       unsetenv("NCCL_DEBUG_FILE");
@@ -605,6 +730,28 @@ namespace RcclUnitTesting
       mode.checkSymk   = true;
       RunSweep("AllReduce", ncclFuncAllReduce, kLoBytes, kHiBytes, mode);
     });
+  }
+
+  // One thread drives every GPU, so CE AllReduce staging setup must not run at launch (ROCM-32044): this hangs there.
+  TEST(CollImplInfo, AllReduceCeRegisteredMatchesDispatchLog)
+  {
+    // The child judges eligibility, since HIP in this parent breaks later TestBed forks; the skip is scored here.
+    const std::string skipFile = "/tmp/rccl_collimpl_ce_skip_" + std::to_string(getpid());
+    remove(skipFile.c_str());
+    // CE AllReduce needs symmetric memory, so cuMem, which is on by default only on gfx1250; the child skips gfx942.
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig("AllReduceCeRegisteredMatchesDispatchLog", []() {
+      SweepMode mode;
+      mode.registerSym = true;
+      mode.ceAllReduce = true;
+      RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
+    }).withEnvironment({{kSkipFileEnv, skipFile}, {"NCCL_CUMEM_ENABLE", "1"}}).withTimeout(std::chrono::seconds(180)));
+    std::string reason;
+    std::getline(std::ifstream(skipFile), reason);
+    remove(skipFile.c_str());
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
   }
 
   TEST(CollImplInfo, AllGatherSymmetricMatchesDispatchLog)

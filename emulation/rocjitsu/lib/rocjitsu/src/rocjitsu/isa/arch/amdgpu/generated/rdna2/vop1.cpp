@@ -13,9 +13,7 @@ namespace rocjitsu {
 namespace rdna2 {
 
 VNopVop1::VNopVop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0) ? "v_nop_dpp"
-                                                                                      : "v_nop_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_nop_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNopVop1)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -23,26 +21,17 @@ VNopVop1::VNopVop1(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVNopVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_nop_dpp"
-          : "v_nop_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_nop_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_NOP does not support DPP";
   return std::make_unique<VNopVop1>(opcode);
 }
 } // namespace detail
 
 VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mov_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mov_b32_dpp"
-               : "v_mov_b32_e32",
+                                                                                : "v_mov_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -90,6 +79,7 @@ VMovB32Vop1::VMovB32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -97,9 +87,7 @@ DecodeResult decodeVMovB32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_mov_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_mov_b32_dpp"
-          : "v_mov_b32_e32",
+                                                                                 : "v_mov_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -113,10 +101,7 @@ DecodeResult decodeVMovB32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VReadfirstlaneB32Vop1::VReadfirstlaneB32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_readfirstlane_b32_dpp"
-               : "v_readfirstlane_b32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_readfirstlane_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop1)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -131,10 +116,7 @@ DecodeResult decodeVReadfirstlaneB32Vop1(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_readfirstlane_b32_dpp"
-          : "v_readfirstlane_b32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_readfirstlane_b32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -147,10 +129,7 @@ DecodeResult decodeVReadfirstlaneB32Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i32_f64_dpp"
-               : "v_cvt_i32_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_i32_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F64Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -163,16 +142,14 @@ VCvtI32F64Vop1::VCvtI32F64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtI32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i32_f64_dpp"
-          : "v_cvt_i32_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_i32_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -185,10 +162,7 @@ DecodeResult decodeVCvtI32F64Vop1(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_i32_dpp"
-               : "v_cvt_f64_i32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_f64_i32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -200,16 +174,14 @@ VCvtF64I32Vop1::VCvtF64I32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64I32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_i32_dpp"
-          : "v_cvt_f64_i32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_i32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -224,8 +196,6 @@ DecodeResult decodeVCvtF64I32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_i32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_i32_dpp"
                : "v_cvt_f32_i32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop1)),
@@ -274,6 +244,7 @@ VCvtF32I32Vop1::VCvtF32I32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -282,8 +253,6 @@ DecodeResult decodeVCvtF32I32Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_i32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_i32_dpp"
           : "v_cvt_f32_i32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -300,8 +269,6 @@ DecodeResult decodeVCvtF32I32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_u32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_u32_dpp"
                : "v_cvt_f32_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop1)),
@@ -350,6 +317,7 @@ VCvtF32U32Vop1::VCvtF32U32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -358,8 +326,6 @@ DecodeResult decodeVCvtF32U32Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_u32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_u32_dpp"
           : "v_cvt_f32_u32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -376,8 +342,6 @@ DecodeResult decodeVCvtF32U32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_u32_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u32_f32_dpp"
                : "v_cvt_u32_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop1)),
@@ -426,6 +390,7 @@ VCvtU32F32Vop1::VCvtU32F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -434,8 +399,6 @@ DecodeResult decodeVCvtU32F32Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_u32_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u32_f32_dpp"
           : "v_cvt_u32_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -452,8 +415,6 @@ DecodeResult decodeVCvtU32F32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_i32_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i32_f32_dpp"
                : "v_cvt_i32_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop1)),
@@ -502,6 +463,7 @@ VCvtI32F32Vop1::VCvtI32F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -510,8 +472,6 @@ DecodeResult decodeVCvtI32F32Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_i32_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i32_f32_dpp"
           : "v_cvt_i32_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -528,8 +488,6 @@ DecodeResult decodeVCvtI32F32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f16_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_f32_dpp"
                : "v_cvt_f16_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop1)),
@@ -578,6 +536,7 @@ VCvtF16F32Vop1::VCvtF16F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -586,8 +545,6 @@ DecodeResult decodeVCvtF16F32Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f16_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_f32_dpp"
           : "v_cvt_f16_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -610,8 +567,6 @@ void VCvtF16F32Vop1::implicit_uses(RegisterSet &uses) const {
 VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_f16_dpp"
                : "v_cvt_f32_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop1)),
@@ -661,6 +616,7 @@ VCvtF32F16Vop1::VCvtF32F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -669,8 +625,6 @@ DecodeResult decodeVCvtF32F16Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_f16_dpp"
           : "v_cvt_f32_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -687,8 +641,6 @@ DecodeResult decodeVCvtF32F16Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_rpi_i32_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_rpi_i32_f32_dpp"
                : "v_cvt_rpi_i32_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtRpiI32F32Vop1)),
@@ -737,6 +689,7 @@ VCvtRpiI32F32Vop1::VCvtRpiI32F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -746,8 +699,6 @@ DecodeResult decodeVCvtRpiI32F32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_rpi_i32_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_rpi_i32_f32_dpp"
           : "v_cvt_rpi_i32_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -764,8 +715,6 @@ DecodeResult decodeVCvtRpiI32F32Vop1(const MachineInst *opcode,
 VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_flr_i32_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_flr_i32_f32_dpp"
                : "v_cvt_flr_i32_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtFlrI32F32Vop1)),
@@ -814,6 +763,7 @@ VCvtFlrI32F32Vop1::VCvtFlrI32F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -823,8 +773,6 @@ DecodeResult decodeVCvtFlrI32F32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_flr_i32_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_flr_i32_f32_dpp"
           : "v_cvt_flr_i32_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -841,8 +789,6 @@ DecodeResult decodeVCvtFlrI32F32Vop1(const MachineInst *opcode,
 VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_off_f32_i4_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_off_f32_i4_dpp"
                : "v_cvt_off_f32_i4_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop1)),
@@ -891,6 +837,7 @@ VCvtOffF32I4Vop1::VCvtOffF32I4Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -900,8 +847,6 @@ DecodeResult decodeVCvtOffF32I4Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_off_f32_i4_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_off_f32_i4_dpp"
           : "v_cvt_off_f32_i4_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -916,10 +861,7 @@ DecodeResult decodeVCvtOffF32I4Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_f64_dpp"
-               : "v_cvt_f32_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_f32_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32F64Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -932,16 +874,14 @@ VCvtF32F64Vop1::VCvtF32F64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_f64_dpp"
-          : "v_cvt_f32_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -954,10 +894,7 @@ DecodeResult decodeVCvtF32F64Vop1(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_f32_dpp"
-               : "v_cvt_f64_f32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_f64_f32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -969,16 +906,14 @@ VCvtF64F32Vop1::VCvtF64F32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64F32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_f32_dpp"
-          : "v_cvt_f64_f32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_f32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -993,8 +928,6 @@ DecodeResult decodeVCvtF64F32Vop1(const MachineInst *opcode, const DecodeErrorEm
 VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_ubyte0_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte0_dpp"
                : "v_cvt_f32_ubyte0_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop1)),
@@ -1043,6 +976,7 @@ VCvtF32Ubyte0Vop1::VCvtF32Ubyte0Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1052,8 +986,6 @@ DecodeResult decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_ubyte0_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte0_dpp"
           : "v_cvt_f32_ubyte0_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1070,8 +1002,6 @@ DecodeResult decodeVCvtF32Ubyte0Vop1(const MachineInst *opcode,
 VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_ubyte1_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte1_dpp"
                : "v_cvt_f32_ubyte1_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop1)),
@@ -1120,6 +1050,7 @@ VCvtF32Ubyte1Vop1::VCvtF32Ubyte1Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1129,8 +1060,6 @@ DecodeResult decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_ubyte1_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte1_dpp"
           : "v_cvt_f32_ubyte1_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1147,8 +1076,6 @@ DecodeResult decodeVCvtF32Ubyte1Vop1(const MachineInst *opcode,
 VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_ubyte2_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte2_dpp"
                : "v_cvt_f32_ubyte2_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop1)),
@@ -1197,6 +1124,7 @@ VCvtF32Ubyte2Vop1::VCvtF32Ubyte2Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1206,8 +1134,6 @@ DecodeResult decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_ubyte2_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte2_dpp"
           : "v_cvt_f32_ubyte2_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1224,8 +1150,6 @@ DecodeResult decodeVCvtF32Ubyte2Vop1(const MachineInst *opcode,
 VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f32_ubyte3_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte3_dpp"
                : "v_cvt_f32_ubyte3_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop1)),
@@ -1274,6 +1198,7 @@ VCvtF32Ubyte3Vop1::VCvtF32Ubyte3Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1283,8 +1208,6 @@ DecodeResult decodeVCvtF32Ubyte3Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f32_ubyte3_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte3_dpp"
           : "v_cvt_f32_ubyte3_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1299,10 +1222,7 @@ DecodeResult decodeVCvtF32Ubyte3Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u32_f64_dpp"
-               : "v_cvt_u32_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_u32_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32F64Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1315,16 +1235,14 @@ VCvtU32F64Vop1::VCvtU32F64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtU32F64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u32_f64_dpp"
-          : "v_cvt_u32_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_u32_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1337,10 +1255,7 @@ DecodeResult decodeVCvtU32F64Vop1(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_u32_dpp"
-               : "v_cvt_f64_u32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_cvt_f64_u32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1352,16 +1267,14 @@ VCvtF64U32Vop1::VCvtF64U32Vop1(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64U32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_u32_dpp"
-          : "v_cvt_f64_u32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_u32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1374,10 +1287,7 @@ DecodeResult decodeVCvtF64U32Vop1(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f64_dpp"
-               : "v_trunc_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_trunc_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1390,16 +1300,14 @@ VTruncF64Vop1::VTruncF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVTruncF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f64_dpp"
-          : "v_trunc_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_trunc_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1412,10 +1320,7 @@ DecodeResult decodeVTruncF64Vop1(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f64_dpp"
-               : "v_ceil_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_ceil_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1428,16 +1333,14 @@ VCeilF64Vop1::VCeilF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCeilF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f64_dpp"
-          : "v_ceil_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_ceil_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1450,10 +1353,7 @@ DecodeResult decodeVCeilF64Vop1(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f64_dpp"
-               : "v_rndne_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_rndne_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1466,16 +1366,14 @@ VRndneF64Vop1::VRndneF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRndneF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f64_dpp"
-          : "v_rndne_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_rndne_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1488,10 +1386,7 @@ DecodeResult decodeVRndneF64Vop1(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f64_dpp"
-               : "v_floor_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_floor_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1504,16 +1399,14 @@ VFloorF64Vop1::VFloorF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFloorF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_floor_f64_dpp"
-          : "v_floor_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_floor_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1526,10 +1419,7 @@ DecodeResult decodeVFloorF64Vop1(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_pipeflush_dpp"
-               : "v_pipeflush_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_pipeflush_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPipeflushVop1)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -1537,26 +1427,17 @@ VPipeflushVop1::VPipeflushVop1(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVPipeflushVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_pipeflush_dpp"
-          : "v_pipeflush_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_pipeflush_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_PIPEFLUSH does not support DPP";
   return std::make_unique<VPipeflushVop1>(opcode);
 }
 } // namespace detail
 
 VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_fract_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f32_dpp"
-               : "v_fract_f32_e32",
+                                                                                : "v_fract_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1604,6 +1485,7 @@ VFractF32Vop1::VFractF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1612,8 +1494,6 @@ DecodeResult decodeVFractF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_fract_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_fract_f32_dpp"
           : "v_fract_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1629,9 +1509,7 @@ DecodeResult decodeVFractF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
 
 VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_trunc_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f32_dpp"
-               : "v_trunc_f32_e32",
+                                                                                : "v_trunc_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1679,6 +1557,7 @@ VTruncF32Vop1::VTruncF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1687,8 +1566,6 @@ DecodeResult decodeVTruncF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_trunc_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f32_dpp"
           : "v_trunc_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1704,9 +1581,7 @@ DecodeResult decodeVTruncF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
 
 VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f32_dpp"
-               : "v_ceil_f32_e32",
+                                                                                : "v_ceil_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1754,6 +1629,7 @@ VCeilF32Vop1::VCeilF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1761,9 +1637,7 @@ DecodeResult decodeVCeilF32Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f32_dpp"
-          : "v_ceil_f32_e32",
+                                                                                 : "v_ceil_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -1778,9 +1652,7 @@ DecodeResult decodeVCeilF32Vop1(const MachineInst *opcode, const DecodeErrorEmit
 
 VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rndne_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f32_dpp"
-               : "v_rndne_f32_e32",
+                                                                                : "v_rndne_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1828,6 +1700,7 @@ VRndneF32Vop1::VRndneF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1836,8 +1709,6 @@ DecodeResult decodeVRndneF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_rndne_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f32_dpp"
           : "v_rndne_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1853,9 +1724,7 @@ DecodeResult decodeVRndneF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
 
 VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_floor_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f32_dpp"
-               : "v_floor_f32_e32",
+                                                                                : "v_floor_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1903,6 +1772,7 @@ VFloorF32Vop1::VFloorF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1911,8 +1781,6 @@ DecodeResult decodeVFloorF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_floor_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_floor_f32_dpp"
           : "v_floor_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -1928,9 +1796,7 @@ DecodeResult decodeVFloorF32Vop1(const MachineInst *opcode, const DecodeErrorEmi
 
 VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_exp_f32_dpp"
-               : "v_exp_f32_e32",
+                                                                                : "v_exp_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -1978,6 +1844,7 @@ VExpF32Vop1::VExpF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1985,9 +1852,7 @@ DecodeResult decodeVExpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_exp_f32_dpp"
-          : "v_exp_f32_e32",
+                                                                                 : "v_exp_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2002,9 +1867,7 @@ DecodeResult decodeVExpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_log_f32_dpp"
-               : "v_log_f32_e32",
+                                                                                : "v_log_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2052,6 +1915,7 @@ VLogF32Vop1::VLogF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2059,9 +1923,7 @@ DecodeResult decodeVLogF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_log_f32_dpp"
-          : "v_log_f32_e32",
+                                                                                 : "v_log_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2076,9 +1938,7 @@ DecodeResult decodeVLogF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f32_dpp"
-               : "v_rcp_f32_e32",
+                                                                                : "v_rcp_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2126,6 +1986,7 @@ VRcpF32Vop1::VRcpF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2133,9 +1994,7 @@ DecodeResult decodeVRcpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f32_dpp"
-          : "v_rcp_f32_e32",
+                                                                                 : "v_rcp_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2151,8 +2010,6 @@ DecodeResult decodeVRcpF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_rcp_iflag_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_iflag_f32_dpp"
                : "v_rcp_iflag_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpIflagF32Vop1)),
@@ -2201,6 +2058,7 @@ VRcpIflagF32Vop1::VRcpIflagF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2210,8 +2068,6 @@ DecodeResult decodeVRcpIflagF32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_rcp_iflag_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rcp_iflag_f32_dpp"
           : "v_rcp_iflag_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -2227,9 +2083,7 @@ DecodeResult decodeVRcpIflagF32Vop1(const MachineInst *opcode,
 
 VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f32_dpp"
-               : "v_rsq_f32_e32",
+                                                                                : "v_rsq_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2277,6 +2131,7 @@ VRsqF32Vop1::VRsqF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2284,9 +2139,7 @@ DecodeResult decodeVRsqF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f32_dpp"
-          : "v_rsq_f32_e32",
+                                                                                 : "v_rsq_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2300,10 +2153,7 @@ DecodeResult decodeVRsqF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f64_dpp"
-               : "v_rcp_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_rcp_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2316,16 +2166,14 @@ VRcpF64Vop1::VRcpF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRcpF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f64_dpp"
-          : "v_rcp_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_rcp_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2338,10 +2186,7 @@ DecodeResult decodeVRcpF64Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f64_dpp"
-               : "v_rsq_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_rsq_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2354,16 +2199,14 @@ VRsqF64Vop1::VRsqF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRsqF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f64_dpp"
-          : "v_rsq_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_rsq_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2377,9 +2220,7 @@ DecodeResult decodeVRsqF64Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f32_dpp"
-               : "v_sqrt_f32_e32",
+                                                                                : "v_sqrt_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2427,6 +2268,7 @@ VSqrtF32Vop1::VSqrtF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2434,9 +2276,7 @@ DecodeResult decodeVSqrtF32Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f32_dpp"
-          : "v_sqrt_f32_e32",
+                                                                                 : "v_sqrt_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2450,10 +2290,7 @@ DecodeResult decodeVSqrtF32Vop1(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f64_dpp"
-               : "v_sqrt_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_sqrt_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2466,16 +2303,14 @@ VSqrtF64Vop1::VSqrtF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSqrtF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f64_dpp"
-          : "v_sqrt_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_sqrt_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2489,9 +2324,7 @@ DecodeResult decodeVSqrtF64Vop1(const MachineInst *opcode, const DecodeErrorEmit
 
 VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sin_f32_dpp"
-               : "v_sin_f32_e32",
+                                                                                : "v_sin_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2539,6 +2372,7 @@ VSinF32Vop1::VSinF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2546,9 +2380,7 @@ DecodeResult decodeVSinF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sin_f32_dpp"
-          : "v_sin_f32_e32",
+                                                                                 : "v_sin_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2563,9 +2395,7 @@ DecodeResult decodeVSinF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cos_f32_dpp"
-               : "v_cos_f32_e32",
+                                                                                : "v_cos_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2613,6 +2443,7 @@ VCosF32Vop1::VCosF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2620,9 +2451,7 @@ DecodeResult decodeVCosF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cos_f32_dpp"
-          : "v_cos_f32_e32",
+                                                                                 : "v_cos_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2637,9 +2466,7 @@ DecodeResult decodeVCosF32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_not_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_not_b32_dpp"
-               : "v_not_b32_e32",
+                                                                                : "v_not_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2687,6 +2514,7 @@ VNotB32Vop1::VNotB32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2694,9 +2522,7 @@ DecodeResult decodeVNotB32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_not_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_not_b32_dpp"
-          : "v_not_b32_e32",
+                                                                                 : "v_not_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2711,9 +2537,7 @@ DecodeResult decodeVNotB32Vop1(const MachineInst *opcode, const DecodeErrorEmitt
 
 VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_bfrev_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfrev_b32_dpp"
-               : "v_bfrev_b32_e32",
+                                                                                : "v_bfrev_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfrevB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2761,6 +2585,7 @@ VBfrevB32Vop1::VBfrevB32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2769,8 +2594,6 @@ DecodeResult decodeVBfrevB32Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_bfrev_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_bfrev_b32_dpp"
           : "v_bfrev_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -2786,9 +2609,7 @@ DecodeResult decodeVBfrevB32Vop1(const MachineInst *opcode, const DecodeErrorEmi
 
 VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_u32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ffbh_u32_dpp"
-               : "v_ffbh_u32_e32",
+                                                                                : "v_ffbh_u32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhU32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2836,6 +2657,7 @@ VFfbhU32Vop1::VFfbhU32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2843,9 +2665,7 @@ DecodeResult decodeVFfbhU32Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_u32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ffbh_u32_dpp"
-          : "v_ffbh_u32_e32",
+                                                                                 : "v_ffbh_u32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2860,9 +2680,7 @@ DecodeResult decodeVFfbhU32Vop1(const MachineInst *opcode, const DecodeErrorEmit
 
 VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbl_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ffbl_b32_dpp"
-               : "v_ffbl_b32_e32",
+                                                                                : "v_ffbl_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfblB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2910,6 +2728,7 @@ VFfblB32Vop1::VFfblB32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2917,9 +2736,7 @@ DecodeResult decodeVFfblB32Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbl_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ffbl_b32_dpp"
-          : "v_ffbl_b32_e32",
+                                                                                 : "v_ffbl_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -2934,9 +2751,7 @@ DecodeResult decodeVFfblB32Vop1(const MachineInst *opcode, const DecodeErrorEmit
 
 VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_i32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ffbh_i32_dpp"
-               : "v_ffbh_i32_e32",
+                                                                                : "v_ffbh_i32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFfbhI32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -2984,6 +2799,7 @@ VFfbhI32Vop1::VFfbhI32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2991,9 +2807,7 @@ DecodeResult decodeVFfbhI32Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ffbh_i32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ffbh_i32_dpp"
-          : "v_ffbh_i32_e32",
+                                                                                 : "v_ffbh_i32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -3007,10 +2821,7 @@ DecodeResult decodeVFfbhI32Vop1(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i32_f64_dpp"
-               : "v_frexp_exp_i32_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_frexp_exp_i32_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F64Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3023,6 +2834,7 @@ VFrexpExpI32F64Vop1::VFrexpExpI32F64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3030,10 +2842,7 @@ DecodeResult decodeVFrexpExpI32F64Vop1(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i32_f64_dpp"
-          : "v_frexp_exp_i32_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_frexp_exp_i32_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3046,10 +2855,7 @@ DecodeResult decodeVFrexpExpI32F64Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f64_dpp"
-               : "v_frexp_mant_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_frexp_mant_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3062,6 +2868,7 @@ VFrexpMantF64Vop1::VFrexpMantF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3069,10 +2876,7 @@ DecodeResult decodeVFrexpMantF64Vop1(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f64_dpp"
-          : "v_frexp_mant_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_frexp_mant_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3085,10 +2889,7 @@ DecodeResult decodeVFrexpMantF64Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f64_dpp"
-               : "v_fract_f64_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_fract_f64_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF64Vop1)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3101,16 +2902,14 @@ VFractF64Vop1::VFractF64Vop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFractF64Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_fract_f64_dpp"
-          : "v_fract_f64_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_fract_f64_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -3125,8 +2924,6 @@ DecodeResult decodeVFractF64Vop1(const MachineInst *opcode, const DecodeErrorEmi
 VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_frexp_exp_i32_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i32_f32_dpp"
                : "v_frexp_exp_i32_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop1)),
@@ -3175,6 +2972,7 @@ VFrexpExpI32F32Vop1::VFrexpExpI32F32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3184,8 +2982,6 @@ DecodeResult decodeVFrexpExpI32F32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_frexp_exp_i32_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i32_f32_dpp"
           : "v_frexp_exp_i32_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3202,8 +2998,6 @@ DecodeResult decodeVFrexpExpI32F32Vop1(const MachineInst *opcode,
 VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_frexp_mant_f32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f32_dpp"
                : "v_frexp_mant_f32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop1)),
@@ -3252,6 +3046,7 @@ VFrexpMantF32Vop1::VFrexpMantF32Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3261,8 +3056,6 @@ DecodeResult decodeVFrexpMantF32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_frexp_mant_f32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f32_dpp"
           : "v_frexp_mant_f32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3277,10 +3070,7 @@ DecodeResult decodeVFrexpMantF32Vop1(const MachineInst *opcode,
 } // namespace detail
 
 VClrexcpVop1::VClrexcpVop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_clrexcp_dpp"
-               : "v_clrexcp_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_clrexcp_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClrexcpVop1)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -3288,17 +3078,10 @@ VClrexcpVop1::VClrexcpVop1(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVClrexcpVop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_clrexcp_dpp"
-          : "v_clrexcp_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_clrexcp_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_CLREXCP does not support DPP";
   return std::make_unique<VClrexcpVop1>(opcode);
 }
 } // namespace detail
@@ -3306,8 +3089,6 @@ DecodeResult decodeVClrexcpVop1(const MachineInst *opcode, const DecodeErrorEmit
 VMovreldB32Vop1::VMovreldB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_movreld_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movreld_b32_dpp"
                : "v_movreld_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovreldB32Vop1)),
@@ -3368,8 +3149,6 @@ DecodeResult decodeVMovreldB32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_movreld_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_movreld_b32_dpp"
           : "v_movreld_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3386,8 +3165,6 @@ DecodeResult decodeVMovreldB32Vop1(const MachineInst *opcode,
 VMovrelsB32Vop1::VMovrelsB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_movrels_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrels_b32_dpp"
                : "v_movrels_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop1)),
@@ -3444,8 +3221,6 @@ DecodeResult decodeVMovrelsB32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_movrels_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_movrels_b32_dpp"
           : "v_movrels_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3462,8 +3237,6 @@ DecodeResult decodeVMovrelsB32Vop1(const MachineInst *opcode,
 VMovrelsdB32Vop1::VMovrelsdB32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_movrelsd_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrelsd_b32_dpp"
                : "v_movrelsd_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop1)),
@@ -3520,8 +3293,6 @@ DecodeResult decodeVMovrelsdB32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_movrelsd_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_movrelsd_b32_dpp"
           : "v_movrelsd_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3538,8 +3309,6 @@ DecodeResult decodeVMovrelsdB32Vop1(const MachineInst *opcode,
 VMovrelsd2B32Vop1::VMovrelsd2B32Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_movrelsd_2_b32_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrelsd_2_b32_dpp"
                : "v_movrelsd_2_b32_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop1)),
@@ -3596,8 +3365,6 @@ DecodeResult decodeVMovrelsd2B32Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_movrelsd_2_b32_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_movrelsd_2_b32_dpp"
           : "v_movrelsd_2_b32_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3614,8 +3381,6 @@ DecodeResult decodeVMovrelsd2B32Vop1(const MachineInst *opcode,
 VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f16_u16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_u16_dpp"
                : "v_cvt_f16_u16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop1)),
@@ -3665,6 +3430,7 @@ VCvtF16U16Vop1::VCvtF16U16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3673,8 +3439,6 @@ DecodeResult decodeVCvtF16U16Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f16_u16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_u16_dpp"
           : "v_cvt_f16_u16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3697,8 +3461,6 @@ void VCvtF16U16Vop1::implicit_uses(RegisterSet &uses) const {
 VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_f16_i16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_i16_dpp"
                : "v_cvt_f16_i16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop1)),
@@ -3748,6 +3510,7 @@ VCvtF16I16Vop1::VCvtF16I16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3756,8 +3519,6 @@ DecodeResult decodeVCvtF16I16Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_f16_i16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_i16_dpp"
           : "v_cvt_f16_i16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3780,8 +3541,6 @@ void VCvtF16I16Vop1::implicit_uses(RegisterSet &uses) const {
 VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_u16_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u16_f16_dpp"
                : "v_cvt_u16_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop1)),
@@ -3831,6 +3590,7 @@ VCvtU16F16Vop1::VCvtU16F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3839,8 +3599,6 @@ DecodeResult decodeVCvtU16F16Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_u16_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u16_f16_dpp"
           : "v_cvt_u16_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3863,8 +3621,6 @@ void VCvtU16F16Vop1::implicit_uses(RegisterSet &uses) const {
 VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_i16_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i16_f16_dpp"
                : "v_cvt_i16_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop1)),
@@ -3914,6 +3670,7 @@ VCvtI16F16Vop1::VCvtI16F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3922,8 +3679,6 @@ DecodeResult decodeVCvtI16F16Vop1(const MachineInst *opcode, const DecodeErrorEm
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_i16_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i16_f16_dpp"
           : "v_cvt_i16_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -3945,9 +3700,7 @@ void VCvtI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f16_dpp"
-               : "v_rcp_f16_e32",
+                                                                                : "v_rcp_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -3996,6 +3749,7 @@ VRcpF16Vop1::VRcpF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4003,9 +3757,7 @@ DecodeResult decodeVRcpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rcp_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f16_dpp"
-          : "v_rcp_f16_e32",
+                                                                                 : "v_rcp_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4026,9 +3778,7 @@ void VRcpF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f16_dpp"
-               : "v_sqrt_f16_e32",
+                                                                                : "v_sqrt_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4077,6 +3827,7 @@ VSqrtF16Vop1::VSqrtF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4084,9 +3835,7 @@ DecodeResult decodeVSqrtF16Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sqrt_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f16_dpp"
-          : "v_sqrt_f16_e32",
+                                                                                 : "v_sqrt_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4107,9 +3856,7 @@ void VSqrtF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f16_dpp"
-               : "v_rsq_f16_e32",
+                                                                                : "v_rsq_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4158,6 +3905,7 @@ VRsqF16Vop1::VRsqF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4165,9 +3913,7 @@ DecodeResult decodeVRsqF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rsq_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f16_dpp"
-          : "v_rsq_f16_e32",
+                                                                                 : "v_rsq_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4188,9 +3934,7 @@ void VRsqF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_log_f16_dpp"
-               : "v_log_f16_e32",
+                                                                                : "v_log_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4239,6 +3983,7 @@ VLogF16Vop1::VLogF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4246,9 +3991,7 @@ DecodeResult decodeVLogF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_log_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_log_f16_dpp"
-          : "v_log_f16_e32",
+                                                                                 : "v_log_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4269,9 +4012,7 @@ void VLogF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_exp_f16_dpp"
-               : "v_exp_f16_e32",
+                                                                                : "v_exp_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4320,6 +4061,7 @@ VExpF16Vop1::VExpF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4327,9 +4069,7 @@ DecodeResult decodeVExpF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_exp_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_exp_f16_dpp"
-          : "v_exp_f16_e32",
+                                                                                 : "v_exp_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4351,8 +4091,6 @@ void VExpF16Vop1::implicit_uses(RegisterSet &uses) const {
 VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_frexp_mant_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f16_dpp"
                : "v_frexp_mant_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop1)),
@@ -4402,6 +4140,7 @@ VFrexpMantF16Vop1::VFrexpMantF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4411,8 +4150,6 @@ DecodeResult decodeVFrexpMantF16Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_frexp_mant_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f16_dpp"
           : "v_frexp_mant_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4435,8 +4172,6 @@ void VFrexpMantF16Vop1::implicit_uses(RegisterSet &uses) const {
 VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_frexp_exp_i16_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i16_f16_dpp"
                : "v_frexp_exp_i16_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop1)),
@@ -4486,6 +4221,7 @@ VFrexpExpI16F16Vop1::VFrexpExpI16F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4495,8 +4231,6 @@ DecodeResult decodeVFrexpExpI16F16Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_frexp_exp_i16_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i16_f16_dpp"
           : "v_frexp_exp_i16_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4518,9 +4252,7 @@ void VFrexpExpI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_floor_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f16_dpp"
-               : "v_floor_f16_e32",
+                                                                                : "v_floor_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4569,6 +4301,7 @@ VFloorF16Vop1::VFloorF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4577,8 +4310,6 @@ DecodeResult decodeVFloorF16Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_floor_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_floor_f16_dpp"
           : "v_floor_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4600,9 +4331,7 @@ void VFloorF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f16_dpp"
-               : "v_ceil_f16_e32",
+                                                                                : "v_ceil_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4651,6 +4380,7 @@ VCeilF16Vop1::VCeilF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4658,9 +4388,7 @@ DecodeResult decodeVCeilF16Vop1(const MachineInst *opcode, const DecodeErrorEmit
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_ceil_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f16_dpp"
-          : "v_ceil_f16_e32",
+                                                                                 : "v_ceil_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -4681,9 +4409,7 @@ void VCeilF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_trunc_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f16_dpp"
-               : "v_trunc_f16_e32",
+                                                                                : "v_trunc_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4732,6 +4458,7 @@ VTruncF16Vop1::VTruncF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4740,8 +4467,6 @@ DecodeResult decodeVTruncF16Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_trunc_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f16_dpp"
           : "v_trunc_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4763,9 +4488,7 @@ void VTruncF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_rndne_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f16_dpp"
-               : "v_rndne_f16_e32",
+                                                                                : "v_rndne_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4814,6 +4537,7 @@ VRndneF16Vop1::VRndneF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4822,8 +4546,6 @@ DecodeResult decodeVRndneF16Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_rndne_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f16_dpp"
           : "v_rndne_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4845,9 +4567,7 @@ void VRndneF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_fract_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f16_dpp"
-               : "v_fract_f16_e32",
+                                                                                : "v_fract_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4896,6 +4616,7 @@ VFractF16Vop1::VFractF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4904,8 +4625,6 @@ DecodeResult decodeVFractF16Vop1(const MachineInst *opcode, const DecodeErrorEmi
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_fract_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_fract_f16_dpp"
           : "v_fract_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -4927,9 +4646,7 @@ void VFractF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sin_f16_dpp"
-               : "v_sin_f16_e32",
+                                                                                : "v_sin_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -4978,6 +4695,7 @@ VSinF16Vop1::VSinF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4985,9 +4703,7 @@ DecodeResult decodeVSinF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_sin_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sin_f16_dpp"
-          : "v_sin_f16_e32",
+                                                                                 : "v_sin_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -5008,9 +4724,7 @@ void VSinF16Vop1::implicit_uses(RegisterSet &uses) const {
 
 VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cos_f16_dpp"
-               : "v_cos_f16_e32",
+                                                                                : "v_cos_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF16Vop1)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
@@ -5059,6 +4773,7 @@ VCosF16Vop1::VCosF16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5066,9 +4781,7 @@ DecodeResult decodeVCosF16Vop1(const MachineInst *opcode, const DecodeErrorEmitt
   const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA ? "v_cos_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cos_f16_dpp"
-          : "v_cos_f16_e32",
+                                                                                 : "v_cos_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
@@ -5090,12 +4803,10 @@ void VCosF16Vop1::implicit_uses(RegisterSet &uses) const {
 VSatPkU8I16Vop1::VSatPkU8I16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_sat_pk_u8_i16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sat_pk_u8_i16_dpp"
                : "v_sat_pk_u8_i16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSatPkU8I16Vop1)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -5149,8 +4860,6 @@ DecodeResult decodeVSatPkU8I16Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_sat_pk_u8_i16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_sat_pk_u8_i16_dpp"
           : "v_sat_pk_u8_i16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -5164,11 +4873,15 @@ DecodeResult decodeVSatPkU8I16Vop1(const MachineInst *opcode,
 }
 } // namespace detail
 
+void VSatPkU8I16Vop1::implicit_uses(RegisterSet &uses) const {
+  Vop1::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_norm_i16_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_norm_i16_f16_dpp"
                : "v_cvt_norm_i16_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop1)),
@@ -5218,6 +4931,7 @@ VCvtNormI16F16Vop1::VCvtNormI16F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5227,8 +4941,6 @@ DecodeResult decodeVCvtNormI16F16Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_norm_i16_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_norm_i16_f16_dpp"
           : "v_cvt_norm_i16_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -5251,8 +4963,6 @@ void VCvtNormI16F16Vop1::implicit_uses(RegisterSet &uses) const {
 VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     : Vop1(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
                ? "v_cvt_norm_u16_f16_sdwa"
-           : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_norm_u16_f16_dpp"
                : "v_cvt_norm_u16_f16_e32",
            reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop1)),
@@ -5302,6 +5012,7 @@ VCvtNormU16F16Vop1::VCvtNormU16F16Vop1(const MachineInst *inst)
     sdwa_clamp_ = sw->clamp;
     sdwa_omod_ = sw->omod;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5311,8 +5022,6 @@ DecodeResult decodeVCvtNormU16F16Vop1(const MachineInst *opcode,
   Result validation = Vop1::validate_encoding(
       reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA
           ? "v_cvt_norm_u16_f16_sdwa"
-      : amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_cvt_norm_u16_f16_dpp"
           : "v_cvt_norm_u16_f16_e32",
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
@@ -5333,54 +5042,39 @@ void VCvtNormU16F16Vop1::implicit_uses(RegisterSet &uses) const {
 }
 
 VSwapB32Vop1::VSwapB32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_swap_b32_dpp"
-               : "v_swap_b32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_swap_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSwapB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
+  src_operands_[0] = &vdst;
+  src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 2;
 }
 
 namespace detail {
 DecodeResult decodeVSwapB32Vop1(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_swap_b32_dpp"
-          : "v_swap_b32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_swap_b32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_SWAP_B32 does not support DPP";
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
-    return emit_error.emit() << "V_SWAP_B32 does not support SDWA";
   return std::make_unique<VSwapB32Vop1>(opcode);
 }
 } // namespace detail
 
 VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
-    : Vop1(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_swaprel_b32_dpp"
-               : "v_swaprel_b32_e32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop1("v_swaprel_b32_e32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSwaprelB32Vop1)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
       m0(32, OperandType::OPR_SDST_M0, 124) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
   dst_operands_[1] = &src0;
-  src_operands_[2] = &m0;
+  src_operands_[0] = &m0;
+  src_operands_[1] = &vdst;
+  src_operands_[2] = &src0;
   num_src_ = 3;
   num_dst_ = 2;
   m0.apply_fieldless_caps(false, false, false);
@@ -5389,19 +5083,10 @@ VSwaprelB32Vop1::VSwaprelB32Vop1(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeVSwaprelB32Vop1(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop1::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)
-          ? "v_swaprel_b32_dpp"
-          : "v_swaprel_b32_e32",
-      reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
+      "v_swaprel_b32_e32", reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_SWAPREL_B32 does not support DPP";
-  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) [[unlikely]]
-    return emit_error.emit() << "V_SWAPREL_B32 does not support SDWA";
   return std::make_unique<VSwaprelB32Vop1>(opcode);
 }
 } // namespace detail

@@ -19,8 +19,9 @@
 ///
 /// The encoding format of a family is stable across generations, but the opcodes
 /// are not. For example, s_branch is opcode 2 on GFX9 (CDNA1-4) and 32 on GFX12
-/// (RDNA4). Every build_* therefore takes rj_code_arch_t and throws
-/// util::UnimplementedInst for an arch it does not model. Scalar-operand codes
+/// (RDNA4). Every build_* therefore takes rj_code_arch_t. The s_delay_alu builder
+/// returns failure for an unsupported arch; other builders currently throw
+/// util::UnimplementedInst. Scalar-operand codes
 /// (VCC, EXEC, M0) and inline constants come from the generated operand tables
 /// (operand_types.h); see scalar_operand_m0 / scalar_operand_vcc_lo /
 /// scalar_operand_exec_lo.
@@ -73,6 +74,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 
 namespace rocjitsu {
@@ -675,7 +677,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
 }
 
 /// @brief Get the s_delay_alu opcode for a target ISA.
-[[nodiscard]] inline constexpr uint32_t sopp_op_delay_alu(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t> sopp_op_delay_alu(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_RDNA3:
     return rdna3::kSDelayAluSopp;
@@ -686,7 +688,7 @@ inline constexpr uint16_t kDelayAluSaluDep1 = 9;
   case ROCJITSU_CODE_ARCH_CDNA5:
     return cdna5::kSDelayAluSopp;
   default:
-    throw util::UnimplementedInst("s_delay_alu for target architecture");
+    return util::Result::failure();
   }
 }
 
@@ -815,8 +817,18 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4)
 }
 
 /// @brief Encode s_delay_alu for the given target ISA.
-[[nodiscard]] inline constexpr uint32_t build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch) {
-  return build_sopp_encoding(arch, sopp_op_delay_alu(arch), simm16);
+/// @returns Failure when the target ISA has no s_delay_alu encoding.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+[[nodiscard]] inline constexpr util::FailureOr<uint32_t>
+build_s_delay_alu(uint16_t simm16, rj_code_arch_t arch,
+                  const util::DiagnosticEmitter *error = nullptr) {
+  const auto op = sopp_op_delay_alu(arch);
+  if (op.failed()) {
+    if (error != nullptr)
+      return error->emit() << "s_delay_alu for target architecture";
+    return util::Result::failure();
+  }
+  return pack_sopp(op.value(), simm16);
 }
 
 /// @brief Encode `s_wait_xcnt 0` for the given target ISA.

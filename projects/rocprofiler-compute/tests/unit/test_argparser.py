@@ -27,6 +27,27 @@ def build_args(argv, experimental=False):
     return parser.parse_args(argv)
 
 
+def help_text(home, argv, capsys):
+    """Return the help output for argv with the given rocprof-compute home."""
+    parser = argparse.ArgumentParser(
+        prog="tool",
+        description="CLI",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    omniarg_parser(parser, home, SUPPORTED_ARCHS, VERSION)
+    with pytest.raises(SystemExit):
+        parser.parse_args([*argv, "--help"])
+    return capsys.readouterr().out
+
+
+def write_skills_readme(skills_dir):
+    """Create a skills README and return its path."""
+    skills_dir.mkdir(parents=True)
+    readme = skills_dir / "README.md"
+    readme.write_text("skills")
+    return readme
+
+
 # =============================================================================
 # -v / --version
 # =============================================================================
@@ -114,6 +135,48 @@ def test_config_dir_requires_value(capsys):
         build_args(["--config-dir"])
     assert exc.value.code == 2
     assert "--config-dir" in capsys.readouterr().err
+
+
+# =============================================================================
+# profile -d / --output-directory
+# =============================================================================
+
+
+@pytest.mark.parametrize("flag", ["-d", "--output-directory"])
+def test_profile_output_directory(flag):
+    args = build_args(["profile", flag, "/tmp/out", "--", "./vcopy"])
+    assert args.output_directory == "/tmp/out"
+
+
+# =============================================================================
+# profile --kernel-iteration-range
+# =============================================================================
+
+
+def test_profile_kernel_iteration_range():
+    args = build_args([
+        "profile",
+        "--kernel-iteration-range",
+        "1",
+        "3:5",
+        "--",
+        "./vcopy",
+    ])
+    assert args.kernel_iteration_range == ["1", "3:5"]
+
+
+# =============================================================================
+# analyze --verify-deps
+# =============================================================================
+
+
+def test_analyze_verify_deps_defaults_off():
+    assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
+
+
+def test_analyze_verify_deps_needs_no_workload():
+    """The flag is a standalone environment check, so -p stays optional."""
+    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
 
 
 def test_pc_sampling_analyze_options():
@@ -347,3 +410,27 @@ def test_experimental_action_help_suppression():
 
     # Help should be suppressed
     assert "--test-exp-feature" not in help_text, f"{help_text}"
+
+
+# =============================================================================
+# Agent Skills note in --help
+# =============================================================================
+
+
+@pytest.mark.parametrize("mode", [[], ["profile"], ["analyze"]])
+def test_help_shows_skills_in_source_checkout(tmp_path, capsys, mode):
+    readme = write_skills_readme(tmp_path / "skills")
+    output = help_text(tmp_path / "src", mode, capsys)
+    assert f"Agent Skills: see {readme}" in output
+
+
+@pytest.mark.parametrize("mode", [[], ["profile"], ["analyze"]])
+def test_help_shows_skills_in_install(tmp_path, capsys, mode):
+    readme = write_skills_readme(tmp_path / "share" / "rocprofiler-compute" / "skills")
+    home = tmp_path / "libexec" / "rocprofiler-compute"
+    output = help_text(home, mode, capsys)
+    assert f"Agent Skills: see {readme}" in output
+
+
+def test_help_omits_skills_when_not_shipped(tmp_path, capsys):
+    assert "Agent Skills" not in help_text(tmp_path / "src", [], capsys)

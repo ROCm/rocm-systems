@@ -21,7 +21,9 @@ _AMDGPU_ARCH_ORDER = (
 
 def emit_isa_properties(output_dir: str, specs) -> Path:
     """Emit a constexpr runtime property map for the supplied AMDGPU ISAs."""
-    profiles = {name: spec.profile for name, spec, _ in specs}
+    profiles = {
+        getattr(spec, 'arch_name', name): spec.profile for name, spec, _ in specs
+    }
     unknown = profiles.keys() - set(_AMDGPU_ARCH_ORDER)
     if unknown:
         raise ValueError(f'unsupported ISA property entries: {sorted(unknown)}')
@@ -42,8 +44,16 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         uses_cluster_ttmp_workgroup_ids = (
             'true' if profile.uses_cluster_ttmp_workgroup_ids else 'false'
         )
+        float_dot_accumulation = (
+            f'FloatDotAccumulation::{profile.float_dot_accumulation.value}'
+        )
+        wave_state_layout = f'WaveStateLayout::{profile.wave_state_layout.value}'
+        compute_tmpring_wavesize_granule = profile.compute_tmpring_wavesize_granule
+        compute_tmpring_wavesize_bits = profile.compute_tmpring_wavesize_bits
         wave_size = profile.wave_size
         wave_size_max = profile.wave_size_max
+        vmcnt_capacity = profile.vmcnt_capacity
+        lgkmcnt_capacity = profile.lgkmcnt_capacity
         addressable_vgprs = profile.max_addressable_vgprs_per_wf
         vgpr_count_granule_wave32 = profile.descriptor_vgpr_count_granule_wave32
         vgpr_count_granule_wave64 = profile.descriptor_vgpr_count_granule_wave64
@@ -58,8 +68,14 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
             f'        .descriptor_sgpr_count_encoded = {descriptor_sgpr_count_encoded},',
             f'        .uses_ttmp_workgroup_ids = {uses_ttmp_workgroup_ids},',
             f'        .uses_cluster_ttmp_workgroup_ids = {uses_cluster_ttmp_workgroup_ids},',
+            f'        .float_dot_accumulation = {float_dot_accumulation},',
+            f'        .wave_state_layout = {wave_state_layout},',
+            f'        .compute_tmpring_wavesize_granule = {compute_tmpring_wavesize_granule},',
+            f'        .compute_tmpring_wavesize_bits = {compute_tmpring_wavesize_bits},',
             f'        .wave_size = {wave_size},',
             f'        .wave_size_max = {wave_size_max},',
+            f'        .vmcnt_capacity = {vmcnt_capacity},',
+            f'        .lgkmcnt_capacity = {lgkmcnt_capacity},',
             f'        .max_addressable_vgprs_per_wf = {addressable_vgprs},',
             f'        .descriptor_vgpr_count_granule_wave32 = {vgpr_count_granule_wave32},',
             f'        .descriptor_vgpr_count_granule_wave64 = {vgpr_count_granule_wave64},',
@@ -83,14 +99,32 @@ def emit_isa_properties(output_dir: str, specs) -> Path:
         '',
         'namespace rocjitsu {',
         '',
+        'enum class FloatDotAccumulation : uint8_t {',
+        '  HostF32,',
+        '  Gfx11,',
+        '  Gfx12,',
+        '};',
+        '',
+        'enum class WaveStateLayout : uint8_t {',
+        '  Legacy,',
+        '  Gfx12,',
+        '  Gfx12_5,',
+        '};',
+        '',
         'struct IsaProperties {',
         '  bool supports_wgp_mode = false;',
         '  bool mode_has_gpr_idx_en = false;',
         '  bool descriptor_sgpr_count_encoded = true;',
         '  bool uses_ttmp_workgroup_ids = false;',
         '  bool uses_cluster_ttmp_workgroup_ids = false;',
+        '  FloatDotAccumulation float_dot_accumulation = FloatDotAccumulation::HostF32;',
+        '  WaveStateLayout wave_state_layout = WaveStateLayout::Legacy;',
+        '  uint32_t compute_tmpring_wavesize_granule = 0;',
+        '  uint32_t compute_tmpring_wavesize_bits = 0;',
         '  uint32_t wave_size = 0;',
         '  uint32_t wave_size_max = 0;',
+        '  uint8_t vmcnt_capacity = 0;   ///< Zero when VMCNT is absent.',
+        '  uint8_t lgkmcnt_capacity = 0; ///< Zero when LGKMCNT is absent.',
         '  uint32_t max_addressable_vgprs_per_wf = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave32 = 0;',
         '  uint32_t descriptor_vgpr_count_granule_wave64 = 0;',

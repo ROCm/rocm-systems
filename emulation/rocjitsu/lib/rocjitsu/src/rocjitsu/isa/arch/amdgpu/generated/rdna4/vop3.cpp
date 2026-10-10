@@ -13,10 +13,7 @@ namespace rocjitsu {
 namespace rdna4 {
 
 VNopVop3::VNopVop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_nop_e64_dpp"
-               : "v_nop",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_nop", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNopVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -24,26 +21,16 @@ VNopVop3::VNopVop3(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVNopVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_nop_e64_dpp"
-          : "v_nop",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_nop", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_NOP does not support DPP";
   return std::make_unique<VNopVop3>(opcode);
 }
 } // namespace detail
 
 VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mov_b32_e64_dpp"
-               : "v_mov_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mov_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -72,24 +59,16 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mov_b32_e64_dpp"
-          : "v_mov_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mov_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mov_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -100,10 +79,7 @@ DecodeResult decodeVMovB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_readfirstlane_b32_e64_dpp"
-               : "v_readfirstlane_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -118,10 +94,7 @@ DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_readfirstlane_b32_e64_dpp"
-          : "v_readfirstlane_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_readfirstlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -132,10 +105,7 @@ DecodeResult decodeVReadfirstlaneB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i32_f64_e64_dpp"
-               : "v_cvt_i32_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -148,16 +118,14 @@ VCvtI32F64Vop3::VCvtI32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i32_f64_e64_dpp"
-          : "v_cvt_i32_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -168,10 +136,7 @@ DecodeResult decodeVCvtI32F64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_i32_e64_dpp"
-               : "v_cvt_f64_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f64_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64I32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -183,16 +148,14 @@ VCvtF64I32Vop3::VCvtF64I32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_i32_e64_dpp"
-          : "v_cvt_f64_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -203,10 +166,7 @@ DecodeResult decodeVCvtF64I32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_i32_e64_dpp"
-               : "v_cvt_f32_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -235,24 +195,16 @@ VCvtF32I32Vop3::VCvtF32I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_i32_e64_dpp"
-          : "v_cvt_f32_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -263,10 +215,7 @@ DecodeResult decodeVCvtF32I32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_u32_e64_dpp"
-               : "v_cvt_f32_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -295,24 +244,16 @@ VCvtF32U32Vop3::VCvtF32U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_u32_e64_dpp"
-          : "v_cvt_f32_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -323,10 +264,7 @@ DecodeResult decodeVCvtF32U32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u32_f32_e64_dpp"
-               : "v_cvt_u32_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_u32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -355,24 +293,16 @@ VCvtU32F32Vop3::VCvtU32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u32_f32_e64_dpp"
-          : "v_cvt_u32_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_u32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_u32_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -383,10 +313,7 @@ DecodeResult decodeVCvtU32F32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i32_f32_e64_dpp"
-               : "v_cvt_i32_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -415,24 +342,16 @@ VCvtI32F32Vop3::VCvtI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i32_f32_e64_dpp"
-          : "v_cvt_i32_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_i32_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -443,10 +362,7 @@ DecodeResult decodeVCvtI32F32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_f32_e64_dpp"
-               : "v_cvt_f16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -475,24 +391,16 @@ VCvtF16F32Vop3::VCvtF16F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF16F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_f32_e64_dpp"
-          : "v_cvt_f16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x8) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -509,10 +417,7 @@ void VCvtF16F32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_f16_e64_dpp"
-               : "v_cvt_f32_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -545,24 +450,16 @@ VCvtF32F16Vop3::VCvtF32F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_f16_e64_dpp"
-          : "v_cvt_f32_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x1) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -573,10 +470,7 @@ DecodeResult decodeVCvtF32F16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_nearest_i32_f32_e64_dpp"
-               : "v_cvt_nearest_i32_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_nearest_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNearestI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -605,6 +499,7 @@ VCvtNearestI32F32Vop3::VCvtNearestI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -612,18 +507,9 @@ DecodeResult decodeVCvtNearestI32F32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_nearest_i32_f32_e64_dpp"
-          : "v_cvt_nearest_i32_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_nearest_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_nearest_i32_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -634,10 +520,7 @@ DecodeResult decodeVCvtNearestI32F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_floor_i32_f32_e64_dpp"
-               : "v_cvt_floor_i32_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_floor_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtFloorI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -666,6 +549,7 @@ VCvtFloorI32F32Vop3::VCvtFloorI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -673,18 +557,9 @@ DecodeResult decodeVCvtFloorI32F32Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_floor_i32_f32_e64_dpp"
-          : "v_cvt_floor_i32_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_floor_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_floor_i32_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -695,10 +570,7 @@ DecodeResult decodeVCvtFloorI32F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_off_f32_i4_e64_dpp"
-               : "v_cvt_off_f32_i4",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_off_f32_i4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtOffF32I4Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -727,6 +599,7 @@ VCvtOffF32I4Vop3::VCvtOffF32I4Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -734,18 +607,9 @@ DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_off_f32_i4_e64_dpp"
-          : "v_cvt_off_f32_i4",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_off_f32_i4", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_off_f32_i4: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -756,10 +620,7 @@ DecodeResult decodeVCvtOffF32I4Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_f64_e64_dpp"
-               : "v_cvt_f32_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -772,16 +633,14 @@ VCvtF32F64Vop3::VCvtF32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_f64_e64_dpp"
-          : "v_cvt_f32_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -792,10 +651,7 @@ DecodeResult decodeVCvtF32F64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_f32_e64_dpp"
-               : "v_cvt_f64_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f64_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64F32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -807,16 +663,14 @@ VCvtF64F32Vop3::VCvtF64F32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_f32_e64_dpp"
-          : "v_cvt_f64_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -827,10 +681,7 @@ DecodeResult decodeVCvtF64F32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte0_e64_dpp"
-               : "v_cvt_f32_ubyte0",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_ubyte0", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte0Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -859,6 +710,7 @@ VCvtF32Ubyte0Vop3::VCvtF32Ubyte0Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -866,18 +718,9 @@ DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte0_e64_dpp"
-          : "v_cvt_f32_ubyte0",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_ubyte0", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_ubyte0: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -888,10 +731,7 @@ DecodeResult decodeVCvtF32Ubyte0Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte1_e64_dpp"
-               : "v_cvt_f32_ubyte1",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_ubyte1", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte1Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -920,6 +760,7 @@ VCvtF32Ubyte1Vop3::VCvtF32Ubyte1Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -927,18 +768,9 @@ DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte1_e64_dpp"
-          : "v_cvt_f32_ubyte1",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_ubyte1", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_ubyte1: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -949,10 +781,7 @@ DecodeResult decodeVCvtF32Ubyte1Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte2_e64_dpp"
-               : "v_cvt_f32_ubyte2",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_ubyte2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte2Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -981,6 +810,7 @@ VCvtF32Ubyte2Vop3::VCvtF32Ubyte2Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -988,18 +818,9 @@ DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte2_e64_dpp"
-          : "v_cvt_f32_ubyte2",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_ubyte2", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_ubyte2: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1010,10 +831,7 @@ DecodeResult decodeVCvtF32Ubyte2Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_ubyte3_e64_dpp"
-               : "v_cvt_f32_ubyte3",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_ubyte3", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Ubyte3Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1042,6 +860,7 @@ VCvtF32Ubyte3Vop3::VCvtF32Ubyte3Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1049,18 +868,9 @@ DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_ubyte3_e64_dpp"
-          : "v_cvt_f32_ubyte3",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_ubyte3", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_ubyte3: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1071,10 +881,7 @@ DecodeResult decodeVCvtF32Ubyte3Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u32_f64_e64_dpp"
-               : "v_cvt_u32_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_u32_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1087,16 +894,14 @@ VCvtU32F64Vop3::VCvtU32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u32_f64_e64_dpp"
-          : "v_cvt_u32_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_u32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1107,10 +912,7 @@ DecodeResult decodeVCvtU32F64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f64_u32_e64_dpp"
-               : "v_cvt_f64_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f64_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF64U32Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1122,16 +924,14 @@ VCvtF64U32Vop3::VCvtF64U32Vop3(const MachineInst *inst)
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f64_u32_e64_dpp"
-          : "v_cvt_f64_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f64_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1142,10 +942,7 @@ DecodeResult decodeVCvtF64U32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f64_e64_dpp"
-               : "v_trunc_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_trunc_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1158,16 +955,14 @@ VTruncF64Vop3::VTruncF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f64_e64_dpp"
-          : "v_trunc_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_trunc_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1178,10 +973,7 @@ DecodeResult decodeVTruncF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f64_e64_dpp"
-               : "v_ceil_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ceil_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1194,16 +986,14 @@ VCeilF64Vop3::VCeilF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f64_e64_dpp"
-          : "v_ceil_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ceil_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1214,10 +1004,7 @@ DecodeResult decodeVCeilF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f64_e64_dpp"
-               : "v_rndne_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rndne_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1230,16 +1017,14 @@ VRndneF64Vop3::VRndneF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f64_e64_dpp"
-          : "v_rndne_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rndne_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1250,10 +1035,7 @@ DecodeResult decodeVRndneF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f64_e64_dpp"
-               : "v_floor_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_floor_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1266,16 +1048,14 @@ VFloorF64Vop3::VFloorF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_floor_f64_e64_dpp"
-          : "v_floor_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_floor_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -1286,10 +1066,7 @@ DecodeResult decodeVFloorF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_pipeflush_e64_dpp"
-               : "v_pipeflush",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_pipeflush", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPipeflushVop3)) {
   num_src_ = 0;
   num_dst_ = 0;
@@ -1297,26 +1074,16 @@ VPipeflushVop3::VPipeflushVop3(const MachineInst *inst)
 
 namespace detail {
 DecodeResult decodeVPipeflushVop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
-  const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_pipeflush_e64_dpp"
-          : "v_pipeflush",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_pipeflush", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
-    return emit_error.emit() << "V_PIPEFLUSH does not support DPP";
   return std::make_unique<VPipeflushVop3>(opcode);
 }
 } // namespace detail
 
 VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mov_b16_e64_dpp"
-               : "v_mov_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mov_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1349,24 +1116,20 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  src0.set_register_byte_mask(
+      src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
+  vdst.set_register_byte_mask(
+      vdst.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3) : 0xf);
 }
 
 namespace detail {
 DecodeResult decodeVMovB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mov_b16_e64_dpp"
-          : "v_mov_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mov_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_mov_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1383,10 +1146,7 @@ void VMovB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f32_e64_dpp"
-               : "v_fract_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fract_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1415,24 +1175,16 @@ VFractF32Vop3::VFractF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fract_f32_e64_dpp"
-          : "v_fract_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fract_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_fract_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1443,10 +1195,7 @@ DecodeResult decodeVFractF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f32_e64_dpp"
-               : "v_trunc_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_trunc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1475,24 +1224,16 @@ VTruncF32Vop3::VTruncF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f32_e64_dpp"
-          : "v_trunc_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_trunc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_trunc_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1503,10 +1244,7 @@ DecodeResult decodeVTruncF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f32_e64_dpp"
-               : "v_ceil_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ceil_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1535,24 +1273,16 @@ VCeilF32Vop3::VCeilF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f32_e64_dpp"
-          : "v_ceil_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ceil_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_ceil_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1563,10 +1293,7 @@ DecodeResult decodeVCeilF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f32_e64_dpp"
-               : "v_rndne_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rndne_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1595,24 +1322,16 @@ VRndneF32Vop3::VRndneF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f32_e64_dpp"
-          : "v_rndne_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rndne_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_rndne_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1623,10 +1342,7 @@ DecodeResult decodeVRndneF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f32_e64_dpp"
-               : "v_floor_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_floor_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1655,24 +1371,16 @@ VFloorF32Vop3::VFloorF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_floor_f32_e64_dpp"
-          : "v_floor_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_floor_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_floor_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1683,10 +1391,7 @@ DecodeResult decodeVFloorF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_exp_f32_e64_dpp"
-               : "v_exp_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_exp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1715,24 +1420,16 @@ VExpF32Vop3::VExpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_exp_f32_e64_dpp"
-          : "v_exp_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_exp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_exp_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1743,10 +1440,7 @@ DecodeResult decodeVExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_log_f32_e64_dpp"
-               : "v_log_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_log_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1775,24 +1469,16 @@ VLogF32Vop3::VLogF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_log_f32_e64_dpp"
-          : "v_log_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_log_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_log_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1803,10 +1489,7 @@ DecodeResult decodeVLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f32_e64_dpp"
-               : "v_rcp_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rcp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1835,24 +1518,16 @@ VRcpF32Vop3::VRcpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f32_e64_dpp"
-          : "v_rcp_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rcp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_rcp_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1863,10 +1538,7 @@ DecodeResult decodeVRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_iflag_f32_e64_dpp"
-               : "v_rcp_iflag_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rcp_iflag_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpIflagF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1895,6 +1567,7 @@ VRcpIflagF32Vop3::VRcpIflagF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -1902,18 +1575,9 @@ DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rcp_iflag_f32_e64_dpp"
-          : "v_rcp_iflag_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rcp_iflag_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_rcp_iflag_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1924,10 +1588,7 @@ DecodeResult decodeVRcpIflagF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f32_e64_dpp"
-               : "v_rsq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rsq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -1956,24 +1617,16 @@ VRsqF32Vop3::VRsqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f32_e64_dpp"
-          : "v_rsq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rsq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_rsq_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -1984,10 +1637,7 @@ DecodeResult decodeVRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f64_e64_dpp"
-               : "v_rcp_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rcp_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2000,16 +1650,14 @@ VRcpF64Vop3::VRcpF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f64_e64_dpp"
-          : "v_rcp_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rcp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2020,10 +1668,7 @@ DecodeResult decodeVRcpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f64_e64_dpp"
-               : "v_rsq_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rsq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2036,16 +1681,14 @@ VRsqF64Vop3::VRsqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f64_e64_dpp"
-          : "v_rsq_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rsq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2056,10 +1699,7 @@ DecodeResult decodeVRsqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f32_e64_dpp"
-               : "v_sqrt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2088,24 +1728,16 @@ VSqrtF32Vop3::VSqrtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f32_e64_dpp"
-          : "v_sqrt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sqrt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sqrt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2116,10 +1748,7 @@ DecodeResult decodeVSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f64_e64_dpp"
-               : "v_sqrt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sqrt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2132,16 +1761,14 @@ VSqrtF64Vop3::VSqrtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f64_e64_dpp"
-          : "v_sqrt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sqrt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2152,10 +1779,7 @@ DecodeResult decodeVSqrtF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sin_f32_e64_dpp"
-               : "v_sin_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sin_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2184,24 +1808,16 @@ VSinF32Vop3::VSinF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sin_f32_e64_dpp"
-          : "v_sin_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sin_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sin_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2212,10 +1828,7 @@ DecodeResult decodeVSinF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cos_f32_e64_dpp"
-               : "v_cos_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cos_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2244,24 +1857,16 @@ VCosF32Vop3::VCosF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cos_f32_e64_dpp"
-          : "v_cos_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cos_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cos_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2272,10 +1877,7 @@ DecodeResult decodeVCosF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_not_b32_e64_dpp"
-               : "v_not_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_not_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2304,24 +1906,16 @@ VNotB32Vop3::VNotB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_not_b32_e64_dpp"
-          : "v_not_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_not_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_not_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2332,10 +1926,7 @@ DecodeResult decodeVNotB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfrev_b32_e64_dpp"
-               : "v_bfrev_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bfrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2364,24 +1955,16 @@ VBfrevB32Vop3::VBfrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bfrev_b32_e64_dpp"
-          : "v_bfrev_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bfrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bfrev_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2392,10 +1975,7 @@ DecodeResult decodeVBfrevB32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_clz_i32_u32_e64_dpp"
-               : "v_clz_i32_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_clz_i32_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClzI32U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2424,24 +2004,16 @@ VClzI32U32Vop3::VClzI32U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVClzI32U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_clz_i32_u32_e64_dpp"
-          : "v_clz_i32_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_clz_i32_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_clz_i32_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2452,10 +2024,7 @@ DecodeResult decodeVClzI32U32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ctz_i32_b32_e64_dpp"
-               : "v_ctz_i32_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ctz_i32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCtzI32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2484,24 +2053,16 @@ VCtzI32B32Vop3::VCtzI32B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCtzI32B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ctz_i32_b32_e64_dpp"
-          : "v_ctz_i32_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ctz_i32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_ctz_i32_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2512,10 +2073,7 @@ DecodeResult decodeVCtzI32B32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cls_i32_e64_dpp"
-               : "v_cls_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cls_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VClsI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2544,24 +2102,16 @@ VClsI32Vop3::VClsI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVClsI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cls_i32_e64_dpp"
-          : "v_cls_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cls_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cls_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2572,10 +2122,7 @@ DecodeResult decodeVClsI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i32_f64_e64_dpp"
-               : "v_frexp_exp_i32_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_exp_i32_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F64Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2588,6 +2135,7 @@ VFrexpExpI32F64Vop3::VFrexpExpI32F64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2595,10 +2143,7 @@ DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i32_f64_e64_dpp"
-          : "v_frexp_exp_i32_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_exp_i32_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2609,10 +2154,7 @@ DecodeResult decodeVFrexpExpI32F64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f64_e64_dpp"
-               : "v_frexp_mant_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_mant_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2625,6 +2167,7 @@ VFrexpMantF64Vop3::VFrexpMantF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2632,10 +2175,7 @@ DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f64_e64_dpp"
-          : "v_frexp_mant_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_mant_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2646,10 +2186,7 @@ DecodeResult decodeVFrexpMantF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f64_e64_dpp"
-               : "v_fract_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fract_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2662,16 +2199,14 @@ VFractF64Vop3::VFractF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fract_f64_e64_dpp"
-          : "v_fract_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fract_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -2682,10 +2217,7 @@ DecodeResult decodeVFractF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i32_f32_e64_dpp"
-               : "v_frexp_exp_i32_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_exp_i32_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI32F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2714,6 +2246,7 @@ VFrexpExpI32F32Vop3::VFrexpExpI32F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2721,18 +2254,9 @@ DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i32_f32_e64_dpp"
-          : "v_frexp_exp_i32_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_exp_i32_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_frexp_exp_i32_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2743,10 +2267,7 @@ DecodeResult decodeVFrexpExpI32F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f32_e64_dpp"
-               : "v_frexp_mant_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_mant_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -2775,6 +2296,7 @@ VFrexpMantF32Vop3::VFrexpMantF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2782,18 +2304,9 @@ DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f32_e64_dpp"
-          : "v_frexp_mant_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_mant_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_frexp_mant_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2804,10 +2317,7 @@ DecodeResult decodeVFrexpMantF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movreld_b32_e64_dpp"
-               : "v_movreld_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_movreld_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovreldB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2846,18 +2356,9 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_movreld_b32_e64_dpp"
-          : "v_movreld_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_movreld_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_movreld_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2868,10 +2369,7 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrels_b32_e64_dpp"
-               : "v_movrels_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2906,18 +2404,9 @@ DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_movrels_b32_e64_dpp"
-          : "v_movrels_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_movrels_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_movrels_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2928,10 +2417,7 @@ DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrelsd_b32_e64_dpp"
-               : "v_movrelsd_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -2966,18 +2452,9 @@ DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_movrelsd_b32_e64_dpp"
-          : "v_movrelsd_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_movrelsd_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_movrelsd_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -2988,10 +2465,7 @@ DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_movrelsd_2_b32_e64_dpp"
-               : "v_movrelsd_2_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -3026,18 +2500,9 @@ DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_movrelsd_2_b32_e64_dpp"
-          : "v_movrelsd_2_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_movrelsd_2_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_movrelsd_2_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3048,10 +2513,7 @@ DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_u16_e64_dpp"
-               : "v_cvt_f16_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f16_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3084,24 +2546,16 @@ VCvtF16U16Vop3::VCvtF16U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF16U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_u16_e64_dpp"
-          : "v_cvt_f16_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f16_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f16_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3118,10 +2572,7 @@ void VCvtF16U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f16_i16_e64_dpp"
-               : "v_cvt_f16_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f16_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF16I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3154,24 +2605,16 @@ VCvtF16I16Vop3::VCvtF16I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF16I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f16_i16_e64_dpp"
-          : "v_cvt_f16_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f16_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f16_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3188,10 +2631,7 @@ void VCvtF16I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u16_f16_e64_dpp"
-               : "v_cvt_u16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3224,24 +2664,16 @@ VCvtU16F16Vop3::VCvtU16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtU16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u16_f16_e64_dpp"
-          : "v_cvt_u16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_u16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3258,10 +2690,7 @@ void VCvtU16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i16_f16_e64_dpp"
-               : "v_cvt_i16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3294,24 +2723,16 @@ VCvtI16F16Vop3::VCvtI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtI16F16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i16_f16_e64_dpp"
-          : "v_cvt_i16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_i16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3328,10 +2749,7 @@ void VCvtI16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rcp_f16_e64_dpp"
-               : "v_rcp_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rcp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRcpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3364,24 +2782,16 @@ VRcpF16Vop3::VRcpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rcp_f16_e64_dpp"
-          : "v_rcp_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rcp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_rcp_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3398,10 +2808,7 @@ void VRcpF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sqrt_f16_e64_dpp"
-               : "v_sqrt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSqrtF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3434,24 +2841,16 @@ VSqrtF16Vop3::VSqrtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sqrt_f16_e64_dpp"
-          : "v_sqrt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sqrt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_sqrt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3468,10 +2867,7 @@ void VSqrtF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rsq_f16_e64_dpp"
-               : "v_rsq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rsq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRsqF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3504,24 +2900,16 @@ VRsqF16Vop3::VRsqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rsq_f16_e64_dpp"
-          : "v_rsq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rsq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_rsq_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3538,10 +2926,7 @@ void VRsqF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_log_f16_e64_dpp"
-               : "v_log_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_log_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLogF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3574,24 +2959,16 @@ VLogF16Vop3::VLogF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_log_f16_e64_dpp"
-          : "v_log_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_log_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_log_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3608,10 +2985,7 @@ void VLogF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_exp_f16_e64_dpp"
-               : "v_exp_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_exp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VExpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3644,24 +3018,16 @@ VExpF16Vop3::VExpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_exp_f16_e64_dpp"
-          : "v_exp_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_exp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_exp_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3678,10 +3044,7 @@ void VExpF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_mant_f16_e64_dpp"
-               : "v_frexp_mant_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_mant_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpMantF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3714,6 +3077,7 @@ VFrexpMantF16Vop3::VFrexpMantF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3721,18 +3085,9 @@ DecodeResult decodeVFrexpMantF16Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_mant_f16_e64_dpp"
-          : "v_frexp_mant_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_mant_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_frexp_mant_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3749,10 +3104,7 @@ void VFrexpMantF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_frexp_exp_i16_f16_e64_dpp"
-               : "v_frexp_exp_i16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_frexp_exp_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFrexpExpI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3785,6 +3137,7 @@ VFrexpExpI16F16Vop3::VFrexpExpI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3792,18 +3145,9 @@ DecodeResult decodeVFrexpExpI16F16Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_frexp_exp_i16_f16_e64_dpp"
-          : "v_frexp_exp_i16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_frexp_exp_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_frexp_exp_i16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3820,10 +3164,7 @@ void VFrexpExpI16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_floor_f16_e64_dpp"
-               : "v_floor_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_floor_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFloorF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3856,24 +3197,16 @@ VFloorF16Vop3::VFloorF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFloorF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_floor_f16_e64_dpp"
-          : "v_floor_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_floor_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_floor_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3890,10 +3223,7 @@ void VFloorF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ceil_f16_e64_dpp"
-               : "v_ceil_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ceil_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCeilF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3926,24 +3256,16 @@ VCeilF16Vop3::VCeilF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCeilF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ceil_f16_e64_dpp"
-          : "v_ceil_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ceil_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_ceil_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -3960,10 +3282,7 @@ void VCeilF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trunc_f16_e64_dpp"
-               : "v_trunc_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_trunc_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTruncF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -3996,24 +3315,16 @@ VTruncF16Vop3::VTruncF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVTruncF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_trunc_f16_e64_dpp"
-          : "v_trunc_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_trunc_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_trunc_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4030,10 +3341,7 @@ void VTruncF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_rndne_f16_e64_dpp"
-               : "v_rndne_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_rndne_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VRndneF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4066,24 +3374,16 @@ VRndneF16Vop3::VRndneF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVRndneF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_rndne_f16_e64_dpp"
-          : "v_rndne_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_rndne_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_rndne_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4100,10 +3400,7 @@ void VRndneF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fract_f16_e64_dpp"
-               : "v_fract_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fract_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFractF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4136,24 +3433,16 @@ VFractF16Vop3::VFractF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFractF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fract_f16_e64_dpp"
-          : "v_fract_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fract_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_fract_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4170,10 +3459,7 @@ void VFractF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sin_f16_e64_dpp"
-               : "v_sin_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sin_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSinF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4206,24 +3492,16 @@ VSinF16Vop3::VSinF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSinF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sin_f16_e64_dpp"
-          : "v_sin_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sin_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_sin_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4240,10 +3518,7 @@ void VSinF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cos_f16_e64_dpp"
-               : "v_cos_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cos_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCosF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4276,24 +3551,16 @@ VCosF16Vop3::VCosF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCosF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cos_f16_e64_dpp"
-          : "v_cos_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cos_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cos_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4310,10 +3577,7 @@ void VCosF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSatPkU8I16Vop3::VSatPkU8I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sat_pk_u8_i16_e64_dpp"
-               : "v_sat_pk_u8_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sat_pk_u8_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSatPkU8I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4349,18 +3613,9 @@ DecodeResult decodeVSatPkU8I16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sat_pk_u8_i16_e64_dpp"
-          : "v_sat_pk_u8_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sat_pk_u8_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x8) [[unlikely]]
-      return emit_error.emit() << "v_sat_pk_u8_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4377,10 +3632,7 @@ void VSatPkU8I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_norm_i16_f16_e64_dpp"
-               : "v_cvt_norm_i16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormI16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4413,6 +3665,7 @@ VCvtNormI16F16Vop3::VCvtNormI16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4420,18 +3673,9 @@ DecodeResult decodeVCvtNormI16F16Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_norm_i16_f16_e64_dpp"
-          : "v_cvt_norm_i16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_norm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_norm_i16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4448,10 +3692,7 @@ void VCvtNormI16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_norm_u16_f16_e64_dpp"
-               : "v_cvt_norm_u16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_norm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtNormU16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4484,6 +3725,7 @@ VCvtNormU16F16Vop3::VCvtNormU16F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4491,18 +3733,9 @@ DecodeResult decodeVCvtNormU16F16Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_norm_u16_f16_e64_dpp"
-          : "v_cvt_norm_u16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_norm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_cvt_norm_u16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4519,10 +3752,7 @@ void VCvtNormU16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_not_b16_e64_dpp"
-               : "v_not_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_not_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VNotB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4555,24 +3785,16 @@ VNotB16Vop3::VNotB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVNotB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_not_b16_e64_dpp"
-          : "v_not_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_not_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x9) [[unlikely]]
-      return emit_error.emit() << "v_not_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4589,10 +3811,7 @@ void VNotB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_i32_i16_e64_dpp"
-               : "v_cvt_i32_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtI32I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4625,24 +3844,16 @@ VCvtI32I16Vop3::VCvtI32I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_i32_i16_e64_dpp"
-          : "v_cvt_i32_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x1) [[unlikely]]
-      return emit_error.emit() << "v_cvt_i32_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4653,10 +3864,7 @@ DecodeResult decodeVCvtI32I16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_u32_u16_e64_dpp"
-               : "v_cvt_u32_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtU32U16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4689,24 +3897,16 @@ VCvtU32U16Vop3::VCvtU32U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_u32_u16_e64_dpp"
-          : "v_cvt_u32_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x1) [[unlikely]]
-      return emit_error.emit() << "v_cvt_u32_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4717,10 +3917,7 @@ DecodeResult decodeVCvtU32U16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_fp8_e64_dpp"
-               : "v_cvt_f32_fp8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_fp8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Fp8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4749,24 +3946,16 @@ VCvtF32Fp8Vop3::VCvtF32Fp8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32Fp8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_fp8_e64_dpp"
-          : "v_cvt_f32_fp8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_fp8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_fp8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4777,10 +3966,7 @@ DecodeResult decodeVCvtF32Fp8Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_f32_bf8_e64_dpp"
-               : "v_cvt_f32_bf8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_f32_bf8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtF32Bf8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(8, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4809,24 +3995,16 @@ VCvtF32Bf8Vop3::VCvtF32Bf8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCvtF32Bf8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_f32_bf8_e64_dpp"
-          : "v_cvt_f32_bf8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_f32_bf8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_f32_bf8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4837,10 +4015,7 @@ DecodeResult decodeVCvtF32Bf8Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCvtPkF32Fp8Vop3::VCvtPkF32Fp8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_f32_fp8_e64_dpp"
-               : "v_cvt_pk_f32_fp8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_f32_fp8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkF32Fp8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4863,10 +4038,7 @@ DecodeResult decodeVCvtPkF32Fp8Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_f32_fp8_e64_dpp"
-          : "v_cvt_pk_f32_fp8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_f32_fp8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4877,10 +4049,7 @@ DecodeResult decodeVCvtPkF32Fp8Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkF32Bf8Vop3::VCvtPkF32Bf8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_f32_bf8_e64_dpp"
-               : "v_cvt_pk_f32_bf8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_f32_bf8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkF32Bf8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -4903,10 +4072,7 @@ DecodeResult decodeVCvtPkF32Bf8Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_f32_bf8_e64_dpp"
-          : "v_cvt_pk_f32_bf8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_f32_bf8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -4917,10 +4083,7 @@ DecodeResult decodeVCvtPkF32Bf8Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cndmask_b32_e64_dpp"
-               : "v_cndmask_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cndmask_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCndmaskB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -4957,6 +4120,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4964,18 +4128,9 @@ DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cndmask_b32_e64_dpp"
-          : "v_cndmask_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cndmask_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cndmask_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -4986,10 +4141,7 @@ DecodeResult decodeVCndmaskB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_f64_e64_dpp"
-               : "v_add_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5009,16 +4161,14 @@ VAddF64Vop3::VAddF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_f64_e64_dpp"
-          : "v_add_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5029,10 +4179,7 @@ DecodeResult decodeVAddF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_f32_e64_dpp"
-               : "v_add_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5067,24 +4214,16 @@ VAddF32Vop3::VAddF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_f32_e64_dpp"
-          : "v_add_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_add_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5095,10 +4234,7 @@ DecodeResult decodeVAddF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_f32_e64_dpp"
-               : "v_sub_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5133,24 +4269,16 @@ VSubF32Vop3::VSubF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_f32_e64_dpp"
-          : "v_sub_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sub_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5161,10 +4289,7 @@ DecodeResult decodeVSubF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_subrev_f32_e64_dpp"
-               : "v_subrev_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_subrev_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5199,24 +4324,16 @@ VSubrevF32Vop3::VSubrevF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_subrev_f32_e64_dpp"
-          : "v_subrev_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_subrev_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_subrev_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5227,10 +4344,7 @@ DecodeResult decodeVSubrevF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_f64_e64_dpp"
-               : "v_mul_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5250,16 +4364,14 @@ VMulF64Vop3::VMulF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_f64_e64_dpp"
-          : "v_mul_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5270,10 +4382,7 @@ DecodeResult decodeVMulF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_dx9_zero_f32_e64_dpp"
-               : "v_mul_dx9_zero_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_dx9_zero_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulDx9ZeroF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5308,6 +4417,7 @@ VMulDx9ZeroF32Vop3::VMulDx9ZeroF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5315,18 +4425,9 @@ DecodeResult decodeVMulDx9ZeroF32Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_dx9_zero_f32_e64_dpp"
-          : "v_mul_dx9_zero_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_dx9_zero_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_dx9_zero_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5337,10 +4438,7 @@ DecodeResult decodeVMulDx9ZeroF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_f32_e64_dpp"
-               : "v_mul_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5375,24 +4473,16 @@ VMulF32Vop3::VMulF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_f32_e64_dpp"
-          : "v_mul_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5403,10 +4493,7 @@ DecodeResult decodeVMulF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_i32_i24_e64_dpp"
-               : "v_mul_i32_i24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5441,24 +4528,16 @@ VMulI32I24Vop3::VMulI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_i32_i24_e64_dpp"
-          : "v_mul_i32_i24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_i32_i24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5469,10 +4548,7 @@ DecodeResult decodeVMulI32I24Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_hi_i32_i24_e64_dpp"
-               : "v_mul_hi_i32_i24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_hi_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5507,6 +4583,7 @@ VMulHiI32I24Vop3::VMulHiI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5514,18 +4591,9 @@ DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_hi_i32_i24_e64_dpp"
-          : "v_mul_hi_i32_i24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_hi_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_hi_i32_i24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5536,10 +4604,7 @@ DecodeResult decodeVMulHiI32I24Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_u32_u24_e64_dpp"
-               : "v_mul_u32_u24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5574,24 +4639,16 @@ VMulU32U24Vop3::VMulU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_u32_u24_e64_dpp"
-          : "v_mul_u32_u24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_u32_u24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5602,10 +4659,7 @@ DecodeResult decodeVMulU32U24Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_hi_u32_u24_e64_dpp"
-               : "v_mul_hi_u32_u24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_hi_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5640,6 +4694,7 @@ VMulHiU32U24Vop3::VMulHiU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5647,18 +4702,9 @@ DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_hi_u32_u24_e64_dpp"
-          : "v_mul_hi_u32_u24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_hi_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mul_hi_u32_u24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5669,10 +4715,7 @@ DecodeResult decodeVMulHiU32U24Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_num_f64_e64_dpp"
-               : "v_min_num_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5692,16 +4735,14 @@ VMinNumF64Vop3::VMinNumF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinNumF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_num_f64_e64_dpp"
-          : "v_min_num_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_num_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5712,10 +4753,7 @@ DecodeResult decodeVMinNumF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_num_f64_e64_dpp"
-               : "v_max_num_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5735,16 +4773,14 @@ VMaxNumF64Vop3::VMaxNumF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxNumF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_num_f64_e64_dpp"
-          : "v_max_num_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_num_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -5755,10 +4791,7 @@ DecodeResult decodeVMaxNumF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_i32_e64_dpp"
-               : "v_min_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5793,24 +4826,16 @@ VMinI32Vop3::VMinI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_i32_e64_dpp"
-          : "v_min_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5821,10 +4846,7 @@ DecodeResult decodeVMinI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_i32_e64_dpp"
-               : "v_max_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5859,24 +4881,16 @@ VMaxI32Vop3::VMaxI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_i32_e64_dpp"
-          : "v_max_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5887,10 +4901,7 @@ DecodeResult decodeVMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_u32_e64_dpp"
-               : "v_min_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5925,24 +4936,16 @@ VMinU32Vop3::VMinU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_u32_e64_dpp"
-          : "v_min_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -5953,10 +4956,7 @@ DecodeResult decodeVMinU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_u32_e64_dpp"
-               : "v_max_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -5991,24 +4991,16 @@ VMaxU32Vop3::VMaxU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_u32_e64_dpp"
-          : "v_max_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6019,10 +5011,7 @@ DecodeResult decodeVMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_num_f32_e64_dpp"
-               : "v_min_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6057,24 +5046,16 @@ VMinNumF32Vop3::VMinNumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinNumF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_num_f32_e64_dpp"
-          : "v_min_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6085,10 +5066,7 @@ DecodeResult decodeVMinNumF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_num_f32_e64_dpp"
-               : "v_max_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6123,24 +5101,16 @@ VMaxNumF32Vop3::VMaxNumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxNumF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_num_f32_e64_dpp"
-          : "v_max_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6151,10 +5121,7 @@ DecodeResult decodeVMaxNumF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshlrev_b32_e64_dpp"
-               : "v_lshlrev_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshlrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6189,6 +5156,7 @@ VLshlrevB32Vop3::VLshlrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6196,18 +5164,9 @@ DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshlrev_b32_e64_dpp"
-          : "v_lshlrev_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshlrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_lshlrev_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6218,10 +5177,7 @@ DecodeResult decodeVLshlrevB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshrrev_b32_e64_dpp"
-               : "v_lshrrev_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshrrev_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6256,6 +5212,7 @@ VLshrrevB32Vop3::VLshrrevB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6263,18 +5220,9 @@ DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshrrev_b32_e64_dpp"
-          : "v_lshrrev_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshrrev_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_lshrrev_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6285,10 +5233,7 @@ DecodeResult decodeVLshrrevB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ashrrev_i32_e64_dpp"
-               : "v_ashrrev_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ashrrev_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6323,6 +5268,7 @@ VAshrrevI32Vop3::VAshrrevI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6330,18 +5276,9 @@ DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ashrrev_i32_e64_dpp"
-          : "v_ashrrev_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ashrrev_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_ashrrev_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6352,10 +5289,7 @@ DecodeResult decodeVAshrrevI32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_and_b32_e64_dpp"
-               : "v_and_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_and_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6390,24 +5324,16 @@ VAndB32Vop3::VAndB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_and_b32_e64_dpp"
-          : "v_and_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_and_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_and_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6418,10 +5344,7 @@ DecodeResult decodeVAndB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_or_b32_e64_dpp"
-               : "v_or_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6456,24 +5379,16 @@ VOrB32Vop3::VOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_or_b32_e64_dpp"
-          : "v_or_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_or_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6484,10 +5399,7 @@ DecodeResult decodeVOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitte
 } // namespace detail
 
 VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_xor_b32_e64_dpp"
-               : "v_xor_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXorB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6522,24 +5434,16 @@ VXorB32Vop3::VXorB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_xor_b32_e64_dpp"
-          : "v_xor_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_xor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_xor_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6550,10 +5454,7 @@ DecodeResult decodeVXorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_xnor_b32_e64_dpp"
-               : "v_xnor_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_xnor_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXnorB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6588,24 +5489,16 @@ VXnorB32Vop3::VXnorB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_xnor_b32_e64_dpp"
-          : "v_xnor_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_xnor_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_xnor_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6616,10 +5509,7 @@ DecodeResult decodeVXnorB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshlrev_b64_e64_dpp"
-               : "v_lshlrev_b64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshlrev_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6638,6 +5528,7 @@ VLshlrevB64Vop3::VLshlrevB64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6645,10 +5536,7 @@ DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshlrev_b64_e64_dpp"
-          : "v_lshlrev_b64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshlrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -6659,10 +5547,7 @@ DecodeResult decodeVLshlrevB64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_nc_u32_e64_dpp"
-               : "v_add_nc_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6697,24 +5582,16 @@ VAddNcU32Vop3::VAddNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_nc_u32_e64_dpp"
-          : "v_add_nc_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_add_nc_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6725,10 +5602,7 @@ DecodeResult decodeVAddNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_nc_u32_e64_dpp"
-               : "v_sub_nc_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6763,24 +5637,16 @@ VSubNcU32Vop3::VSubNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_nc_u32_e64_dpp"
-          : "v_sub_nc_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sub_nc_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6791,10 +5657,7 @@ DecodeResult decodeVSubNcU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_subrev_nc_u32_e64_dpp"
-               : "v_subrev_nc_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_subrev_nc_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevNcU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6829,6 +5692,7 @@ VSubrevNcU32Vop3::VSubrevNcU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6836,18 +5700,9 @@ DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_subrev_nc_u32_e64_dpp"
-          : "v_subrev_nc_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_subrev_nc_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_subrev_nc_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6858,18 +5713,15 @@ DecodeResult decodeVSubrevNcU32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fmac_f32_e64_dpp"
-               : "v_fmac_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fmac_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &vdst;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
@@ -6897,24 +5749,16 @@ VFmacF32Vop3::VFmacF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fmac_f32_e64_dpp"
-          : "v_fmac_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fmac_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_fmac_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6925,10 +5769,7 @@ DecodeResult decodeVFmacF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCvtPkRtzF16F32Vop3::VCvtPkRtzF16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_rtz_f16_f32_e64_dpp"
-               : "v_cvt_pk_rtz_f16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_rtz_f16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkRtzF16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -6970,18 +5811,9 @@ DecodeResult decodeVCvtPkRtzF16F32Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_rtz_f16_f32_e64_dpp"
-          : "v_cvt_pk_rtz_f16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_rtz_f16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_rtz_f16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -6992,10 +5824,7 @@ DecodeResult decodeVCvtPkRtzF16F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_num_f16_e64_dpp"
-               : "v_min_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7038,24 +5867,16 @@ VMinNumF16Vop3::VMinNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinNumF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_num_f16_e64_dpp"
-          : "v_min_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_min_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7072,10 +5893,7 @@ void VMinNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_num_f16_e64_dpp"
-               : "v_max_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7118,24 +5936,16 @@ VMaxNumF16Vop3::VMaxNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxNumF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_num_f16_e64_dpp"
-          : "v_max_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_max_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7152,10 +5962,7 @@ void VMaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_f16_e64_dpp"
-               : "v_add_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7198,24 +6005,16 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_f16_e64_dpp"
-          : "v_add_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_add_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7232,10 +6031,7 @@ void VAddF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_f16_e64_dpp"
-               : "v_sub_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7278,24 +6074,16 @@ VSubF16Vop3::VSubF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_f16_e64_dpp"
-          : "v_sub_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_sub_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7312,10 +6100,7 @@ void VSubF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_subrev_f16_e64_dpp"
-               : "v_subrev_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_subrev_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubrevF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7358,24 +6143,16 @@ VSubrevF16Vop3::VSubrevF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubrevF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_subrev_f16_e64_dpp"
-          : "v_subrev_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_subrev_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_subrev_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7392,10 +6169,7 @@ void VSubrevF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_f16_e64_dpp"
-               : "v_mul_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7438,24 +6212,16 @@ VMulF16Vop3::VMulF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_f16_e64_dpp"
-          : "v_mul_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_mul_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7472,18 +6238,15 @@ void VMulF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fmac_f16_e64_dpp"
-               : "v_fmac_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fmac_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmacF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &vdst;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
@@ -7519,24 +6282,16 @@ VFmacF16Vop3::VFmacF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFmacF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fmac_f16_e64_dpp"
-          : "v_fmac_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fmac_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_fmac_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7553,10 +6308,7 @@ void VFmacF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ldexp_f16_e64_dpp"
-               : "v_ldexp_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ldexp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7599,24 +6351,16 @@ VLdexpF16Vop3::VLdexpF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLdexpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ldexp_f16_e64_dpp"
-          : "v_ldexp_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ldexp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_ldexp_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7633,10 +6377,7 @@ void VLdexpF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fma_dx9_zero_f32_e64_dpp"
-               : "v_fma_dx9_zero_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fma_dx9_zero_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmaDx9ZeroF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7677,6 +6418,7 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7684,18 +6426,9 @@ DecodeResult decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fma_dx9_zero_f32_e64_dpp"
-          : "v_fma_dx9_zero_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fma_dx9_zero_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_fma_dx9_zero_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7706,10 +6439,7 @@ DecodeResult decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_i32_i24_e64_dpp"
-               : "v_mad_i32_i24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_i32_i24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadI32I24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7750,24 +6480,16 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_i32_i24_e64_dpp"
-          : "v_mad_i32_i24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mad_i32_i24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7778,10 +6500,7 @@ DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_u32_u24_e64_dpp"
-               : "v_mad_u32_u24",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_u32_u24", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadU32U24Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(24, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7822,24 +6541,16 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_u32_u24_e64_dpp"
-          : "v_mad_u32_u24",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mad_u32_u24: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7850,10 +6561,7 @@ DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cubeid_f32_e64_dpp"
-               : "v_cubeid_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cubeid_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubeidF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7894,24 +6602,16 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cubeid_f32_e64_dpp"
-          : "v_cubeid_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cubeid_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cubeid_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7922,10 +6622,7 @@ DecodeResult decodeVCubeidF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cubesc_f32_e64_dpp"
-               : "v_cubesc_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cubesc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubescF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -7966,24 +6663,16 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cubesc_f32_e64_dpp"
-          : "v_cubesc_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cubesc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cubesc_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -7994,10 +6683,7 @@ DecodeResult decodeVCubescF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cubetc_f32_e64_dpp"
-               : "v_cubetc_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cubetc_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubetcF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8038,24 +6724,16 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cubetc_f32_e64_dpp"
-          : "v_cubetc_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cubetc_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cubetc_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8066,10 +6744,7 @@ DecodeResult decodeVCubetcF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cubema_f32_e64_dpp"
-               : "v_cubema_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cubema_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCubemaF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8110,24 +6785,16 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cubema_f32_e64_dpp"
-          : "v_cubema_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cubema_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cubema_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8138,10 +6805,7 @@ DecodeResult decodeVCubemaF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfe_u32_e64_dpp"
-               : "v_bfe_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bfe_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfeU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8182,24 +6846,16 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bfe_u32_e64_dpp"
-          : "v_bfe_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bfe_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bfe_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8210,10 +6866,7 @@ DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfe_i32_e64_dpp"
-               : "v_bfe_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bfe_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfeI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8254,24 +6907,16 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bfe_i32_e64_dpp"
-          : "v_bfe_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bfe_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bfe_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8282,10 +6927,7 @@ DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfi_b32_e64_dpp"
-               : "v_bfi_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bfi_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfiB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8326,24 +6968,16 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bfi_b32_e64_dpp"
-          : "v_bfi_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bfi_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bfi_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8354,10 +6988,7 @@ DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fma_f32_e64_dpp"
-               : "v_fma_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fma_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmaF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8398,24 +7029,16 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fma_f32_e64_dpp"
-          : "v_fma_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fma_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_fma_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8426,10 +7049,7 @@ DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fma_f64_e64_dpp"
-               : "v_fma_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fma_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmaF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8456,16 +7076,14 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fma_f64_e64_dpp"
-          : "v_fma_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fma_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -8476,10 +7094,7 @@ DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lerp_u8_e64_dpp"
-               : "v_lerp_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lerp_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLerpU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8520,24 +7135,16 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lerp_u8_e64_dpp"
-          : "v_lerp_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lerp_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_lerp_u8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8548,10 +7155,7 @@ DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_alignbit_b32_e64_dpp"
-               : "v_alignbit_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_alignbit_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAlignbitB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8596,6 +7200,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8603,18 +7208,9 @@ DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_alignbit_b32_e64_dpp"
-          : "v_alignbit_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_alignbit_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x4) [[unlikely]]
-      return emit_error.emit() << "v_alignbit_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8625,10 +7221,7 @@ DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_alignbyte_b32_e64_dpp"
-               : "v_alignbyte_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_alignbyte_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAlignbyteB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8673,6 +7266,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8680,18 +7274,9 @@ DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_alignbyte_b32_e64_dpp"
-          : "v_alignbyte_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_alignbyte_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x4) [[unlikely]]
-      return emit_error.emit() << "v_alignbyte_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8702,10 +7287,7 @@ DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMullitF32Vop3::VMullitF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mullit_f32_e64_dpp"
-               : "v_mullit_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mullit_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMullitF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8752,18 +7334,9 @@ namespace detail {
 DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mullit_f32_e64_dpp"
-          : "v_mullit_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mullit_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mullit_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8774,10 +7347,7 @@ DecodeResult decodeVMullitF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_i32_e64_dpp"
-               : "v_min3_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8818,24 +7388,16 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_i32_e64_dpp"
-          : "v_min3_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min3_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8846,10 +7408,7 @@ DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_u32_e64_dpp"
-               : "v_min3_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8890,24 +7449,16 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_u32_e64_dpp"
-          : "v_min3_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min3_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8918,10 +7469,7 @@ DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_i32_e64_dpp"
-               : "v_max3_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -8962,24 +7510,16 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_i32_e64_dpp"
-          : "v_max3_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max3_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -8990,10 +7530,7 @@ DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_u32_e64_dpp"
-               : "v_max3_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9034,24 +7571,16 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_u32_e64_dpp"
-          : "v_max3_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max3_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9062,10 +7591,7 @@ DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_i32_e64_dpp"
-               : "v_med3_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9106,24 +7632,16 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_i32_e64_dpp"
-          : "v_med3_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_med3_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9134,10 +7652,7 @@ DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_u32_e64_dpp"
-               : "v_med3_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9178,24 +7693,16 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_u32_e64_dpp"
-          : "v_med3_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_med3_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9206,10 +7713,7 @@ DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sad_u8_e64_dpp"
-               : "v_sad_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sad_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9250,24 +7754,16 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sad_u8_e64_dpp"
-          : "v_sad_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sad_u8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9278,10 +7774,7 @@ DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitte
 } // namespace detail
 
 VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sad_hi_u8_e64_dpp"
-               : "v_sad_hi_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sad_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadHiU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9322,24 +7815,16 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sad_hi_u8_e64_dpp"
-          : "v_sad_hi_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sad_hi_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sad_hi_u8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9350,10 +7835,7 @@ DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sad_u16_e64_dpp"
-               : "v_sad_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sad_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadU16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9394,24 +7876,16 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sad_u16_e64_dpp"
-          : "v_sad_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sad_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9422,10 +7896,7 @@ DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sad_u32_e64_dpp"
-               : "v_sad_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sad_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9466,24 +7937,16 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sad_u32_e64_dpp"
-          : "v_sad_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sad_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9494,10 +7957,7 @@ DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VCvtPkU8F32Vop3::VCvtPkU8F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_u8_f32_e64_dpp"
-               : "v_cvt_pk_u8_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_u8_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkU8F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9545,18 +8005,9 @@ DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_u8_f32_e64_dpp"
-          : "v_cvt_pk_u8_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_u8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_u8_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9567,10 +8018,7 @@ DecodeResult decodeVCvtPkU8F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VDivFixupF32Vop3::VDivFixupF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_div_fixup_f32_e64_dpp"
-               : "v_div_fixup_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_div_fixup_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9601,10 +8049,7 @@ DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_div_fixup_f32_e64_dpp"
-          : "v_div_fixup_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_div_fixup_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9615,10 +8060,7 @@ DecodeResult decodeVDivFixupF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VDivFixupF64Vop3::VDivFixupF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_div_fixup_f64_e64_dpp"
-               : "v_div_fixup_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_div_fixup_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9652,10 +8094,7 @@ DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_div_fixup_f64_e64_dpp"
-          : "v_div_fixup_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_div_fixup_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -9666,10 +8105,7 @@ DecodeResult decodeVDivFixupF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_num_f32_e64_dpp"
-               : "v_min3_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9710,6 +8146,7 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9717,18 +8154,9 @@ DecodeResult decodeVMin3NumF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_num_f32_e64_dpp"
-          : "v_min3_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_min3_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9739,10 +8167,7 @@ DecodeResult decodeVMin3NumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_num_f32_e64_dpp"
-               : "v_max3_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9783,6 +8208,7 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9790,18 +8216,9 @@ DecodeResult decodeVMax3NumF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_num_f32_e64_dpp"
-          : "v_max3_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_max3_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9812,10 +8229,7 @@ DecodeResult decodeVMax3NumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_num_f16_e64_dpp"
-               : "v_min3_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9868,6 +8282,7 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9875,18 +8290,9 @@ DecodeResult decodeVMin3NumF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_num_f16_e64_dpp"
-          : "v_min3_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_min3_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9903,10 +8309,7 @@ void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_num_f16_e64_dpp"
-               : "v_max3_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -9959,6 +8362,7 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9966,18 +8370,9 @@ DecodeResult decodeVMax3NumF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_num_f16_e64_dpp"
-          : "v_max3_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_max3_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -9994,10 +8389,7 @@ void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimum3_f32_e64_dpp"
-               : "v_minimum3_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimum3_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimum3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10038,6 +8430,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10045,18 +8438,9 @@ DecodeResult decodeVMinimum3F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimum3_f32_e64_dpp"
-          : "v_minimum3_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimum3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minimum3_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10067,10 +8451,7 @@ DecodeResult decodeVMinimum3F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximum3_f32_e64_dpp"
-               : "v_maximum3_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximum3_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximum3F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10111,6 +8492,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10118,18 +8500,9 @@ DecodeResult decodeVMaximum3F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximum3_f32_e64_dpp"
-          : "v_maximum3_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximum3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maximum3_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10140,10 +8513,7 @@ DecodeResult decodeVMaximum3F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimum3_f16_e64_dpp"
-               : "v_minimum3_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimum3_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimum3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10196,6 +8566,7 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10203,18 +8574,9 @@ DecodeResult decodeVMinimum3F16Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimum3_f16_e64_dpp"
-          : "v_minimum3_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimum3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_minimum3_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10231,10 +8593,7 @@ void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximum3_f16_e64_dpp"
-               : "v_maximum3_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximum3_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximum3F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10287,6 +8646,7 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10294,18 +8654,9 @@ DecodeResult decodeVMaximum3F16Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximum3_f16_e64_dpp"
-          : "v_maximum3_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximum3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_maximum3_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10322,10 +8673,7 @@ void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_num_f32_e64_dpp"
-               : "v_med3_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3NumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10366,6 +8714,7 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10373,18 +8722,9 @@ DecodeResult decodeVMed3NumF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_num_f32_e64_dpp"
-          : "v_med3_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_med3_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10395,10 +8735,7 @@ DecodeResult decodeVMed3NumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_num_f16_e64_dpp"
-               : "v_med3_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3NumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10451,6 +8788,7 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -10458,18 +8796,9 @@ DecodeResult decodeVMed3NumF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_num_f16_e64_dpp"
-          : "v_med3_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_med3_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10486,10 +8815,7 @@ void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VDivFmasF32Vop3::VDivFmasF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_div_fmas_f32_e64_dpp"
-               : "v_div_fmas_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_div_fmas_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFmasF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10523,10 +8849,7 @@ DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_div_fmas_f32_e64_dpp"
-          : "v_div_fmas_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_div_fmas_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10537,10 +8860,7 @@ DecodeResult decodeVDivFmasF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VDivFmasF64Vop3::VDivFmasF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_div_fmas_f64_e64_dpp"
-               : "v_div_fmas_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_div_fmas_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFmasF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10577,10 +8897,7 @@ DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_div_fmas_f64_e64_dpp"
-          : "v_div_fmas_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_div_fmas_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10591,10 +8908,7 @@ DecodeResult decodeVDivFmasF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_msad_u8_e64_dpp"
-               : "v_msad_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_msad_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMsadU8Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10635,24 +8949,16 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_msad_u8_e64_dpp"
-          : "v_msad_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_msad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_msad_u8: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10663,10 +8969,7 @@ DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VQsadPkU16U8Vop3::VQsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_qsad_pk_u16_u8_e64_dpp"
-               : "v_qsad_pk_u16_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_qsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VQsadPkU16U8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10699,10 +9002,7 @@ DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_qsad_pk_u16_u8_e64_dpp"
-          : "v_qsad_pk_u16_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_qsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10713,10 +9013,7 @@ DecodeResult decodeVQsadPkU16U8Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMqsadPkU16U8Vop3::VMqsadPkU16U8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mqsad_pk_u16_u8_e64_dpp"
-               : "v_mqsad_pk_u16_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mqsad_pk_u16_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMqsadPkU16U8Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10749,10 +9046,7 @@ DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mqsad_pk_u16_u8_e64_dpp"
-          : "v_mqsad_pk_u16_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mqsad_pk_u16_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10763,10 +9057,7 @@ DecodeResult decodeVMqsadPkU16U8Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMqsadU32U8Vop3::VMqsadU32U8Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mqsad_u32_u8_e64_dpp"
-               : "v_mqsad_u32_u8",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mqsad_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMqsadU32U8Vop3)),
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10794,10 +9085,7 @@ DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mqsad_u32_u8_e64_dpp"
-          : "v_mqsad_u32_u8",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mqsad_u32_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -10808,10 +9096,7 @@ DecodeResult decodeVMqsadU32U8Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_xor3_b32_e64_dpp"
-               : "v_xor3_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_xor3_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXor3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10852,24 +9137,16 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_xor3_b32_e64_dpp"
-          : "v_xor3_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_xor3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_xor3_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10880,10 +9157,7 @@ DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_u16_e64_dpp"
-               : "v_mad_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -10936,24 +9210,16 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_u16_e64_dpp"
-          : "v_mad_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_mad_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -10970,10 +9236,7 @@ void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_perm_b32_e64_dpp"
-               : "v_perm_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_perm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11014,24 +9277,16 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_perm_b32_e64_dpp"
-          : "v_perm_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_perm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_perm_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11042,10 +9297,7 @@ DecodeResult decodeVPermB32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_xad_u32_e64_dpp"
-               : "v_xad_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_xad_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXadU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11086,24 +9338,16 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_xad_u32_e64_dpp"
-          : "v_xad_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_xad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_xad_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11114,10 +9358,7 @@ DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshl_add_u32_e64_dpp"
-               : "v_lshl_add_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshl_add_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlAddU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11158,6 +9399,7 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -11165,18 +9407,9 @@ DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshl_add_u32_e64_dpp"
-          : "v_lshl_add_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshl_add_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_lshl_add_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11187,10 +9420,7 @@ DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_lshl_u32_e64_dpp"
-               : "v_add_lshl_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_lshl_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddLshlU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11231,6 +9461,7 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -11238,18 +9469,9 @@ DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_lshl_u32_e64_dpp"
-          : "v_add_lshl_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_lshl_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_add_lshl_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11260,10 +9482,7 @@ DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_fma_f16_e64_dpp"
-               : "v_fma_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_fma_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VFmaF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11316,24 +9535,16 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_fma_f16_e64_dpp"
-          : "v_fma_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_fma_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_fma_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11350,10 +9561,7 @@ void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_i16_e64_dpp"
-               : "v_min3_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11406,24 +9614,16 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_i16_e64_dpp"
-          : "v_min3_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_min3_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11440,10 +9640,7 @@ void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min3_u16_e64_dpp"
-               : "v_min3_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min3_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMin3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11496,24 +9693,16 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min3_u16_e64_dpp"
-          : "v_min3_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_min3_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11530,10 +9719,7 @@ void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_i16_e64_dpp"
-               : "v_max3_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11586,24 +9772,16 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_i16_e64_dpp"
-          : "v_max3_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_max3_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11620,10 +9798,7 @@ void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max3_u16_e64_dpp"
-               : "v_max3_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max3_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMax3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11676,24 +9851,16 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max3_u16_e64_dpp"
-          : "v_max3_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_max3_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11710,10 +9877,7 @@ void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_i16_e64_dpp"
-               : "v_med3_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3I16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11766,24 +9930,16 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_i16_e64_dpp"
-          : "v_med3_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_med3_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11800,10 +9956,7 @@ void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_med3_u16_e64_dpp"
-               : "v_med3_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_med3_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMed3U16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11856,24 +10009,16 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_med3_u16_e64_dpp"
-          : "v_med3_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_med3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_med3_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11890,10 +10035,7 @@ void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_i16_e64_dpp"
-               : "v_mad_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -11946,24 +10088,16 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_i16_e64_dpp"
-          : "v_mad_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_mad_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -11980,10 +10114,7 @@ void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VDivFixupF16Vop3::VDivFixupF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_div_fixup_f16_e64_dpp"
-               : "v_div_fixup_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_div_fixup_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDivFixupF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12043,18 +10174,9 @@ DecodeResult decodeVDivFixupF16Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_div_fixup_f16_e64_dpp"
-          : "v_div_fixup_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_div_fixup_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_div_fixup_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12071,10 +10193,7 @@ void VDivFixupF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add3_u32_e64_dpp"
-               : "v_add3_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add3_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAdd3U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12115,24 +10234,16 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add3_u32_e64_dpp"
-          : "v_add3_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_add3_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12143,10 +10254,7 @@ DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshl_or_b32_e64_dpp"
-               : "v_lshl_or_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshl_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12187,24 +10295,16 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshl_or_b32_e64_dpp"
-          : "v_lshl_or_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshl_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_lshl_or_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12215,10 +10315,7 @@ DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_and_or_b32_e64_dpp"
-               : "v_and_or_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_and_or_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndOrB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12259,24 +10356,16 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_and_or_b32_e64_dpp"
-          : "v_and_or_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_and_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_and_or_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12287,10 +10376,7 @@ DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_or3_b32_e64_dpp"
-               : "v_or3_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_or3_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOr3B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12331,24 +10417,16 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_or3_b32_e64_dpp"
-          : "v_or3_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_or3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_or3_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12359,10 +10437,7 @@ DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_u32_u16_e64_dpp"
-               : "v_mad_u32_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadU32U16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12417,18 +10492,9 @@ namespace detail {
 DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_u32_u16_e64_dpp"
-          : "v_mad_u32_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_mad_u32_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12439,10 +10505,7 @@ DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mad_i32_i16_e64_dpp"
-               : "v_mad_i32_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mad_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMadI32I16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12497,18 +10560,9 @@ namespace detail {
 DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mad_i32_i16_e64_dpp"
-          : "v_mad_i32_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mad_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_mad_i32_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12519,10 +10573,7 @@ DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_permlane16_b32_e64_dpp"
-               : "v_permlane16_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_permlane16_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlane16B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12549,10 +10600,7 @@ DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_permlane16_b32_e64_dpp"
-          : "v_permlane16_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_permlane16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -12563,10 +10611,7 @@ DecodeResult decodeVPermlane16B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_permlanex16_b32_e64_dpp"
-               : "v_permlanex16_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_permlanex16_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlanex16B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12593,10 +10638,7 @@ DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_permlanex16_b32_e64_dpp"
-          : "v_permlanex16_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_permlanex16_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -12607,10 +10649,7 @@ DecodeResult decodeVPermlanex16B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cndmask_b16_e64_dpp"
-               : "v_cndmask_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cndmask_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCndmaskB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12655,6 +10694,7 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -12662,18 +10702,9 @@ DecodeResult decodeVCndmaskB16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cndmask_b16_e64_dpp"
-          : "v_cndmask_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cndmask_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_cndmask_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12690,10 +10721,7 @@ void VCndmaskB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maxmin_u32_e64_dpp"
-               : "v_maxmin_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maxmin_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxminU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12734,24 +10762,16 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxminU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maxmin_u32_e64_dpp"
-          : "v_maxmin_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maxmin_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maxmin_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12762,10 +10782,7 @@ DecodeResult decodeVMaxminU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minmax_u32_e64_dpp"
-               : "v_minmax_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minmax_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinmaxU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12806,24 +10823,16 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinmaxU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minmax_u32_e64_dpp"
-          : "v_minmax_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minmax_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minmax_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12834,10 +10843,7 @@ DecodeResult decodeVMinmaxU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maxmin_i32_e64_dpp"
-               : "v_maxmin_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maxmin_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxminI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12878,24 +10884,16 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxminI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maxmin_i32_e64_dpp"
-          : "v_maxmin_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maxmin_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maxmin_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12906,10 +10904,7 @@ DecodeResult decodeVMaxminI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minmax_i32_e64_dpp"
-               : "v_minmax_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minmax_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinmaxI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -12950,24 +10945,16 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinmaxI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minmax_i32_e64_dpp"
-          : "v_minmax_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minmax_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minmax_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -12978,10 +10965,7 @@ DecodeResult decodeVMinmaxI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VDot2F16F16Vop3::VDot2F16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_dot2_f16_f16_e64_dpp"
-               : "v_dot2_f16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_dot2_f16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDot2F16F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13033,18 +11017,9 @@ DecodeResult decodeVDot2F16F16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_dot2_f16_f16_e64_dpp"
-          : "v_dot2_f16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_dot2_f16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xC) [[unlikely]]
-      return emit_error.emit() << "v_dot2_f16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13061,10 +11036,7 @@ void VDot2F16F16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VDot2Bf16Bf16Vop3::VDot2Bf16Bf16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_dot2_bf16_bf16_e64_dpp"
-               : "v_dot2_bf16_bf16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_dot2_bf16_bf16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VDot2Bf16Bf16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13116,18 +11088,9 @@ DecodeResult decodeVDot2Bf16Bf16Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_dot2_bf16_bf16_e64_dpp"
-          : "v_dot2_bf16_bf16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_dot2_bf16_bf16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xC) [[unlikely]]
-      return emit_error.emit() << "v_dot2_bf16_bf16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13144,10 +11107,7 @@ void VDot2Bf16Bf16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minmax_num_f32_e64_dpp"
-               : "v_minmax_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minmax_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinmaxNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13188,6 +11148,7 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13195,18 +11156,9 @@ DecodeResult decodeVMinmaxNumF32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minmax_num_f32_e64_dpp"
-          : "v_minmax_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minmax_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minmax_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13217,10 +11169,7 @@ DecodeResult decodeVMinmaxNumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maxmin_num_f32_e64_dpp"
-               : "v_maxmin_num_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maxmin_num_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxminNumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13261,6 +11210,7 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13268,18 +11218,9 @@ DecodeResult decodeVMaxminNumF32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maxmin_num_f32_e64_dpp"
-          : "v_maxmin_num_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maxmin_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maxmin_num_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13290,10 +11231,7 @@ DecodeResult decodeVMaxminNumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minmax_num_f16_e64_dpp"
-               : "v_minmax_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minmax_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinmaxNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13346,6 +11284,7 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13353,18 +11292,9 @@ DecodeResult decodeVMinmaxNumF16Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minmax_num_f16_e64_dpp"
-          : "v_minmax_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minmax_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_minmax_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13381,10 +11311,7 @@ void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maxmin_num_f16_e64_dpp"
-               : "v_maxmin_num_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maxmin_num_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxminNumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13437,6 +11364,7 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13444,18 +11372,9 @@ DecodeResult decodeVMaxminNumF16Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maxmin_num_f16_e64_dpp"
-          : "v_maxmin_num_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maxmin_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_maxmin_num_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13472,10 +11391,7 @@ void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimummaximum_f32_e64_dpp"
-               : "v_minimummaximum_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimummaximum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimummaximumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13516,6 +11432,7 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13523,18 +11440,9 @@ DecodeResult decodeVMinimummaximumF32Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimummaximum_f32_e64_dpp"
-          : "v_minimummaximum_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimummaximum_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minimummaximum_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13545,10 +11453,7 @@ DecodeResult decodeVMinimummaximumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximumminimum_f32_e64_dpp"
-               : "v_maximumminimum_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximumminimum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumminimumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13589,6 +11494,7 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13596,18 +11502,9 @@ DecodeResult decodeVMaximumminimumF32Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximumminimum_f32_e64_dpp"
-          : "v_maximumminimum_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximumminimum_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maximumminimum_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13618,10 +11515,7 @@ DecodeResult decodeVMaximumminimumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimummaximum_f16_e64_dpp"
-               : "v_minimummaximum_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimummaximum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimummaximumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13674,6 +11568,7 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13681,18 +11576,9 @@ DecodeResult decodeVMinimummaximumF16Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimummaximum_f16_e64_dpp"
-          : "v_minimummaximum_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimummaximum_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_minimummaximum_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13709,10 +11595,7 @@ void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximumminimum_f16_e64_dpp"
-               : "v_maximumminimum_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximumminimum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumminimumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -13765,6 +11648,7 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -13772,18 +11656,9 @@ DecodeResult decodeVMaximumminimumF16Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximumminimum_f16_e64_dpp"
-          : "v_maximumminimum_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximumminimum_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xF) [[unlikely]]
-      return emit_error.emit() << "v_maximumminimum_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -13800,10 +11675,7 @@ void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSExpF32Vop3::VSExpF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_exp_f32_e64_dpp"
-               : "v_s_exp_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_exp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSExpF32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -13821,10 +11693,7 @@ namespace detail {
 DecodeResult decodeVSExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_exp_f32_e64_dpp"
-          : "v_s_exp_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_exp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -13838,10 +11707,7 @@ DecodeResult decodeVSExpF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSExpF16Vop3::VSExpF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_exp_f16_e64_dpp"
-               : "v_s_exp_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_exp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSExpF16Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SREG_LITERAL, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -13860,10 +11726,7 @@ namespace detail {
 DecodeResult decodeVSExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_exp_f16_e64_dpp"
-          : "v_s_exp_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_exp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -13877,10 +11740,7 @@ DecodeResult decodeVSExpF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSLogF32Vop3::VSLogF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_log_f32_e64_dpp"
-               : "v_s_log_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_log_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSLogF32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -13898,10 +11758,7 @@ namespace detail {
 DecodeResult decodeVSLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_log_f32_e64_dpp"
-          : "v_s_log_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_log_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -13915,10 +11772,7 @@ DecodeResult decodeVSLogF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSLogF16Vop3::VSLogF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_log_f16_e64_dpp"
-               : "v_s_log_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_log_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSLogF16Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SREG_LITERAL, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -13937,10 +11791,7 @@ namespace detail {
 DecodeResult decodeVSLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_log_f16_e64_dpp"
-          : "v_s_log_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_log_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -13954,10 +11805,7 @@ DecodeResult decodeVSLogF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSRcpF32Vop3::VSRcpF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_rcp_f32_e64_dpp"
-               : "v_s_rcp_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_rcp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSRcpF32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -13975,10 +11823,7 @@ namespace detail {
 DecodeResult decodeVSRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_rcp_f32_e64_dpp"
-          : "v_s_rcp_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_rcp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -13992,10 +11837,7 @@ DecodeResult decodeVSRcpF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSRcpF16Vop3::VSRcpF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_rcp_f16_e64_dpp"
-               : "v_s_rcp_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_rcp_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSRcpF16Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SREG_LITERAL, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -14014,10 +11856,7 @@ namespace detail {
 DecodeResult decodeVSRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_rcp_f16_e64_dpp"
-          : "v_s_rcp_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_rcp_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -14031,10 +11870,7 @@ DecodeResult decodeVSRcpF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSRsqF32Vop3::VSRsqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_rsq_f32_e64_dpp"
-               : "v_s_rsq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_rsq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSRsqF32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -14052,10 +11888,7 @@ namespace detail {
 DecodeResult decodeVSRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_rsq_f32_e64_dpp"
-          : "v_s_rsq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_rsq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -14069,10 +11902,7 @@ DecodeResult decodeVSRsqF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSRsqF16Vop3::VSRsqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_rsq_f16_e64_dpp"
-               : "v_s_rsq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_rsq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSRsqF16Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SREG_LITERAL, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -14091,10 +11921,7 @@ namespace detail {
 DecodeResult decodeVSRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_rsq_f16_e64_dpp"
-          : "v_s_rsq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_rsq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -14108,10 +11935,7 @@ DecodeResult decodeVSRsqF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VSSqrtF32Vop3::VSSqrtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_sqrt_f32_e64_dpp"
-               : "v_s_sqrt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_sqrt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSSqrtF32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -14129,10 +11953,7 @@ namespace detail {
 DecodeResult decodeVSSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_sqrt_f32_e64_dpp"
-          : "v_s_sqrt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_sqrt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -14146,10 +11967,7 @@ DecodeResult decodeVSSqrtF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VSSqrtF16Vop3::VSSqrtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_s_sqrt_f16_e64_dpp"
-               : "v_s_sqrt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_s_sqrt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSSqrtF16Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SREG_LITERAL, reinterpret_cast<const OpEncoding *>(inst)->src0) {
@@ -14168,10 +11986,7 @@ namespace detail {
 DecodeResult decodeVSSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_s_sqrt_f16_e64_dpp"
-          : "v_s_sqrt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_s_sqrt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->vdst >=
@@ -14185,10 +12000,7 @@ DecodeResult decodeVSSqrtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_nc_u16_e64_dpp"
-               : "v_add_nc_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14231,24 +12043,16 @@ VAddNcU16Vop3::VAddNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_nc_u16_e64_dpp"
-          : "v_add_nc_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_add_nc_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14265,10 +12069,7 @@ void VAddNcU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_nc_u16_e64_dpp"
-               : "v_sub_nc_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_nc_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14311,24 +12112,16 @@ VSubNcU16Vop3::VSubNcU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubNcU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_nc_u16_e64_dpp"
-          : "v_sub_nc_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_nc_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_sub_nc_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14345,10 +12138,7 @@ void VSubNcU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_lo_u16_e64_dpp"
-               : "v_mul_lo_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_lo_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLoU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14391,24 +12181,16 @@ VMulLoU16Vop3::VMulLoU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulLoU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_lo_u16_e64_dpp"
-          : "v_mul_lo_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_lo_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_mul_lo_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14425,10 +12207,7 @@ void VMulLoU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtPkI16F32Vop3::VCvtPkI16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_i16_f32_e64_dpp"
-               : "v_cvt_pk_i16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_i16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkI16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14470,18 +12249,9 @@ DecodeResult decodeVCvtPkI16F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_i16_f32_e64_dpp"
-          : "v_cvt_pk_i16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_i16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_i16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14492,10 +12262,7 @@ DecodeResult decodeVCvtPkI16F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkU16F32Vop3::VCvtPkU16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_u16_f32_e64_dpp"
-               : "v_cvt_pk_u16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_u16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkU16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14537,18 +12304,9 @@ DecodeResult decodeVCvtPkU16F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_u16_f32_e64_dpp"
-          : "v_cvt_pk_u16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_u16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_u16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14559,10 +12317,7 @@ DecodeResult decodeVCvtPkU16F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_u16_e64_dpp"
-               : "v_max_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14605,24 +12360,16 @@ VMaxU16Vop3::VMaxU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_u16_e64_dpp"
-          : "v_max_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_max_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14639,10 +12386,7 @@ void VMaxU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_max_i16_e64_dpp"
-               : "v_max_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_max_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaxI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14685,24 +12429,16 @@ VMaxI16Vop3::VMaxI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMaxI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_max_i16_e64_dpp"
-          : "v_max_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_max_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_max_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14719,10 +12455,7 @@ void VMaxI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_u16_e64_dpp"
-               : "v_min_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinU16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14765,24 +12498,16 @@ VMinU16Vop3::VMinU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_u16_e64_dpp"
-          : "v_min_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_min_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14799,10 +12524,7 @@ void VMinU16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_min_i16_e64_dpp"
-               : "v_min_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_min_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14845,24 +12567,16 @@ VMinI16Vop3::VMinI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMinI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_min_i16_e64_dpp"
-          : "v_min_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_min_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_min_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14879,10 +12593,7 @@ void VMinI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_nc_i16_e64_dpp"
-               : "v_add_nc_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -14925,24 +12636,16 @@ VAddNcI16Vop3::VAddNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_nc_i16_e64_dpp"
-          : "v_add_nc_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_add_nc_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -14959,10 +12662,7 @@ void VAddNcI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_nc_i16_e64_dpp"
-               : "v_sub_nc_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_nc_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15005,24 +12705,16 @@ VSubNcI16Vop3::VSubNcI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubNcI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_nc_i16_e64_dpp"
-          : "v_sub_nc_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_nc_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_sub_nc_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15039,10 +12731,7 @@ void VSubNcI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_permlane16_var_b32_e64_dpp"
-               : "v_permlane16_var_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_permlane16_var_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlane16VarB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15059,10 +12748,7 @@ DecodeResult decodeVPermlane16VarB32Vop3(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_permlane16_var_b32_e64_dpp"
-          : "v_permlane16_var_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_permlane16_var_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -15073,10 +12759,7 @@ DecodeResult decodeVPermlane16VarB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_permlanex16_var_b32_e64_dpp"
-               : "v_permlanex16_var_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_permlanex16_var_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPermlanex16VarB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15093,10 +12776,7 @@ DecodeResult decodeVPermlanex16VarB32Vop3(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_permlanex16_var_b32_e64_dpp"
-          : "v_permlanex16_var_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_permlanex16_var_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -15107,10 +12787,7 @@ DecodeResult decodeVPermlanex16VarB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VPackB32F16Vop3::VPackB32F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_pack_b32_f16_e64_dpp"
-               : "v_pack_b32_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_pack_b32_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VPackB32F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15160,18 +12837,9 @@ DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_pack_b32_f16_e64_dpp"
-          : "v_pack_b32_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_pack_b32_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_pack_b32_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15182,10 +12850,7 @@ DecodeResult decodeVPackB32F16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkNormI16F16Vop3::VCvtPkNormI16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_norm_i16_f16_e64_dpp"
-               : "v_cvt_pk_norm_i16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_norm_i16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15235,18 +12900,9 @@ DecodeResult decodeVCvtPkNormI16F16Vop3(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_norm_i16_f16_e64_dpp"
-          : "v_cvt_pk_norm_i16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_norm_i16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_norm_i16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15257,10 +12913,7 @@ DecodeResult decodeVCvtPkNormI16F16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkNormU16F16Vop3::VCvtPkNormU16F16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_norm_u16_f16_e64_dpp"
-               : "v_cvt_pk_norm_u16_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_norm_u16_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15310,18 +12963,9 @@ DecodeResult decodeVCvtPkNormU16F16Vop3(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_norm_u16_f16_e64_dpp"
-          : "v_cvt_pk_norm_u16_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_norm_u16_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_norm_u16_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15332,10 +12976,7 @@ DecodeResult decodeVCvtPkNormU16F16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ldexp_f32_e64_dpp"
-               : "v_ldexp_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ldexp_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15370,24 +13011,16 @@ VLdexpF32Vop3::VLdexpF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ldexp_f32_e64_dpp"
-          : "v_ldexp_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ldexp_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_ldexp_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15398,10 +13031,7 @@ DecodeResult decodeVLdexpF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bfm_b32_e64_dpp"
-               : "v_bfm_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bfm_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBfmB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15436,24 +13066,16 @@ VBfmB32Vop3::VBfmB32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bfm_b32_e64_dpp"
-          : "v_bfm_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bfm_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bfm_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15464,10 +13086,7 @@ DecodeResult decodeVBfmB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 } // namespace detail
 
 VBcntU32B32Vop3::VBcntU32B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_bcnt_u32_b32_e64_dpp"
-               : "v_bcnt_u32_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_bcnt_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VBcntU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15509,18 +13128,9 @@ DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_bcnt_u32_b32_e64_dpp"
-          : "v_bcnt_u32_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_bcnt_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_bcnt_u32_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15531,10 +13141,7 @@ DecodeResult decodeVBcntU32B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMbcntLoU32B32Vop3::VMbcntLoU32B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mbcnt_lo_u32_b32_e64_dpp"
-               : "v_mbcnt_lo_u32_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mbcnt_lo_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMbcntLoU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15576,18 +13183,9 @@ DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mbcnt_lo_u32_b32_e64_dpp"
-          : "v_mbcnt_lo_u32_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mbcnt_lo_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mbcnt_lo_u32_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15598,10 +13196,7 @@ DecodeResult decodeVMbcntLoU32B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMbcntHiU32B32Vop3::VMbcntHiU32B32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mbcnt_hi_u32_b32_e64_dpp"
-               : "v_mbcnt_hi_u32_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mbcnt_hi_u32_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMbcntHiU32B32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15643,18 +13238,9 @@ DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mbcnt_hi_u32_b32_e64_dpp"
-          : "v_mbcnt_hi_u32_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mbcnt_hi_u32_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_mbcnt_hi_u32_b32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15665,10 +13251,7 @@ DecodeResult decodeVMbcntHiU32B32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkNormI16F32Vop3::VCvtPkNormI16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_norm_i16_f32_e64_dpp"
-               : "v_cvt_pk_norm_i16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_norm_i16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkNormI16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15710,18 +13293,9 @@ DecodeResult decodeVCvtPkNormI16F32Vop3(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_norm_i16_f32_e64_dpp"
-          : "v_cvt_pk_norm_i16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_norm_i16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_norm_i16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15732,10 +13306,7 @@ DecodeResult decodeVCvtPkNormI16F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkNormU16F32Vop3::VCvtPkNormU16F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_norm_u16_f32_e64_dpp"
-               : "v_cvt_pk_norm_u16_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_norm_u16_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkNormU16F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15777,18 +13348,9 @@ DecodeResult decodeVCvtPkNormU16F32Vop3(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_norm_u16_f32_e64_dpp"
-          : "v_cvt_pk_norm_u16_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_norm_u16_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_norm_u16_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15799,10 +13361,7 @@ DecodeResult decodeVCvtPkNormU16F32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkU16U32Vop3::VCvtPkU16U32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_u16_u32_e64_dpp"
-               : "v_cvt_pk_u16_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_u16_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkU16U32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15844,18 +13403,9 @@ DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_u16_u32_e64_dpp"
-          : "v_cvt_pk_u16_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_u16_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_u16_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15866,10 +13416,7 @@ DecodeResult decodeVCvtPkU16U32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCvtPkI16I32Vop3::VCvtPkI16I32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_i16_i32_e64_dpp"
-               : "v_cvt_pk_i16_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_i16_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkI16I32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15911,18 +13458,9 @@ DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_i16_i32_e64_dpp"
-          : "v_cvt_pk_i16_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_i16_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_i16_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15933,10 +13471,7 @@ DecodeResult decodeVCvtPkI16I32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_sub_nc_i32_e64_dpp"
-               : "v_sub_nc_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_sub_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VSubNcI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -15971,24 +13506,16 @@ VSubNcI32Vop3::VSubNcI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_sub_nc_i32_e64_dpp"
-          : "v_sub_nc_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_sub_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_sub_nc_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -15999,10 +13526,7 @@ DecodeResult decodeVSubNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_add_nc_i32_e64_dpp"
-               : "v_add_nc_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_add_nc_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAddNcI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16037,24 +13561,16 @@ VAddNcI32Vop3::VAddNcI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_add_nc_i32_e64_dpp"
-          : "v_add_nc_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_add_nc_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_add_nc_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16065,10 +13581,7 @@ DecodeResult decodeVAddNcI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ldexp_f64_e64_dpp"
-               : "v_ldexp_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ldexp_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLdexpF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16087,16 +13600,14 @@ VLdexpF64Vop3::VLdexpF64Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ldexp_f64_e64_dpp"
-          : "v_ldexp_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ldexp_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16107,10 +13618,7 @@ DecodeResult decodeVLdexpF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_lo_u32_e64_dpp"
-               : "v_mul_lo_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_lo_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulLoU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16128,16 +13636,14 @@ VMulLoU32Vop3::VMulLoU32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_lo_u32_e64_dpp"
-          : "v_mul_lo_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_lo_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16148,10 +13654,7 @@ DecodeResult decodeVMulLoU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_hi_u32_e64_dpp"
-               : "v_mul_hi_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_hi_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiU32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16169,16 +13672,14 @@ VMulHiU32Vop3::VMulHiU32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_hi_u32_e64_dpp"
-          : "v_mul_hi_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_hi_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16189,10 +13690,7 @@ DecodeResult decodeVMulHiU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_mul_hi_i32_e64_dpp"
-               : "v_mul_hi_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_mul_hi_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMulHiI32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16210,16 +13708,14 @@ VMulHiI32Vop3::VMulHiI32Vop3(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_mul_hi_i32_e64_dpp"
-          : "v_mul_hi_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_mul_hi_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16230,10 +13726,7 @@ DecodeResult decodeVMulHiI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VTrigPreopF64Vop3::VTrigPreopF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_trig_preop_f64_e64_dpp"
-               : "v_trig_preop_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_trig_preop_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VTrigPreopF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16259,10 +13752,7 @@ DecodeResult decodeVTrigPreopF64Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_trig_preop_f64_e64_dpp"
-          : "v_trig_preop_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_trig_preop_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16273,10 +13763,7 @@ DecodeResult decodeVTrigPreopF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshlrev_b16_e64_dpp"
-               : "v_lshlrev_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshlrev_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshlrevB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16319,6 +13806,7 @@ VLshlrevB16Vop3::VLshlrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16326,18 +13814,9 @@ DecodeResult decodeVLshlrevB16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshlrev_b16_e64_dpp"
-          : "v_lshlrev_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshlrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_lshlrev_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16354,10 +13833,7 @@ void VLshlrevB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshrrev_b16_e64_dpp"
-               : "v_lshrrev_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshrrev_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16400,6 +13876,7 @@ VLshrrevB16Vop3::VLshrrevB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16407,18 +13884,9 @@ DecodeResult decodeVLshrrevB16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshrrev_b16_e64_dpp"
-          : "v_lshrrev_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshrrev_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_lshrrev_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16435,10 +13903,7 @@ void VLshrrevB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ashrrev_i16_e64_dpp"
-               : "v_ashrrev_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ashrrev_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16481,6 +13946,7 @@ VAshrrevI16Vop3::VAshrrevI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16488,18 +13954,9 @@ DecodeResult decodeVAshrrevI16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ashrrev_i16_e64_dpp"
-          : "v_ashrrev_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ashrrev_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_ashrrev_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16516,10 +13973,7 @@ void VAshrrevI16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_lshrrev_b64_e64_dpp"
-               : "v_lshrrev_b64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_lshrrev_b64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VLshrrevB64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16538,6 +13992,7 @@ VLshrrevB64Vop3::VLshrrevB64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16545,10 +14000,7 @@ DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_lshrrev_b64_e64_dpp"
-          : "v_lshrrev_b64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_lshrrev_b64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16559,10 +14011,7 @@ DecodeResult decodeVLshrrevB64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_ashrrev_i64_e64_dpp"
-               : "v_ashrrev_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_ashrrev_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAshrrevI64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16581,6 +14030,7 @@ VAshrrevI64Vop3::VAshrrevI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16588,10 +14038,7 @@ DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_ashrrev_i64_e64_dpp"
-          : "v_ashrrev_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_ashrrev_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16602,10 +14049,7 @@ DecodeResult decodeVAshrrevI64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimum_f64_e64_dpp"
-               : "v_minimum_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimum_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16625,6 +14069,7 @@ VMinimumF64Vop3::VMinimumF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16632,10 +14077,7 @@ DecodeResult decodeVMinimumF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimum_f64_e64_dpp"
-          : "v_minimum_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimum_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16646,10 +14088,7 @@ DecodeResult decodeVMinimumF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximum_f64_e64_dpp"
-               : "v_maximum_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximum_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF64Vop3)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16669,6 +14108,7 @@ VMaximumF64Vop3::VMaximumF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -16676,10 +14116,7 @@ DecodeResult decodeVMaximumF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximum_f64_e64_dpp"
-          : "v_maximum_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximum_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16690,10 +14127,7 @@ DecodeResult decodeVMaximumF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_readlane_b32_e64_dpp"
-               : "v_readlane_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16703,6 +14137,10 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   src_operands_[1] = &src1;
   num_src_ = 2;
   num_dst_ = 1;
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+    src1 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
 
 namespace detail {
@@ -16710,10 +14148,7 @@ DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_readlane_b32_e64_dpp"
-          : "v_readlane_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_readlane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16724,22 +14159,23 @@ DecodeResult decodeVReadlaneB32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_writelane_b32_e64_dpp"
-               : "v_writelane_b32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_writelane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VWritelaneB32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SSRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &vdst;
   num_src_ = 3;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
+        32, OperandType::OPR_SIMM32,
+        static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+    src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
 }
@@ -16749,10 +14185,7 @@ DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_writelane_b32_e64_dpp"
-          : "v_writelane_b32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_writelane_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -16762,11 +14195,14 @@ DecodeResult decodeVWritelaneB32Vop3(const MachineInst *opcode,
 }
 } // namespace detail
 
+void VWritelaneB32Vop3::implicit_uses(RegisterSet &uses) const {
+  Vop3::implicit_uses(uses);
+  if (auto r = vdst.to_register_ref())
+    uses.expand(*r);
+}
+
 VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_and_b16_e64_dpp"
-               : "v_and_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_and_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VAndB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16809,24 +14245,16 @@ VAndB16Vop3::VAndB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVAndB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_and_b16_e64_dpp"
-          : "v_and_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_and_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_and_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16843,10 +14271,7 @@ void VAndB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_or_b16_e64_dpp"
-               : "v_or_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_or_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VOrB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16889,24 +14314,16 @@ VOrB16Vop3::VOrB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVOrB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_or_b16_e64_dpp"
-          : "v_or_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_or_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_or_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -16923,10 +14340,7 @@ void VOrB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_xor_b16_e64_dpp"
-               : "v_xor_b16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_xor_b16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VXorB16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -16969,24 +14383,16 @@ VXorB16Vop3::VXorB16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVXorB16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_xor_b16_e64_dpp"
-          : "v_xor_b16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_xor_b16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_xor_b16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17003,10 +14409,7 @@ void VXorB16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimum_f32_e64_dpp"
-               : "v_minimum_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17041,6 +14444,7 @@ VMinimumF32Vop3::VMinimumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -17048,18 +14452,9 @@ DecodeResult decodeVMinimumF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimum_f32_e64_dpp"
-          : "v_minimum_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimum_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_minimum_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17070,10 +14465,7 @@ DecodeResult decodeVMinimumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximum_f32_e64_dpp"
-               : "v_maximum_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximum_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17108,6 +14500,7 @@ VMaximumF32Vop3::VMaximumF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -17115,18 +14508,9 @@ DecodeResult decodeVMaximumF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximum_f32_e64_dpp"
-          : "v_maximum_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximum_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_maximum_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17137,10 +14521,7 @@ DecodeResult decodeVMaximumF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_minimum_f16_e64_dpp"
-               : "v_minimum_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_minimum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMinimumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17183,6 +14564,7 @@ VMinimumF16Vop3::VMinimumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -17190,18 +14572,9 @@ DecodeResult decodeVMinimumF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_minimum_f16_e64_dpp"
-          : "v_minimum_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_minimum_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_minimum_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17218,10 +14591,7 @@ void VMinimumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_maximum_f16_e64_dpp"
-               : "v_maximum_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_maximum_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VMaximumF16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17264,6 +14634,7 @@ VMaximumF16Vop3::VMaximumF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -17271,18 +14642,9 @@ DecodeResult decodeVMaximumF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_maximum_f16_e64_dpp"
-          : "v_maximum_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_maximum_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0xB) [[unlikely]]
-      return emit_error.emit() << "v_maximum_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17299,10 +14661,7 @@ void VMaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtPkFp8F32Vop3::VCvtPkFp8F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_fp8_f32_e64_dpp"
-               : "v_cvt_pk_fp8_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_fp8_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkFp8F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17344,18 +14703,9 @@ DecodeResult decodeVCvtPkFp8F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_fp8_f32_e64_dpp"
-          : "v_cvt_pk_fp8_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_fp8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x8) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_fp8_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17372,10 +14722,7 @@ void VCvtPkFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtPkBf8F32Vop3::VCvtPkBf8F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_pk_bf8_f32_e64_dpp"
-               : "v_cvt_pk_bf8_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_pk_bf8_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtPkBf8F32Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17417,18 +14764,9 @@ DecodeResult decodeVCvtPkBf8F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_pk_bf8_f32_e64_dpp"
-          : "v_cvt_pk_bf8_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_pk_bf8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x8) [[unlikely]]
-      return emit_error.emit() << "v_cvt_pk_bf8_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17445,19 +14783,15 @@ void VCvtPkBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtSrFp8F32Vop3::VCvtSrFp8F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_sr_fp8_f32_e64_dpp"
-               : "v_cvt_sr_fp8_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_sr_fp8_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtSrFp8F32Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -17491,18 +14825,9 @@ DecodeResult decodeVCvtSrFp8F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_sr_fp8_f32_e64_dpp"
-          : "v_cvt_sr_fp8_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_sr_fp8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_sr_fp8_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17519,19 +14844,15 @@ void VCvtSrFp8F32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCvtSrBf8F32Vop3::VCvtSrBf8F32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cvt_sr_bf8_f32_e64_dpp"
-               : "v_cvt_sr_bf8_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cvt_sr_bf8_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCvtSrBf8F32Vop3)),
       vdst(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src1) {
-  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &src1;
-  num_src_ = 3;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &src1;
+  num_src_ = 2;
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
     src0 = Operand(
@@ -17565,18 +14886,9 @@ DecodeResult decodeVCvtSrBf8F32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cvt_sr_bf8_f32_e64_dpp"
-          : "v_cvt_sr_bf8_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cvt_sr_bf8_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cvt_sr_bf8_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17593,10 +14905,7 @@ void VCvtSrBf8F32Vop3::implicit_uses(RegisterSet &uses) const {
 }
 
 VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_f16_e64_dpp"
-               : "v_cmp_lt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17639,24 +14948,16 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_f16_e64_dpp"
-          : "v_cmp_lt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17667,10 +14968,7 @@ DecodeResult decodeVCmpLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_f16_e64_dpp"
-               : "v_cmp_eq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17713,24 +15011,16 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_f16_e64_dpp"
-          : "v_cmp_eq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17741,10 +15031,7 @@ DecodeResult decodeVCmpEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_f16_e64_dpp"
-               : "v_cmp_le_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17787,24 +15074,16 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_f16_e64_dpp"
-          : "v_cmp_le_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17815,10 +15094,7 @@ DecodeResult decodeVCmpLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_f16_e64_dpp"
-               : "v_cmp_gt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17861,24 +15137,16 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_f16_e64_dpp"
-          : "v_cmp_gt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17889,10 +15157,7 @@ DecodeResult decodeVCmpGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lg_f16_e64_dpp"
-               : "v_cmp_lg_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -17935,24 +15200,16 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lg_f16_e64_dpp"
-          : "v_cmp_lg_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lg_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -17963,10 +15220,7 @@ DecodeResult decodeVCmpLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_f16_e64_dpp"
-               : "v_cmp_ge_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18009,24 +15263,16 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_f16_e64_dpp"
-          : "v_cmp_ge_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18037,10 +15283,7 @@ DecodeResult decodeVCmpGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_o_f16_e64_dpp"
-               : "v_cmp_o_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_o_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18083,24 +15326,16 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_o_f16_e64_dpp"
-          : "v_cmp_o_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_o_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18111,10 +15346,7 @@ DecodeResult decodeVCmpOF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_u_f16_e64_dpp"
-               : "v_cmp_u_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_u_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18157,24 +15389,16 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_u_f16_e64_dpp"
-          : "v_cmp_u_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_u_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18185,10 +15409,7 @@ DecodeResult decodeVCmpUF16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nge_f16_e64_dpp"
-               : "v_cmp_nge_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18231,24 +15452,16 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nge_f16_e64_dpp"
-          : "v_cmp_nge_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nge_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18259,10 +15472,7 @@ DecodeResult decodeVCmpNgeF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlg_f16_e64_dpp"
-               : "v_cmp_nlg_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18305,24 +15515,16 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlg_f16_e64_dpp"
-          : "v_cmp_nlg_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nlg_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18333,10 +15535,7 @@ DecodeResult decodeVCmpNlgF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ngt_f16_e64_dpp"
-               : "v_cmp_ngt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18379,24 +15578,16 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ngt_f16_e64_dpp"
-          : "v_cmp_ngt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ngt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18407,10 +15598,7 @@ DecodeResult decodeVCmpNgtF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nle_f16_e64_dpp"
-               : "v_cmp_nle_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18453,24 +15641,16 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nle_f16_e64_dpp"
-          : "v_cmp_nle_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nle_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18481,10 +15661,7 @@ DecodeResult decodeVCmpNleF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_neq_f16_e64_dpp"
-               : "v_cmp_neq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18527,24 +15704,16 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_neq_f16_e64_dpp"
-          : "v_cmp_neq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_neq_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18555,10 +15724,7 @@ DecodeResult decodeVCmpNeqF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlt_f16_e64_dpp"
-               : "v_cmp_nlt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18601,24 +15767,16 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlt_f16_e64_dpp"
-          : "v_cmp_nlt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nlt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18629,10 +15787,7 @@ DecodeResult decodeVCmpNltF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_f32_e64_dpp"
-               : "v_cmp_lt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18667,24 +15822,16 @@ VCmpLtF32Vop3::VCmpLtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_f32_e64_dpp"
-          : "v_cmp_lt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18695,10 +15842,7 @@ DecodeResult decodeVCmpLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_f32_e64_dpp"
-               : "v_cmp_eq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18733,24 +15877,16 @@ VCmpEqF32Vop3::VCmpEqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_f32_e64_dpp"
-          : "v_cmp_eq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18761,10 +15897,7 @@ DecodeResult decodeVCmpEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_f32_e64_dpp"
-               : "v_cmp_le_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18799,24 +15932,16 @@ VCmpLeF32Vop3::VCmpLeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_f32_e64_dpp"
-          : "v_cmp_le_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18827,10 +15952,7 @@ DecodeResult decodeVCmpLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_f32_e64_dpp"
-               : "v_cmp_gt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18865,24 +15987,16 @@ VCmpGtF32Vop3::VCmpGtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_f32_e64_dpp"
-          : "v_cmp_gt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18893,10 +16007,7 @@ DecodeResult decodeVCmpGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lg_f32_e64_dpp"
-               : "v_cmp_lg_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18931,24 +16042,16 @@ VCmpLgF32Vop3::VCmpLgF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lg_f32_e64_dpp"
-          : "v_cmp_lg_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lg_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -18959,10 +16062,7 @@ DecodeResult decodeVCmpLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_f32_e64_dpp"
-               : "v_cmp_ge_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -18997,24 +16097,16 @@ VCmpGeF32Vop3::VCmpGeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_f32_e64_dpp"
-          : "v_cmp_ge_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19025,10 +16117,7 @@ DecodeResult decodeVCmpGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_o_f32_e64_dpp"
-               : "v_cmp_o_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19063,24 +16152,16 @@ VCmpOF32Vop3::VCmpOF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_o_f32_e64_dpp"
-          : "v_cmp_o_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_o_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19091,10 +16172,7 @@ DecodeResult decodeVCmpOF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_u_f32_e64_dpp"
-               : "v_cmp_u_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_u_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19129,24 +16207,16 @@ VCmpUF32Vop3::VCmpUF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_u_f32_e64_dpp"
-          : "v_cmp_u_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_u_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19157,10 +16227,7 @@ DecodeResult decodeVCmpUF32Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nge_f32_e64_dpp"
-               : "v_cmp_nge_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19195,24 +16262,16 @@ VCmpNgeF32Vop3::VCmpNgeF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nge_f32_e64_dpp"
-          : "v_cmp_nge_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nge_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19223,10 +16282,7 @@ DecodeResult decodeVCmpNgeF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlg_f32_e64_dpp"
-               : "v_cmp_nlg_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19261,24 +16317,16 @@ VCmpNlgF32Vop3::VCmpNlgF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlg_f32_e64_dpp"
-          : "v_cmp_nlg_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nlg_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19289,10 +16337,7 @@ DecodeResult decodeVCmpNlgF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ngt_f32_e64_dpp"
-               : "v_cmp_ngt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19327,24 +16372,16 @@ VCmpNgtF32Vop3::VCmpNgtF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ngt_f32_e64_dpp"
-          : "v_cmp_ngt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ngt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19355,10 +16392,7 @@ DecodeResult decodeVCmpNgtF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nle_f32_e64_dpp"
-               : "v_cmp_nle_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19393,24 +16427,16 @@ VCmpNleF32Vop3::VCmpNleF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nle_f32_e64_dpp"
-          : "v_cmp_nle_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nle_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19421,10 +16447,7 @@ DecodeResult decodeVCmpNleF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_neq_f32_e64_dpp"
-               : "v_cmp_neq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19459,24 +16482,16 @@ VCmpNeqF32Vop3::VCmpNeqF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_neq_f32_e64_dpp"
-          : "v_cmp_neq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_neq_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19487,10 +16502,7 @@ DecodeResult decodeVCmpNeqF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlt_f32_e64_dpp"
-               : "v_cmp_nlt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19525,24 +16537,16 @@ VCmpNltF32Vop3::VCmpNltF32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlt_f32_e64_dpp"
-          : "v_cmp_nlt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_nlt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -19553,10 +16557,7 @@ DecodeResult decodeVCmpNltF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_f64_e64_dpp"
-               : "v_cmp_lt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19576,16 +16577,14 @@ VCmpLtF64Vop3::VCmpLtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_f64_e64_dpp"
-          : "v_cmp_lt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19596,10 +16595,7 @@ DecodeResult decodeVCmpLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_f64_e64_dpp"
-               : "v_cmp_eq_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19619,16 +16615,14 @@ VCmpEqF64Vop3::VCmpEqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_f64_e64_dpp"
-          : "v_cmp_eq_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19639,10 +16633,7 @@ DecodeResult decodeVCmpEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_f64_e64_dpp"
-               : "v_cmp_le_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19662,16 +16653,14 @@ VCmpLeF64Vop3::VCmpLeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_f64_e64_dpp"
-          : "v_cmp_le_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19682,10 +16671,7 @@ DecodeResult decodeVCmpLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_f64_e64_dpp"
-               : "v_cmp_gt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19705,16 +16691,14 @@ VCmpGtF64Vop3::VCmpGtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_f64_e64_dpp"
-          : "v_cmp_gt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19725,10 +16709,7 @@ DecodeResult decodeVCmpGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lg_f64_e64_dpp"
-               : "v_cmp_lg_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLgF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19748,16 +16729,14 @@ VCmpLgF64Vop3::VCmpLgF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lg_f64_e64_dpp"
-          : "v_cmp_lg_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19768,10 +16747,7 @@ DecodeResult decodeVCmpLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_f64_e64_dpp"
-               : "v_cmp_ge_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19791,16 +16767,14 @@ VCmpGeF64Vop3::VCmpGeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_f64_e64_dpp"
-          : "v_cmp_ge_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19811,10 +16785,7 @@ DecodeResult decodeVCmpGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_o_f64_e64_dpp"
-               : "v_cmp_o_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_o_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpOF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19834,16 +16805,14 @@ VCmpOF64Vop3::VCmpOF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_o_f64_e64_dpp"
-          : "v_cmp_o_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19854,10 +16823,7 @@ DecodeResult decodeVCmpOF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_u_f64_e64_dpp"
-               : "v_cmp_u_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_u_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpUF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19877,16 +16843,14 @@ VCmpUF64Vop3::VCmpUF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_u_f64_e64_dpp"
-          : "v_cmp_u_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19897,10 +16861,7 @@ DecodeResult decodeVCmpUF64Vop3(const MachineInst *opcode, const DecodeErrorEmit
 } // namespace detail
 
 VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nge_f64_e64_dpp"
-               : "v_cmp_nge_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgeF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19920,16 +16881,14 @@ VCmpNgeF64Vop3::VCmpNgeF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nge_f64_e64_dpp"
-          : "v_cmp_nge_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19940,10 +16899,7 @@ DecodeResult decodeVCmpNgeF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlg_f64_e64_dpp"
-               : "v_cmp_nlg_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNlgF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -19963,16 +16919,14 @@ VCmpNlgF64Vop3::VCmpNlgF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlg_f64_e64_dpp"
-          : "v_cmp_nlg_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -19983,10 +16937,7 @@ DecodeResult decodeVCmpNlgF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ngt_f64_e64_dpp"
-               : "v_cmp_ngt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNgtF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20006,16 +16957,14 @@ VCmpNgtF64Vop3::VCmpNgtF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ngt_f64_e64_dpp"
-          : "v_cmp_ngt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -20026,10 +16975,7 @@ DecodeResult decodeVCmpNgtF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nle_f64_e64_dpp"
-               : "v_cmp_nle_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNleF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20049,16 +16995,14 @@ VCmpNleF64Vop3::VCmpNleF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nle_f64_e64_dpp"
-          : "v_cmp_nle_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -20069,10 +17013,7 @@ DecodeResult decodeVCmpNleF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_neq_f64_e64_dpp"
-               : "v_cmp_neq_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeqF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20092,16 +17033,14 @@ VCmpNeqF64Vop3::VCmpNeqF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_neq_f64_e64_dpp"
-          : "v_cmp_neq_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -20112,10 +17051,7 @@ DecodeResult decodeVCmpNeqF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_nlt_f64_e64_dpp"
-               : "v_cmp_nlt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNltF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20135,16 +17071,14 @@ VCmpNltF64Vop3::VCmpNltF64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_nlt_f64_e64_dpp"
-          : "v_cmp_nlt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -20155,10 +17089,7 @@ DecodeResult decodeVCmpNltF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_i16_e64_dpp"
-               : "v_cmp_lt_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20201,24 +17132,16 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_i16_e64_dpp"
-          : "v_cmp_lt_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20229,10 +17152,7 @@ DecodeResult decodeVCmpLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_i16_e64_dpp"
-               : "v_cmp_eq_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20275,24 +17195,16 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_i16_e64_dpp"
-          : "v_cmp_eq_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20303,10 +17215,7 @@ DecodeResult decodeVCmpEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_i16_e64_dpp"
-               : "v_cmp_le_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20349,24 +17258,16 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_i16_e64_dpp"
-          : "v_cmp_le_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20377,10 +17278,7 @@ DecodeResult decodeVCmpLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_i16_e64_dpp"
-               : "v_cmp_gt_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20423,24 +17321,16 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_i16_e64_dpp"
-          : "v_cmp_gt_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20451,10 +17341,7 @@ DecodeResult decodeVCmpGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_i16_e64_dpp"
-               : "v_cmp_ne_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20497,24 +17384,16 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_i16_e64_dpp"
-          : "v_cmp_ne_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ne_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20525,10 +17404,7 @@ DecodeResult decodeVCmpNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_i16_e64_dpp"
-               : "v_cmp_ge_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20571,24 +17447,16 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_i16_e64_dpp"
-          : "v_cmp_ge_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20599,10 +17467,7 @@ DecodeResult decodeVCmpGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_u16_e64_dpp"
-               : "v_cmp_lt_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20645,24 +17510,16 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_u16_e64_dpp"
-          : "v_cmp_lt_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20673,10 +17530,7 @@ DecodeResult decodeVCmpLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_u16_e64_dpp"
-               : "v_cmp_eq_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20719,24 +17573,16 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_u16_e64_dpp"
-          : "v_cmp_eq_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20747,10 +17593,7 @@ DecodeResult decodeVCmpEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_u16_e64_dpp"
-               : "v_cmp_le_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20793,24 +17636,16 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_u16_e64_dpp"
-          : "v_cmp_le_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20821,10 +17656,7 @@ DecodeResult decodeVCmpLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_u16_e64_dpp"
-               : "v_cmp_gt_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20867,24 +17699,16 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_u16_e64_dpp"
-          : "v_cmp_gt_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20895,10 +17719,7 @@ DecodeResult decodeVCmpGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_u16_e64_dpp"
-               : "v_cmp_ne_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -20941,24 +17762,16 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_u16_e64_dpp"
-          : "v_cmp_ne_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ne_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -20969,10 +17782,7 @@ DecodeResult decodeVCmpNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_u16_e64_dpp"
-               : "v_cmp_ge_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21015,24 +17825,16 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_u16_e64_dpp"
-          : "v_cmp_ge_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21043,10 +17845,7 @@ DecodeResult decodeVCmpGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_i32_e64_dpp"
-               : "v_cmp_lt_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21081,24 +17880,16 @@ VCmpLtI32Vop3::VCmpLtI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_i32_e64_dpp"
-          : "v_cmp_lt_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21109,10 +17900,7 @@ DecodeResult decodeVCmpLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_i32_e64_dpp"
-               : "v_cmp_eq_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21147,24 +17935,16 @@ VCmpEqI32Vop3::VCmpEqI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_i32_e64_dpp"
-          : "v_cmp_eq_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21175,10 +17955,7 @@ DecodeResult decodeVCmpEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_i32_e64_dpp"
-               : "v_cmp_le_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21213,24 +17990,16 @@ VCmpLeI32Vop3::VCmpLeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_i32_e64_dpp"
-          : "v_cmp_le_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21241,10 +18010,7 @@ DecodeResult decodeVCmpLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_i32_e64_dpp"
-               : "v_cmp_gt_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21279,24 +18045,16 @@ VCmpGtI32Vop3::VCmpGtI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_i32_e64_dpp"
-          : "v_cmp_gt_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21307,10 +18065,7 @@ DecodeResult decodeVCmpGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_i32_e64_dpp"
-               : "v_cmp_ne_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21345,24 +18100,16 @@ VCmpNeI32Vop3::VCmpNeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_i32_e64_dpp"
-          : "v_cmp_ne_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ne_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21373,10 +18120,7 @@ DecodeResult decodeVCmpNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_i32_e64_dpp"
-               : "v_cmp_ge_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21411,24 +18155,16 @@ VCmpGeI32Vop3::VCmpGeI32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_i32_e64_dpp"
-          : "v_cmp_ge_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21439,10 +18175,7 @@ DecodeResult decodeVCmpGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_u32_e64_dpp"
-               : "v_cmp_lt_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21477,24 +18210,16 @@ VCmpLtU32Vop3::VCmpLtU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_u32_e64_dpp"
-          : "v_cmp_lt_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_lt_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21505,10 +18230,7 @@ DecodeResult decodeVCmpLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_u32_e64_dpp"
-               : "v_cmp_eq_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21543,24 +18265,16 @@ VCmpEqU32Vop3::VCmpEqU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_u32_e64_dpp"
-          : "v_cmp_eq_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_eq_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21571,10 +18285,7 @@ DecodeResult decodeVCmpEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_u32_e64_dpp"
-               : "v_cmp_le_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21609,24 +18320,16 @@ VCmpLeU32Vop3::VCmpLeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_u32_e64_dpp"
-          : "v_cmp_le_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_le_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21637,10 +18340,7 @@ DecodeResult decodeVCmpLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_u32_e64_dpp"
-               : "v_cmp_gt_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21675,24 +18375,16 @@ VCmpGtU32Vop3::VCmpGtU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_u32_e64_dpp"
-          : "v_cmp_gt_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_gt_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21703,10 +18395,7 @@ DecodeResult decodeVCmpGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_u32_e64_dpp"
-               : "v_cmp_ne_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21741,24 +18430,16 @@ VCmpNeU32Vop3::VCmpNeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_u32_e64_dpp"
-          : "v_cmp_ne_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ne_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21769,10 +18450,7 @@ DecodeResult decodeVCmpNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_u32_e64_dpp"
-               : "v_cmp_ge_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21807,24 +18485,16 @@ VCmpGeU32Vop3::VCmpGeU32Vop3(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_u32_e64_dpp"
-          : "v_cmp_ge_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_ge_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -21835,10 +18505,7 @@ DecodeResult decodeVCmpGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_i64_e64_dpp"
-               : "v_cmp_lt_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21858,16 +18525,14 @@ VCmpLtI64Vop3::VCmpLtI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_i64_e64_dpp"
-          : "v_cmp_lt_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -21878,10 +18543,7 @@ DecodeResult decodeVCmpLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_i64_e64_dpp"
-               : "v_cmp_eq_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21901,16 +18563,14 @@ VCmpEqI64Vop3::VCmpEqI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_i64_e64_dpp"
-          : "v_cmp_eq_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -21921,10 +18581,7 @@ DecodeResult decodeVCmpEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_i64_e64_dpp"
-               : "v_cmp_le_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21944,16 +18601,14 @@ VCmpLeI64Vop3::VCmpLeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_i64_e64_dpp"
-          : "v_cmp_le_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -21964,10 +18619,7 @@ DecodeResult decodeVCmpLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_i64_e64_dpp"
-               : "v_cmp_gt_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -21987,16 +18639,14 @@ VCmpGtI64Vop3::VCmpGtI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_i64_e64_dpp"
-          : "v_cmp_gt_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22007,10 +18657,7 @@ DecodeResult decodeVCmpGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_i64_e64_dpp"
-               : "v_cmp_ne_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22030,16 +18677,14 @@ VCmpNeI64Vop3::VCmpNeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_i64_e64_dpp"
-          : "v_cmp_ne_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22050,10 +18695,7 @@ DecodeResult decodeVCmpNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_i64_e64_dpp"
-               : "v_cmp_ge_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeI64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22073,16 +18715,14 @@ VCmpGeI64Vop3::VCmpGeI64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_i64_e64_dpp"
-          : "v_cmp_ge_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22093,10 +18733,7 @@ DecodeResult decodeVCmpGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_lt_u64_e64_dpp"
-               : "v_cmp_lt_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLtU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22116,16 +18753,14 @@ VCmpLtU64Vop3::VCmpLtU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_lt_u64_e64_dpp"
-          : "v_cmp_lt_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22136,10 +18771,7 @@ DecodeResult decodeVCmpLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_eq_u64_e64_dpp"
-               : "v_cmp_eq_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpEqU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22159,16 +18791,14 @@ VCmpEqU64Vop3::VCmpEqU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_eq_u64_e64_dpp"
-          : "v_cmp_eq_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22179,10 +18809,7 @@ DecodeResult decodeVCmpEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_le_u64_e64_dpp"
-               : "v_cmp_le_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_le_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpLeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22202,16 +18829,14 @@ VCmpLeU64Vop3::VCmpLeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_le_u64_e64_dpp"
-          : "v_cmp_le_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22222,10 +18847,7 @@ DecodeResult decodeVCmpLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_gt_u64_e64_dpp"
-               : "v_cmp_gt_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGtU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22245,16 +18867,14 @@ VCmpGtU64Vop3::VCmpGtU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_gt_u64_e64_dpp"
-          : "v_cmp_gt_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22265,10 +18885,7 @@ DecodeResult decodeVCmpGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ne_u64_e64_dpp"
-               : "v_cmp_ne_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpNeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22288,16 +18905,14 @@ VCmpNeU64Vop3::VCmpNeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ne_u64_e64_dpp"
-          : "v_cmp_ne_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22308,10 +18923,7 @@ DecodeResult decodeVCmpNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_ge_u64_e64_dpp"
-               : "v_cmp_ge_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpGeU64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22331,16 +18943,14 @@ VCmpGeU64Vop3::VCmpGeU64Vop3(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
 DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_ge_u64_e64_dpp"
-          : "v_cmp_ge_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22351,10 +18961,7 @@ DecodeResult decodeVCmpGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpClassF16Vop3::VCmpClassF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_class_f16_e64_dpp"
-               : "v_cmp_class_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_class_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF16Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22404,18 +19011,9 @@ DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_class_f16_e64_dpp"
-          : "v_cmp_class_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmp_class_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22426,10 +19024,7 @@ DecodeResult decodeVCmpClassF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpClassF32Vop3::VCmpClassF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_class_f32_e64_dpp"
-               : "v_cmp_class_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_class_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF32Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22471,18 +19066,9 @@ DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_class_f32_e64_dpp"
-          : "v_cmp_class_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmp_class_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22493,10 +19079,7 @@ DecodeResult decodeVCmpClassF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpClassF64Vop3::VCmpClassF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmp_class_f64_e64_dpp"
-               : "v_cmp_class_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmp_class_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpClassF64Vop3)),
       vdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22522,10 +19105,7 @@ DecodeResult decodeVCmpClassF64Vop3(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmp_class_f64_e64_dpp"
-          : "v_cmp_class_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmp_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -22536,10 +19116,7 @@ DecodeResult decodeVCmpClassF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f16_e64_dpp"
-               : "v_cmpx_lt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22592,18 +19169,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f16_e64_dpp"
-          : "v_cmpx_lt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22614,10 +19182,7 @@ DecodeResult decodeVCmpxLtF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f16_e64_dpp"
-               : "v_cmpx_eq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22670,18 +19235,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f16_e64_dpp"
-          : "v_cmpx_eq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22692,10 +19248,7 @@ DecodeResult decodeVCmpxEqF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f16_e64_dpp"
-               : "v_cmpx_le_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22748,18 +19301,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f16_e64_dpp"
-          : "v_cmpx_le_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22770,10 +19314,7 @@ DecodeResult decodeVCmpxLeF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f16_e64_dpp"
-               : "v_cmpx_gt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22826,18 +19367,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f16_e64_dpp"
-          : "v_cmpx_gt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22848,10 +19380,7 @@ DecodeResult decodeVCmpxGtF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f16_e64_dpp"
-               : "v_cmpx_lg_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22904,18 +19433,9 @@ namespace detail {
 DecodeResult decodeVCmpxLgF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f16_e64_dpp"
-          : "v_cmpx_lg_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lg_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -22926,10 +19446,7 @@ DecodeResult decodeVCmpxLgF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f16_e64_dpp"
-               : "v_cmpx_ge_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -22982,18 +19499,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f16_e64_dpp"
-          : "v_cmpx_ge_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23004,10 +19512,7 @@ DecodeResult decodeVCmpxGeF16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f16_e64_dpp"
-               : "v_cmpx_o_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_o_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23060,18 +19565,9 @@ namespace detail {
 DecodeResult decodeVCmpxOF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f16_e64_dpp"
-          : "v_cmpx_o_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_o_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23082,10 +19578,7 @@ DecodeResult decodeVCmpxOF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f16_e64_dpp"
-               : "v_cmpx_u_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_u_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23138,18 +19631,9 @@ namespace detail {
 DecodeResult decodeVCmpxUF16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f16_e64_dpp"
-          : "v_cmpx_u_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_u_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23160,10 +19644,7 @@ DecodeResult decodeVCmpxUF16Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f16_e64_dpp"
-               : "v_cmpx_nge_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nge_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23217,18 +19698,9 @@ DecodeResult decodeVCmpxNgeF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f16_e64_dpp"
-          : "v_cmpx_nge_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nge_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23239,10 +19711,7 @@ DecodeResult decodeVCmpxNgeF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f16_e64_dpp"
-               : "v_cmpx_nlg_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlg_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23296,18 +19765,9 @@ DecodeResult decodeVCmpxNlgF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f16_e64_dpp"
-          : "v_cmpx_nlg_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nlg_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23318,10 +19778,7 @@ DecodeResult decodeVCmpxNlgF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f16_e64_dpp"
-               : "v_cmpx_ngt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ngt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23375,18 +19832,9 @@ DecodeResult decodeVCmpxNgtF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f16_e64_dpp"
-          : "v_cmpx_ngt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ngt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23397,10 +19845,7 @@ DecodeResult decodeVCmpxNgtF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f16_e64_dpp"
-               : "v_cmpx_nle_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nle_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23454,18 +19899,9 @@ DecodeResult decodeVCmpxNleF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f16_e64_dpp"
-          : "v_cmpx_nle_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nle_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23476,10 +19912,7 @@ DecodeResult decodeVCmpxNleF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f16_e64_dpp"
-               : "v_cmpx_neq_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_neq_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23533,18 +19966,9 @@ DecodeResult decodeVCmpxNeqF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f16_e64_dpp"
-          : "v_cmpx_neq_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_neq_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23555,10 +19979,7 @@ DecodeResult decodeVCmpxNeqF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f16_e64_dpp"
-               : "v_cmpx_nlt_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlt_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23612,18 +20033,9 @@ DecodeResult decodeVCmpxNltF16Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f16_e64_dpp"
-          : "v_cmpx_nlt_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nlt_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23634,10 +20046,7 @@ DecodeResult decodeVCmpxNltF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtF32Vop3::VCmpxLtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f32_e64_dpp"
-               : "v_cmpx_lt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23682,18 +20091,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f32_e64_dpp"
-          : "v_cmpx_lt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23704,10 +20104,7 @@ DecodeResult decodeVCmpxLtF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF32Vop3::VCmpxEqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f32_e64_dpp"
-               : "v_cmpx_eq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23752,18 +20149,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f32_e64_dpp"
-          : "v_cmpx_eq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23774,10 +20162,7 @@ DecodeResult decodeVCmpxEqF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF32Vop3::VCmpxLeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f32_e64_dpp"
-               : "v_cmpx_le_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23822,18 +20207,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f32_e64_dpp"
-          : "v_cmpx_le_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23844,10 +20220,7 @@ DecodeResult decodeVCmpxLeF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF32Vop3::VCmpxGtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f32_e64_dpp"
-               : "v_cmpx_gt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23892,18 +20265,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f32_e64_dpp"
-          : "v_cmpx_gt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23914,10 +20278,7 @@ DecodeResult decodeVCmpxGtF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF32Vop3::VCmpxLgF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f32_e64_dpp"
-               : "v_cmpx_lg_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -23962,18 +20323,9 @@ namespace detail {
 DecodeResult decodeVCmpxLgF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f32_e64_dpp"
-          : "v_cmpx_lg_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lg_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -23984,10 +20336,7 @@ DecodeResult decodeVCmpxLgF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF32Vop3::VCmpxGeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f32_e64_dpp"
-               : "v_cmpx_ge_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24032,18 +20381,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f32_e64_dpp"
-          : "v_cmpx_ge_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24054,10 +20394,7 @@ DecodeResult decodeVCmpxGeF32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF32Vop3::VCmpxOF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f32_e64_dpp"
-               : "v_cmpx_o_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_o_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24102,18 +20439,9 @@ namespace detail {
 DecodeResult decodeVCmpxOF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f32_e64_dpp"
-          : "v_cmpx_o_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_o_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24124,10 +20452,7 @@ DecodeResult decodeVCmpxOF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF32Vop3::VCmpxUF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f32_e64_dpp"
-               : "v_cmpx_u_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_u_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24172,18 +20497,9 @@ namespace detail {
 DecodeResult decodeVCmpxUF32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f32_e64_dpp"
-          : "v_cmpx_u_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_u_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24194,10 +20510,7 @@ DecodeResult decodeVCmpxUF32Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF32Vop3::VCmpxNgeF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f32_e64_dpp"
-               : "v_cmpx_nge_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nge_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24243,18 +20556,9 @@ DecodeResult decodeVCmpxNgeF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f32_e64_dpp"
-          : "v_cmpx_nge_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nge_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24265,10 +20569,7 @@ DecodeResult decodeVCmpxNgeF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF32Vop3::VCmpxNlgF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f32_e64_dpp"
-               : "v_cmpx_nlg_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlg_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24314,18 +20615,9 @@ DecodeResult decodeVCmpxNlgF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f32_e64_dpp"
-          : "v_cmpx_nlg_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nlg_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24336,10 +20628,7 @@ DecodeResult decodeVCmpxNlgF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF32Vop3::VCmpxNgtF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f32_e64_dpp"
-               : "v_cmpx_ngt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ngt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24385,18 +20674,9 @@ DecodeResult decodeVCmpxNgtF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f32_e64_dpp"
-          : "v_cmpx_ngt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ngt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24407,10 +20687,7 @@ DecodeResult decodeVCmpxNgtF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF32Vop3::VCmpxNleF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f32_e64_dpp"
-               : "v_cmpx_nle_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nle_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24456,18 +20733,9 @@ DecodeResult decodeVCmpxNleF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f32_e64_dpp"
-          : "v_cmpx_nle_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nle_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24478,10 +20746,7 @@ DecodeResult decodeVCmpxNleF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF32Vop3::VCmpxNeqF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f32_e64_dpp"
-               : "v_cmpx_neq_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_neq_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24527,18 +20792,9 @@ DecodeResult decodeVCmpxNeqF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f32_e64_dpp"
-          : "v_cmpx_neq_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_neq_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24549,10 +20805,7 @@ DecodeResult decodeVCmpxNeqF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF32Vop3::VCmpxNltF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f32_e64_dpp"
-               : "v_cmpx_nlt_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlt_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24598,18 +20851,9 @@ DecodeResult decodeVCmpxNltF32Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f32_e64_dpp"
-          : "v_cmpx_nlt_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_nlt_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -24620,10 +20864,7 @@ DecodeResult decodeVCmpxNltF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtF64Vop3::VCmpxLtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_f64_e64_dpp"
-               : "v_cmpx_lt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24653,10 +20894,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_f64_e64_dpp"
-          : "v_cmpx_lt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24667,10 +20905,7 @@ DecodeResult decodeVCmpxLtF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqF64Vop3::VCmpxEqF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_f64_e64_dpp"
-               : "v_cmpx_eq_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24700,10 +20935,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_f64_e64_dpp"
-          : "v_cmpx_eq_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24714,10 +20946,7 @@ DecodeResult decodeVCmpxEqF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeF64Vop3::VCmpxLeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_f64_e64_dpp"
-               : "v_cmpx_le_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24747,10 +20976,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_f64_e64_dpp"
-          : "v_cmpx_le_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24761,10 +20987,7 @@ DecodeResult decodeVCmpxLeF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtF64Vop3::VCmpxGtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_f64_e64_dpp"
-               : "v_cmpx_gt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24794,10 +21017,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_f64_e64_dpp"
-          : "v_cmpx_gt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24808,10 +21028,7 @@ DecodeResult decodeVCmpxGtF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLgF64Vop3::VCmpxLgF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lg_f64_e64_dpp"
-               : "v_cmpx_lg_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLgF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24841,10 +21058,7 @@ namespace detail {
 DecodeResult decodeVCmpxLgF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lg_f64_e64_dpp"
-          : "v_cmpx_lg_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24855,10 +21069,7 @@ DecodeResult decodeVCmpxLgF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeF64Vop3::VCmpxGeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_f64_e64_dpp"
-               : "v_cmpx_ge_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24888,10 +21099,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_f64_e64_dpp"
-          : "v_cmpx_ge_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24902,10 +21110,7 @@ DecodeResult decodeVCmpxGeF64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxOF64Vop3::VCmpxOF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_o_f64_e64_dpp"
-               : "v_cmpx_o_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_o_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxOF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24935,10 +21140,7 @@ namespace detail {
 DecodeResult decodeVCmpxOF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_o_f64_e64_dpp"
-          : "v_cmpx_o_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_o_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24949,10 +21151,7 @@ DecodeResult decodeVCmpxOF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxUF64Vop3::VCmpxUF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_u_f64_e64_dpp"
-               : "v_cmpx_u_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_u_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxUF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -24982,10 +21181,7 @@ namespace detail {
 DecodeResult decodeVCmpxUF64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_u_f64_e64_dpp"
-          : "v_cmpx_u_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_u_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -24996,10 +21192,7 @@ DecodeResult decodeVCmpxUF64Vop3(const MachineInst *opcode, const DecodeErrorEmi
 } // namespace detail
 
 VCmpxNgeF64Vop3::VCmpxNgeF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nge_f64_e64_dpp"
-               : "v_cmpx_nge_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nge_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgeF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25030,10 +21223,7 @@ DecodeResult decodeVCmpxNgeF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nge_f64_e64_dpp"
-          : "v_cmpx_nge_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nge_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25044,10 +21234,7 @@ DecodeResult decodeVCmpxNgeF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNlgF64Vop3::VCmpxNlgF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlg_f64_e64_dpp"
-               : "v_cmpx_nlg_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlg_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNlgF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25078,10 +21265,7 @@ DecodeResult decodeVCmpxNlgF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlg_f64_e64_dpp"
-          : "v_cmpx_nlg_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlg_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25092,10 +21276,7 @@ DecodeResult decodeVCmpxNlgF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNgtF64Vop3::VCmpxNgtF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ngt_f64_e64_dpp"
-               : "v_cmpx_ngt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ngt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNgtF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25126,10 +21307,7 @@ DecodeResult decodeVCmpxNgtF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ngt_f64_e64_dpp"
-          : "v_cmpx_ngt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ngt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25140,10 +21318,7 @@ DecodeResult decodeVCmpxNgtF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNleF64Vop3::VCmpxNleF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nle_f64_e64_dpp"
-               : "v_cmpx_nle_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nle_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNleF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25174,10 +21349,7 @@ DecodeResult decodeVCmpxNleF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nle_f64_e64_dpp"
-          : "v_cmpx_nle_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nle_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25188,10 +21360,7 @@ DecodeResult decodeVCmpxNleF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNeqF64Vop3::VCmpxNeqF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_neq_f64_e64_dpp"
-               : "v_cmpx_neq_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_neq_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeqF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25222,10 +21391,7 @@ DecodeResult decodeVCmpxNeqF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_neq_f64_e64_dpp"
-          : "v_cmpx_neq_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_neq_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25236,10 +21402,7 @@ DecodeResult decodeVCmpxNeqF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxNltF64Vop3::VCmpxNltF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_nlt_f64_e64_dpp"
-               : "v_cmpx_nlt_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_nlt_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNltF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25270,10 +21433,7 @@ DecodeResult decodeVCmpxNltF64Vop3(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_nlt_f64_e64_dpp"
-          : "v_cmpx_nlt_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_nlt_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -25284,10 +21444,7 @@ DecodeResult decodeVCmpxNltF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i16_e64_dpp"
-               : "v_cmpx_lt_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25340,18 +21497,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i16_e64_dpp"
-          : "v_cmpx_lt_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25362,10 +21510,7 @@ DecodeResult decodeVCmpxLtI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i16_e64_dpp"
-               : "v_cmpx_eq_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25418,18 +21563,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i16_e64_dpp"
-          : "v_cmpx_eq_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25440,10 +21576,7 @@ DecodeResult decodeVCmpxEqI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i16_e64_dpp"
-               : "v_cmpx_le_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25496,18 +21629,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i16_e64_dpp"
-          : "v_cmpx_le_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25518,10 +21642,7 @@ DecodeResult decodeVCmpxLeI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i16_e64_dpp"
-               : "v_cmpx_gt_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25574,18 +21695,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i16_e64_dpp"
-          : "v_cmpx_gt_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25596,10 +21708,7 @@ DecodeResult decodeVCmpxGtI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i16_e64_dpp"
-               : "v_cmpx_ne_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25652,18 +21761,9 @@ namespace detail {
 DecodeResult decodeVCmpxNeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i16_e64_dpp"
-          : "v_cmpx_ne_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ne_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25674,10 +21774,7 @@ DecodeResult decodeVCmpxNeI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i16_e64_dpp"
-               : "v_cmpx_ge_i16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_i16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25730,18 +21827,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeI16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i16_e64_dpp"
-          : "v_cmpx_ge_i16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_i16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25752,10 +21840,7 @@ DecodeResult decodeVCmpxGeI16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u16_e64_dpp"
-               : "v_cmpx_lt_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25808,18 +21893,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u16_e64_dpp"
-          : "v_cmpx_lt_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25830,10 +21906,7 @@ DecodeResult decodeVCmpxLtU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u16_e64_dpp"
-               : "v_cmpx_eq_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25886,18 +21959,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u16_e64_dpp"
-          : "v_cmpx_eq_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25908,10 +21972,7 @@ DecodeResult decodeVCmpxEqU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u16_e64_dpp"
-               : "v_cmpx_le_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -25964,18 +22025,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u16_e64_dpp"
-          : "v_cmpx_le_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -25986,10 +22038,7 @@ DecodeResult decodeVCmpxLeU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u16_e64_dpp"
-               : "v_cmpx_gt_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26042,18 +22091,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u16_e64_dpp"
-          : "v_cmpx_gt_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26064,10 +22104,7 @@ DecodeResult decodeVCmpxGtU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u16_e64_dpp"
-               : "v_cmpx_ne_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26120,18 +22157,9 @@ namespace detail {
 DecodeResult decodeVCmpxNeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u16_e64_dpp"
-          : "v_cmpx_ne_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ne_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26142,10 +22170,7 @@ DecodeResult decodeVCmpxNeU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u16_e64_dpp"
-               : "v_cmpx_ge_u16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_u16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26198,18 +22223,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeU16Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u16_e64_dpp"
-          : "v_cmpx_ge_u16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_u16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26220,10 +22236,7 @@ DecodeResult decodeVCmpxGeU16Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtI32Vop3::VCmpxLtI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i32_e64_dpp"
-               : "v_cmpx_lt_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26268,18 +22281,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i32_e64_dpp"
-          : "v_cmpx_lt_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26290,10 +22294,7 @@ DecodeResult decodeVCmpxLtI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI32Vop3::VCmpxEqI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i32_e64_dpp"
-               : "v_cmpx_eq_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26338,18 +22339,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i32_e64_dpp"
-          : "v_cmpx_eq_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26360,10 +22352,7 @@ DecodeResult decodeVCmpxEqI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI32Vop3::VCmpxLeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i32_e64_dpp"
-               : "v_cmpx_le_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26408,18 +22397,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i32_e64_dpp"
-          : "v_cmpx_le_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26430,10 +22410,7 @@ DecodeResult decodeVCmpxLeI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI32Vop3::VCmpxGtI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i32_e64_dpp"
-               : "v_cmpx_gt_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26478,18 +22455,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i32_e64_dpp"
-          : "v_cmpx_gt_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26500,10 +22468,7 @@ DecodeResult decodeVCmpxGtI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI32Vop3::VCmpxNeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i32_e64_dpp"
-               : "v_cmpx_ne_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26548,18 +22513,9 @@ namespace detail {
 DecodeResult decodeVCmpxNeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i32_e64_dpp"
-          : "v_cmpx_ne_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ne_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26570,10 +22526,7 @@ DecodeResult decodeVCmpxNeI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI32Vop3::VCmpxGeI32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i32_e64_dpp"
-               : "v_cmpx_ge_i32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_i32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26618,18 +22571,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i32_e64_dpp"
-          : "v_cmpx_ge_i32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_i32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26640,10 +22584,7 @@ DecodeResult decodeVCmpxGeI32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU32Vop3::VCmpxLtU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u32_e64_dpp"
-               : "v_cmpx_lt_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26688,18 +22629,9 @@ namespace detail {
 DecodeResult decodeVCmpxLtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u32_e64_dpp"
-          : "v_cmpx_lt_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_lt_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26710,10 +22642,7 @@ DecodeResult decodeVCmpxLtU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU32Vop3::VCmpxEqU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u32_e64_dpp"
-               : "v_cmpx_eq_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26758,18 +22687,9 @@ namespace detail {
 DecodeResult decodeVCmpxEqU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u32_e64_dpp"
-          : "v_cmpx_eq_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_eq_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26780,10 +22700,7 @@ DecodeResult decodeVCmpxEqU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU32Vop3::VCmpxLeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u32_e64_dpp"
-               : "v_cmpx_le_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26828,18 +22745,9 @@ namespace detail {
 DecodeResult decodeVCmpxLeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u32_e64_dpp"
-          : "v_cmpx_le_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_le_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26850,10 +22758,7 @@ DecodeResult decodeVCmpxLeU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU32Vop3::VCmpxGtU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u32_e64_dpp"
-               : "v_cmpx_gt_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26898,18 +22803,9 @@ namespace detail {
 DecodeResult decodeVCmpxGtU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u32_e64_dpp"
-          : "v_cmpx_gt_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_gt_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26920,10 +22816,7 @@ DecodeResult decodeVCmpxGtU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU32Vop3::VCmpxNeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u32_e64_dpp"
-               : "v_cmpx_ne_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -26968,18 +22861,9 @@ namespace detail {
 DecodeResult decodeVCmpxNeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u32_e64_dpp"
-          : "v_cmpx_ne_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ne_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -26990,10 +22874,7 @@ DecodeResult decodeVCmpxNeU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU32Vop3::VCmpxGeU32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u32_e64_dpp"
-               : "v_cmpx_ge_u32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_u32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27038,18 +22919,9 @@ namespace detail {
 DecodeResult decodeVCmpxGeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u32_e64_dpp"
-          : "v_cmpx_ge_u32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_ge_u32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -27060,10 +22932,7 @@ DecodeResult decodeVCmpxGeU32Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtI64Vop3::VCmpxLtI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_i64_e64_dpp"
-               : "v_cmpx_lt_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27093,10 +22962,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_i64_e64_dpp"
-          : "v_cmpx_lt_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27107,10 +22973,7 @@ DecodeResult decodeVCmpxLtI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqI64Vop3::VCmpxEqI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_i64_e64_dpp"
-               : "v_cmpx_eq_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27140,10 +23003,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_i64_e64_dpp"
-          : "v_cmpx_eq_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27154,10 +23014,7 @@ DecodeResult decodeVCmpxEqI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeI64Vop3::VCmpxLeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_i64_e64_dpp"
-               : "v_cmpx_le_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27187,10 +23044,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_i64_e64_dpp"
-          : "v_cmpx_le_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27201,10 +23055,7 @@ DecodeResult decodeVCmpxLeI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtI64Vop3::VCmpxGtI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_i64_e64_dpp"
-               : "v_cmpx_gt_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27234,10 +23085,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_i64_e64_dpp"
-          : "v_cmpx_gt_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27248,10 +23096,7 @@ DecodeResult decodeVCmpxGtI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeI64Vop3::VCmpxNeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_i64_e64_dpp"
-               : "v_cmpx_ne_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27281,10 +23126,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_i64_e64_dpp"
-          : "v_cmpx_ne_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27295,10 +23137,7 @@ DecodeResult decodeVCmpxNeI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeI64Vop3::VCmpxGeI64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_i64_e64_dpp"
-               : "v_cmpx_ge_i64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_i64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeI64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27328,10 +23167,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeI64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_i64_e64_dpp"
-          : "v_cmpx_ge_i64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_i64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27342,10 +23178,7 @@ DecodeResult decodeVCmpxGeI64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLtU64Vop3::VCmpxLtU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_lt_u64_e64_dpp"
-               : "v_cmpx_lt_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_lt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLtU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27375,10 +23208,7 @@ namespace detail {
 DecodeResult decodeVCmpxLtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_lt_u64_e64_dpp"
-          : "v_cmpx_lt_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_lt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27389,10 +23219,7 @@ DecodeResult decodeVCmpxLtU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxEqU64Vop3::VCmpxEqU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_eq_u64_e64_dpp"
-               : "v_cmpx_eq_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_eq_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxEqU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27422,10 +23249,7 @@ namespace detail {
 DecodeResult decodeVCmpxEqU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_eq_u64_e64_dpp"
-          : "v_cmpx_eq_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_eq_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27436,10 +23260,7 @@ DecodeResult decodeVCmpxEqU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxLeU64Vop3::VCmpxLeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_le_u64_e64_dpp"
-               : "v_cmpx_le_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_le_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxLeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27469,10 +23290,7 @@ namespace detail {
 DecodeResult decodeVCmpxLeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_le_u64_e64_dpp"
-          : "v_cmpx_le_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_le_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27483,10 +23301,7 @@ DecodeResult decodeVCmpxLeU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGtU64Vop3::VCmpxGtU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_gt_u64_e64_dpp"
-               : "v_cmpx_gt_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_gt_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGtU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27516,10 +23331,7 @@ namespace detail {
 DecodeResult decodeVCmpxGtU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_gt_u64_e64_dpp"
-          : "v_cmpx_gt_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_gt_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27530,10 +23342,7 @@ DecodeResult decodeVCmpxGtU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxNeU64Vop3::VCmpxNeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ne_u64_e64_dpp"
-               : "v_cmpx_ne_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ne_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxNeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27563,10 +23372,7 @@ namespace detail {
 DecodeResult decodeVCmpxNeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ne_u64_e64_dpp"
-          : "v_cmpx_ne_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ne_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27577,10 +23383,7 @@ DecodeResult decodeVCmpxNeU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxGeU64Vop3::VCmpxGeU64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_ge_u64_e64_dpp"
-               : "v_cmpx_ge_u64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_ge_u64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxGeU64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27610,10 +23413,7 @@ namespace detail {
 DecodeResult decodeVCmpxGeU64Vop3(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_ge_u64_e64_dpp"
-          : "v_cmpx_ge_u64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_ge_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27624,10 +23424,7 @@ DecodeResult decodeVCmpxGeU64Vop3(const MachineInst *opcode, const DecodeErrorEm
 } // namespace detail
 
 VCmpxClassF16Vop3::VCmpxClassF16Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f16_e64_dpp"
-               : "v_cmpx_class_f16",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_class_f16", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF16Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(16, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27681,18 +23478,9 @@ DecodeResult decodeVCmpxClassF16Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f16_e64_dpp"
-          : "v_cmpx_class_f16",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x3) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_class_f16: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -27703,10 +23491,7 @@ DecodeResult decodeVCmpxClassF16Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxClassF32Vop3::VCmpxClassF32Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f32_e64_dpp"
-               : "v_cmpx_class_f32",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_class_f32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF32Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27752,18 +23537,9 @@ DecodeResult decodeVCmpxClassF32Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f32_e64_dpp"
-          : "v_cmpx_class_f32",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if ((reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
-       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))) {
-    auto *op = reinterpret_cast<const Vop3::OpEncoding *>(inst);
-    if (op->opsel != 0 && op->opsel != 0x0) [[unlikely]]
-      return emit_error.emit() << "v_cmpx_class_f32: DPP requires matching OPSEL halves";
-  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
@@ -27774,10 +23550,7 @@ DecodeResult decodeVCmpxClassF32Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VCmpxClassF64Vop3::VCmpxClassF64Vop3(const MachineInst *inst)
-    : Vop3(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-               ? "v_cmpx_class_f64_e64_dpp"
-               : "v_cmpx_class_f64",
-           reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3("v_cmpx_class_f64", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VCmpxClassF64Vop3)),
       vdst(64, OperandType::OPR_EXEC, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src0(64, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
@@ -27807,10 +23580,7 @@ DecodeResult decodeVCmpxClassF64Vop3(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)
-          ? "v_cmpx_class_f64_e64_dpp"
-          : "v_cmpx_class_f64",
-      reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+      "v_cmpx_class_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -27821,10 +23591,7 @@ DecodeResult decodeVCmpxClassF64Vop3(const MachineInst *opcode,
 } // namespace detail
 
 VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_add_co_ci_u32_e64_dpp"
-                      : "v_add_co_ci_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_add_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -27863,6 +23630,7 @@ VAddCoCiU32Vop3SdstEnc::VAddCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -27870,10 +23638,7 @@ DecodeResult decodeVAddCoCiU32Vop3SdstEnc(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_add_co_ci_u32_e64_dpp"
-          : "v_add_co_ci_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_add_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -27894,10 +23659,7 @@ void VAddCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_sub_co_ci_u32_e64_dpp"
-                      : "v_sub_co_ci_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_sub_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -27936,6 +23698,7 @@ VSubCoCiU32Vop3SdstEnc::VSubCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -27943,10 +23706,7 @@ DecodeResult decodeVSubCoCiU32Vop3SdstEnc(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_sub_co_ci_u32_e64_dpp"
-          : "v_sub_co_ci_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_sub_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -27967,10 +23727,7 @@ void VSubCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_subrev_co_ci_u32_e64_dpp"
-                      : "v_subrev_co_ci_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_subrev_co_ci_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoCiU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28009,6 +23766,7 @@ VSubrevCoCiU32Vop3SdstEnc::VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -28016,10 +23774,7 @@ DecodeResult decodeVSubrevCoCiU32Vop3SdstEnc(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_subrev_co_ci_u32_e64_dpp"
-          : "v_subrev_co_ci_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_subrev_co_ci_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -28040,10 +23795,7 @@ void VSubrevCoCiU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 VDivScaleF32Vop3SdstEnc::VDivScaleF32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_div_scale_f32_e64_dpp"
-                      : "v_div_scale_f32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_div_scale_f32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28076,10 +23828,7 @@ DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_div_scale_f32_e64_dpp"
-          : "v_div_scale_f32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_div_scale_f32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -28091,10 +23840,7 @@ DecodeResult decodeVDivScaleF32Vop3SdstEnc(const MachineInst *opcode,
 } // namespace detail
 
 VDivScaleF64Vop3SdstEnc::VDivScaleF64Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_div_scale_f64_e64_dpp"
-                      : "v_div_scale_f64",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_div_scale_f64", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VDivScaleF64Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28133,10 +23879,7 @@ DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_div_scale_f64_e64_dpp"
-          : "v_div_scale_f64",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_div_scale_f64", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -28148,10 +23891,7 @@ DecodeResult decodeVDivScaleF64Vop3SdstEnc(const MachineInst *opcode,
 } // namespace detail
 
 VMadCoU64U32Vop3SdstEnc::VMadCoU64U32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_mad_co_u64_u32_e64_dpp"
-                      : "v_mad_co_u64_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_mad_co_u64_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadCoU64U32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28186,10 +23926,7 @@ DecodeResult decodeVMadCoU64U32Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_mad_co_u64_u32_e64_dpp"
-          : "v_mad_co_u64_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_mad_co_u64_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -28201,10 +23938,7 @@ DecodeResult decodeVMadCoU64U32Vop3SdstEnc(const MachineInst *opcode,
 } // namespace detail
 
 VMadCoI64I32Vop3SdstEnc::VMadCoI64I32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_mad_co_i64_i32_e64_dpp"
-                      : "v_mad_co_i64_i32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_mad_co_i64_i32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VMadCoI64I32Vop3SdstEnc)),
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28239,10 +23973,7 @@ DecodeResult decodeVMadCoI64I32Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_mad_co_i64_i32_e64_dpp"
-          : "v_mad_co_i64_i32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_mad_co_i64_i32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP ||
@@ -28254,10 +23985,7 @@ DecodeResult decodeVMadCoI64I32Vop3SdstEnc(const MachineInst *opcode,
 } // namespace detail
 
 VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_add_co_u32_e64_dpp"
-                      : "v_add_co_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_add_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VAddCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28294,6 +24022,7 @@ VAddCoU32Vop3SdstEnc::VAddCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -28301,10 +24030,7 @@ DecodeResult decodeVAddCoU32Vop3SdstEnc(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_add_co_u32_e64_dpp"
-          : "v_add_co_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_add_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -28325,10 +24051,7 @@ void VAddCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_sub_co_u32_e64_dpp"
-                      : "v_sub_co_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_sub_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28365,6 +24088,7 @@ VSubCoU32Vop3SdstEnc::VSubCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -28372,10 +24096,7 @@ DecodeResult decodeVSubCoU32Vop3SdstEnc(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_sub_co_u32_e64_dpp"
-          : "v_sub_co_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_sub_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
@@ -28396,10 +24117,7 @@ void VSubCoU32Vop3SdstEnc::implicit_uses(RegisterSet &uses) const {
 }
 
 VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
-    : Vop3SdstEnc(amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)
-                      ? "v_subrev_co_u32_e64_dpp"
-                      : "v_subrev_co_u32",
-                  reinterpret_cast<const OpEncoding *>(inst),
+    : Vop3SdstEnc("v_subrev_co_u32", reinterpret_cast<const OpEncoding *>(inst),
                   selected_exec_fn(InstructionExecutionId::VSubrevCoU32Vop3SdstEnc)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       sdst(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
@@ -28436,6 +24154,7 @@ VSubrevCoU32Vop3SdstEnc::VSubrevCoU32Vop3SdstEnc(const MachineInst *inst)
     dpp_bound_ctrl_ = dp->bound_ctrl;
     dpp_fi_ = dp->fi;
   }
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -28443,10 +24162,7 @@ DecodeResult decodeVSubrevCoU32Vop3SdstEnc(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   const auto *inst = opcode;
   Result validation = Vop3SdstEnc::validate_encoding(
-      amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0)
-          ? "v_subrev_co_u32_e64_dpp"
-          : "v_subrev_co_u32",
-      reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
+      "v_subrev_co_u32", reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Vop3SdstEnc::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {

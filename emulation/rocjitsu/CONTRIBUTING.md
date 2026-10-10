@@ -25,7 +25,7 @@
 | Binary translation rule or expansion | `lib/rocjitsu/src/rocjitsu/code/dbt/` |
 | Binary instrumentation pass | `lib/rocjitsu/src/rocjitsu/code/patch/` |
 | Code object loading or ELF mutation | `lib/rocjitsu/src/rocjitsu/code/` |
-| Register liveness or def-use analysis | `lib/rocjitsu/src/rocjitsu/analysis/` |
+| Register liveness or def-use analysis | `lib/rocjitsu/src/rocjitsu/code/analysis/` |
 | Simulation engine (events, topology, PDES) | `lib/simdojo/` |
 | Shared utility (bit ops, logging, SIMD, allocators) | `lib/util/` |
 | JSON config schema change | `schemas/` + `lib/rocjitsu/src/rocjitsu/config/` |
@@ -92,12 +92,14 @@ Before writing new infrastructure, check these existing libraries:
   survive a log-groups-OFF build, and its signal-backtrace path must stay
   async-signal-safe (`rj_hsa_dbt_hooks.cpp` uses raw `::write`).
 - **Errors.** Expected failures such as a rejected instruction encoding return
-  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Exceptions are
+  `Result` or `FailureOr<T>` and optionally emit a diagnostic. Do not introduce
+  new exception use unless an existing code path requires it. Exceptions are
   reserved for unrecoverable initialization, configuration, or execution
-  failures. Do not throw exceptions in simulation hot paths (event handlers,
-  instruction execution, cache lookups). Do not add `try`/`catch` blocks unless
-  you are at a boundary that must translate an error (e.g., the C API layer).
-  There is no general exception safety guarantee unless explicitly documented.
+  failures. The project plans to disable exceptions entirely in the future.
+  Do not throw exceptions in simulation hot paths (event handlers, instruction
+  execution, cache lookups). Do not add `try`/`catch` blocks unless you are at a
+  boundary that must translate an error (e.g., the C API layer). There is no
+  general exception safety guarantee unless explicitly documented.
 
 ## ISA codegen workflow
 

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -18,400 +19,583 @@ class BufferLoadFormatXMubuf : public Mubuf {
 public:
   BufferLoadFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatXyMubuf : public Mubuf {
 public:
   BufferLoadFormatXyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatXyzMubuf : public Mubuf {
 public:
   BufferLoadFormatXyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatXyzwMubuf : public Mubuf {
 public:
   BufferLoadFormatXyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferStoreFormatXMubuf : public Mubuf {
 public:
   BufferStoreFormatXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyMubuf : public Mubuf {
 public:
   BufferStoreFormatXyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyzMubuf : public Mubuf {
 public:
   BufferStoreFormatXyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatXyzwMubuf : public Mubuf {
 public:
   BufferStoreFormatXyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadFormatD16XMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatD16XyMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatD16XyzMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xf, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatD16XyzwMubuf : public Mubuf {
 public:
   BufferLoadFormatD16XyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferStoreFormatD16XMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatD16XyMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatD16XyzMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyzMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreFormatD16XyzwMubuf : public Mubuf {
 public:
   BufferStoreFormatD16XyzwMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadUbyteMubuf : public Mubuf {
 public:
   BufferLoadUbyteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadSbyteMubuf : public Mubuf {
 public:
   BufferLoadSbyteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadUshortMubuf : public Mubuf {
 public:
   BufferLoadUshortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadSshortMubuf : public Mubuf {
 public:
   BufferLoadSshortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadDwordMubuf : public Mubuf {
 public:
   BufferLoadDwordMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadDwordx2Mubuf : public Mubuf {
 public:
   BufferLoadDwordx2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadDwordx3Mubuf : public Mubuf {
 public:
   BufferLoadDwordx3Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadDwordx4Mubuf : public Mubuf {
 public:
   BufferLoadDwordx4Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferStoreByteMubuf : public Mubuf {
 public:
   BufferStoreByteMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreByteD16HiMubuf : public Mubuf {
 public:
   BufferStoreByteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreShortMubuf : public Mubuf {
 public:
   BufferStoreShortMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreShortD16HiMubuf : public Mubuf {
 public:
   BufferStoreShortD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreDwordMubuf : public Mubuf {
 public:
   BufferStoreDwordMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreDwordx2Mubuf : public Mubuf {
 public:
   BufferStoreDwordx2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreDwordx3Mubuf : public Mubuf {
 public:
   BufferStoreDwordx3Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferStoreDwordx4Mubuf : public Mubuf {
 public:
   BufferStoreDwordx4Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferLoadUbyteD16Mubuf : public Mubuf {
 public:
   BufferLoadUbyteD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadUbyteD16HiMubuf : public Mubuf {
 public:
   BufferLoadUbyteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadSbyteD16Mubuf : public Mubuf {
 public:
   BufferLoadSbyteD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadSbyteD16HiMubuf : public Mubuf {
 public:
   BufferLoadSbyteD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadShortD16Mubuf : public Mubuf {
 public:
   BufferLoadShortD16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0x3>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadShortD16HiMubuf : public Mubuf {
 public:
   BufferLoadShortD16HiMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferLoadFormatD16HiXMubuf : public Mubuf {
 public:
   BufferLoadFormatD16HiXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false, 0xc>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand lds_m0;
 };
 
 class BufferStoreFormatD16HiXMubuf : public Mubuf {
 public:
   BufferStoreFormatD16HiXMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<false>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
 };
 
 class BufferWbl2Mubuf : public Mubuf {
@@ -450,312 +634,467 @@ class BufferAtomicSwapMubuf : public Mubuf {
 public:
   BufferAtomicSwapMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapMubuf : public Mubuf {
 public:
   BufferAtomicCmpswapMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddMubuf : public Mubuf {
 public:
   BufferAtomicAddMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubMubuf : public Mubuf {
 public:
   BufferAtomicSubMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSminMubuf : public Mubuf {
 public:
   BufferAtomicSminMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicUminMubuf : public Mubuf {
 public:
   BufferAtomicUminMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSmaxMubuf : public Mubuf {
 public:
   BufferAtomicSmaxMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicUmaxMubuf : public Mubuf {
 public:
   BufferAtomicUmaxMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndMubuf : public Mubuf {
 public:
   BufferAtomicAndMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrMubuf : public Mubuf {
 public:
   BufferAtomicOrMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorMubuf : public Mubuf {
 public:
   BufferAtomicXorMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncMubuf : public Mubuf {
 public:
   BufferAtomicIncMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecMubuf : public Mubuf {
 public:
   BufferAtomicDecMubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddF32Mubuf : public Mubuf {
 public:
   BufferAtomicAddF32Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicPkAddF16Mubuf : public Mubuf {
 public:
   BufferAtomicPkAddF16Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddF64Mubuf : public Mubuf {
 public:
   BufferAtomicAddF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMinF64Mubuf : public Mubuf {
 public:
   BufferAtomicMinF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicMaxF64Mubuf : public Mubuf {
 public:
   BufferAtomicMaxF64Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSwapX2Mubuf : public Mubuf {
 public:
   BufferAtomicSwapX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicCmpswapX2Mubuf : public Mubuf {
 public:
   BufferAtomicCmpswapX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAddX2Mubuf : public Mubuf {
 public:
   BufferAtomicAddX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSubX2Mubuf : public Mubuf {
 public:
   BufferAtomicSubX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSminX2Mubuf : public Mubuf {
 public:
   BufferAtomicSminX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicUminX2Mubuf : public Mubuf {
 public:
   BufferAtomicUminX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicSmaxX2Mubuf : public Mubuf {
 public:
   BufferAtomicSmaxX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicUmaxX2Mubuf : public Mubuf {
 public:
   BufferAtomicUmaxX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicAndX2Mubuf : public Mubuf {
 public:
   BufferAtomicAndX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicOrX2Mubuf : public Mubuf {
 public:
   BufferAtomicOrX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicXorX2Mubuf : public Mubuf {
 public:
   BufferAtomicXorX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicIncX2Mubuf : public Mubuf {
 public:
   BufferAtomicIncX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 class BufferAtomicDecX2Mubuf : public Mubuf {
 public:
   BufferAtomicDecX2Mubuf(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    amdgpu::buffer_register_modifiers<true>(*this, modifiers);
+  }
   Operand vdata;
   Operand vaddr;
   Operand srsrc;
   Operand soffset;
+  Operand gpumem;
+  Operand gpumem_in;
 };
 
 } // namespace cdna2

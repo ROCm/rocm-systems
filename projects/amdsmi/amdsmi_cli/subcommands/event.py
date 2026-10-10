@@ -1,25 +1,9 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import signal
+import sys
 import threading
 
 from amdsmi import amdsmi_exception, amdsmi_interface
@@ -48,11 +32,8 @@ class EventCommands:
         print("EVENT LISTENING:\n")
         print("Press q and hit ENTER when you want to stop.")
         self.stop = False
-        threads = []
-        for device_handle in range(len(args.gpu)):
-            x = threading.Thread(target=self._event_thread, args=(self, device_handle))
-            threads.append(x)
-            x.start()
+        event_thread = threading.Thread(target=self._event_thread, args=(self, args.gpu))
+        event_thread.start()
 
         previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
         system_exit_exc = None
@@ -79,8 +60,7 @@ class EventCommands:
             system_exit_exc = exc
         finally:
             self.stop = True
-            for thread in threads:
-                thread.join()
+            event_thread.join()
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
         if system_exit_exc is not None:
@@ -90,8 +70,7 @@ class EventCommands:
         self.stop = True
         raise SystemExit(128 + signum)
 
-    def _event_thread(self, commands, i):
-        devices = commands.device_handles
+    def _event_thread(self, commands, devices):
         if len(devices) == 0:
             print("No GPUs on machine")
             return
@@ -101,31 +80,46 @@ class EventCommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        device = devices[i]
-        listener = amdsmi_interface.AmdSmiEventReader(
-            device, amdsmi_interface.AmdSmiEvtNotificationType
-        )
+        listeners = [
+            amdsmi_interface.AmdSmiEventReader(device, amdsmi_interface.AmdSmiEvtNotificationType)
+            for device in devices
+        ]
         values_dict = {}
 
-        while not self.stop:
-            try:
-                events = listener.read(2000)
-                for event in events:
-                    values_dict["event"] = event["event"]
-                    # parse message as it's own dictionary
-                    message_list = event["message"].split("  ")
-                    message_dict = {}
-                    for item in message_list:
-                        if not item == "":
-                            item_list = item.split(": ")
-                            message_dict.update({item_list[0]: item_list[1]})
-                    values_dict["message"] = message_dict
-                    commands.logger.store_output(event["processor_handle"], "values", values_dict)
-                    commands.logger.print_output()
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
-                    print(e)
-            except Exception as e:
-                print(e)
+        try:
+            while not self.stop:
+                try:
+                    # read() is a global poll: amdsmi_get_gpu_event_notification()
+                    # returns queued events for ALL registered devices, each tagged
+                    # with its own processor_handle. A single listener's read()
+                    # therefore drains every GPU, not just listeners[0].
+                    events = listeners[0].read(2000)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
+                        print(e, file=sys.stderr)
+                    continue
 
-        listener.stop()
+                for event in events:
+                    try:
+                        values_dict["timestamp"] = event["timestamp"]
+                        values_dict["event"] = event["event"]
+                        # parse message as it's own dictionary
+                        message_list = event["message"].split("  ")
+                        message_dict = {}
+                        for item in message_list:
+                            if item == "":
+                                continue
+                            item_list = item.split(": ", 1)
+                            if len(item_list) == 2:
+                                message_dict[item_list[0]] = item_list[1]
+                        values_dict["message"] = message_dict
+                        commands.logger.store_event_output(event["processor_handle"], values_dict)
+                        commands.logger.print_event_output()
+                    except Exception as e:
+                        # Isolate per-event failures (e.g. a malformed message) so
+                        # one bad record can't drop its batch siblings; keep the
+                        # stdout record stream clean by logging to stderr.
+                        print(e, file=sys.stderr)
+        finally:
+            for listener in listeners:
+                listener.stop()

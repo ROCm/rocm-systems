@@ -34,15 +34,7 @@ void SCmovkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAddkCoI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.write_scc(::rocjitsu::amdgpu::signed_add_overflows(
-      amdgpu::RegisterAccess(wf).read_scalar(sdst),
-      static_cast<uint32_t>(static_cast<int32_t>(
-          static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
-  amdgpu::RegisterAccess(wf).write_scalar(
-      sdst,
-      (amdgpu::RegisterAccess(wf).read_scalar(sdst) +
-       static_cast<uint32_t>(static_cast<int32_t>(
-           static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(simm16) << 16) >> 16))));
+  amdgpu::execute_s_addk_co_i32_sopk(*this, wf);
 }
 
 void SMulkI32Sopk::execute_impl(amdgpu::Wavefront &wf) {
@@ -62,7 +54,7 @@ void SGetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(sdst);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src, amdgpu::HwregWriteKind::Setreg);
   if (result != amdgpu::HwregAccessResult::Success)
     util::Logger::warn("s_setreg_b32: ", amdgpu::hwreg_access_result_name(result),
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));
@@ -71,7 +63,7 @@ void SSetregB32Sopk::execute_impl(amdgpu::Wavefront &wf) {
 void SSetregImm32B32Sopk::execute_impl(amdgpu::Wavefront &wf) {
   uint16_t hwreg = simm16.encoding_value_;
   uint32_t src = amdgpu::RegisterAccess(wf).read_scalar(literal);
-  auto result = amdgpu::write_hwreg_field(wf, hwreg, src);
+  auto result = amdgpu::write_hwreg_field(wf, hwreg, src, amdgpu::HwregWriteKind::SetregImm32);
   if (result != amdgpu::HwregAccessResult::Success)
     util::Logger::warn("s_setreg_imm32_b32: ", amdgpu::hwreg_access_result_name(result),
                        " hwreg=", amdgpu::hwreg_name(wf, hwreg), " id=", amdgpu::hwreg_id(hwreg));

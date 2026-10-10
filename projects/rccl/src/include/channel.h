@@ -12,6 +12,7 @@
 #include "param.h"
 
 bool rcclUseAinic();
+int rcclEffectiveP2pBatchEnable(struct ncclComm* comm);
 
 RCCL_PARAM_DECLARE(
   PxnOptQpUsage); // RCCL_PXN_OPT_QP_USAGE: uses batch stride of comm->maxLocalRanks instead of 1 to reduce QP usage when p2p-batching is disabled
@@ -37,6 +38,10 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
     base = p2pRound;
   }
   return base & 0xff;
+}
+
+inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvBytes, ssize_t threshold) {
+  return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }
 
 #endif

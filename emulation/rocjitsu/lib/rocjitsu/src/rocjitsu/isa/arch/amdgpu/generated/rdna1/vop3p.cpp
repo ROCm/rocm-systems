@@ -623,272 +623,6 @@ DecodeResult decodeVPkMaxF16Vop3p(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
-VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot2_f32_f16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot2F32F16Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot2F32F16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot2_f32_f16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot2F32F16Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot2_i32_i16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot2I32I16Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot2I32I16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot2_i32_i16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot2I32I16Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot2_u32_u16", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot2U32U16Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot2U32U16Vop3p(const MachineInst *opcode,
-                                    const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot2_u32_u16", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot2U32U16Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot4_i32_i8", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot4I32I8Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot4I32I8Vop3p(const MachineInst *opcode,
-                                   const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot4_i32_i8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot4I32I8Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot4_u32_u8", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot4U32U8Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot4U32U8Vop3p(const MachineInst *opcode,
-                                   const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot4_u32_u8", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot4U32U8Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot8_i32_i4", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot8I32I4Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot8I32I4Vop3p(const MachineInst *opcode,
-                                   const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot8_i32_i4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot8I32I4Vop3p>(opcode);
-}
-} // namespace detail
-
-VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
-    : Vop3p("v_dot8_u32_u4", reinterpret_cast<const OpEncoding *>(inst),
-            selected_exec_fn(InstructionExecutionId::VDot8U32U4Vop3p)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src1(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src2(32, OperandType::OPR_SRC_NOLDS, reinterpret_cast<const OpEncoding *>(inst)->src2) {
-  dst_operands_[0] = &vdst;
-  src_operands_[0] = &src0;
-  src_operands_[1] = &src1;
-  src_operands_[2] = &src2;
-  num_src_ = 3;
-  num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
-    src0 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
-    src1 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
-    src2 = Operand(
-        32, OperandType::OPR_SIMM32,
-        static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
-}
-
-namespace detail {
-DecodeResult decodeVDot8U32U4Vop3p(const MachineInst *opcode,
-                                   const DecodeErrorEmitter &emit_error) {
-  Result validation = Vop3p::validate_encoding(
-      "v_dot8_u32_u4", reinterpret_cast<const Vop3p::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
-    return Result::failure();
-  return std::make_unique<VDot8U32U4Vop3p>(opcode);
-}
-} // namespace detail
-
 VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     : Vop3p("v_fma_mix_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::VFmaMixF32Vop3p)),
@@ -914,6 +648,12 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
 }
 
 namespace detail {
@@ -953,6 +693,13 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0x3);
 }
 
 namespace detail {
@@ -998,6 +745,13 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  src0.set_register_byte_mask(
+      src0.decoded_vgpr() && (inst_.op_sel_hi & 1) ? ((inst_.op_sel & 1) ? 0xc : 0x3) : 0xf);
+  src1.set_register_byte_mask(
+      src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
+  src2.set_register_byte_mask(
+      src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
+  vdst.set_register_byte_mask(0xc);
 }
 
 namespace detail {

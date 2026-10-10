@@ -646,6 +646,116 @@ HIP_TEST_CASE(Unit_hipMallocAsync_DefaultStreams_Concurrent) {
   HIP_CHECK(hipStreamDestroy(stream[0]));
 }
 
+static __global__ void fillWordPattern(uint32_t* words, size_t num_words) {
+  for (size_t word_idx = blockIdx.x * static_cast<size_t>(blockDim.x) + threadIdx.x;
+       word_idx < num_words; word_idx += static_cast<size_t>(gridDim.x) * blockDim.x) {
+    words[word_idx] = static_cast<uint32_t>(word_idx) * 2654435761u;
+  }
+}
+
+static uint8_t expectedPatternByte(size_t byte_offset) {
+  uint32_t word = static_cast<uint32_t>(byte_offset / sizeof(uint32_t)) * 2654435761u;
+  return static_cast<uint8_t>(word >> (8 * (byte_offset % sizeof(uint32_t))));
+}
+
+// Frees a hipMallocAsync allocation on its stream and waits for the free on destruction.
+class AsyncAllocGuard {
+ public:
+  AsyncAllocGuard(size_t size, hipStream_t stream) : stream_{stream} {
+    HIP_CHECK(hipMallocAsync(&ptr_, size, stream_));
+  }
+  AsyncAllocGuard(const AsyncAllocGuard&) = delete;
+  AsyncAllocGuard& operator=(const AsyncAllocGuard&) = delete;
+
+  ~AsyncAllocGuard() {
+    static_cast<void>(hipFreeAsync(ptr_, stream_));
+    static_cast<void>(hipStreamSynchronize(stream_));
+  }
+
+  void* ptr() const { return ptr_; }
+
+ private:
+  void* ptr_ = nullptr;
+  hipStream_t stream_;
+};
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Allocate a large buffer with hipMallocAsync, then copy a 2D region out of it with
+ * hipMemcpy2DAsync (device to device), starting at an offset inside the allocation.
+ * The pointer inside the allocation must resolve to the whole allocation, so copies that
+ * reach past the first 128 MiB of a pool allocation succeed and return the right data.
+ * ------------------------
+ *    - catch\unit\memory\hipMallocAsync.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipMallocAsync_InteriorPointer_Memcpy2DAsync) {
+  checkMempoolSupported(0)
+
+  struct CopyCase {
+    size_t pool_bytes;
+    size_t src_offset;
+    size_t src_pitch;
+    size_t width_bytes;
+    size_t height_rows;
+  };
+  constexpr size_t kMiB = 1 << 20;
+  const CopyCase copy_cases[] = {
+      {560 * kMiB, 160 * kMiB, 40960, 40000, 10000},
+      {560 * kMiB, 0, 40960, 40000, 10000},
+      {400 * kMiB, 0, 40960, 40000, 10000},
+      {560 * kMiB, 160 * kMiB, 40960, 40000, 1000},
+      {64 * kMiB, 4 * kMiB, 4096, 4000, 1000},
+  };
+
+  StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+  for (const auto& copy_case : copy_cases) {
+    INFO("pool_bytes " << copy_case.pool_bytes << " src_offset " << copy_case.src_offset
+                       << " src_pitch " << copy_case.src_pitch << " width_bytes "
+                       << copy_case.width_bytes << " height_rows " << copy_case.height_rows);
+    LinearAllocGuard<char> dst_alloc(LinearAllocs::hipMalloc,
+                                     copy_case.width_bytes * copy_case.height_rows);
+    AsyncAllocGuard pool_alloc(copy_case.pool_bytes, stream);
+    void* pool_ptr = pool_alloc.ptr();
+    char* dst_ptr = dst_alloc.ptr();
+    char* src_ptr = static_cast<char*>(pool_ptr) + copy_case.src_offset;
+
+    hipLaunchKernelGGL(fillWordPattern, dim3(1024), dim3(256), 0, stream,
+                       static_cast<uint32_t*>(pool_ptr), copy_case.pool_bytes / sizeof(uint32_t));
+    HIP_CHECK(hipGetLastError());
+
+    hipDeviceptr_t range_base;
+    size_t range_bytes = 0;
+    HIP_CHECK(hipMemGetAddressRange(&range_base, &range_bytes,
+                                    reinterpret_cast<hipDeviceptr_t>(src_ptr)));
+    REQUIRE(reinterpret_cast<hipDeviceptr_t>(pool_ptr) == range_base);
+    REQUIRE(range_bytes == copy_case.pool_bytes);
+
+    HIP_CHECK(hipMemcpy2DAsync(dst_ptr, copy_case.width_bytes, src_ptr, copy_case.src_pitch,
+                               copy_case.width_bytes, copy_case.height_rows,
+                               hipMemcpyDeviceToDevice, stream));
+
+    const size_t checked_rows[] = {0, copy_case.height_rows / 2, copy_case.height_rows - 1};
+    std::vector<uint8_t> row_host(copy_case.width_bytes);
+    for (size_t row_idx : checked_rows) {
+      HIP_CHECK(hipMemcpyAsync(row_host.data(), dst_ptr + row_idx * copy_case.width_bytes,
+                               copy_case.width_bytes, hipMemcpyDeviceToHost, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+      const size_t row_offset = copy_case.src_offset + row_idx * copy_case.src_pitch;
+      size_t num_mismatches = 0;
+      for (size_t byte_idx = 0; byte_idx < copy_case.width_bytes; ++byte_idx) {
+        num_mismatches += row_host[byte_idx] != expectedPatternByte(row_offset + byte_idx);
+      }
+      INFO("row " << row_idx);
+      REQUIRE(num_mismatches == 0);
+    }
+  }
+}
+
 /**
  * End doxygen group StreamOTest.
  * @}

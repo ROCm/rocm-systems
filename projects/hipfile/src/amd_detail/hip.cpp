@@ -206,11 +206,25 @@ Hip::hipGetDevice() const
     return device_id;
 }
 
+void
+Hip::hipSetDevice(int device_id) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipSetDevice(device_id));
+}
+
 int
 Hip::hipGetDeviceCount() const
 {
     int device_count;
     (void)throwOnHipError<Hip::RuntimeError>(::hipGetDeviceCount(&device_count));
     return device_count;
+}
+
+hipUUID
+Hip::hipDeviceGetUuid(int device_id) const
+{
+    hipUUID uuid{};
+    (void)throwOnHipError<Hip::RuntimeError>(::hipDeviceGetUuid(&uuid, device_id));
+    return uuid;
 }
 }

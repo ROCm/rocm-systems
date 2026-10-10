@@ -22,6 +22,7 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -45,6 +46,7 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -69,6 +71,7 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -93,6 +96,7 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -117,6 +121,7 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -141,6 +146,7 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -165,6 +171,7 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -188,6 +195,7 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -212,6 +220,7 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -236,6 +245,7 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -260,6 +270,7 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -278,13 +289,18 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSwapMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -301,15 +317,20 @@ DecodeResult decodeImageAtomicSwapMimg(const MachineInst *opcode,
 ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicCmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -328,13 +349,18 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicAddMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -353,13 +379,18 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSubMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -378,13 +409,18 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -403,13 +439,18 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicUminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -428,13 +469,18 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicSmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -453,13 +499,18 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicUmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -478,13 +529,18 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicAndMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -503,13 +559,18 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicOrMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -528,13 +589,18 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicXorMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -553,13 +619,18 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicIncMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -578,13 +649,18 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicDecMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -601,15 +677,20 @@ DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
 ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
     : Mimg("image_atomic_fcmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageAtomicFcmpswapMimg)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -628,13 +709,18 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicFminMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -653,13 +739,18 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageAtomicFmaxMimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
-  src_operands_[0] = &vdata;
+      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   dst_operands_[0] = &vdata;
-  src_operands_[1] = &vaddr;
-  src_operands_[2] = &srsrc;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &srsrc;
+  dst_operands_[1] = &gpumem;
+  src_operands_[2] = &gpumem_in;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 2;
+  gpumem.apply_fieldless_caps(false, false, false);
+  gpumem_in.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -686,6 +777,7 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -712,6 +804,7 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -738,6 +831,7 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -764,6 +858,7 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -790,6 +885,7 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -816,6 +912,7 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -842,6 +939,7 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -868,6 +966,7 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -894,6 +993,7 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -920,6 +1020,7 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -946,6 +1047,7 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -972,6 +1074,7 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -998,6 +1101,7 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1024,6 +1128,7 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1050,6 +1155,7 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1076,6 +1182,7 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1102,6 +1209,7 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1128,6 +1236,7 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1154,6 +1263,7 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1180,6 +1290,7 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1206,6 +1317,7 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1232,6 +1344,7 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1258,6 +1371,7 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1284,6 +1398,7 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1310,6 +1425,7 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1336,6 +1452,7 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1362,6 +1479,7 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1388,6 +1506,7 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1414,6 +1533,7 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1440,6 +1560,7 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1466,6 +1587,7 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1492,6 +1614,7 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1518,6 +1641,7 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1544,6 +1668,7 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1568,6 +1693,7 @@ ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1592,6 +1718,7 @@ ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1618,6 +1745,7 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1644,6 +1772,7 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1670,6 +1799,7 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1696,6 +1826,7 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1722,6 +1853,7 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1748,6 +1880,7 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1772,6 +1905,7 @@ ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1796,6 +1930,7 @@ ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1822,6 +1957,7 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1848,6 +1984,7 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1874,6 +2011,7 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1900,6 +2038,7 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1926,6 +2065,7 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1952,6 +2092,7 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -1976,6 +2117,7 @@ ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2000,6 +2142,7 @@ ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2026,6 +2169,7 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2052,6 +2196,7 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2078,6 +2223,7 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2104,6 +2250,7 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2130,6 +2277,7 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2156,6 +2304,7 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2180,6 +2329,7 @@ ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2204,6 +2354,7 @@ ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2230,6 +2381,7 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2256,6 +2408,7 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2282,6 +2435,7 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2308,6 +2462,7 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2334,6 +2489,7 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2360,6 +2516,7 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2386,6 +2543,7 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2412,6 +2570,7 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2438,6 +2597,7 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2464,6 +2624,7 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2490,6 +2651,7 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2516,6 +2678,7 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2542,6 +2705,7 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2568,6 +2732,7 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2594,6 +2759,7 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2620,6 +2786,7 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2644,6 +2811,7 @@ ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2668,6 +2836,7 @@ ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2692,6 +2861,7 @@ ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2716,6 +2886,7 @@ ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2740,6 +2911,7 @@ ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2764,6 +2936,7 @@ ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2788,6 +2961,7 @@ ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2812,6 +2986,7 @@ ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2836,6 +3011,7 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2862,6 +3038,7 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2888,6 +3065,7 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2914,6 +3092,7 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2940,6 +3119,7 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2966,6 +3146,7 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -2992,6 +3173,7 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3018,6 +3200,7 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3044,6 +3227,7 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3070,6 +3254,7 @@ ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3096,6 +3281,7 @@ ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3122,6 +3308,7 @@ ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3148,6 +3335,7 @@ ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3174,6 +3362,7 @@ ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3200,6 +3389,7 @@ ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3226,6 +3416,7 @@ ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {
@@ -3252,6 +3443,7 @@ ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
 namespace detail {

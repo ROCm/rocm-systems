@@ -64,7 +64,7 @@ hipError_t hipBindTextureToArray(const textureReference* tex, hipArray_const_t a
 hipError_t hipBindTextureToMipmappedArray(const textureReference* tex,
                                           hipMipmappedArray_const_t mipmappedArray,
                                           const hipChannelFormatDesc* desc);
-hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop);
+hipError_t hipChooseDeviceR0600(int* device, const hipDeviceProp_tR0600* prop);
 hipError_t hipChooseDeviceR0000(int* device, const hipDeviceProp_tR0000* properties);
 hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream);
 hipError_t hipCreateTextureObject(hipTextureObject_t* pTexObject, const hipResourceDesc* pResDesc,
@@ -889,6 +889,7 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
@@ -939,6 +940,10 @@ hipError_t hipExecutionCtxSynchronize(hipExecutionCtx_t ctx);
 hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type);
+hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                    hipModule_t mod);
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
+                                             hipFlushGPUDirectRDMAWritesScope scope);
 }  // namespace hip
 
 namespace hip {
@@ -975,7 +980,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipBindTexture2D_fn = hip::hipBindTexture2D;
   ptrDispatchTable->hipBindTextureToArray_fn = hip::hipBindTextureToArray;
   ptrDispatchTable->hipBindTextureToMipmappedArray_fn = hip::hipBindTextureToMipmappedArray;
-  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDevice;
+  ptrDispatchTable->hipChooseDevice_fn = hip::hipChooseDeviceR0600;
   ptrDispatchTable->hipChooseDeviceR0000_fn = hip::hipChooseDeviceR0000;
   ptrDispatchTable->hipConfigureCall_fn = hip::hipConfigureCall;
   ptrDispatchTable->hipCreateSurfaceObject_fn = hip::hipCreateSurfaceObject;
@@ -1329,6 +1334,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
       hip::hipOccupancyMaxPotentialClusterSize;
   ptrDispatchTable->hipLibraryGetGlobal_fn = hip::hipLibraryGetGlobal;
   ptrDispatchTable->hipLibraryGetManaged_fn = hip::hipLibraryGetManaged;
+  ptrDispatchTable->hipLibraryGetModule_fn = hip::hipLibraryGetModule;
   ptrDispatchTable->hipPeekAtLastError_fn = hip::hipPeekAtLastError;
   ptrDispatchTable->hipPointerGetAttribute_fn = hip::hipPointerGetAttribute;
   ptrDispatchTable->hipPointerGetAttributes_fn = hip::hipPointerGetAttributes;
@@ -1525,6 +1531,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExecutionCtxWaitEvent_fn = hip::hipExecutionCtxWaitEvent;
   ptrDispatchTable->hipMemGetDefaultMemPool_fn = hip::hipMemGetDefaultMemPool;
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
+  ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
+  ptrDispatchTable->hipDeviceFlushGPUDirectRDMAWrites_fn = hip::hipDeviceFlushGPUDirectRDMAWrites;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2264,15 +2272,21 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetDefaultMemPool_fn, 541);
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetLuid_fn, 542);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 33
 HIP_ENFORCE_ABI(HipDispatchTable, hipInitDevice_fn, 543);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 34
+HIP_ENFORCE_ABI(HipDispatchTable, hipModuleEnumerateFunctions_fn, 544);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 35
+HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceFlushGPUDirectRDMAWrites_fn, 545);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetModule_fn, 546);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 544)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 547)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 33,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 36,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif
