@@ -87,6 +87,15 @@ constexpr int kDdaLL128DataBytesPerSlice =
 static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0,
               "a slice must be a whole number of lines");
 
+// Per-rank slot in 8B wire words. nStagingAreas is 1 for one-shot publish/reduce
+// and 2 for two-shot (publish plus write-back). Shared by all-reduce, all-gather
+// and reduce-scatter so the four tiers carve the bank the same way.
+constexpr size_t ddaLL128SlotWords(size_t bankSize, int nRanks, int nStagingAreas) {
+  return ddaLLSlotPkts(bankSize,
+                       sizeof(uint64_t) * (size_t)nRanks * (size_t)nStagingAreas,
+                       (size_t)kDdaLL128WireWordsPerSlice);
+}
+
 // The last lane of each line's lane group owns that line's flag word: lanes
 // 7,15,23,31 for a 128-byte line
 __device__ __forceinline__ bool ddaLL128IsFlagLane(int wid) {

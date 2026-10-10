@@ -28,7 +28,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather
-    16ULL*1024*1024,     // [3] ReduceScatter
+    1ULL*1024*1024,      // [3] ReduceScatter -- LL ends here; LL128 starts on the next byte
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -41,7 +41,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather
-    2ULL*1024*1024,      // [3] ReduceScatter
+    64ULL*1024*1024,     // [3] ReduceScatter -- (1 MiB, 64 MiB] after the LL cap
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used

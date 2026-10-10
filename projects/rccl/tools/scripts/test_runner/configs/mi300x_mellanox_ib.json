@@ -926,7 +926,7 @@
         {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility and block-cap tests",
-          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
         },
         {
           "name": "CeAlltoAllvEligibilityTest",
