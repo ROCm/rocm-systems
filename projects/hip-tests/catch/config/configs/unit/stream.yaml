@@ -513,11 +513,11 @@ stream:
     # stream wait-value deadlocks on HW rings.
     disabled: [amd_windows, amd_wsl]
   Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream:
-    <<: *level_0
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamImplicitSync_InterleavedNullStreamWork:
-    <<: *level_0
+    <<: *level_default
     tags: [synchronization, P1]
   Unit_hipStreamImplicitSync_MultipleBlockingStreams:
-    <<: *level_0
+    <<: *level_default
     tags: [synchronization, P1]
