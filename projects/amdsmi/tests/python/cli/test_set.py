@@ -25,25 +25,17 @@ class TestSet(TestCliBase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
-        # Get current settings
-        power_profile = {}
-        for index, gpu in enumerate(self.common.processors):
-            try:
-                power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
-            except amdsmi.AmdSmiLibraryException:
-                power_profile[index] = None
-
         cmds = self.CreateCmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
         # Registered before the sweep: RunCmds raises on the first failure, and a
         # sweep that aborts partway is exactly when the GPU is left mid-change.
-        self.addCleanup(self._restore_starting_values, power_profile)
+        self.addCleanup(self._restore_starting_values)
         self.RunCmds(cmds)
 
         return
 
-    def _restore_starting_values(self, power_profile):
+    def _restore_starting_values(self):
         """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
@@ -62,14 +54,24 @@ class TestSet(TestCliBase):
                     self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
+            # A readable fan speed does not imply the fan can be controlled.
             fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
             if fan_speed != "N/A":
-                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
+                cmds.append(
+                    (
+                        f"amd-smi reset --fans --gpu {index}",
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                    )
+                )
 
             # set --profile defaults
-            if power_profile[index]:
-                profile = _strip_prefix(power_profile[index]["current"], "AMDSMI_PWR_PROF_PRST_")
-                cmds.append((f"amd-smi set --profile {profile} --gpu {index}", self.PASS))
+            # Read from the static baseline: the library is shut down once setup
+            # ends, so querying it here fails and the restore was skipped.
+            profile = self.static_data["gpu_data"][index].get("profile")
+            if isinstance(profile, dict) and profile["current"] in profile["available_profiles"]:
+                cmds.append(
+                    (f"amd-smi set --profile {profile['current']} --gpu {index}", self.PASS)
+                )
 
             # set --perf-determinism defaults
             clock_sys = self.static_data["gpu_data"][index]["clock"]["sys"]
@@ -126,13 +128,13 @@ class TestSet(TestCliBase):
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
             if soc_pstate != "N/A":
-                current = int(soc_pstate["current"])
+                current = int(soc_pstate["current_id"])
                 cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
 
             # set --xgmi-plpd defaults
             xgmi_plpd = self.static_data["gpu_data"][index]["xgmi_plpd"]
             if xgmi_plpd != "N/A":
-                current = int(xgmi_plpd["current"])
+                current = int(xgmi_plpd["current_id"])
                 cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
 
             # set --ptl-status defaults

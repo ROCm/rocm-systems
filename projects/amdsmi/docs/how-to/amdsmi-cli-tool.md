@@ -706,6 +706,9 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}
+                                                Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.
+                                                This is a system-wide setting, not per-GPU.
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
@@ -1109,6 +1112,20 @@ NODE:
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
 `AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
 `max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+
+`amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
+balancing mode (`POWER_BALANCING`, the default, or `FREQUENCY_BALANCING`).
+This field reads `N/A` when the underlying value is missing or unreadable,
+not when NPM is disabled (see `STATUS` for enablement). Use
+`amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` to
+change it (AMD-SMI-only; not exposed via BMC Redfish/APML).
+
+It also includes `SUPPORTED_BALANCING_MODES`, the balancing modes supported by
+this node's platform/ASIC (e.g. `POWER_BALANCING, FREQUENCY_BALANCING`),
+independent of current NPM enablement. `amd-smi set --node-balancing-mode`
+returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` with a message naming the
+requested mode if it is absent from this set, distinct from
+`AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
 
 ## Interpreting the output
 

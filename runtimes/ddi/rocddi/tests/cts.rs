@@ -17,19 +17,19 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU16, AtomicU64, Ordering, fence};
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     KernelCommand, KernelQueueFormat, QueueAccessWidth, QueueParameters, QueuePriority,
     QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
-use rocddi::gpu::{CopyRect, GpuCopySequence};
+use rocddi::device::gpu::{CopyRect, GpuCopySequence};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
-use rocddi::memory::{DeviceAccess, HostCachePolicy, MemoryKind};
-use rocddi::session::{Session, SessionLifetime};
+use rocddi::memory::{DeviceAccess, HostMappingPolicy, MemoryKind};
+use rocddi::session::{DriverContextLifetime, Session};
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
 fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -78,7 +78,7 @@ fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
             Ok(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(1)),
             outcome => {
                 // An unretired command may still read its source after this
-                // test returns. Preserve all providers and backing until exit.
+                // test returns. Preserve all owners and backing until exit.
                 std::mem::forget(queue);
                 std::mem::forget(command);
                 std::mem::forget(device);
@@ -132,7 +132,7 @@ fn gfx1201_ais_vram_file_contract() -> Result<(), Box<dyn Error>> {
     file.write_all_at(&[0_u8; BYTES], BYTES as u64)?;
     file.sync_all()?;
 
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -194,7 +194,7 @@ fn gfx1201_ais_vram_file_contract() -> Result<(), Box<dyn Error>> {
     reason = "one native session checks linear, pitched, and virtual-memory copies"
 )]
 fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -259,7 +259,8 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     source_bytes[..64].fill(0x5a);
     destination_bytes[..64].fill(0xa5);
     // SAFETY: The two mapped allocations remain live through this second
-    // default-ring copy after the first operation returned its native context.
+    // default-ring copy after the first operation returned its DRM submission
+    // context.
     if let Err(failure) = unsafe {
         gpu.copy_linear(
             destination_info.device_address,
@@ -278,19 +279,19 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
     assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
 
-    let ring_mask = gpu.available_sdma_rings()?;
-    assert_ne!(ring_mask & 1, 0);
-    for ring in 0..u32::BITS {
-        if ring_mask & (1_u32 << ring) == 0 {
+    let engine_mask = gpu.available_sdma_engines()?;
+    assert_ne!(engine_mask & 1, 0);
+    for engine in 0..u32::BITS {
+        if engine_mask & (1_u32 << engine) == 0 {
             continue;
         }
         destination_bytes[..64].fill(0xa5);
-        let mut sequence = match GpuCopySequence::begin_on_sdma_ring(gpu, &cancel, ring) {
+        let mut sequence = match GpuCopySequence::begin_on_sdma_engine(gpu, &cancel, engine) {
             Ok(sequence) => sequence,
             Err(failure) => return Err(Box::new(failure.error)),
         };
         // SAFETY: Both system allocations remain GPU-mapped until this
-        // selected-ring submission retires or its owners are retained.
+        // selected-engine submission retires or its owners are retained.
         if let Err(failure) = unsafe {
             sequence.copy_linear(
                 destination_info.device_address,
@@ -723,7 +724,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
 
     let mut uncached_host = device.allocate(
         MemoryKind::OwnedHost {
-            cache: HostCachePolicy::Uncached,
+            policy: HostMappingPolicy::Uncached,
         },
         4096,
         4096,
@@ -770,11 +771,12 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     drop(uncached_host);
 
     for cache in [
-        HostCachePolicy::Coarse,
-        HostCachePolicy::Fine,
-        HostCachePolicy::Extended,
+        HostMappingPolicy::Coarse,
+        HostMappingPolicy::Fine,
+        HostMappingPolicy::Extended,
     ] {
-        let mut host = device.allocate(MemoryKind::OwnedHost { cache }, 4096, 4096, access)?;
+        let mut host =
+            device.allocate(MemoryKind::OwnedHost { policy: cache }, 4096, 4096, access)?;
         let info = host.info();
         assert_eq!(info.host_address, Some(info.device_address as usize));
         host.free()?;
@@ -788,7 +790,13 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     // SAFETY: The aligned 4096-byte page lies inside the boxed 8192-byte
     // extent. The box stays mapped until native deregistration succeeds.
     let mut registered = match unsafe {
-        device.register_host(host_address, HostCachePolicy::Uncached, 4096, 4096, access)
+        device.register_host(
+            host_address,
+            HostMappingPolicy::Uncached,
+            4096,
+            4096,
+            access,
+        )
     } {
         Ok(registered) => registered,
         Err(error) => {
@@ -847,9 +855,9 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     drop(registered);
 
     for cache in [
-        HostCachePolicy::Coarse,
-        HostCachePolicy::Fine,
-        HostCachePolicy::Extended,
+        HostMappingPolicy::Coarse,
+        HostMappingPolicy::Fine,
+        HostMappingPolicy::Extended,
     ] {
         // SAFETY: The boxed page cover remains live through successful
         // deregistration or is retained on uncertain native cleanup.
@@ -894,7 +902,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
 )]
 fn gfx1201_secondary_extended_host_contract() -> Result<(), Box<dyn Error>> {
     const BYTES: usize = 4096;
-    let mut session = Session::new(SessionLifetime::Session)?;
+    let mut session = Session::new(DriverContextLifetime::Session)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -937,7 +945,7 @@ fn gfx1201_secondary_extended_host_contract() -> Result<(), Box<dyn Error>> {
     let mut registered = match unsafe {
         device.register_host(
             host_address,
-            HostCachePolicy::Extended,
+            HostMappingPolicy::Extended,
             BYTES as u64,
             BYTES as u64,
             access,
@@ -1010,7 +1018,7 @@ fn gfx1201_secondary_extended_host_contract() -> Result<(), Box<dyn Error>> {
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD 1.20+, and a bound DRM render node"]
 fn gfx1201_gpu_capability_contract() -> Result<(), Box<dyn Error>> {
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -1058,7 +1066,7 @@ fn gfx1201_user_sdma_queue(ring_memory: QueueRingMemory) -> Result<(), Box<dyn E
     const WRITEBACK: u32 = (1 << 31) | (1 << 22);
     const INVALIDATE: u32 = (1 << 30) | (1 << 25) | (1 << 24) | (1 << 23);
 
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint.gpu().is_some_and(|gpu| {
@@ -1239,7 +1247,7 @@ fn gfx1201_aql_barrier(
     const AQL_PACKET_BYTES: usize = 64;
     const BARRIER_HEADER: u16 = 3 | (1 << 8) | (2 << 9) | (2 << 11);
 
-    let mut session = Session::new(SessionLifetime::Process)?;
+    let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;
     session.enumerate(&mut |endpoint| {
         if endpoint
@@ -1317,7 +1325,7 @@ fn gfx1201_aql_barrier(
     // SAFETY: The queue owns a writable AQL ring and 64-bit index and doorbell
     // words. The release header publishes the initialized packet, the release
     // write index publishes slot 0, and the doorbell drains CPU stores before
-    // notifying firmware.
+    // notifying the command processor.
     unsafe {
         std::ptr::copy_nonoverlapping(
             packet.as_ptr(),
