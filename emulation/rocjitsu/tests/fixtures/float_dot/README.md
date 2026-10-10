@@ -1,4 +1,14 @@
-# DOT2 and WMMA hardware fixtures
+# DOT2, WMMA and SWMMAC local observation fixtures
+
+The arithmetic models described here are best-effort inferences based solely on
+local input/output observations from the installed W7900 (`gfx1100`) and R9700
+(`gfx1201`). The captured bits record what those devices returned for the saved
+inputs and settings. Product groups, intermediate steps, alignment grids and
+precedence rules describe the simulator model inferred from those observations;
+they do not establish how the hardware computes its results. We do not know the
+hardware's internal implementation. These models are not vendor specifications
+and may be incomplete or wrong for untested inputs, flags, modes or devices.
+Matching the finite corpus bit for bit does not guarantee a match elsewhere.
 
 The original GFX11/GFX12 and packed floating-point fixtures were captured on
 Radeon Pro W7900 (`gfx1100`) and Radeon AI Pro R9700 (`gfx1201`) using
@@ -6,21 +16,41 @@ TheRock `10.2.0a20260916`. The decoded regression
 tests consume the captured bits directly and require no GPU. Later per-opcode
 fixtures record their SDK version and date in the sections below.
 
+The headers in this directory contain compact raw hardware expectations and the
+inputs needed to reconstruct them. The decoded tests run without a GPU; after a
+normal host build, run them with:
+
+```sh
+ctest --test-dir build --output-on-failure -R 'RdnaWmma|RdnaSwmmac|PackedWmma|Gfx11Dot2|Gfx12Dot'
+```
+
+The larger physical sweeps described below are additional qualification results,
+not files or commands supplied by this checkout. Their raw input/output pairs,
+code objects, hashes and replay tools are retained separately in the
+`rdna-wmma-captures-20261010.tar.zst` qualification archive. The archive README
+provides its GPU-free replay instructions. The compact headers are sufficient
+for the repository regression tests; they are a subset of that larger corpus.
+
 | Header | Contents |
 | --- | --- |
 | `gfx1100_cases.h` | GFX11 FP32-output DOT2 cases and a WMMA matrix. |
 | `gfx1201_cases.h` | GFX12 FP32-output DOT2 cases and WMMA matrices. |
 | `packed_operand_cases.h` | 440 packed WMMA instruction/operand captures for modifiers, selectors and inline constants. |
+| `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
+| `rdna_wmma_iu8_cases.h` | Four IU8 matrices for signed saturation, both architectures and wave sizes. |
+| `rdna_wmma_iu4_cases.h` | Four IU4 matrices for signed saturation, both architectures and wave sizes. |
+| `rdna_wmma_iu4_k32_cases.h` | Two IU4 K32 matrices for signed saturation on gfx1201, both wave sizes. |
+| `rdna_swmmac_iu8_cases.h` | Sparse IU8 saturation/index/overlap matrices on gfx1201, both wave sizes. |
 | `rdna_swmmac_iu4_cases.h` | Sparse IU4 K32 saturation/index/overlap matrices on gfx1201, both wave sizes. |
 | `rdna_swmmac_iu4_k64_cases.h` | Sparse IU4 K64 saturation/index/overlap matrices on gfx1201, both wave sizes. |
-| `rdna_swmmac_iu8_cases.h` | Sparse IU8 saturation/index/overlap matrices on gfx1201, both wave sizes. |
-| `rdna_wmma_iu4_k32_cases.h` | Two IU4 K32 matrices for signed saturation on gfx1201, both wave sizes. |
-| `rdna_wmma_iu4_cases.h` | Four IU4 matrices for signed saturation, both architectures and wave sizes. |
-| `rdna_wmma_iu8_cases.h` | Four IU8 matrices for signed saturation, both architectures and wave sizes. |
 | `rdna_wmma_f32_fp8_fp8_cases.h` | FP8/FP8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_wmma_f32_fp8_bf8_cases.h` | FP8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_wmma_f32_bf8_fp8_cases.h` | BF8/FP8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_wmma_f32_bf8_bf8_cases.h` | BF8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_wmma_f32_f16_cases.h` | F16 F32 WMMA raw matrices and operand witnesses on gfx1100 and gfx1201, both wave sizes. |
+| `rdna_wmma_f32_bf16_cases.h` | BF16 F32 WMMA raw matrices and operand witnesses on gfx1100 and gfx1201, both wave sizes. |
+| `rdna_wmma_f16_f16_cases.h` | F16 F16 WMMA raw matrices and operand witnesses on gfx1100 and gfx1201, both wave sizes. |
+| `rdna_wmma_bf16_bf16_cases.h` | BF16 BF16 WMMA raw matrices and operand witnesses on gfx1100 and gfx1201, both wave sizes. |
 | `rdna_swmmac_f32_f16_cases.h` | F16 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_swmmac_f32_bf16_cases.h` | BF16 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_swmmac_f16_f16_cases.h` | F16 F16 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
@@ -29,7 +59,6 @@ fixtures record their SDK version and date in the sections below.
 | `rdna_swmmac_f32_fp8_bf8_cases.h` | FP8/BF8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_swmmac_f32_bf8_fp8_cases.h` | BF8/FP8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `rdna_swmmac_f32_bf8_bf8_cases.h` | BF8/BF8 F32 sparse SWMMAC raw matrices and operand witnesses on gfx1201, both wave sizes. |
-| `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
 
 DOT2 records store packed A/B words, FP32 C and the expected FP32 result.
 WMMA inputs use row-major matrices. Packed matrix expectations are indexed by
@@ -44,9 +73,11 @@ half selections, wave32/wave64 and overlapping input/output registers. Separate
 regressions retain intermediate F16 overflow-mode and cancellation witnesses.
 Comparisons include every output bit, including NaNs and preserved halves.
 
-The GFX11 fixtures also test RDNA3.5 dispatch, without claiming a physical
-RDNA3.5 measurement. The floating-point captures qualify dense F16/BF16 DOT2/WMMA arithmetic
-on these two cards; they do not establish behavior for other matrix formats.
+The GFX11 fixtures also test RDNA3.5 decoded dispatch, including the four dense
+16-bit opcodes in the shared float runner. This reuses gfx1100 observations and
+does not claim a physical RDNA3.5 measurement. The original floating-point
+fixtures check the dense F16/BF16 DOT2/WMMA models against local observations;
+later sections describe the additional integer and native 8-bit formats.
 
 ## Integer IU8 WMMA captures
 
@@ -210,8 +241,8 @@ The per-format headers select these operand interpretations:
 
 - `rdna_wmma_f32_fp8_fp8_cases.h`: FP8 A and B; neither has infinities.
   Compact operands cover C-bit encodings, inline C and zero-product MODE cases.
-  Direct special-value witnesses are in the retained op70 corpus. The remaining
-  headers below also embed their special-value witnesses as compact operands.
+  Additional archived observations cover direct special-value witnesses. The
+  remaining headers below embed their special-value witnesses as compact operands.
 - `rdna_wmma_f32_fp8_bf8_cases.h`: FP8 A and BF8 B. The `0x7c` witnesses
   distinguish finite A from infinite B.
 - `rdna_wmma_f32_bf8_fp8_cases.h`: BF8 A and FP8 B. The `0x7c` witnesses
@@ -254,30 +285,19 @@ ABS before NEG to the tied accumulator, as in the dense WMMA model. This does
 not establish an internal hardware ordering. These extra encoding observations
 are excluded from supported-operand counts. Each qualified header retains six
 such operands,
-using destination v24 and MODE `0xf0` at both wave widths. Raw pairs and code
-objects are retained in the per-opcode directories named below.
+using destination v24 and MODE `0xf0` at both wave widths. Separate archived
+qualification covers 192 additional raw C-bit captures per opcode, including
+clamp combinations, with zero decoded replay mismatches in both execution settings.
 
 Qualified per-opcode headers:
 
 - `rdna_swmmac_f32_f16_cases.h`: `V_SWMMAC_F32_16X16X32_F16`.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op80`. The 192 additional raw C-bit
-  captures in `float-flags-op80`, including clamp combinations, also match
-  decoded replay in both execution settings.
 - `rdna_swmmac_f32_bf16_cases.h`: `V_SWMMAC_F32_16X16X32_BF16`.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op81`. The 192 additional raw C-bit
-  captures in `float-flags-op81`, including clamp combinations, also match
-  decoded replay in both execution settings.
 - `rdna_swmmac_f16_f16_cases.h`: `V_SWMMAC_F16_16X16X32_F16`.
   The model rounds each step directly to F16, including its inferred handling
   of F16 overflow mode.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op82`. The 192 additional raw C-bit
-  captures in `float-flags-op82`, including clamp combinations, also match
-  decoded replay in both execution settings.
 - `rdna_swmmac_bf16_bf16_cases.h`: `V_SWMMAC_BF16_16X16X32_BF16`.
   The model truncates each step's rounded F32 result to BF16.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op83`. The 192 additional raw C-bit
-  captures in `float-flags-op83`, including clamp combinations, also match
-  decoded replay in both execution settings.
 
 The retained corpus covers finite and raw matrices, MODE sweeps and shifted
 overlaps. These finite observations qualify the model but do not prove all
@@ -293,15 +313,16 @@ control. Compact matrices retain non-default MODE settings, and zero-product
 operands make subnormal C observable.
 Sparse C is tied to D. Fixtures also overlap D with the index VGPR using
 the actual output span for each width. They retain every legal index key and
-ordered, distinct two-of-four indices. Index slices use sixteen bits per lane
-in wave32 and eight in wave64. Compressed K is contiguous at both widths.
-Arithmetic uses two steps of eight compressed products, with the same native
-format alignment, zero and NaN rules as dense FP8/BF8 above. The ISA defines no
-source sign modifiers for this family. Separately, raw C ABS/NEG and clamp
-encodings in the per-opcode directories named below are observed to be ignored
-on gfx1201. They are
-labeled outside the supported operand scope and require `--include-unsupported`
-for replay. Raw A/B sign encodings have not been measured. Each qualified header
+ordered, distinct two-of-four indices. The best-effort model uses sixteen index
+bits per lane in wave32 and eight in wave64, with contiguous compressed K at
+both widths and two steps of eight compressed products. It uses the same
+inferred alignment, zero and NaN rules as the dense FP8/BF8 model above. The ISA
+defines no source sign modifiers for this family. Separate archived local
+gfx1201 captures returned unchanged outputs for raw C ABS/NEG and clamp
+encodings: all 16 flag batches per opcode match decoded replay in both execution
+settings with the model ignoring those bits. These observations are
+outside the supported operand scope. Raw A/B sign encodings have not been
+measured. Each qualified header
 also retains raw C-bit witnesses at destination v24 and MODE `0xf0`, with zero
 and nonzero products. The latter distinguish ignored modifiers from a missing
 destination write. Uniform special-value records retain
@@ -312,37 +333,21 @@ Qualified per-opcode headers:
 
 - `rdna_swmmac_f32_fp8_fp8_cases.h`: `V_SWMMAC_F32_16X16X32_FP8_FP8`;
   both factors are FP8, with no infinities.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op87` and
-  `nonzero-sparse-c-bit-fixtures-op87`. All 16 raw flag batches in
-  `float-flags-op87`, including clamp combinations, also match decoded replay
-  in both execution settings.
 - `rdna_swmmac_f32_fp8_bf8_cases.h`: `V_SWMMAC_F32_16X16X32_FP8_BF8`;
   A is FP8 and B is BF8.
   Twelve nonuniform operand records distinguish infinities within and across
   eight-product steps, with quiet/signaling NaN or zero C. They patch B at
   `factor_base` 8 using `factor_groups`.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op88` and
-  `nonzero-sparse-c-bit-fixtures-op88`. All 16 raw flag batches in
-  `float-flags-op88`, including clamp combinations, also match decoded replay
-  in both execution settings.
 - `rdna_swmmac_f32_bf8_fp8_cases.h`: `V_SWMMAC_F32_16X16X32_BF8_FP8`;
   A is BF8 and B is FP8.
   Twelve nonuniform operand records distinguish infinities within and across
   eight-product steps, with quiet/signaling NaN or zero C. They patch A at
   `factor_base` 0 using `factor_groups`.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op89` and
-  `nonzero-sparse-c-bit-fixtures-op89`. All 16 raw flag batches in
-  `float-flags-op89`, including clamp combinations, also match decoded replay
-  in both execution settings.
 - `rdna_swmmac_f32_bf8_bf8_cases.h`: `V_SWMMAC_F32_16X16X32_BF8_BF8`;
   both factors are BF8.
   Twenty-four nonuniform operand records distinguish infinities within and across
   eight-product steps, with quiet/signaling NaN or zero C. They patch A or B at
   `factor_base` 0 or 8 using `factor_groups`.
-  Extra C-bit pairs: `sparse-c-bit-fixtures-op90` and
-  `nonzero-sparse-c-bit-fixtures-op90`. All 16 raw flag batches in
-  `float-flags-op90`, including clamp combinations, also match decoded replay
-  in both execution settings.
 
 The retained corpus covers finite and raw matrices, MODE sweeps and shifted
 overlaps. Larger local sweeps outside the compact headers retain all 65,536 raw
@@ -350,3 +355,86 @@ byte pairs per format in `results/fp8-pairs-op*`, plus cancellation/alignment
 witnesses in `results/float-cancellation-op*`. The pair sweep uses 256 matrices,
 each testing the Cartesian product of 16 A bytes and 16 B bytes. These finite
 observations qualify the model but do not prove all possible matrix inputs.
+
+## F16/BF16 WMMA captures
+
+The per-opcode fixtures below were captured on W7900/gfx1100 and R9700/gfx1201
+on 2026-10-10 using TheRock 10.1.0a20260822, for wave32 and wave64. They use
+the same seed, raw/finite input patterns and all-register decoded comparison
+described above. Destinations v0 and v8 directly overlap A and B; v24 is a
+control. Compact matrices retain non-default MODE settings, and zero-product
+operands probe subnormal C. The observations below distinguish output formats.
+These observations are consistent with the existing GFX11 eight-DOT2-step and
+GFX12 four-DOT4-step models. The per-opcode decoded fixtures supplement the
+older DOT/WMMA arithmetic fixtures listed above; both corpora remain regression
+coverage when the model changes. Operand records cover every supported
+source modifier. Inline 0, 0.5 and integer -1 witnesses retain constant-C raw
+results.
+
+Qualified per-opcode headers:
+
+- `rdna_wmma_f32_f16_cases.h`: `V_WMMA_F32_16X16X16_F16`.
+  The recorded zero-product F32 subnormal C flushes on gfx1100 and survives
+  on gfx1201.
+  Separate archived CLAMP observations are outside supported operand forms
+  and match decoded replay in both execution settings.
+  The gfx1100 CLAMP captures also use a noncanonical high selector; they are
+  retained as adjacent observations and excluded from supported coverage.
+- `rdna_wmma_f32_bf16_cases.h`: `V_WMMA_F32_16X16X16_BF16`.
+  The recorded zero-product F32 subnormal C flushes on gfx1100 and survives
+  on gfx1201.
+  Uniform factors have the same numerical values as the F16 witnesses, with
+  distinct BF16 bit patterns; both operand and matrix records distinguish the
+  formats. Four additional matrices bound factor exponents from -6 through 3
+  so finite accumulation and the C boundary words remain observable. These
+  use `bounded_bf16` and retain the full-range overflow witnesses as well.
+  Separate archived C=0 controls demonstrate sensitivity to the accumulator.
+  Separate archived CLAMP observations are outside supported operand forms
+  and match decoded replay in both execution settings.
+  The gfx1100 CLAMP captures also use a noncanonical high selector; they are
+  retained as adjacent observations and excluded from supported coverage.
+- `rdna_wmma_f16_f16_cases.h`: `V_WMMA_F16_16X16X16_F16`;
+  operand witnesses include both RDNA3 packed destination half selections.
+  The model narrows packed output after every inferred arithmetic step.
+  The full-range finite
+  matrices retain F32-shaped C/D words and primarily qualify overflow and layout;
+  the finite operand records below supply evidence for narrowing and packed
+  accumulation. Zero-product F16 subnormal C survives in the selected output
+  halves on gfx1100 and gfx1201 for the three retained MODE settings.
+  Forty-eight finite nonuniform operand records pair nonzero C with C=0, using
+  four factor patterns at `factor_base` 0. Each of the eight `factor_groups` words
+  repeats across sixteen consecutive lanes in register-major order, patching
+  128 lane words. Groups repeat within each RDNA3 register to preserve input
+  replication. These records cover gfx1100 and gfx1201 at both wave widths,
+  including both RDNA3 destination halves. Sixteen additional RDNA3 high-half matrix
+  records cross raw/finite inputs with v0/v8 overlaps and non-default MODE,
+  including FP16_OVFL. Six high-half zero-product records cover the same three
+  MODE settings as their low-half counterparts.
+  Separate archived CLAMP observations are outside supported operand forms
+  and match decoded replay in both execution settings.
+  The gfx1100 CLAMP captures also use a noncanonical high selector; they are
+  retained as adjacent observations and excluded from supported coverage.
+- `rdna_wmma_bf16_bf16_cases.h`: `V_WMMA_BF16_16X16X16_BF16`;
+  operand witnesses include both RDNA3 packed destination half selections.
+  The model narrows packed output after every inferred arithmetic step.
+  Zero-product BF16 subnormal C flushes on gfx1100 and survives on gfx1201
+  in the selected output halves for all three retained MODE settings.
+  Full-range matrices retain F32-shaped C/D words. Six records set
+  `bounded_bf16`, selecting bounded factors and packed BF16 C/D values to keep
+  finite accumulation observable. Four records, one per architecture and wave
+  width, have separate archived physical C=0 controls. Two RDNA3 high-half
+  counterparts cover destination placement and
+  preservation. The C halves are equal in these matrices; uniform operand
+  records with distinct C halves qualify which half is read.
+  Eighteen high-half RDNA3 matrices and six zero-product operand records
+  cross that selection with MODE, raw/finite inputs
+  and destination overlaps. These are counterparts of all retained low-half
+  RDNA3 matrix and subnormal-C cases.
+  Separate archived CLAMP observations are outside supported operand forms
+  and match decoded replay in both execution settings.
+  The gfx1100 CLAMP captures also use a noncanonical high selector; they are
+  retained as adjacent observations and excluded from supported coverage.
+
+The retained corpus covers finite and raw matrices, MODE
+sweeps and shifted overlaps, plus every inline C selector. These finite observations
+qualify the model but do not prove all possible matrix inputs.

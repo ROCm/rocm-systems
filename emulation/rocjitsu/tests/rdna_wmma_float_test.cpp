@@ -15,10 +15,15 @@
 #include "fixtures/float_dot/rdna_swmmac_f32_f16_cases.h"
 #include "fixtures/float_dot/rdna_swmmac_f32_fp8_bf8_cases.h"
 #include "fixtures/float_dot/rdna_swmmac_f32_fp8_fp8_cases.h"
+#include "fixtures/float_dot/rdna_wmma_bf16_bf16_cases.h"
+#include "fixtures/float_dot/rdna_wmma_f16_f16_cases.h"
+#include "fixtures/float_dot/rdna_wmma_f32_bf16_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_bf8_bf8_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_bf8_fp8_cases.h"
+#include "fixtures/float_dot/rdna_wmma_f32_f16_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_fp8_bf8_cases.h"
 #include "fixtures/float_dot/rdna_wmma_f32_fp8_fp8_cases.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -52,7 +57,12 @@ struct WmmaFloatShape {
   std::span<const RdnaWmmaFloatOperandCase> operands;
 };
 
-constexpr std::array<WmmaFloatShape, 12> kWmmaFloatShapes{{
+static_assert(rdna3::kVWmmaF3216x16x16F16Vop3p == rdna4::kVWmmaF3216x16x16F16Vop3p);
+static_assert(rdna3::kVWmmaF3216x16x16Bf16Vop3p == rdna4::kVWmmaF3216x16x16Bf16Vop3p);
+static_assert(rdna3::kVWmmaF1616x16x16F16Vop3p == rdna4::kVWmmaF1616x16x16F16Vop3p);
+static_assert(rdna3::kVWmmaBf1616x16x16Bf16Vop3p == rdna4::kVWmmaBf1616x16x16Bf16Vop3p);
+
+constexpr std::array<WmmaFloatShape, 16> kWmmaFloatShapes{{
     {rdna4::kVWmmaF3216x16x16Fp8Fp8Vop3p, "v_wmma_f32_16x16x16_fp8_fp8", 8, false, false, false,
      kRdnaWmmaF32Fp8Fp8Matrices, kRdnaWmmaF32Fp8Fp8Operands},
     {rdna4::kVWmmaF3216x16x16Fp8Bf8Vop3p, "v_wmma_f32_16x16x16_fp8_bf8", 8, false, true, false,
@@ -61,6 +71,14 @@ constexpr std::array<WmmaFloatShape, 12> kWmmaFloatShapes{{
      kRdnaWmmaF32Bf8Fp8Matrices, kRdnaWmmaF32Bf8Fp8Operands},
     {rdna4::kVWmmaF3216x16x16Bf8Bf8Vop3p, "v_wmma_f32_16x16x16_bf8_bf8", 8, true, true, false,
      kRdnaWmmaF32Bf8Bf8Matrices, kRdnaWmmaF32Bf8Bf8Operands},
+    {rdna4::kVWmmaF3216x16x16F16Vop3p, "v_wmma_f32_16x16x16_f16", 16, false, false, false,
+     kRdnaWmmaF32F16Matrices, kRdnaWmmaF32F16Operands},
+    {rdna4::kVWmmaF3216x16x16Bf16Vop3p, "v_wmma_f32_16x16x16_bf16", 16, true, true, false,
+     kRdnaWmmaF32Bf16Matrices, kRdnaWmmaF32Bf16Operands},
+    {rdna4::kVWmmaF1616x16x16F16Vop3p, "v_wmma_f16_16x16x16_f16", 16, false, false, true,
+     kRdnaWmmaF16F16Matrices, kRdnaWmmaF16F16Operands},
+    {rdna4::kVWmmaBf1616x16x16Bf16Vop3p, "v_wmma_bf16_16x16x16_bf16", 16, true, true, true,
+     kRdnaWmmaBf16Bf16Matrices, kRdnaWmmaBf16Bf16Operands},
     {rdna4::kVSwmmacF3216x16x32F16Vop3p, "v_swmmac_f32_16x16x32_f16", 16, false, false, false,
      kRdnaSwmmacF32F16Matrices, kRdnaSwmmacF32F16Operands},
     {rdna4::kVSwmmacF3216x16x32Bf16Vop3p, "v_swmmac_f32_16x16x32_bf16", 16, true, true, false,
@@ -80,7 +98,7 @@ constexpr std::array<WmmaFloatShape, 12> kWmmaFloatShapes{{
 }};
 
 struct WmmaFloatCase {
-  bool gfx12;
+  rj_code_arch_t arch;
   uint32_t width;
   bool scalar;
   WmmaFloatShape shape;
@@ -90,14 +108,14 @@ class RdnaWmmaFloat : public testing::TestWithParam<WmmaFloatCase> {
 protected:
   void SetUp() override {
     shape = GetParam().shape;
-    gfx12 = GetParam().gfx12;
+    gfx12 = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4;
     width = GetParam().width;
     scalar = GetParam().scalar;
     old_scalar = util::force_scalar();
     util::set_force_scalar_for_testing(scalar);
     cache.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = gfx12 ? ROCJITSU_CODE_ARCH_RDNA4 : ROCJITSU_CODE_ARCH_RDNA3;
+    cfg.arch = GetParam().arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
@@ -132,9 +150,21 @@ protected:
         EXPECT_EQ(cu->read_vgpr(base + reg, lane), expected[reg * width + lane])
             << "reg=" << reg << " lane=" << lane;
   }
-  void matrix_input(uint32_t rng, bool finite) {
+  void matrix_input(uint32_t rng, bool finite, bool bounded_bf16) {
+    if (bounded_bf16) {
+      ASSERT_TRUE(finite);
+      ASSERT_EQ(shape.input_bits, 16u);
+      ASSERT_TRUE(shape.a_bfloat && shape.b_bfloat);
+    }
+    // Full-range packed matrices keep F32-shaped C/D for overflow and layout.
+    // Packed-C witnesses use F16 operand cases or bounded BF16 matrices.
     constexpr std::array<uint32_t, 8> accumulators{
         0, 1, 0x80000000u, 0x3f800001u, 0xbf800001u, 0x43800001u, 0xc3800001u, 0x80000001u};
+    // BF16 C boundary values repeat across both packed halves.
+    constexpr std::array<uint32_t, 8> packed_bf16_accumulators{
+        0,           0x00010001u, 0x80008000u, 0x3f813f81u,
+        0xbf81bf81u, 0x43814381u, 0xc381c381u, 0x80018001u};
+    const auto &c_values = bounded_bf16 && shape.packed ? packed_bf16_accumulators : accumulators;
     constexpr std::array<uint32_t, 6> index_pairs{4, 8, 12, 9, 13, 14};
     const uint32_t bits = shape.input_bits;
     for (uint32_t reg = 0; reg < 33; ++reg)
@@ -151,10 +181,13 @@ protected:
             const uint32_t part = (rng >> shift) & ((1u << bits) - 1);
             const uint32_t sign = part & (1u << (bits - 1));
             const uint32_t magnitude = part & ((1u << (bits - 1)) - 1);
-            value |= (sign | (magnitude % (max_finite + 1))) << shift;
+            // BF16 magnitudes 0x3c80..0x417f bound factor exponents to [-6, 3].
+            const uint32_t finite_magnitude =
+                bounded_bf16 ? 0x3c80u + magnitude % 0x500u : magnitude % (max_finite + 1);
+            value |= (sign | finite_magnitude) << shift;
           }
         } else if (finite && reg >= 16 && reg < 32)
-          value = accumulators[(rng >> 24) & 7];
+          value = c_values[(rng >> 24) & 7];
         if (reg == 32) {
           value = 0;
           for (uint32_t i = 0; i < 8; ++i)
@@ -187,8 +220,9 @@ TEST_P(RdnaWmmaFloat, CapturedMatrices) {
     if (fixture.gfx12 != gfx12 || fixture.width != width)
       continue;
     SCOPED_TRACE(testing::Message() << "seed=" << fixture.seed << " finite=" << fixture.finite
+                                    << " bounded_bf16=" << fixture.bounded_bf16
                                     << " word0=" << fixture.code[0] << " mode=" << fixture.mode);
-    matrix_input(fixture.seed, fixture.finite);
+    ASSERT_NO_FATAL_FAILURE(matrix_input(fixture.seed, fixture.finite, fixture.bounded_bf16));
     expected = input;
     const uint32_t dst = fixture.code[0] & 255;
     ASSERT_LE(fixture.expected_words, fixture.expected.size());
@@ -236,19 +270,24 @@ TEST_P(RdnaWmmaFloat, CapturedOperands) {
 std::vector<WmmaFloatCase> rdna_wmma_float_cases() {
   std::vector<WmmaFloatCase> result;
   for (const auto &shape : kWmmaFloatShapes)
-    for (bool gfx12 : {false, true})
+    for (rj_code_arch_t arch :
+         {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
       for (uint32_t width : {32u, 64u})
         for (bool scalar : {false, true})
-          if (std::any_of(shape.matrices.begin(), shape.matrices.end(),
-                          [&](const auto &f) { return f.gfx12 == gfx12 && f.width == width; }))
-            result.push_back({gfx12, width, scalar, shape});
+          if (std::any_of(shape.matrices.begin(), shape.matrices.end(), [&](const auto &f) {
+                return f.gfx12 == (arch == ROCJITSU_CODE_ARCH_RDNA4) && f.width == width;
+              }))
+            result.push_back({arch, width, scalar, shape});
   return result;
 }
 
 std::string rdna_wmma_float_case_name(const testing::TestParamInfo<WmmaFloatCase> &info) {
-  const auto &[gfx12, width, scalar, shape] = info.param;
-  return std::string(shape.mnemonic) + (gfx12 ? "Gfx12" : "Gfx11") + "Wave" +
-         std::to_string(width) + (scalar ? "Scalar" : "Default");
+  const auto &[arch, width, scalar, shape] = info.param;
+  const char *arch_name = arch == ROCJITSU_CODE_ARCH_RDNA4     ? "Rdna4"
+                          : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? "Rdna35"
+                                                               : "Rdna3";
+  return std::string(shape.mnemonic) + arch_name + "Wave" + std::to_string(width) +
+         (scalar ? "Scalar" : "Default");
 }
 
 INSTANTIATE_TEST_SUITE_P(HardwareWidthsAndPaths, RdnaWmmaFloat,

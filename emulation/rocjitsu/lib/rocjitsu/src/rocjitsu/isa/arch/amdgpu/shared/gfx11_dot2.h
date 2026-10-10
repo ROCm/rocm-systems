@@ -4,7 +4,12 @@
 #pragma once
 
 /// @file gfx11_dot2.h
-/// @brief Hardware-characterized GFX11 DOT2 arithmetic with F32 or packed outputs.
+/// @brief Best-effort GFX11 DOT2 arithmetic inferred from local observations.
+/// @details Based solely on local gfx1100 input/output captures. The grouping,
+/// alignment, rounding and precedence rules describe this simulator model, not
+/// known hardware internals or a vendor specification. Matching saved outputs
+/// does not guarantee untested inputs, flags, modes or devices. See
+/// tests/fixtures/float_dot/README.md for capture provenance and scope.
 
 #include "dot_packed16.h"
 
@@ -90,8 +95,9 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
 }
 } // namespace gfx11_dot2_detail
 
-/// @brief GFX11 DOT2 arithmetic with F32 or packed outputs, characterized on gfx1100.
-/// @details Used by VOP3P DOT2, VOP2/VOPD DOT2ACC and F32/packed-output WMMA. See
+/// @brief Best-effort GFX11 DOT2 model with F32 or packed outputs.
+/// @details Inferred solely from local gfx1100 input/output observations. Used
+/// by VOP3P DOT2, VOP2/VOPD DOT2ACC and F32/packed-output WMMA. See
 /// https://github.com/ROCm/rocm-systems/issues/12056 for the finite arithmetic
 /// model. In S2's sign frame an opposing term contributes ~m, not -m, after
 /// truncation onto the alignment grid. In particular, signed zeros matter.
