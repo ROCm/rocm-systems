@@ -1436,6 +1436,7 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_MultiSegmentFusedSignalsLastSegment) {
 }
 
 // Unfused SDMA-path PutValue: a hit lands, marks dirty and quiets; a dst resolve miss drops the value and skips quiet.
+// A hit fences in fenceBeforeSignal and again in signalPeer; a miss issued no SDMA, so only signalPeer fences.
 TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaPathSignalQuietsOnlyOnHit) {
   constexpr uint64_t kVal = 0x1122334455667788ULL;
   for (const bool mapDst : {true, false}) {
@@ -1447,7 +1448,7 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaPathSignalQuietsOnlyOnHit) {
     EXPECT_EQ(env.dirty.download(), mapDst ? kPeer1DirtyBit : 0ULL);
     EXPECT_EQ(env.signals.download(), 1ULL);
     EXPECT_EQ(readQuietCount(), mapDst ? 1ULL : 0ULL);
-    EXPECT_EQ(readThreadfenceCount(), 1ULL);
+    EXPECT_EQ(readThreadfenceCount(), mapDst ? 2ULL : 1ULL);
   }
 }
 
