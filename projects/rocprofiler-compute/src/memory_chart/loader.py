@@ -150,8 +150,14 @@ def layout_files() -> list[Path]:
 
 
 def load_layout(path: Path) -> Layout:
-    """Read and resolve a layout file; a malformed file is an error."""
-    layout = _resolve(path, json.loads(path.read_text(encoding="utf-8")))
+    """Read and resolve a layout file; a missing or malformed file is an error."""
+    try:
+        layout_json = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:  # ValueError covers invalid JSON
+        _fail(path, f"cannot read the layout: {error}")
+    if not isinstance(layout_json, dict):
+        _fail(path, "the layout must be a JSON object")
+    layout = _resolve(path, layout_json)
     _check_references(layout)
     return layout
 
