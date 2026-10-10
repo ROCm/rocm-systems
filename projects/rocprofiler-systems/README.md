@@ -16,6 +16,18 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 The documentation source files reside in the [`/docs`](/docs) folder of this repository. For information on contributing to the documentation, see
 [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html)
 
+### Quick start
+
+```bash
+rocsys -- ./app
+rocsys profile -- ./app
+```
+
+`rocsys` is the unified command-line entry point. The default (`rocsys -- ./app`
+or `rocsys profile -- ./app`) collects a full trace profile. Use
+`rocsys instrument` for runtime instrumentation and `rocsys rewrite` for
+binary rewrite. Existing `rocprof-sys-*` binaries are unchanged.
+
 ### Data collection modes
 
 - Dynamic instrumentation

@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 import re
 import pytest
-import os
 import shutil
 from conftest import RocprofsysTest
+from rocprofsys.commands import get_ls_command
 
 pytestmark = [pytest.mark.rocprof_binary]
 
@@ -165,17 +165,6 @@ def validate_format_consistency(txt_vars: set[str], json_paths: set[str]) -> lis
 # ============================================================================
 # Helper functions
 # ============================================================================
-
-
-def get_ls_command() -> tuple[str, list[str]]:
-    """Get ls binary name and args (handles RedHat coreutils wrapper).
-
-    Returns:
-        Tuple of (binary_name, args_list)
-    """
-    if os.path.exists("/usr/bin/coreutils"):
-        return "coreutils", ["--coreutils-prog=ls"]
-    return "ls", []
 
 
 # ============================================================================

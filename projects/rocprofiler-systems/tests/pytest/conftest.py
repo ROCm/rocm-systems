@@ -335,6 +335,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "tool_runner",
         "cli_help",
+        "rocsys",
         "hpc",
         "hip",
         "scratch_memory",
@@ -498,11 +499,13 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = overflow_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "attach" in item.keywords:
+        # Use the marker, not the keyword. A parametrize id such as "python"
+        # or "attach" is also a keyword and must not skip help-forward tests.
+        if item.get_closest_marker("attach"):
             _msg = attach_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "python" in item.keywords:
+        if item.get_closest_marker("python"):
             _msg = python_base_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
