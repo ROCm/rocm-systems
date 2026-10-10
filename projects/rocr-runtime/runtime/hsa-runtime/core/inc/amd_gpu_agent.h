@@ -1086,6 +1086,9 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
+  //!< True when SDMA copies go through the native WDDM SDMA user queue.
+  bool sdma_native_;
+
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
   std::atomic<uint32_t> sdma_user_queue_rr_index_{0};

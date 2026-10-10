@@ -261,6 +261,32 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   queue_->RingDoorbell(value);
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetSdmaUserQueueInfo(HSA_QUEUEID QueueId,
+                                                   HsaSdmaUserQueueInfo *Info) {
+  CHECK_DXG_OPEN();
+
+  auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
+  if (!queue_ || !Info)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  memset(Info, 0, sizeof(*Info));
+
+  // Only a native SDMA user queue has a ring epilogue; every other queue kind (compute,
+  // or SDMA on the legacy SWS translation thread) reports zero, which leaves the
+  // producer's reservation arithmetic a no-op.
+  if (queue_->IsNativeSdma())
+    Info->EpilogueBytes = wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes;
+
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSdmaUserQueueConfig(HsaSdmaUserQueueConfig Config) {
+  dxg_runtime->sdma_user_queue_enabled_ = Config.ui32.NativeUserQueue != 0;
+  dxg_runtime->sdma_user_queue_gpu_poll_ = Config.ui32.GpuPoll != 0;
   return HSAKMT_STATUS_SUCCESS;
 }
 

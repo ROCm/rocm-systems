@@ -97,7 +97,7 @@ template <bool useGCR, bool scopeFields>
 const uint32_t BlitSdma<useGCR, scopeFields>::poll_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
 
 template <bool useGCR, bool scopeFields>
-const uint32_t BlitSdma<useGCR, scopeFields>::flush_command_size_ = sizeof(SDMA_PKT_POLL_REGMEM);
+const uint32_t BlitSdma<useGCR, scopeFields>::flush_command_size_ = sizeof(SDMA_PKT_HDP_FLUSH);
 
 template <bool useGCR, bool scopeFields>
 const uint32_t BlitSdma<useGCR, scopeFields>::atomic_command_size_ = sizeof(SDMA_PKT_ATOMIC);
@@ -139,6 +139,7 @@ BlitSdma<useGCR, scopeFields>::BlitSdma()
       is_dxg_(false),
       enable_sdma_hdp_flush_(false),
       sw_poll_workaround_(false),
+      sdma_epilogue_bytes_(0),
       queue_wptr_(nullptr),
       queue_rptr_(nullptr),
       queue_doorbell_(nullptr),
@@ -258,6 +259,16 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   is_dxg_ = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
   needs_kmt_doorbell_ = is_dxg_ ||
                         core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF();
+
+  // libhsakmt appends a progress-fence epilogue on every doorbell, so every reservation must include it.
+  if (core::Runtime::runtime_singleton_->flag().enable_sdma_user_queue() &&
+      HSAKMT_CALL(hsaKmtGetSdmaUserQueueInfo) != nullptr) {
+    HsaSdmaUserQueueInfo sdma_info = {};
+    if (HSAKMT_CALL(hsaKmtGetSdmaUserQueueInfo(queue_resource_.QueueId, &sdma_info)) ==
+        HSAKMT_STATUS_SUCCESS) {
+      sdma_epilogue_bytes_ = sdma_info.EpilogueBytes;
+    }
+  }
   sdma_wait_idle_ = core::Runtime::runtime_singleton_->flag().sdma_wait_idle();
   enable_sdma_hdp_flush_ = core::Runtime::runtime_singleton_->flag().enable_sdma_hdp_flush();
 
@@ -1954,8 +1965,12 @@ template <bool useGCR, bool scopeFields> hsa_status_t BlitSdma<useGCR, scopeFiel
 
 template <bool useGCR, bool scopeFields>
 char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index) {
+  // Reserve the caller's packets plus the FENCE epilogue libhsakmt appends on the doorbell
+  // (0 on non-native paths), so the write index stays in step with the submitted wptr and the
+  // epilogue cannot straddle the ring end.
+  const uint32_t reserve_size = cmd_size + sdma_epilogue_bytes_;
   // Ring is full when all but one byte is written.
-  if (cmd_size >= kQueueSize) {
+  if (reserve_size >= kQueueSize) {
     return nullptr;
   }
 
@@ -1965,14 +1980,14 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
     // Check whether a linear region of the requested size is available.
     // If == cmd_size: region is at beginning of ring.
     // If < cmd_size: region intersects end of ring, pad with no-ops and retry.
-    if (WrapIntoRing(curr_index + cmd_size) < cmd_size) {
+    if (WrapIntoRing(curr_index + reserve_size) < reserve_size) {
       PadRingToEnd(curr_index);
       curr_index = atomic::Load(&cached_reserve_index_, std::memory_order_acquire);
       continue;
     }
 
     // Check whether the engine has finished using this region.
-    const uint64_t new_index = curr_index + cmd_size;
+    const uint64_t new_index = curr_index + reserve_size;
 
     if (CanWriteUpto(new_index) == false) {
       // Wait for read index to move and try again.
@@ -2049,12 +2064,15 @@ void BlitSdma<useGCR, scopeFields>::UpdateWriteAndDoorbellRegister(uint64_t curr
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size) {
-  if (cmd_size > kQueueSize) {
+  // Advance by packets + reserved epilogue so the doorbell wptr matches the reservation;
+  // libhsakmt fills [end-epilogue, end) with the progress FENCE.
+  const uint32_t reserve_size = cmd_size + sdma_epilogue_bytes_;
+  if (reserve_size > kQueueSize) {
     assert(false && "cmd_addr is outside the queue buffer range");
     return;
   }
 
-  UpdateWriteAndDoorbellRegister(curr_index, curr_index + cmd_size);
+  UpdateWriteAndDoorbellRegister(curr_index, curr_index + reserve_size);
 }
 
 template <bool useGCR, bool scopeFields>
@@ -2135,7 +2153,7 @@ void BlitSdma<useGCR, scopeFields>::BuildFenceCommand(char* fence_command_addr, 
     packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(fence);
     packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(fence);
 
-    packet_addr->DATA_UNION.data = fence_value;\
+    packet_addr->DATA_UNION.data = fence_value;
   }
 }
 
@@ -2649,6 +2667,7 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
   packet_addr->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   packet_addr->HEADER_UNION.mem_poll = 1;
   packet_addr->HEADER_UNION.func = 0x3;  // IsEqual.
+  packet_addr->HEADER_UNION.hdp_flush = enable_sdma_hdp_flush_ && hdp_flush_support_ ? 1 : 0;
   packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(addr);
   packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
 
@@ -2987,7 +3006,7 @@ template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::Bui
 
 template <bool useGCR, bool scopeFields> void BlitSdma<useGCR, scopeFields>::BuildHdpFlushCommand(char* cmd_addr) {
   assert(cmd_addr != NULL);
-  SDMA_PKT_POLL_REGMEM* addr = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(cmd_addr);
+  SDMA_PKT_HDP_FLUSH* addr = reinterpret_cast<SDMA_PKT_HDP_FLUSH*>(cmd_addr);
   memcpy(addr, &hdp_flush_cmd, flush_command_size_);
 }
 

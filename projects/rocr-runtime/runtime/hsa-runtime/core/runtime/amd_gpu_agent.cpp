@@ -124,6 +124,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
+      sdma_native_(core::Runtime::runtime_singleton_->flag().enable_sdma_user_queue()),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
@@ -889,7 +890,12 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
     case 11:
     case 12:
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
+        // DXG wraps SDMA packets in GCR itself, so useGCR=false either way. The native user
+        // queue bypasses that wrapping, so it needs explicit SDMA_MEMORY_SCOPE_SYS on writes
+        // to system memory (e.g. the completion-signal atomic) for the host CPU to see them;
+        // without it the host poll never observes the decrement.
+        sdma = sdma_native_ ? static_cast<BlitSdmaBase*>(new BlitSdmaV6())
+                            : static_cast<BlitSdmaBase*>(new BlitSdmaV4());
       } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
       } else {

@@ -71,6 +71,7 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
+
   // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
   // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
   // PM4 path.
@@ -82,10 +83,11 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
               kSchedulerIdCompute0, device_info_.compute_schedid);
      }
   }
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d sdma_queue=%d use_pm4_override=%" PRIu64
            " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
+           device_info_.hwsInfo.hwsMask.sdma_queue,
            (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
@@ -496,7 +498,8 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   return false;
 }
 
-bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debugger_data) {
+bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debugger_data,
+                               bool sdma_native) {
   void *priv_data;
   int priv_size;
 
@@ -504,12 +507,17 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debug
   if (ordinal < 0)
     return false;
 
+  // osQueueId is the scheduler ID of the engine this context runs on, which is what `engine`
+  // already holds (from GetSdmaEngine()/GetComputeEngine()).
+  int schedid = engine;
+
   priv_size = Wkmi::GetContextPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
+  // wkmi calls this the ROCr client id; it is what tags the context as a native SDMA queue.
   Wkmi::FillinContextPrivData(priv_data, SupportStateShadowingByCpFw(),
-                              device_info_.compute_schedid, debugger_data);
+                              schedid, debugger_data, sdma_native);
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -524,6 +532,8 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debug
   else
     args.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(engine, &device_info_);
 
+  pr_debug("CreateContext engine=%d ordinal=%d schedid=%d hws=%d sdma_native=%d\n",
+           engine, ordinal, schedid, (int)IsHwsEnabled(engine), (int)sdma_native);
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
@@ -890,7 +900,9 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 }
 
 bool WDDMDevice::CreateQueue(WDDMQueue* queue, uint64_t debugger_data) {
-  if (!CreateContext(queue->queue_engine, &queue->context, debugger_data)) return false;
+  // The KMD recognizes the SDMA ring from the ROCr client id.
+  if (!CreateContext(queue->queue_engine, &queue->context, debugger_data, queue->IsNativeSdma()))
+    return false;
 
   GpuMemory *gpu_mem = nullptr;
   if (queue->cmdbuf_addr == 0) {
@@ -1106,7 +1118,7 @@ void WDDMDevice::FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
 
 bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
-  int priv_size;
+  static const int priv_size = Wkmi::GetHwQueuePrivDataSize();
 
   // Allocate CWSR (Context Wave Save/Restore) region in system (GTT) memory.
   // Matches Linux: anonymous mmap + register_svm_range(alwaysMapped=true).
@@ -1136,8 +1148,6 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     FillCwsrHeader(cwsr_gpu_mem->CpuAddress(), ctx_save_restore_size,
                    debug_memory_size, num_xcc, queue->error_reason_, queue->error_event_id_);
   }
-
-  priv_size = Wkmi::GetHwQueuePrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
@@ -1146,13 +1156,15 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
   // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
   GpuMemory* queue_memory = queue->GetAmdQueueMemory();
-  D3DKMT_HANDLE resource = 0;
-  bool is_aql = false;
-  if (queue_memory != nullptr) {
-    resource = queue_memory->KmtHandle();
-    is_aql = IsAqlSupported();
+  D3DKMT_HANDLE resource = queue_memory ? queue_memory->KmtHandle() : 0;
+
+  Wkmi::HwQueueKind kind = Wkmi::kHwQueuePm4;
+  if (queue->IsNativeSdma()) {
+    kind = Wkmi::kHwQueueSdma;
+  } else if (queue_memory != nullptr && IsAqlSupported()) {
+    kind = Wkmi::kHwQueueAql;
   }
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, kind,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
       queue->cwsr_mem_handle_);
@@ -1165,7 +1177,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateHwQueue(&createHwQueue));
   if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+    pr_err("fail %x kind=%d\n", ret, (int)kind);
     free(priv_data);
     if (queue->cwsr_mem_ != nullptr) {
       delete GpuMemory::Convert(queue->cwsr_mem_);
@@ -1183,6 +1195,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   queue->queue = createHwQueue.hHwQueue;
   queue->syncobj = createHwQueue.hHwQueueProgressFence;
   queue->sync_addr = (uint64_t *)createHwQueue.HwQueueProgressFenceCPUVirtualAddress;
+  if (kind == Wkmi::kHwQueueSdma) {
+    queue->hwqueue_progress_fence_va_ = createHwQueue.HwQueueProgressFenceGPUVirtualAddress;
+  }
 
   return true;
 }
@@ -1211,9 +1226,7 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
 bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                                 uint64_t command_size, uint64_t fence_value) {
   void *priv_data;
-  int priv_size;
-
-  priv_size = Wkmi::GetSubmitPrivDataSize();
+  static const int priv_size = Wkmi::GetSubmitPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
@@ -1245,7 +1258,7 @@ bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
 #if defined(WIN32)
   pr_debug("set CU mask doorbell: %d -> %d\n", doorbell, cu_mask_count);
   // Fill private KMD data
-  int priv_size = Wkmi::GetCuMaskPrivDataSize();
+  static const int priv_size = Wkmi::GetCuMaskPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinCuMaskPrivData(priv_data, doorbell, cu_mask_count, queue_cu_mask);
@@ -1283,6 +1296,33 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
     return false;
   }
 #endif
+  return true;
+}
+
+// ================================================================================================
+bool WDDMDevice::SubmitToSdmaHwQueue(WDDMQueue* queue, uint64_t wptr_in_bytes) {
+  static const int priv_size = Wkmi::GetSdmaSubmitPrivDataSize();
+  void* priv_data = alloca(priv_size);
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinSdmaSubmitPrivData(priv_data, wptr_in_bytes);
+
+  // The ring's FENCE packet writes this same id to the progress-fence VA; they must agree
+  // for the OS fence to advance.
+  // fence_id was already incremented by RingDoorbell before appending the FENCE packet.
+  uint64_t fence_id = queue->hwqueue_fence_id_;
+
+  D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {
+      .hHwQueue = queue->queue,
+      .HwQueueProgressFenceId = fence_id,
+      .CommandBuffer = queue->cmdbuf_addr,
+      .CommandLength = static_cast<UINT>(wptr_in_bytes),
+      .PrivateDriverDataSize = static_cast<UINT>(priv_size),
+      .pPrivateDriverData = priv_data};
+  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommandToHwQueue(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("fail %lx\n", (long)ret);
+    return false;
+  }
   return true;
 }
 
