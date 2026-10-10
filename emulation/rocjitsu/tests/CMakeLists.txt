@@ -609,6 +609,7 @@ add_executable(
     ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
+    ds_gws_test.cpp
     l2_cache_test.cpp
     l2_maintenance_mutex_test.cpp
     l2_shard_epoch_test.cpp

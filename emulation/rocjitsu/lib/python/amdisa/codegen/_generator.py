@@ -415,6 +415,7 @@ class CodeGenerator:
         'ds_mskor': 'local',
         'ds_append_consume': 'local',
         'ds_barrier_arrive': 'local',
+        'ds_gws': 'local',
         'ds_read_addtid': 'local',
         'ds_write_addtid': 'local',
         'ds_read_tr_b16': 'local',
@@ -7842,6 +7843,11 @@ class CodeGenerator:
                 return gds_guard + self._gen_ds_append_consume(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_barrier_arrive(dst_ops, src_ops, sem)
 
+        if cls == 'ds_gws':
+            # GWS legitimately targets GDS, so (unlike the other DS classes) it
+            # must not be guarded against inst_.gds.
+            return self._gen_ds_gws(dst_ops, src_ops, sem)
+
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'
             is_bpermute = 'BPERMUTE' in sem.name.upper()
@@ -8341,6 +8347,7 @@ class CodeGenerator:
             )
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
+            or sem.semantic_class == 'ds_gws'
             or (
                 sem.semantic_class.startswith('ds_read_tr_')
                 and self.isa_spec.profile.ds_transpose_ignores_exec
@@ -9078,6 +9085,99 @@ class CodeGenerator:
             L.append('    std::memcpy(&d->store_data[lane * 8], &lo, 4);')
             L.append('    std::memcpy(&d->store_data[lane * 8 + 4], &hi, 4);')
             L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_gws(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
+
+        * Decode the 6-bit resource id as (M0[21:16] + offset0[5:0]) & 0x3f
+          (the hardware convention; it is not spelled out in the ISA XML).
+        * For init/barrier/sema_br (which carry one source VGPR), read the
+          count from the ADDR operand's first active lane, honoring the DS acc
+          bit so the AGPR bank is used when selected. sema_v/p/release_all
+          carry no operand.
+        * Route to the matching ComputeUnitCore GWS hook, then publish a
+          zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
+          increments and retires the lgkmcnt/GDS wait counter and plugins
+          observe the instruction (the structural accounting path).
+        * EXEC=0 handling is target-specific. On RDNA3/3.5 the count-carrying
+          operations (init/barrier/sema_br) execute even with EXEC=0, reading
+          their operand from lane 0 -- the lane-0 fallback documented in those
+          ISA manuals (section 13.4.2). Every other case (all ops on the older
+          targets, and the count-less sema_v/p/release_all) stays a pure
+          structural no-op when EXEC is zero, since no such rule is documented
+          for them and it must not be extrapolated silently.
+        """
+        op = sem.operation
+        has_count = op in ('init', 'barrier', 'sema_br')
+        # RDNA3/3.5 (ISA section 13.4.2) run the count-carrying GWS operations
+        # even when EXEC is zero, taking the operand from lane 0. No other target
+        # documents that rule, so they keep the EXEC-gated structural no-op.
+        exec_independent = has_count and self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+        rid_decl = (
+            'uint32_t rid = (((wf.m0() >> 16) & 0x3fu) + '
+            '(static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;'
+        )
+        L = []
+        L.append('  uint64_t exec = wf.exec();')
+        if exec_independent:
+            # No EXEC guard: the operation always takes effect, falling back to
+            # lane 0 when EXEC selects no active lane.
+            body_indent = '  '
+            L.append(f'  {rid_decl}')
+            L.append(
+                '  uint32_t lane = exec ? '
+                'static_cast<uint32_t>(std::countr_zero(exec)) : 0u;'
+            )
+            L.append('  auto &cu = wf.cu();')
+            L.append(
+                f'  uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+            )
+            L.append(
+                '  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+            )
+        else:
+            body_indent = '    '
+            L.append('  if (exec) {')
+            L.append(f'    {rid_decl}')
+            if has_count:
+                L.append(
+                    '    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));'
+                )
+                L.append('    auto &cu = wf.cu();')
+                L.append(
+                    f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+                )
+                L.append(
+                    '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+                )
+        if op == 'init':
+            L.append(f'{body_indent}wf.gws_init(rid, gws_count);')
+        elif op == 'barrier':
+            L.append(f'{body_indent}wf.gws_barrier_arrive(rid, gws_count);')
+        elif op == 'sema_br':
+            L.append(f'{body_indent}wf.gws_sema_br(rid, gws_count);')
+        elif op == 'sema_v':
+            L.append(f'{body_indent}wf.gws_sema_v(rid);')
+        elif op == 'sema_p':
+            L.append(f'{body_indent}wf.gws_sema_p(rid);')
+        elif op == 'sema_release_all':
+            L.append(f'{body_indent}wf.gws_sema_release_all(rid);')
+        else:
+            L.append(f'{body_indent}(void)rid; // {op} has no stateful effect')
+        if not exec_independent:
+            L.append('  }')
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+        )
+        L.append('  d->elem_size = 4;')
+        L.append('  d->num_elems = 0;')
+        L.append('  d->is_load = false;')
+        L.append('  d->lane_mask = 0;')
+        self._append_wait_counter_type(L, sem, 'ds_gws')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -10642,6 +10742,22 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = self._constructor_operand_type(inst_sem, opnd)
+                            # GWS carries its count in a DS data operand that, on
+                            # CDNA2/3, honors the acc bank bit (the execute path
+                            # already reads the AGPR). Promote the decoded operand
+                            # to VGPR-or-AGPR so disassembly and the source
+                            # register reference name the same register as
+                            # execution; _fold_acc_bank_selector then adds the
+                            # bank offset. Gated on the DS acc field so VGPR-only
+                            # ISAs keep the plain OPR_VGPR operand.
+                            if (
+                                inst_sem is not None
+                                and inst_sem.semantic_class == 'ds_gws'
+                                and opr_type == 'OPR_VGPR'
+                                and 'acc' in inst_field_names
+                                and 'OPR_VGPR_OR_ACCVGPR' in self.isa_spec.operand_types
+                            ):
+                                opr_type = 'OPR_VGPR_OR_ACCVGPR'
                             packed_16bit_source = (
                                 self._operand_uses_packed_16bit_source(
                                     enc.enc_name, opnd, reads_dst=reads_dst

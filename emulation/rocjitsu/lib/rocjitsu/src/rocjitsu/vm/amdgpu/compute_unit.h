@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
@@ -157,7 +158,7 @@ public:
     }
   };
 
-  ~ComputeUnitCore() override = default;
+  ~ComputeUnitCore() override;
   /// @brief Number of memory-wait hazards observed, including suppressed reports.
   uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
   /// @brief Number of replay-source hazards, including suppressed reports.
@@ -436,6 +437,34 @@ public:
     return *cluster_lds_multicast_engine_;
   }
 
+  /// @brief Share one reference-counted device-global GWS store across the CUs
+  /// that run a dispatch.
+  ///
+  /// @details GWS resources are device-global (see GwsDevice): the command
+  /// processor scatters a dispatch's workgroups across CUs -- and, under XCD
+  /// fan-out, across XCDs -- so every CU that can run a dispatch must share one
+  /// store for cross-CU wakeups and quiescence. The CU registers itself with the
+  /// store so its waves participate in shared wake and deadlock-escape. Holding
+  /// the shared_ptr guarantees the store outlives this CU, so ~ComputeUnitCore
+  /// can unregister safely even when the owning device tears its components down
+  /// in an arbitrary order. Passing nullptr restores this CU's private default
+  /// store (standalone use). This is the sole injection path; a CU with no
+  /// injected store uses its embedded default (default_gws_device_).
+  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+    GwsDevice *replacement = device ? device.get() : &default_gws_device_;
+    if (replacement == gws_device_) {
+      gws_device_owner_ = std::move(device);
+      return;
+    }
+    gws_device_->unregister_compute_unit(this);
+    gws_device_owner_ = std::move(device);
+    gws_device_ = replacement;
+    gws_device_->register_compute_unit(this);
+  }
+
+  /// @brief Return the device-global GWS store this CU participates in.
+  GwsDevice &gws_device() { return *gws_device_; }
+
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
@@ -459,6 +488,22 @@ public:
 
   /// @brief Leave the wave's currently joined named barrier.
   bool named_barrier_leave(Wavefront &wf);
+
+  // GWS hooks called by the generated DS execute bodies. These forward to the
+  // device-global GWS store this CU participates in; see GwsDevice (gws_device.h)
+  // for the authoritative scheduling policy.
+  /// @brief Seed a GWS resource's barrier count / semaphore credits.
+  void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Arrive at a GWS barrier (may park the wave).
+  void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Signal (V) a GWS semaphore.
+  void gws_sema_v(Wavefront &wf, uint32_t rid);
+  /// @brief Wait (P) on a GWS semaphore (may park the wave).
+  void gws_sema_p(Wavefront &wf, uint32_t rid);
+  /// @brief Bulk-signal (BR) a GWS semaphore by @p count credits.
+  void gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count);
+  /// @brief Release every wave parked on a GWS resource.
+  void gws_sema_release_all(Wavefront &wf, uint32_t rid);
 
   /// @brief Called by Wavefront::halt() to decrement the WG refcount.
   /// @details When the refcount reaches zero, all WFs in the WG have halted
@@ -1412,6 +1457,22 @@ protected:
   void notify_barrier_complete(std::span<Wavefront *> members);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
+  /// @brief CU-private fallback GWS store, used when no shared store is injected.
+  /// @details GWS state is device-global in hardware (see GwsDevice), so in
+  /// production every CU that can run a dispatch shares one injected store (via
+  /// set_gws_device). A standalone CU with no injected store falls back to this
+  /// embedded instance, so single-CU use needs no wiring. The active store reads
+  /// this CU's wfs_ / active_wgs_ / wave activity for shared wakeups and the
+  /// process-wide quiescence backstop, always on this CU's own thread, so
+  /// GwsDevice is a friend.
+  GwsDevice default_gws_device_;
+  /// @brief Pins an injected shared store so it outlives this CU (see
+  /// set_gws_device); null while the CU uses its private fallback.
+  std::shared_ptr<GwsDevice> gws_device_owner_;
+  /// @brief Active GWS store for this CU: the injected shared store when one is
+  /// wired, otherwise &default_gws_device_. Never null.
+  GwsDevice *gws_device_ = &default_gws_device_;
+
   uint64_t shared_aperture_base_ = 0;
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
@@ -1467,6 +1528,7 @@ protected:
 
   friend class CommandProcessor;
   friend class InstructionComputeUnitView;
+  friend class GwsDevice; // Shared GWS store scans this CU's waves for wake/quiescence.
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 

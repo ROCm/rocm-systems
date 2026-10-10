@@ -56,6 +56,23 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   cp_->add_l2_cache(l2_cache_);
   add_child(std::move(cp));
+
+  // Share one device-global GWS store across every CU of this XCD now that all
+  // shader engines and their CUs exist.
+  wire_gws_to_cus();
+}
+
+void Xcd::wire_gws_to_cus() {
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      compute_unit->set_gws_device(gws_device_);
+}
+
+void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
+  if (!store || store == gws_device_)
+    return;
+  gws_device_ = std::move(store);
+  wire_gws_to_cus();
 }
 
 void Xcd::set_l2_cache(L2Cache *l2) {
