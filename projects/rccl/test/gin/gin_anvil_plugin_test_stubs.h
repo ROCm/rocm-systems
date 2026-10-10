@@ -32,6 +32,10 @@ const std::vector<int>& GetLastIntraNodeAllGatherRanks();
 int GetLastIntraNodeAllGatherRank();
 int GetLastIntraNodeAllGatherNranks();
 int GetBootstrapAllGatherCalls();
+// Element size of the last bootstrapAllGather that was not sizeof(int).
+int GetLastWideAllGatherSize();
+// Non-int bootstrapAllGather calls whose buffer could not hold one slot per world rank.
+int GetWideAllGatherOverruns();
 int GetIntraNodeAllGatherCalls();
 const std::vector<int>& GetLastIntraNodeBarrierRanks();
 int GetLastIntraNodeBarrierRank();
