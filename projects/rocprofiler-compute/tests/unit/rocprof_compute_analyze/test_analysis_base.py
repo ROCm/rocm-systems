@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -176,3 +177,61 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
+
+
+@pytest.mark.parametrize(
+    "flag_kwargs, expected_trace",
+    [
+        pytest.param(
+            {
+                "list_torch_operators": True,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--torch-trace",
+            id="list_torch",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": True,
+                "torch_operator": None,
+                "triton_operator": None,
+            },
+            "--triton-trace",
+            id="list_triton",
+        ),
+        pytest.param(
+            {
+                "list_torch_operators": False,
+                "list_triton_operators": False,
+                "torch_operator": None,
+                "triton_operator": ["*matmul*"],
+            },
+            "--triton-trace",
+            id="triton_operator",
+        ),
+    ],
+)
+def test_sanitize_errors_when_operator_flag_without_trace(
+    tmp_path, monkeypatch, flag_kwargs, expected_trace
+):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(
+        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n"
+    )
+    mock_error = Mock(side_effect=SystemExit(1))
+    common.patch_console(monkeypatch, MODULE, "error", error=mock_error)
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(
+                tui=False,
+                path=[[str(workload)]],
+                **flag_kwargs,
+            ),
+            {},
+        ).sanitize()
+    assert "was not profiled" in mock_error.call_args.args[1]
+    assert expected_trace in mock_error.call_args.args[1]

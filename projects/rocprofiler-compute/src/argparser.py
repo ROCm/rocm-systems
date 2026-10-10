@@ -352,7 +352,8 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tRequires PyTorch 2.13 or 2.14."
+            "\t\t\tNative tracing on PyTorch 2.13/2.14 when the collector loads;\n"
+            "\t\t\totherwise a warning and TorchDispatchMode."
         ),
     )
     profile_group.add_argument(
@@ -550,8 +551,9 @@ Examples:
         feature_label="Triton trace",
         help=(
             "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
-            "\t\t\tUse when profiling Triton kernels, including those generated\n"
-            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tUse when profiling Triton kernels launched through Triton's\n"
+            "\t\t\tPython runtime. torch.compile / Inductor static launches are\n"
+            "\t\t\tnot covered; use --torch-trace.\n"
             "\t\t\tCan be combined with --torch-trace."
         ),
     )
@@ -724,16 +726,13 @@ Examples:
             "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
             "\t\t\tselect their kernels, and display metrics.\n"
             "\t\t\tWith no arguments, matches all operators (default: **).\n"
-            "\t\t\tExamples (operator hierarchy is /-separated):\n"
-            "\t\t\t  *relu               ends with relu\n"
-            "\t\t\t  *conv*              contains conv\n"
-            "\t\t\t  torch.nn.functional.relu   exact match\n"
-            "\t\t\t  */torch.nn.functional.relu two-level match\n"
-            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\t/ in patterns is the reconstructed call path.\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *relu*              contains relu\n"
+            "\t\t\t  */aten::addmm       addmm leaf on the reconstructed path\n"
             "\t\t\t  all  or  '*'        match every operator\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
-            "\t\t\t  --torch-operator */*conv2d */*relu\n"
+            "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
             "\t\t\tCombine with -k to intersect with kernel IDs."
         ),
     )

@@ -3,6 +3,7 @@
 
 import argparse
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -15,6 +16,7 @@ from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
+    _compute_selected_frameworks,
     _partition_warning_messages,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -98,7 +100,6 @@ def test_partition_warning_messages(
 # ---------------------------------------------------------------------------
 # sanitize() with --torch-trace
 # ---------------------------------------------------------------------------
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
     [
@@ -1226,3 +1227,30 @@ def test_run_profiling_native_tool_path(
         assert mocks.profile.called is expect_profile_called
     if expect_error is not None:
         assert mocks.console_error.called is expect_error
+
+
+def test_compute_selected_frameworks_unions_torch_and_triton_flags():
+    both_flags = _compute_selected_frameworks(
+        argparse.Namespace(torch_trace=True, triton_trace=True, ml_api_trace=False)
+    )
+    ml_api = _compute_selected_frameworks(
+        argparse.Namespace(torch_trace=False, triton_trace=False, ml_api_trace=True)
+    )
+    assert both_flags == {"torch", "triton"}
+    assert ml_api == both_flags
+
+
+@pytest.mark.parametrize(
+    "trace_flag",
+    [
+        pytest.param("torch_trace", id="torch"),
+        pytest.param("triton_trace", id="triton"),
+        pytest.param("ml_api_trace", id="ml_api"),
+    ],
+)
+def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, trace_flag):
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, attach_pid=12345, **{trace_flag: True})
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    with pytest.raises(SystemExit):
+        profiler.sanitize()

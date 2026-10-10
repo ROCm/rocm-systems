@@ -15,6 +15,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* `--torch-trace` emits one-level ROCTX markers (name, location, arguments, launcher-thread correlation) instead of a stacked ancestor path. The collector ships as one generic C++17 library with no PyTorch or Python build dependencies. PyTorch 2.13 and 2.14 use native tracing on every thread, including autograd workers; other versions or an unavailable collector warn and use `TorchDispatchMode`. Profile keeps the raw marker and counter CSVs.
+
+* `--triton-trace` no longer emits `|triton` ranges for `torch.compile` / Inductor fused kernels. Inductor now launches those kernels through PyTorch's static launcher, not Triton's Python runtime. Use `--torch-trace`; the GPU kernels nest under `torch.compile.<fn>`. `--triton-trace` still marks `@triton.jit` launches.
+* Replaced `sample/torch_compile_triton.py` with `sample/torch_triton_net.py` (eager PyTorch plus a `@triton.jit` kernel in one process).
+
+* Experimental ML API analyze no longer writes `ml_api_trace/consolidated.csv`.
+
+* Workloads profiled with the previous stacked Function labels (`:#` or `@`) make `--list-*-operators` / `--*-operator` exit. Re-profile with current `--torch-trace` or `--triton-trace`.
+
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
 
 * All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
@@ -34,6 +43,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
+
+* `--torch-trace` tensor wraps no longer replace `UninitializedParameter` or `UninitializedBuffer` with a plain Tensor on device or dtype `.to` (`nn.LazyLinear`, `nn.LazyBatchNorm*`).
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
@@ -276,7 +287,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
-* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
+* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 

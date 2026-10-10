@@ -50,7 +50,7 @@ config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["triton_test_app"] = ["python3", "./tests/triton_ffn.py"]
-config["torch_compile_test_app"] = ["python3", "./tests/torch_compile_triton.py"]
+config["ml_api_test_app"] = ["python3", "./tests/torch_triton_net.py"]
 config["cleanup"] = True
 
 arch_config = {}

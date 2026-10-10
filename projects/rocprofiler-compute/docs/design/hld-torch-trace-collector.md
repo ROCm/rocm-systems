@@ -87,6 +87,27 @@ The wire syntax and storage contract are detailed in the
 stacked labels need the one-level parser; the collector does not translate
 between those formats.
 
+## Analysis path
+
+Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
+rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
+that column, parse Function, then nest marker intervals per `Thread_Id`.
+`Correlation_ID` is the in-memory per-pass join key after that rename.
+
+Those flags print warnings after the call tree. Plain analyze without
+those flags does not join and does not report those warnings.
+
+Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
+Printed identical sibling fold is display-only and does not mutate the forest.
+Operator flags confine the forest by backend, then glob on that view.
+
+Adjacent ranges (`A.end == B.start`) are siblings. Analysis also uses the
+launcher id and interval containment to attach worker ranges to the
+launcher's call.
+
+Join steps and recorded error types are in the
+[low-level design](lld-torch-trace-collector.md).
+
 ## Build and runtime compatibility
 
 The shipped artifact is named torch_trace_collector.so. Its name is independent
@@ -115,3 +136,6 @@ and symbol behavior before extending the loader's supported set. Changes to
 the marker fields or encoding must be coordinated with the analysis consumer
 and both Python and native producers. The generic artifact and profile CSV
 layout remain independent of those future extensions.
+
+Analyze tests cover Function parse, join, consolidate, nest, and operator
+list/filter on the copied marker and counter CSVs.

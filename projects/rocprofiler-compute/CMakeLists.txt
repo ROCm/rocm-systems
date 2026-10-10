@@ -420,6 +420,30 @@ add_test(
 )
 
 add_test(
+    NAME test_profile_triton_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -m triton_trace
+        --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
+        tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_profile_ml_api_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -m ml_api_trace
+        --junitxml=tests/test_profile_ml_api_trace.xml ${COV_OPTION}
+        tests/integration/test_profile_ml_api_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_torch_trace_coverage
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -m torch_trace_coverage
+        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
+        tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_profile_membw
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_membw.xml
@@ -443,6 +467,9 @@ set_tests_properties(
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
+    test_profile_triton_trace
+    test_profile_ml_api_trace
+    test_torch_trace_coverage
     test_profile_membw
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1 TIMEOUT 1800
 )
@@ -871,6 +898,13 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_inject_roctx_torch
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch.xml
+        ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -1054,7 +1088,11 @@ if(${ENABLE_COVERAGE})
         test_roofline_main
         test_rocpd_data
         test_profile_torch_trace
+        test_profile_triton_trace
+        test_profile_ml_api_trace
+        test_torch_trace_coverage
         test_inject_roctx_package
+        test_inject_roctx_torch
         test_analysis_db
         test_analysis_base
         test_analysis_orm

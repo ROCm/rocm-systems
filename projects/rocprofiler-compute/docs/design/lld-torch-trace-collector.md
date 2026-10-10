@@ -143,6 +143,33 @@ the OS assigns new thread ids. The consumer can exclude it from its stitch
 key while retaining seqNr, tid, and ftid. Consumers expecting the older stacked
 marker syntax require the flat-marker analysis update.
 
+## Analyze path
+
+`--list-*-operators` / `--*-operator`:
+
+1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
+   `_counter_collection.csv`.
+2. Rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
+   unique dispatches to markers on `Correlation_ID` (plus `GUID` when both
+   files have that column).
+3. Record `UnaccountedKernelError` when a kernel's `Correlation_ID` is not
+   in the marker CSV (warns during join). Plain analyze without
+   those flags does not join and does not report that error.
+4. Consolidate matching operator calls across passes on the stitch key plus
+   `function_ordinal`. Record `PassMarkerMismatchError` when operator calls
+   or the kernel-name set disagree across passes (analyze exits).
+5. Parse Function into name, file/line, `Backend`, `launcher_thread_id`
+   from `ltid=`, and args. `tid=` and `ftid=` stay on the Function cell
+   for stitch; they are not analyze columns.
+6. Nest marker intervals per `Thread_Id`. Two markers on the same
+   `Thread_Id` whose intervals overlap (neither nested nor adjacent) record
+   `OverlappingMarkerRangeError`.
+7. Attach unlocated worker trees to the launcher using `ltid` and interval
+   containment.
+
+A torch/triton worker root with empty file/line and no ancestor that has a
+source location records `MissingSourceLocationError`.
+
 ## Plain-C interface
 
 The collector exports exactly four functions at interface revision 2.
@@ -177,3 +204,9 @@ are private PyTorch interfaces. The accepted compatibility boundary is the
 validated 2.13/2.14 layout set, not an upstream ABI guarantee for every build
 of those minors. Extending this set requires real-header and runtime behavior
 validation. No exact wheel identity or paired ELF build-ID gate is used.
+
+## Tests
+
+Live profile covers torch, triton, and combined ML API traces, plus operator
+coverage against the native collector. Unit tests cover inject_roctx wraps,
+Function parse, join, nest, and operator list/filter.
