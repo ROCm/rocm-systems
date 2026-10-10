@@ -39,8 +39,10 @@ def parse_gtest_list(output):
 
 
 def positive_clauses(test_filter):
-    """Positive patterns of a gtest filter; an empty filter means '*'."""
-    positive = (test_filter or "*").split("-", 1)[0]
+    """Positive patterns of a gtest filter; an empty filter or "ALL" means '*'."""
+    if test_filter in (None, "", "ALL"):
+        return ["*"]
+    positive = test_filter.split("-", 1)[0]
     return [p for p in positive.split(":") if p] or ["*"]
 
 
@@ -82,13 +84,19 @@ def main():
                     missing.add(binary)
                     listings[binary] = None
                     continue
-                out = subprocess.run([str(path), "--gtest_list_tests"], capture_output=True,
-                                     text=True, timeout=300, check=False)
+                try:
+                    out = subprocess.run([str(path), "--gtest_list_tests"], capture_output=True,
+                                         text=True, timeout=300, check=False)
+                except subprocess.TimeoutExpired:
+                    print(f"ERROR: {binary} --gtest_list_tests timed out")
+                    listings[binary] = None
+                    failures += 1
+                    continue
                 listings[binary] = parse_gtest_list(out.stdout) if out.returncode == 0 else None
                 if listings[binary] is None:
                     print(f"ERROR: {binary} --gtest_list_tests exited {out.returncode}")
                     failures += 1
-            if not listings[binary]:
+            if listings[binary] is None:
                 continue
             for clause in unmatched_clauses(test.get("test_filter"), listings[binary]):
                 print(f"{config_file.name}: {cname}.{test.get('name')}: '{clause}' matches no test in {binary}")

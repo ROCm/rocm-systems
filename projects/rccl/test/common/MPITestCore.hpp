@@ -140,7 +140,7 @@ protected:
 
     /**
    * @brief Flags for test_stream_; set before createTestCommunicator() to override.
-   * RCCL_TEST_STREAM_NONBLOCKING=1/0 takes precedence when set.
+   * RCCL_TEST_STREAM_NONBLOCKING=1/0 takes precedence when set; honoured by createTestCommunicator() only.
    */
     unsigned int test_stream_flags_ = hipStreamDefault;
 

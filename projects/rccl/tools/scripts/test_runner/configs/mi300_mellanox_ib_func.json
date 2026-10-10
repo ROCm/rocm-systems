@@ -644,7 +644,7 @@
         },
         {
           "name": "Cast_AlternatingWrrNonWrr",
-          "description": "Toggle doWrr mid-connection (3×10 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
+          "description": "Toggle doWrr mid-connection (3\u00d710 sends): WRR consumes tokens in phases 1&3, zero in phase 2",
           "test_filter": "NetIbMPITest.CastAlternatingWrrNonWrr",
           "env_variables": {
             "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "60000000"
@@ -736,7 +736,7 @@
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
         "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
         "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
-        "RCCL_IB_FAULT_INJECTION": "1"
+        "RCCL_IB_FAULT_INJECTION":     "1"
       },
       "tests": [
         {
@@ -3486,8 +3486,8 @@
       "tests": [
         {
           "name": "MultiSegment_HostBoundaryMath_All",
-          "description": "Host-only segment selection and split arithmetic",
-          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*"
+          "description": "Host-only segment selection, split arithmetic and CTS layout validation",
+          "test_filter": "NetIbMultiSeg.*:NetIbSplit.*:NetIbCtsLayout.*"
         }
       ]
     },
@@ -3503,7 +3503,6 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_ELASTIC_BUFFER_REGISTER": "1",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -3547,12 +3546,12 @@
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_WIN_ENABLE": "1",
         "NCCL_ELASTIC_BUFFER_REGISTER": "1",
         "NCCL_SYM_REUSE_SYSMEM_HANDLES": "1",
+        "RCCL_TEST_HYBRID_VMM_REQUIRE": "1",
         "NCCL_GIN_ENABLE": "1",
         "NCCL_GIN_TYPE": "2",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
@@ -3627,7 +3626,6 @@
       "env_variables": {
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
-        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
@@ -3643,6 +3641,14 @@
           "test_filter": "NetIbMultiSegmentMPITest.*:RmaMultiSegmentMPITest.*-RmaMultiSegmentMPITest.DeepEP_Hybrid*"
         },
         {
+          "name": "MultiSegment_Transport_RegisterOff_MultiNode",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: classic NET/IB declines a multi-segment registration, a multi-segment RMA window stays on the single-MR path, and single-segment buffers still transfer",
+          "test_filter": "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_*:NetIbMultiSegmentMPITest.HostAndDeviceSingleSegmentRegression:NetIbMultiSegmentMPITest.SingleSegmentThroughMultiSegPath:RmaMultiSegmentMPITest.MultiSegmentRegisterOff_*:RmaMultiSegmentMPITest.SingleSegmentRegression:RmaMultiSegmentMPITest.IFlushSingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
           "name": "UBR_MultiSegment_Generic",
           "description": "Out-of-place AllReduce on an 8-segment VMM buffer; asserts NET cache netNSegments",
           "test_filter": "UBR_MultiSegment.Generic"
@@ -3654,6 +3660,32 @@
           "env_variables": {
             "NCCL_GIN_ENABLE": "0"
           }
+        }
+      ]
+    },
+    "multisegment_netproxy_intranode_multinode": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_NET": "IB",
+        "NCCL_CUMEM_ENABLE": "1",
+        "RCCL_FORCE_ENABLE_DMABUF": "1",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_DEBUG_SUBSYS": "REG",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_GIN_ENABLE": "0",
+        "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
+      },
+      "tests": [
+        {
+          "name": "UBR_MultiSegment_NET_Proxy_Partial_Final_Segment_IntraNodePeer",
+          "description": "NET proxy registration clips the final physical segment with an intra-node peer (2 ranks per node) on the non-blocking test stream",
+          "test_filter": "UBR_MultiSegment.NetProxyPartialFinalSegment"
         }
       ]
     }
@@ -3687,6 +3719,12 @@
       "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
       "description": "All classic and GIN transport tests, including DeepEP and boundary stress",
       "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - NET Proxy Intra-Node Peer (Multi-Node)",
+      "description": "NetProxyPartialFinalSegment at 4 ranks across 2 nodes, so every rank also has an intra-node peer",
+      "config": "multisegment_netproxy_intranode_multinode",
       "enabled": true
     },
     {
