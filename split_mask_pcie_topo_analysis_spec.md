@@ -44,14 +44,118 @@ Each communicator runs all_reduce independently — models isolated DP gradient 
 
 ---
 
-## 3. RCCL NIC Selection Logic
+## 3. RCCL Path Type Computation
 
-### 3.1 Entry Point
+### 3.1 Path Type Definitions
+`src/include/graph.h`:
+
+```
+PATH_LOC (0)  — Local (self)
+PATH_NVL (1)  — NVLink / XGMI direct
+PATH_NVB (2)  — NVLink via intermediate GPU
+PATH_C2C (3)  — Chip-to-chip
+PATH_PIX (4)  — Single PCIe bridge
+PATH_PXB (5)  — Multiple PCIe bridges, NO CPU traversal
+PATH_P2C (6)  — C2C + PCIe (GPU→CPU→NIC)
+PATH_PXN (7)  — PCI + NVLink proxy routing
+PATH_PHB (8)  — PCIe through CPU/Host Bridge
+PATH_SYS (9)  — Cross-NUMA (QPI/UPI)
+PATH_NET (10) — Network
+PATH_DIS (11) — Disconnected
+```
+
+**GDR threshold**: Enabled when path type **< PATH_PHB** (i.e., PATH_PXB=5 or better).
+
+### 3.2 BFS Path Computation Algorithm
+`src/graph/paths.cc` — `ncclTopoSetPaths()`:
+
+Uses breadth-first search from each base node to all reachable nodes. Two critical classification rules:
+
+```c
+// Rule 1: PCI switch → PCI switch traversal = PATH_PXB
+if (node->type == PCI && remNode->type == PCI) newType = PATH_PXB;
+
+// Rule 2: Any PCI link through CPU = PATH_PHB
+if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU))
+    newType = PATH_PHB;
+
+// Path type is monotonically increasing (worst segment wins)
+newType = std::max(path->type, newType);
+```
+
+Path selection prefers: lower type > higher bandwidth > fewer hops.
+
+### 3.3 BCM Switch Flattening
+`src/graph/topo.cc` — `ncclTopoFlattenBcmSwitches()`:
+
+RCCL detects Gen4/Gen5 Broadcom switches (device ID pattern `0x1000c010...` / `0x1000c030...`) and flattens their internal 2-level hierarchy into a single switch node. This reduces hop count for same-partition paths.
+
+---
+
+## 4. Virtual Switch Link Mechanism
+
+### 4.1 Kernel Module: switch_discovery
+- Reads Broadcom VSEC (Vendor-Specific Extended Capability) registers
+- Exposes inter-switch fabric via `/sys/kernel/pci_switch_link/virtual_switch_links/`
+- Refresh trigger: `/sys/kernel/pci_switch_link/refresh_switch_toplogy`
+- **Status on test nodes**: NOT loaded, sysfs path does NOT exist
+
+### 4.2 RCCL Integration
+`src/graph/xml.cc` lines 778-794:
+
+```c
+// When building XML topology, for BCM switches (vendor 0x1000):
+if (vendor != NULL && strcmp(vendor, "0x1000") == 0) {
+    ncclOsGetBcmLinks(busId, &nlinks, &peers);
+    // Adds <pcilink target="peer_busid"/> elements to XML
+}
+```
+
+`src/graph/topo.cc` — `ncclTopoRefreshBcmP2pLinks()`:
+```c
+// Trigger sysfs refresh before reading links
+FILE* fp = fopen("/sys/kernel/pci_switch_link/refresh_switch_toplogy", "r");
+```
+
+These `<pcilink>` elements create **direct PCI↔PCI edges** in the topology graph, enabling the BFS to find PCI-only paths between switch partitions.
+
+### 4.3 Impact on Path Computation
+
+**Without virtual switch links (current state):**
+```
+GPU1 → PCI(61:00.0) → CPU(NUMA0) → PCI(01:00.0) → ionic_6
+                        ↑
+                   PATH_PHB triggered (Rule 2)
+```
+Result: **PATH_PHB (8)** → GDR disabled → host memory bounce buffer
+
+**With virtual switch links (switch_discovery + pcilink):**
+```
+GPU1 → PCI(61:00.0) → PCI(41:00.0) → PCI(01:00.0) → ionic_6
+        PCI→PCI = PXB    PCI→PCI = PXB   (no CPU traversal)
+```
+Result: **PATH_PXB (5)** → GDR enabled → direct GPU↔NIC DMA
+
+### 4.4 Required Fix Components
+1. **Kernel**: `switch_discovery` module loaded, exposing `/sys/kernel/pci_switch_link/`
+2. **RCCL**: PR #3121 (Wenkai Du) — reads BCM P2P links and adds pcilink topology edges
+3. Both must be deployed together
+
+### 4.5 gfx1250 Path Rewriting (related but different arch)
+`src/graph/paths.cc` lines 885-899 — `rcclRewriteSameDomainNetPaths()`:
+
+For gfx1250 GPUs only, rewrites same-PCI-domain GPU↔NIC paths from PATH_PHB → PATH_PXB. This is a domain-based heuristic workaround, NOT applicable to MI300X (gfx942).
+
+---
+
+## 5. RCCL NIC Selection Logic
+
+### 5.1 Entry Point
 `src/graph/search.cc:1645` — `ncclTopoGetNetDev()` determines NIC for each channel:
 - Graph-based channels use `inter[]` from graph search
 - P2P channels use `ncclTopoGetLocalNet()`
 
-### 3.2 Local NIC Selection Algorithm
+### 5.2 Local NIC Selection Algorithm
 `src/graph/topo.cc:2524-2581` — `ncclTopoGetLocalNetType()`:
 
 ```c
@@ -75,7 +179,7 @@ if (isPow2(localRailCount)) {
 
 **Key behavior**: Cross-NUMA NICs have PATH_SYS (9), which is worse than same-NUMA PATH_PHB (8), so NUMA-local NICs are always preferred. The equidistant set is always confined to same-NUMA NICs.
 
-### 3.3 mirrorBits() — Rail-Striping Function
+### 5.3 mirrorBits() — Rail-Striping Function
 `src/graph/topo.h:407-412`:
 
 ```c
@@ -90,7 +194,7 @@ static int mirrorBits(int val, int pow2) {
 - `mirrorBits(val, 1) = 0` always (loop body never executes since `1 < 1` is false)
 - `mirrorBits(val, 2)` = bit 0 of val → 0 for even GPUs, 1 for odd GPUs
 
-### 3.4 Scenario A: 8 GPUs / 8 NICs (No Split-Mask)
+### 5.4 Scenario A: 8 GPUs / 8 NICs (No Split-Mask)
 
 With all 8 NICs present, each partition has exactly 1 GPU + 1 NIC. Each GPU has a **same-partition NIC** reachable via PATH_PXB (PCI switches only, no CPU traversal):
 
@@ -109,7 +213,7 @@ With all 8 NICs present, each partition has exactly 1 GPU + 1 NIC. Each GPU has 
 
 **Result**: Perfect 1:1 GPU-to-NIC pairing. All same-partition. All GDR enabled. No contention.
 
-### 3.5 Scenario B: 8 GPUs / 4 NICs (Split-Mask, Without Virtual Switch Links)
+### 5.5 Scenario B: 8 GPUs / 4 NICs (Split-Mask, Without Virtual Switch Links)
 
 With `NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6`, the available NICs are:
 
@@ -153,7 +257,7 @@ GPU6: mirrorBits(6, 2) = 0 → rail 0 → ionic_2 (Sw4-A) — cross-switch!
 
 Both appear as PATH_PHB, so `mirrorBits()` assigns GPU1 to ionic_4 on a completely different physical switch.
 
-### 3.6 Observed NIC Assignment (from RCCL debug logs, 4-NIC config)
+### 5.6 Observed NIC Assignment (from RCCL debug logs, 4-NIC config)
 All 16 channels per rank used the same NIC (no per-channel striping for 2-rank comms):
 
 | GPU | Upstream | NIC | NIC Upstream | Rail | Topology Relationship | GDR |
@@ -167,9 +271,35 @@ All 16 channels per rank used the same NIC (no per-channel striping for 2-rank c
 | GPU6 | `c1:00.0` (Sw5-A) | ionic_2 | `81:00.0` (Sw4-A) | 0 | Cross-switch (Sw5→Sw4) | **Disabled** |
 | GPU7 | `e1:00.0` (Sw5-B) | ionic_0 | `e1:00.0` (Sw5-B) | 1 | Same-partition | Enabled |
 
-### 3.7 Scenario C: 8 GPUs / 4 NICs (Split-Mask, WITH Virtual Switch Links — After Fix)
+### 5.7 Scenario C: 8 GPUs / 4 NICs (Split-Mask, WITH `switch_discovery` Module + RCCL pcilink Support)
 
-With virtual switch links exposed, RCCL creates PCI↔PCI edges between partitions of the same physical switch. The BFS now finds PCI-only paths for cross-partition pairs on the same switch:
+When the `switch_discovery` kernel module is loaded and RCCL includes pcilink support (PR #3121), the inter-partition fabric within each Broadcom PEX89104 becomes visible to RCCL's topology graph. Here is the end-to-end flow:
+
+**Step 1 — Kernel exposes inter-partition links via sysfs:**
+The `switch_discovery` module reads Broadcom VSEC (Vendor-Specific Extended Capability) registers from PCIe config space to discover which upstream ports belong to the same physical switch. It exposes these relationships at:
+```
+/sys/kernel/pci_switch_link/virtual_switch_links/
+```
+Each entry lists a pair of BDF addresses (e.g., `01:00.0 ↔ 21:00.0`) indicating that these two upstream ports are partitions of the same physical switch and connected via internal fabric.
+
+**Step 2 — RCCL reads sysfs links during XML topology construction:**
+In `ncclTopoGetXmlFromSys()` (`src/graph/xml.cc:778-794`), when RCCL encounters a Broadcom switch (vendor `0x1000`), it calls `ncclOsGetBcmLinks(busId, &nlinks, &peers)` which reads the sysfs entries. For each peer found, RCCL adds a `<pcilink target="peer_busid"/>` element to the XML topology.
+
+**Step 3 — pcilink elements become PCI↔PCI edges in the topology graph:**
+When the XML is parsed into RCCL's internal graph (`ncclTopoConnectNodes`), each `<pcilink>` element creates a **direct edge between two PCI switch nodes** — bypassing the CPU node entirely. For Switch 1, this creates: `PCI(01:00.0) ↔ PCI(21:00.0)`.
+
+**Step 4 — BFS path computation yields PATH_PXB instead of PATH_PHB:**
+When `ncclTopoSetPaths()` runs BFS from GPU1 to ionic_6, it now finds this path:
+```
+GPU1 → PCI(21:00.0) → [pcilink] → PCI(01:00.0) → ionic_6
+        PCI→PCI = Rule 1 → PATH_PXB    (no CPU node in path!)
+```
+Without the pcilink edge, the only path was through the CPU:
+```
+GPU1 → PCI(21:00.0) → CPU(NUMA0) → PCI(01:00.0) → ionic_6
+                        ↑ Rule 2 → PATH_PHB (CPU traversal)
+```
+Since path type uses `max()` (worst segment wins), the pcilink path stays at PATH_PXB (5), while the CPU path hits PATH_PHB (8). The BFS picks the lower-type path.
 
 **GPUs whose same-partition NIC was masked — path types change:**
 
@@ -180,9 +310,9 @@ With virtual switch links exposed, RCCL creates PCI↔PCI edges between partitio
 | GPU5 | `a1:00.0` (Sw4-B) | ionic_2 (Sw4-A): **PATH_PXB** (same switch via fabric), ionic_0 (Sw5-B): PATH_PHB | **1** → ionic_2 |
 | GPU6 | `c1:00.0` (Sw5-A) | ionic_0 (Sw5-B): **PATH_PXB** (same switch via fabric), ionic_2 (Sw4-A): PATH_PHB | **1** → ionic_0 |
 
-**Result after fix**: Every GPU now picks a NIC on its **own physical switch** (same-partition or cross-partition via internal fabric). `localRailCount=1` for all GPUs — no `mirrorBits()` tie-breaking needed. All 8 GPU-NIC paths are PATH_PXB or better. **GDR enabled for all 8 GPUs.**
+**Result with `switch_discovery` + pcilink**: Every GPU now picks a NIC on its **own physical switch** (same-partition or cross-partition via internal fabric). `localRailCount=1` for all GPUs — no `mirrorBits()` tie-breaking needed. All 8 GPU-NIC paths are PATH_PXB or better. **GDR enabled for all 8 GPUs.**
 
-| GPU | NIC (before fix) | NIC (after fix) | Change |
+| GPU | NIC (without switch_discovery) | NIC (with switch_discovery + pcilink) | Change |
 |---|---|---|---|
 | GPU0 | ionic_6 (same-partition) | ionic_6 (same-partition) | No change |
 | GPU1 | ionic_4 (Sw3, cross-switch) | **ionic_6 (Sw1, cross-partition)** | Reassigned |
@@ -193,7 +323,7 @@ With virtual switch links exposed, RCCL creates PCI↔PCI edges between partitio
 | GPU6 | ionic_2 (Sw4, cross-switch) | **ionic_0 (Sw5, cross-partition)** | Reassigned |
 | GPU7 | ionic_0 (same-partition) | ionic_0 (same-partition) | No change |
 
-**NIC load distribution after fix**: Each NIC serves 2 GPUs (from both partitions of its physical switch):
+**NIC load distribution with switch_discovery**: Each NIC serves 2 GPUs (from both partitions of its physical switch):
 - ionic_6: GPU0 (same-partition) + GPU1 (cross-partition)
 - ionic_4: GPU3 (same-partition) + GPU2 (cross-partition)
 - ionic_2: GPU4 (same-partition) + GPU5 (cross-partition)
@@ -201,63 +331,15 @@ With virtual switch links exposed, RCCL creates PCI↔PCI edges between partitio
 
 ---
 
-## 4. RCCL Path Type Computation
+## 6. Physical PCIe Topology (SMC300x MI300X)
 
-### 4.1 Path Type Definitions
-`src/include/graph.h`:
+> **Why this section follows RCCL NIC Selection Logic**: Understanding the RCCL selection algorithm and its three scenarios (sections 5.4-5.7) first reveals *why* the physical PCIe topology matters — specifically, why the inability to see inter-switch fabric between Broadcom switch partitions causes the 4-NIC degradation. This section then provides the hardware evidence — the physical switch mapping, DSN-based grouping, and 8-NIC vs 4-NIC topology comparison — that underpins those scenarios and motivates the DSN-based discovery approach as a potential complement to the `switch_discovery` kernel module.
 
-```
-PATH_LOC (0)  — Local (self)
-PATH_NVL (1)  — NVLink / XGMI direct
-PATH_NVB (2)  — NVLink via intermediate GPU
-PATH_C2C (3)  — Chip-to-chip
-PATH_PIX (4)  — Single PCIe bridge
-PATH_PXB (5)  — Multiple PCIe bridges, NO CPU traversal
-PATH_P2C (6)  — C2C + PCIe (GPU→CPU→NIC)
-PATH_PXN (7)  — PCI + NVLink proxy routing
-PATH_PHB (8)  — PCIe through CPU/Host Bridge
-PATH_SYS (9)  — Cross-NUMA (QPI/UPI)
-PATH_NET (10) — Network
-PATH_DIS (11) — Disconnected
-```
-
-**GDR threshold**: Enabled when path type **< PATH_PHB** (i.e., PATH_PXB=5 or better).
-
-### 4.2 BFS Path Computation Algorithm
-`src/graph/paths.cc` — `ncclTopoSetPaths()`:
-
-Uses breadth-first search from each base node to all reachable nodes. Two critical classification rules:
-
-```c
-// Rule 1: PCI switch → PCI switch traversal = PATH_PXB
-if (node->type == PCI && remNode->type == PCI) newType = PATH_PXB;
-
-// Rule 2: Any PCI link through CPU = PATH_PHB
-if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU))
-    newType = PATH_PHB;
-
-// Path type is monotonically increasing (worst segment wins)
-newType = std::max(path->type, newType);
-```
-
-Path selection prefers: lower type > higher bandwidth > fewer hops.
-
-### 4.3 BCM Switch Flattening
-`src/graph/topo.cc` — `ncclTopoFlattenBcmSwitches()`:
-
-RCCL detects Gen4/Gen5 Broadcom switches (device ID pattern `0x1000c010...` / `0x1000c030...`) and flattens their internal 2-level hierarchy into a single switch node. This reduces hop count for same-partition paths.
-
----
-
-## 5. Physical PCIe Topology (SMC300x MI300X)
-
-> **Why this section follows RCCL NIC Selection Logic**: Understanding the RCCL selection algorithm and its three scenarios (sections 3.4-3.7) first reveals *why* the physical PCIe topology matters — specifically, why the inability to see inter-switch fabric between Broadcom switch partitions causes the 4-NIC degradation. This section then provides the hardware evidence — the physical switch mapping, DSN-based grouping, and 8-NIC vs 4-NIC topology comparison — that underpins those scenarios and motivates the DSN-based discovery approach as a potential complement to the `switch_discovery` kernel module.
-
-### 5.1 Broadcom PEX89104 Multi-Host Switch Architecture
+### 6.1 Broadcom PEX89104 Multi-Host Switch Architecture
 
 Each physical PEX89104 presents as **two virtual PCIe switches** (multi-host partitioning), each with its own upstream port connected to a different CPU root port. The OS sees two independent PCIe hierarchies per physical switch.
 
-### 5.2 Physical Switch Mapping (via PCIe Device Serial Number)
+### 6.2 Physical Switch Mapping (via PCIe Device Serial Number)
 
 **Discovery method**: PCIe DSN at extended capability offset 0x100. All ports on the same physical switch share an identical DSN. Upstream ports with the same DSN are partitions of the same physical silicon — they share an internal cross-partition fabric.
 
@@ -275,7 +357,7 @@ Each physical PEX89104 presents as **two virtual PCIe switches** (multi-host par
 | Switch 5 | `...a0-0f-93-08` | A | `c1:00.0` | 1 | GPU6 (`c9:00.0`) | ionic_1 (`c6:00.0`) | — (masked) |
 | Switch 5 | `...a0-0f-93-08` | B | `e1:00.0` | 1 | GPU7 (`e5:00.0`) | ionic_0 (`e9:00.0`) | ionic_0 |
 
-### 5.3 8-NIC vs 4-NIC Topology Comparison
+### 6.3 8-NIC vs 4-NIC Topology Comparison
 
 The topology table above has both NIC columns, but the critical difference is best understood by examining the GPU-to-NIC relationship per physical switch:
 
@@ -303,20 +385,20 @@ The topology table above has both NIC columns, but the critical difference is be
 | Switch 4 | GPU4 + ionic_2 | GPU5 (NIC masked) | ionic_2 (A) | GPU5 has no same-partition NIC |
 | Switch 5 | GPU6 (NIC masked) | GPU7 + ionic_0 | ionic_0 (B) | GPU6 has no same-partition NIC |
 
-**The topology gap**: GPU1, GPU2, GPU5, and GPU6 each need to reach a NIC on the **other partition** of their physical switch. Without visibility into the internal cross-partition fabric (via `switch_discovery` or DSN-based inference), these cross-partition paths are indistinguishable from cross-switch paths — both traverse the CPU and get classified as PATH_PHB. This is the root cause of the NIC mis-assignment shown in section 3.5.
+**The topology gap**: GPU1, GPU2, GPU5, and GPU6 each need to reach a NIC on the **other partition** of their physical switch. Without visibility into the internal cross-partition fabric (via `switch_discovery` or DSN-based inference), these cross-partition paths are indistinguishable from cross-switch paths — both traverse the CPU and get classified as PATH_PHB. This is the root cause of the NIC mis-assignment shown in section 5.5.
 
-### 5.4 DSN as a Complement to Inter-Switch-Link Discovery
+### 6.4 DSN as a Complement to Inter-Switch-Link Discovery
 
-The Physical Switch Mapping table (section 5.2) demonstrates that the DSN groups partitions by physical switch — providing exactly the information RCCL needs to infer which cross-partition paths traverse the internal fabric rather than the CPU:
+The Physical Switch Mapping table (section 6.2) demonstrates that the DSN groups partitions by physical switch — providing exactly the information RCCL needs to infer which cross-partition paths traverse the internal fabric rather than the CPU:
 
 1. **DSN groups establish switch membership**: `01:00.0` and `21:00.0` share DSN `...2e-34-7e-08` → they are partitions of the same PEX89104 → cross-partition traffic between them uses internal fabric, not the CPU
 2. **RCCL could use this to create pcilink edges**: Instead of relying on `switch_discovery`'s sysfs path, RCCL could read DSN directly from PCIe config space (offset 0x100), group upstream ports by DSN, and inject pcilink edges between partitions of the same switch
 3. **Advantage**: No kernel module dependency — works on any system with Broadcom multi-host switches
-4. **Limitation**: Requires `CAP_SYS_RAWIO` (root) to access extended config space (see section 7.1), but RCCL often runs with elevated privileges in HPC/datacenter environments
+4. **Limitation**: Requires `CAP_SYS_RAWIO` (root) to access extended config space (see section 7), but RCCL often runs with elevated privileges in HPC/datacenter environments
 
 This makes DSN-based discovery a viable **alternative or fallback** when the `switch_discovery` module is unavailable, subject to privilege constraints.
 
-### 5.5 Management Endpoints
+### 6.5 Management Endpoints
 
 Each physical switch exposes a management endpoint at Port #31 (`xx:1f.0`) under exactly ONE partition:
 
@@ -328,7 +410,7 @@ Each physical switch exposes a management endpoint at Port #31 (`xx:1f.0`) under
 | `82:1f.0` | `81:00.0` | Switch 4 |
 | `e2:1f.0` | `e1:00.0` | Switch 5 |
 
-### 5.6 MI300X Internal PCIe Bridge
+### 6.6 MI300X Internal PCIe Bridge
 
 MI300X is a multi-chiplet SoC that presents as a PCIe switch internally:
 - Upstream bridge: `1022:1500`
@@ -337,69 +419,13 @@ MI300X is a multi-chiplet SoC that presents as a PCIe switch internally:
 
 This adds +2 bridge hops vs NVIDIA H20 (direct endpoint), contributing to higher PCIe distance values.
 
-### 5.7 GPU-NIC PCIe Distance Matrix
+### 6.7 GPU-NIC PCIe Distance Matrix
 
 **Without virtual switch link visibility (current state):**
 
 - Same partition (GPU + NIC under same upstream port): ~6 hops → borderline PATH_PXB (5) / PATH_PHB (8)
 - Cross partition (GPU under one upstream, NIC under another): 8+ hops → PATH_PHB (8) through CPU
 - Cross switch (different physical switch entirely): PATH_PHB (8) through CPU
-
----
-
-## 6. Virtual Switch Link Mechanism
-
-### 6.1 Kernel Module: switch_discovery
-- Reads Broadcom VSEC (Vendor-Specific Extended Capability) registers
-- Exposes inter-switch fabric via `/sys/kernel/pci_switch_link/virtual_switch_links/`
-- Refresh trigger: `/sys/kernel/pci_switch_link/refresh_switch_toplogy`
-- **Status on test nodes**: NOT loaded, sysfs path does NOT exist
-
-### 6.2 RCCL Integration
-`src/graph/xml.cc` lines 778-794:
-
-```c
-// When building XML topology, for BCM switches (vendor 0x1000):
-if (vendor != NULL && strcmp(vendor, "0x1000") == 0) {
-    ncclOsGetBcmLinks(busId, &nlinks, &peers);
-    // Adds <pcilink target="peer_busid"/> elements to XML
-}
-```
-
-`src/graph/topo.cc` — `ncclTopoRefreshBcmP2pLinks()`:
-```c
-// Trigger sysfs refresh before reading links
-FILE* fp = fopen("/sys/kernel/pci_switch_link/refresh_switch_toplogy", "r");
-```
-
-These `<pcilink>` elements create **direct PCI↔PCI edges** in the topology graph, enabling the BFS to find PCI-only paths between switch partitions.
-
-### 6.3 Impact on Path Computation
-
-**Without virtual switch links (current state):**
-```
-GPU1 → PCI(61:00.0) → CPU(NUMA0) → PCI(01:00.0) → ionic_6
-                        ↑
-                   PATH_PHB triggered (Rule 2)
-```
-Result: **PATH_PHB (8)** → GDR disabled → host memory bounce buffer
-
-**With virtual switch links (after fix):**
-```
-GPU1 → PCI(61:00.0) → PCI(41:00.0) → PCI(01:00.0) → ionic_6
-        PCI→PCI = PXB    PCI→PCI = PXB   (no CPU traversal)
-```
-Result: **PATH_PXB (5)** → GDR enabled → direct GPU↔NIC DMA
-
-### 6.4 Required Fix Components
-1. **Kernel**: `switch_discovery` module loaded, exposing `/sys/kernel/pci_switch_link/`
-2. **RCCL**: PR #3121 (Wenkai Du) — reads BCM P2P links and adds pcilink topology edges
-3. Both must be deployed together
-
-### 6.5 gfx1250 Path Rewriting (related but different arch)
-`src/graph/paths.cc` lines 885-899 — `rcclRewriteSameDomainNetPaths()`:
-
-For gfx1250 GPUs only, rewrites same-PCI-domain GPU↔NIC paths from PATH_PHB → PATH_PXB. This is a domain-based heuristic workaround, NOT applicable to MI300X (gfx942).
 
 ---
 
@@ -514,7 +540,7 @@ bash run-rccl.sh all_reduce 1G 1G 1 1
 
 2. **DSN-based userspace alternative**: Could RCCL read PCIe DSN directly from config space (offset 0x100) to infer physical switch membership without requiring a kernel module? This would be a portable, module-free solution.
 
-3. **Performance delta quantification**: Compare all_reduce bandwidth with GDR disabled (current PATH_PHB) vs GDR enabled (after fix PATH_PXB) for the cross-partition GPU-NIC pairs.
+3. **Performance delta quantification**: Compare all_reduce bandwidth with GDR disabled (current PATH_PHB) vs GDR enabled (with switch_discovery, PATH_PXB) for the cross-partition GPU-NIC pairs.
 
 4. **NIC-aware split strategy**: Explore whether `NCCL_TESTS_SPLIT=DIV` or `MOD` can create communicators aligned with NIC topology to avoid cross-partition contention.
 
