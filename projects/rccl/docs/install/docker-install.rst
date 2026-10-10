@@ -19,7 +19,7 @@ To build the Docker image and run the container, follow these steps.
 
    By default, the Dockerfile uses ``docker.io/rocm/dev-ubuntu-22.04:latest`` as the base Docker image.
    It then fetches ``projects/rccl``, ``projects/rccl-tests``, and ``projects/rocshmem`` from the ``develop`` branch of the
-   `rocm-systems <https://github.com/ROCm/rocm-systems>`_ repository and builds RCCL and rccl-tests.
+   `rocm-systems <https://github.com/ROCm/rocm-systems>`_ repository and builds RCCL and rccl-tests for ``gfx942`` GPUs.
 
    Use this command to build the Docker image:
 
@@ -30,6 +30,8 @@ To build the Docker image and run the container, follow these steps.
    The base Docker image, rocm-systems repository (``ROCM_SYSTEMS_REPO``), branch, tag, or commit SHA
    (``ROCM_SYSTEMS_REF``), and GPU targets can be modified
    by using ``--build-arg`` in the ``docker build`` command above.
+   ``GPU_TARGETS`` takes one target (for example, ``gfx950``), several separated by ``;`` (for example, ``"gfx942;gfx950"``),
+   or an empty value (``GPU_TARGETS=``) to build every target RCCL and rccl-tests support, which makes the build several times slower and the image larger.
    ``ROCM_SYSTEMS_REF`` must be a branch, a tag that contains ``projects/`` (for example, ``therock-*``), or a full commit SHA,
    because short SHAs fail the shallow fetch and ``rocm-7.2.x`` tags predate the monorepo layout.
    For example, to use a different base Docker image and target a specific GPU architecture,

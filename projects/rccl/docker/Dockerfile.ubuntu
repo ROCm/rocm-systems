@@ -8,7 +8,7 @@ ARG ROCM_SYSTEMS_REPO=https://github.com/ROCm/rocm-systems
 ## branch, tag that contains projects/ (e.g. therock-*), or full commit SHA; short SHAs and rocm-7.2.x tags do not work
 ARG ROCM_SYSTEMS_REF=develop
 
-## AMD GPU Targets
+## AMD GPU targets, ';'-separated (e.g. "gfx942;gfx950"); set it empty to build every target RCCL and RCCL-Tests support
 ARG GPU_TARGETS=gfx942
 
 ## extra RCCL install.sh flags, e.g. --rocshmem (empty by default)
@@ -113,14 +113,14 @@ RUN git init "${ROCM_SYSTEMS_DIR}" \
 ## building RCCL
 ENV RCCL_INSTALL_PREFIX=${WORKDIR}/rccl/install
 RUN cd "${ROCM_SYSTEMS_DIR}/projects/rccl" \
-    && ./install.sh --amdgpu_targets=${GPU_TARGETS} --prefix=${RCCL_INSTALL_PREFIX} ${RCCL_BUILD_ARGS}
+    && ./install.sh ${GPU_TARGETS:+"--amdgpu_targets=${GPU_TARGETS}"} --prefix=${RCCL_INSTALL_PREFIX} ${RCCL_BUILD_ARGS}
 
 ## building RCCL-Tests (symlinked to ${WORKDIR}/rccl-tests so the binaries stay at ${WORKDIR}/rccl-tests/build)
 ## RCCL_DIR is required: rccl-tests prepends ROCM_PATH to CMAKE_PREFIX_PATH, which would pick the base image RCCL
 RUN cd "${ROCM_SYSTEMS_DIR}/projects/rccl-tests" \
     && mkdir build \
     && cd build \
-    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DRCCL_DIR="${RCCL_INSTALL_PREFIX}/lib/cmake/rccl" -DGPU_TARGETS=${GPU_TARGETS} .. \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MPI=ON -DCMAKE_PREFIX_PATH="${RCCL_INSTALL_PREFIX};${MPI_INSTALL_PREFIX}" -DRCCL_DIR="${RCCL_INSTALL_PREFIX}/lib/cmake/rccl" ${GPU_TARGETS:+"-DGPU_TARGETS=${GPU_TARGETS}"} .. \
     && make -j16 \
     && ln -s "${ROCM_SYSTEMS_DIR}/projects/rccl-tests" "${WORKDIR}/rccl-tests"
 

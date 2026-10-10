@@ -13,6 +13,7 @@ $ docker build -t rccl-tests -f Dockerfile.ubuntu --pull .
 
 The base docker image, rocm-systems repo (`ROCM_SYSTEMS_REPO`), branch/tag/commit (`ROCM_SYSTEMS_REF`), and GPU targets can be modified using `--build-arg` in the `docker build` command above.
 `ROCM_SYSTEMS_REF` must be a branch, a tag that contains `projects/` (e.g. `therock-*`), or a full commit SHA, because short SHAs fail the shallow fetch and `rocm-7.2.x` tags predate the monorepo layout.
+`GPU_TARGETS` takes one target (e.g. `gfx950`), several separated by `;` (e.g. `"gfx942;gfx950"`), or an empty value (`GPU_TARGETS=`) to build every target RCCL and RCCL-Tests support; the empty value makes the build several times slower and the image larger.
 E.g., to use a different base docker image for the MI250 GPU:
 ```shell
 $ docker build -t rccl-tests -f Dockerfile.ubuntu --build-arg="ROCM_IMAGE_NAME=rocm/dev-ubuntu-20.04" --build-arg="ROCM_IMAGE_TAG=6.2" --build-arg="GPU_TARGETS=gfx90a" --pull .
