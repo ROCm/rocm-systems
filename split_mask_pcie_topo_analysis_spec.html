@@ -470,17 +470,6 @@ Result: <span class="good">PATH_PXB (5)</span> &rarr; GDR enabled
             </ol>
         </div>
 
-        <h3>4.5 gfx1250 Path Rewriting (related but different arch)</h3>
-        <div class="card">
-            <p>
-                <code>src/graph/paths.cc</code> lines 885&ndash;899 &mdash; <code>rcclRewriteSameDomainNetPaths()</code>:
-            </p>
-            <p>
-                For <strong>gfx1250 GPUs only</strong>, rewrites same-PCI-domain GPU&harr;NIC paths from
-                PATH_PHB &rarr; PATH_PXB. This is a domain-based heuristic workaround,
-                <strong>NOT applicable to MI300X (gfx942)</strong>.
-            </p>
-        </div>
     </section>
 
 
@@ -1167,7 +1156,7 @@ NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6   <span style="color:#6a9955;"># 4-N
             </tr>
             <tr>
                 <td><code>src/graph/paths.cc</code></td>
-                <td><code>ncclTopoSetPaths()</code>, <code>ncclTopoComputePaths()</code>, <code>rcclRewriteSameDomainNetPaths()</code></td>
+                <td><code>ncclTopoSetPaths()</code>, <code>ncclTopoComputePaths()</code></td>
                 <td>BFS path computation, GDR/PXN decisions</td>
             </tr>
             <tr>

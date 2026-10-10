@@ -146,11 +146,6 @@ Result: **PATH_PXB (5)** → GDR enabled → direct GPU↔NIC DMA
 2. **RCCL**: PR #3121 (Wenkai Du) — reads BCM P2P links and adds pcilink topology edges. **Note**: This NCCL patch is already incorporated in the latest RCCL codebase.
 3. Both kernel module and RCCL pcilink support must be deployed together
 
-### 4.5 gfx1250 Path Rewriting (related but different arch)
-`src/graph/paths.cc` lines 885-899 — `rcclRewriteSameDomainNetPaths()`:
-
-For gfx1250 GPUs only, rewrites same-PCI-domain GPU↔NIC paths from PATH_PHB → PATH_PXB. This is a domain-based heuristic workaround, NOT applicable to MI300X (gfx942).
-
 ---
 
 ## 5. RCCL NIC Selection Logic
@@ -529,7 +524,7 @@ bash run-rccl.sh all_reduce 1G 1G 1 1
 | File | Key Functions | Purpose |
 |---|---|---|
 | `src/include/graph.h` | PATH_* defines | Path type constants |
-| `src/graph/paths.cc` | `ncclTopoSetPaths()`, `ncclTopoComputePaths()`, `rcclRewriteSameDomainNetPaths()` | BFS path computation, GDR/PXN decisions |
+| `src/graph/paths.cc` | `ncclTopoSetPaths()`, `ncclTopoComputePaths()` | BFS path computation, GDR/PXN decisions |
 | `src/graph/topo.cc` | `ncclTopoGetLocalNetType()`, `ncclTopoGetLocal()`, `ncclTopoFlattenBcmSwitches()`, `ncclTopoRefreshBcmP2pLinks()` | NIC selection, BCM flattening, virtual link refresh |
 | `src/graph/topo.h` | `mirrorBits()` | GPU-to-rail assignment |
 | `src/graph/xml.cc` | `ncclTopoGetXmlFromSys()`, `ncclOsGetBcmLinks()` | XML topo building, BCM link reading |
