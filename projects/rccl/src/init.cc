@@ -227,6 +227,11 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
 #endif
 
+#if ENABLE_TDM_PRIM_LL128
+// Off by default; opt in with RCCL_TDM_LL128_ENABLE=1 on gfx1250.
+RCCL_PARAM(TdmLl128Enable, "TDM_LL128_ENABLE", 0);
+#endif
+
 /**
  * Used on gfx1151 (StrixHalo) to set the nChannels for ncclTopoPreset before determining number of nodes.
  */
@@ -1061,6 +1066,9 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
   tmpCommAndChans.comm.cheapPostSendFenceOff = comm->cheapPostSendFenceOff;
 #if ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  tmpCommAndChans.comm.tdmLl128Enable = comm->tdmLl128Enable;
 #endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
@@ -2215,6 +2223,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+#endif
+#if ENABLE_TDM_PRIM_LL128
+  comm->tdmLl128Enable =
+    rcclParamTdmLl128Enable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  if (comm->tdmLl128Enable) INFO(NCCL_INIT, "TDM LL128 path enabled");
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

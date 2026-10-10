@@ -6,7 +6,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "tdm/tdmCopy.h"
+
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
+
+// gfx1250 tensor-data-mover path for the LL128 user buffers; see tdm/ll128Tdm.h.
+// Built in with --enable-tdm-prim-ll128, then selected per comm with RCCL_TDM_LL128_ENABLE=1.
+#ifndef ENABLE_TDM_PRIM_LL128
+#define ENABLE_TDM_PRIM_LL128 0
+#endif
+
+#define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
@@ -127,6 +137,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+#if TDM_LL128_ON
+  // Read from shmem once here, not per slice: the hot path tests a register.
+  bool tdmEnable = false;
+#endif
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -236,8 +250,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
+#if TDM_LL128_ON
+#include "tdm/ll128Tdm.h"  // member functions; included inside the class body on purpose
+#endif
+
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
+#if TDM_LL128_ON
+    if (tdmLoadBegin<WordPerThread>(src, eltN)) return;
+#endif
     constexpr int EltPer16B = 16 / sizeof(T);
     // Parametrize the warp-local addressing on the LL128 line geometry.
     // The literals "16" and "4" originally hard-coded 2*LINEELEMS and
@@ -297,6 +318,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsFinish(uint64_t (&regs)[WordPerThread]) {
+#if TDM_LL128_ON
+    tdmLoadFinish<WordPerThread>(regs);
+#endif
     // Move data out of flag registers into the vacant registers.
 #pragma unroll
     for (int g = 1; g < WordPerThread / 2; g += 2) {
@@ -312,6 +336,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g - 1] = regs[2 * g];
     }
+#if TDM_LL128_ON
+    if (tdmStoreRegs<WordPerThread>(dst, regs, eltN)) return;
+#endif
 
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
@@ -469,6 +496,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     barrier();
 
     sqtt_marker_enter("PRIM_LL128_DATA_PROCESS");
+#if TDM_LL128_ON
+    tdmLoadAllowed = RECV;  // async source load only pays when there is a spin to hide
+#endif
     nelem -= DataEltPerSlice * warp;
     srcPtr += DataEltPerSlice * warp;
     dstPtr += DataEltPerSlice * warp;
@@ -481,8 +511,14 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       if (DST) {
         if (accPtr != nullptr) {
           uint64_t accRegs[NCCL_LL128_SHMEM_ELEMS_PER_THREAD];
+#if TDM_LL128_ON
+          tdmLoadAllowed = false;  // accumulator load has no spin to overlap with
+#endif
           loadRegsBegin(accRegs, accPtr, eltInSlice);
           loadRegsFinish(accRegs);
+#if TDM_LL128_ON
+          tdmLoadAllowed = RECV;
+#endif
           accPtr += DataEltPerSlice * nwarps;
 #pragma unroll
           for (int u = 0; u < NCCL_LL128_SHMEM_ELEMS_PER_THREAD; u++) {
@@ -497,6 +533,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       dstPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
     }
+#if TDM_LL128_ON
+    tdmDrain();
+#endif
 
     barrier();
 
@@ -576,6 +615,9 @@ public:
     loadSendSync();
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
+#if TDM_LL128_ON
+    tdmEnable = ncclShmem.comm.tdmLl128Enable;
+#endif
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
