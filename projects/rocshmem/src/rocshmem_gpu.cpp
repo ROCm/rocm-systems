@@ -1539,12 +1539,30 @@ __device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
   direct_ctx_broadcast_wg<T>(ctx, team, dest, source, nelems, pe_root);
 }
 
+template <typename T>
+__device__ void rocshmem_broadcast_wg(rocshmem_team_t team, T *dest,
+                                       const T *source, int nelems,
+                                       int pe_root) {
+  LOGD_API("device::broadcast_wg (team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
+    team, dest, source, nelems, pe_root);
+
+  direct_ctx_broadcast_wg<T>(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root);
+}
+
 __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
   void *dest, const void *source, int nelems, int pe_root) {
     LOGD_API("device::broadcastmem_wg (ctx=%zd, team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
       ctx.ctx_opaque, team, dest, source, nelems, pe_root);
 
     direct_ctx_broadcastmem_wg(ctx, team, dest, source, nelems, pe_root);
+}
+
+__device__ void rocshmem_broadcastmem_wg(rocshmem_team_t team,
+  void *dest, const void *source, int nelems, int pe_root) {
+    LOGD_API("device::broadcastmem_wg (team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
+      team, dest, source, nelems, pe_root);
+
+    direct_ctx_broadcastmem_wg(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root);
 }
 
 template <typename T>
@@ -1556,12 +1574,29 @@ __device__ int rocshmem_broadcast_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
   return direct_ctx_broadcast_wave<T>(ctx, team, dest, source, nelems, pe_root);
 }
 
+template <typename T>
+__device__ int rocshmem_broadcast_wave(rocshmem_team_t team, T *dest,
+                                        const T *source, int nelems, int pe_root) {
+  LOGD_API("device::broadcast_wave (team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
+    team, dest, source, nelems, pe_root);
+
+  return direct_ctx_broadcast_wave<T>(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root);
+}
+
 __device__ int rocshmem_ctx_broadcastmem_wave(rocshmem_ctx_t ctx, rocshmem_team_t team,
   void *dest, const void *source, int nelems, int pe_root) {
     LOGD_API("device::broadcastmem_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
       ctx.ctx_opaque, team, dest, source, nelems, pe_root);
 
     return direct_ctx_broadcastmem_wave(ctx, team, dest, source, nelems, pe_root);
+}
+
+__device__ int rocshmem_broadcastmem_wave(rocshmem_team_t team,
+  void *dest, const void *source, int nelems, int pe_root) {
+    LOGD_API("device::broadcastmem_wave (team=%zd, dest=%p, source=%p, nelems=%d, root=%d)",
+      team, dest, source, nelems, pe_root);
+
+    return direct_ctx_broadcastmem_wave(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems, pe_root);
 }
 
 template <typename T>
@@ -1591,6 +1626,14 @@ __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
   direct_ctx_alltoallmem_wg(ctx, team, dest, source, nelems);
 }
 
+__device__ void rocshmem_alltoallmem_wg(
+    rocshmem_team_t team, void *dest, const void *source, int nelems) {
+  LOGD_API("device::alltoallmem_wg (team=%zd, dest=%p, source=%p, nelems=%d)",
+              team, dest, source, nelems);
+
+  direct_ctx_alltoallmem_wg(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
+}
+
 template <typename T>
 __device__ void rocshmem_alltoallv_wg(rocshmem_team_t team,
                                       T *dest, const size_t dest_nelems[],
@@ -1616,12 +1659,29 @@ __device__ int rocshmem_ctx_alltoall_wave(rocshmem_ctx_t ctx,
   return direct_ctx_alltoall_wave<T>(ctx, team, dest, source, nelems);
 }
 
+template <typename T>
+__device__ int rocshmem_alltoall_wave(rocshmem_team_t team, T *dest,
+                                       const T *source, int nelems) {
+  LOGD_API("device::alltoall_wave (team=%zd, dest=%p, source=%p, nelems=%d)",
+              team, dest, source, nelems);
+
+  return direct_ctx_alltoall_wave<T>(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
+}
+
 __device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
           rocshmem_team_t team, void *dest, const void *source, int nelems){
   LOGD_API("device::ctx_alltoallmem_wave (ctx=%zd, team=%zd, dest=%p, source=%p, nelems=%d)",
               ctx.ctx_opaque, team, dest, source, nelems);
 
   return direct_ctx_alltoallmem_wave(ctx, team, dest, source, nelems);
+}
+
+__device__ int rocshmem_alltoallmem_wave(
+          rocshmem_team_t team, void *dest, const void *source, int nelems){
+  LOGD_API("device::alltoallmem_wave (team=%zd, dest=%p, source=%p, nelems=%d)",
+              team, dest, source, nelems);
+
+  return direct_ctx_alltoallmem_wave(ROCSHMEM_CTX_DEFAULT, team, dest, source, nelems);
 }
 
 template <typename T>
@@ -2386,6 +2446,12 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
   template __device__ int rocshmem_broadcast_wave<T>(                          \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelems, int pe_root);                                                \
+  template __device__ void rocshmem_broadcast_wg<T>(                           \
+      rocshmem_team_t team, T * dest, const T *source,                         \
+      int nelems, int pe_root);                                                \
+  template __device__ int rocshmem_broadcast_wave<T>(                          \
+      rocshmem_team_t team, T * dest, const T *source,                         \
+      int nelems, int pe_root);                                                \
   template __device__ void rocshmem_ctx_alltoall_wg<T>(                        \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelems);                                                             \
@@ -2393,6 +2459,8 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
       rocshmem_team_t team, T * dest, const T *source,                         \
       int nelems);                                                             \
   template __device__ int rocshmem_ctx_alltoall_wave<T>(rocshmem_ctx_t ctx,    \
+      rocshmem_team_t team, T *dest, const T *source, int nelems);             \
+  template __device__ int rocshmem_alltoall_wave<T>(                           \
       rocshmem_team_t team, T *dest, const T *source, int nelems);             \
   template __device__ void rocshmem_alltoallv_wg<T>(                           \
                                       rocshmem_team_t team,                    \
@@ -2747,11 +2815,21 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
       int nelems, int pe_root) {                                              \
     rocshmem_broadcast_wg<T>(ctx, team, dest, source, nelems, pe_root);       \
   }                                                                           \
+  __device__ void rocshmem_##TNAME##_broadcast_wg(                            \
+      rocshmem_team_t team, T *dest, const T *source,                         \
+      int nelems, int pe_root) {                                              \
+    rocshmem_broadcast_wg<T>(team, dest, source, nelems, pe_root);            \
+  }                                                                           \
   __device__ int rocshmem_ctx_##TNAME##_broadcast_wave(                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelems, int pe_root) {                                              \
     return rocshmem_broadcast_wave<T>(ctx, team, dest,                        \
                                        source, nelems, pe_root);              \
+  }                                                                           \
+  __device__ int rocshmem_##TNAME##_broadcast_wave(                           \
+      rocshmem_team_t team, T *dest, const T *source,                         \
+      int nelems, int pe_root) {                                              \
+    return rocshmem_broadcast_wave<T>(team, dest, source, nelems, pe_root);   \
   }                                                                           \
   __device__ void rocshmem_ctx_##TNAME##_alltoall_wg(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
@@ -2766,6 +2844,10 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
   __device__ int rocshmem_ctx_##TNAME##_alltoall_wave(rocshmem_ctx_t ctx,     \
       rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
     return rocshmem_ctx_alltoall_wave<T>(ctx, team, dest, source, nelems);    \
+  }                                                                           \
+  __device__ int rocshmem_##TNAME##_alltoall_wave(                            \
+      rocshmem_team_t team, T *dest, const T *source, int nelems) {           \
+    return rocshmem_alltoall_wave<T>(team, dest, source, nelems);             \
   }                                                                           \
   __device__ void rocshmem_##TNAME##_alltoallv_wg(                            \
                                       rocshmem_team_t team,                   \
