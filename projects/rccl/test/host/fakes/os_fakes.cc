@@ -41,6 +41,10 @@ int ncclOsCpuCount(const ncclAffinity& affinity) {
   return g_ncclOsCpuCountValue;
 }
 
+// Real, as in src/os/linux.cc: cpuset.h's parsers build their masks with these.
+void ncclOsCpuZero(ncclAffinity& affinity) { CPU_ZERO(&affinity); }
+void ncclOsCpuSet(ncclAffinity& affinity, int cpu) { CPU_SET(cpu, &affinity); }
+
 // Controllable (was fail-loud). A std::function because :1609 writes through the pointer -- though nothing
 // ever reads affinitySave back, which is what the AffinitySaveIsNeverRestored test pins.
 // Writes an EMPTY mask by default, so ncclOsCpuCount's 0 default stays consistent and :1609-1610 are skipped.
