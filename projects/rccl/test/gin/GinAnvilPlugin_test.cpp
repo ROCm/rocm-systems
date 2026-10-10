@@ -469,8 +469,20 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   EXPECT_EQ(hostCtx[1].counters - hostCtx[0].counters, 5);
   EXPECT_EQ(hostCtx[2].counters - hostCtx[1].counters, 5);
 
+  // Both contexts share one span registration. The IPC entry stays until the
+  // last context drops its ref.
+  const ncclGinAnvilIpcBufEntry* ipcTable = nullptr;
+  int ipcCount = -1;
+  ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
+  EXPECT_EQ(ipcCount, 1);
+
   plugin_.destroyContext(ginCtx);
+  ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
+  EXPECT_EQ(ipcCount, 1);
+
   plugin_.destroyContext(ginCtxB);
+  ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
+  EXPECT_EQ(ipcCount, 0);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }

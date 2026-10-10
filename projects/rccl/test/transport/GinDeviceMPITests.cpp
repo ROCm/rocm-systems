@@ -2266,37 +2266,39 @@ struct AllContextsBarrierObservation {
 };
 
 __global__ void allContextsConsecutiveBarrierKernel(
-    int rank, uint64_t delayCycles, AllContextsBarrierObservation* observation, struct ncclDevComm devComm) {
+    int rank, uint64_t delayTicks, AllContextsBarrierObservation* observation, struct ncclDevComm devComm) {
   ncclGinBarrierSession<ncclCoopCta> bar{
       ncclCoopCta(), ncclGinAllContexts(devComm), ncclTeamTagWorld{}, /*barrierIndex=*/0};
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
 
   if (rank == 1) {
-    uint64_t start = clock64();
-    while (clock64() - start < delayCycles) {}
+    uint64_t start = wall_clock64();
+    while (wall_clock64() - start < delayTicks) {}
   }
   ncclCoopCta().sync();
 
-  uint64_t start = clock64();
+  uint64_t start = wall_clock64();
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
   if (threadIdx.x != 0) return;
 
-  observation->secondBarrierCycles = clock64() - start;
+  observation->secondBarrierCycles = wall_clock64() - start;
   const int peer = 1 - rank;
   const uint32_t sigIndex = devComm.worldGinBarrier.signal0 + peer;
-  for (int ctx = 0; ctx < 2; ctx++) {
-    ncclGin gin{devComm, ctx};
-    observation->ctxPeerSignals[ctx] = gin.readSignal(sigIndex, 64, cuda::memory_order_relaxed);
+  // Index 0 and ginConnectionCount are logical contexts 0 and 1 on connection 0.
+  // Indices 0 and 1 land on different connections when ginConnectionCount > 1,
+  // both with contextId 0, so that pair passes even if one connection still aliases.
+  const int ctxIndex[2] = {0, (int)devComm.ginConnectionCount};
+  for (int i = 0; i < 2; i++) {
+    ncclGin gin{devComm, ctxIndex[i]};
+    observation->ctxPeerSignals[i] = gin.readSignal(sigIndex, 64, cuda::memory_order_relaxed);
 #if NCCL_GIN_ANVIL_SDMA_ENABLE
-    // Derive handle/contextId the same way ncclGinInitCommon does so
-    // NCCL_GIN_NCONNECTIONS!=1 does not read past ginHandles[0].
     ncclGinCtx ginCtx{};
     ginCtx.handle = gin._ginHandle;
     ginCtx.contextId = gin.contextId;
     ginCtx.backend = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
     ginCtx.rank = devComm.rank;
     ginCtx.nRanks = devComm.nRanks;
-    observation->ctxSignalPtrs[ctx] =
+    observation->ctxSignalPtrs[i] =
         ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, sigIndex).ptr;
 #endif
   }
@@ -2319,14 +2321,21 @@ TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_Single
   ncclCommUserRank(comm, &rank);
 
   ncclDevCommRequirements reqs = defaultGinReqs();
-  reqs.ginContextCount = 2;
+  // Two logical contexts on every connection. ncclDevCommCreate rounds the
+  // request up to a multiple of ginConnectionCount, which is at most
+  // NCCL_GIN_MAX_CONNECTIONS, so this stays at two per connection when
+  // NCCL_GIN_NCONNECTIONS is not 1. A request of 2 with two connections
+  // yields contextId 0 on each handle and the alias check below passes
+  // with the stripes still shared.
+  reqs.ginContextCount = 2 * NCCL_GIN_MAX_CONNECTIONS;
   reqs.worldGinBarrierCount = 1;
   ncclDevComm devComm{};
   ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
   auto devCommCleanup = makeScopeGuard([&]() {
     (void)ncclDevCommDestroy(comm, &devComm);
   });
-  ASSERT_GE((int)devComm.ginContextCount, 2);
+  ASSERT_GT((int)devComm.ginConnectionCount, 0);
+  ASSERT_GE((int)devComm.ginContextCount / (int)devComm.ginConnectionCount, 2);
 
   AllContextsBarrierObservation* dObservation = nullptr;
   ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservation, sizeof(AllContextsBarrierObservation)));
@@ -2335,17 +2344,26 @@ TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_Single
   });
   ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservation, 0, sizeof(AllContextsBarrierObservation)));
 
-  constexpr uint64_t kDelayCycles = 100000000;
+  // wall_clock64 is fixed-rate (hipDeviceAttributeWallClockRate). clock64 is
+  // each GPU's shader clock, so a tick budget burned on rank 1 is not the
+  // same real time as the delta rank 0 records. 10 ms, shared via the slower
+  // device's rate so both ranks program the same tick count.
+  int rateKhz = 0;
+  ASSERT_EQ(hipSuccess, hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0));
+  ASSERT_GT(rateKhz, 0);
+  int commonRateKhz = 0;
+  MPI_Allreduce(&rateKhz, &commonRateKhz, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+  const uint64_t kDelayTicks = 10ull * static_cast<uint64_t>(commonRateKhz);
   MPI_Barrier(MPI_COMM_WORLD);
   allContextsConsecutiveBarrierKernel<<<1, kGinKernelThreads, 0, stream>>>(
-      rank, kDelayCycles, dObservation, devComm);
+      rank, kDelayTicks, dObservation, devComm);
   ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
 
   AllContextsBarrierObservation observation{};
   ASSERT_MPI_EQ(hipSuccess,
                 hipMemcpy(&observation, dObservation, sizeof(observation), hipMemcpyDeviceToHost));
   if (rank == 0) {
-    EXPECT_GE(observation.secondBarrierCycles, kDelayCycles / 4)
+    EXPECT_GE(observation.secondBarrierCycles, kDelayTicks / 4)
         << "second AllContexts barrier returned before delayed peer arrival";
     EXPECT_EQ(observation.ctxPeerSignals[0], 2u);
     EXPECT_EQ(observation.ctxPeerSignals[1], 2u);
