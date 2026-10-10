@@ -721,6 +721,38 @@ TEST_F(GinAnvilPluginTest, ConnCheck_SkippedOnRailConnection) {
   plugin_.finalize(ictx);
 }
 
+// The span-base probe allgathers over comm->bootstrap, which writes one slot per
+// world rank. Under NCCL_GIN_CONNECTION_RAIL the world is wider than the GIN team,
+// so a buffer sized by the GIN team would be overrun.
+TEST_F(GinAnvilPluginTest, BindSignals_SpanBaseProbeSizedForWorldRanks) {
+  constexpr int kWorldRanks = 8;
+  GinAnvilPluginStubs::SetBootstrapNranks(2);
+  mockComm_.get()->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+  mockComm_.get()->nRanks = kWorldRanks;
+  mockComm_.get()->rank = 5;
+  mockComm_.get()->devrState.lsaSize = 2;
+  mockComm_.get()->devrState.lsaSelf = 0;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  GinAnvilPluginStubs::SetBootstrapNranks(kWorldRanks);
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetLastWideAllGatherSize(), static_cast<int>(sizeof(uintptr_t)));
+  EXPECT_EQ(GinAnvilPluginStubs::GetWideAllGatherOverruns(), 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G21: conn-check inject-fail env aborts bind when nRanks>=2.
 TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   void* rawDevLsa = nullptr;
