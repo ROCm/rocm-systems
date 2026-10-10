@@ -1768,7 +1768,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
  *     a call and exits normally, and its capture shutdown writes its manifest
  *     under that mutex. The workload fails if the child does not exit within
  *     its deadline.
- *   - Both processes leave an archive whose manifest lists the API.
+ *   - Both processes leave an archive. The parent's manifest lists the API.
+ *     The child's does not: its archive holds no event for it.
  */
 HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_noting_unreplayable"};
@@ -1789,7 +1790,11 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
     REQUIRE(fs::exists(archive / "manifest.json"));
     const std::string manifest = read_text_file(archive / "manifest.json");
     INFO("Process manifest:\n" << manifest);
-    CHECK(manifest.find("\"hipUserObjectCreate\"") != std::string::npos);
+    // The child's manifest names the other process as its parent.
+    const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
+    const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
+    const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
+    CHECK((manifest.find("\"hipUserObjectCreate\"") != std::string::npos) == !child);
   }
 }
 
