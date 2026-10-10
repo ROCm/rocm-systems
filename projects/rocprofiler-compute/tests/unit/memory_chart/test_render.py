@@ -11,7 +11,7 @@ import pytest
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts, PanelConfigs
-from memory_chart.mem_chart import MemChart, plot_mem_chart, progress_bar
+from memory_chart.render import MemChart, plot_mem_chart, progress_bar
 from memory_chart.units import display_unit, panel_units
 from utils.utils_common import strip_ansi
 

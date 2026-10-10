@@ -20,7 +20,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from memory_chart.loader import Layouts, PanelConfigs, load_layout
-from memory_chart.mem_chart import MemChart
+from memory_chart.render import MemChart
 from memory_chart.units import PLAIN, display_unit, panel_units
 
 # Values as shown on the chart, before the unit's scale is undone
