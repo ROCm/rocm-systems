@@ -224,22 +224,19 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         std::string                                  archName;
     };
 
-    // The 2-shot cap is part of the opt-in env, not the suite. gfx1250's table
-    // leaves ceNonRegMax[AllReduce] at 0, so a suite-wide RCCL_CE_AR_MAX_MSG_BYTES
-    // would make DefaultOff_2Shot_Gfx1250 look enabled.
+
+
+
     const std::unordered_map<std::string, std::string> baseEnv = {
         {"RCCL_CE_ALLREDUCE", "1"},
-        {"RCCL_CE_AR_MAX_MSG_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+        {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
     };
 
     const std::vector<UseCeArCase> cases = {
-        // Per-arch default for 2-shot (staging buffer): off on gfx1250 (ceNonRegMax[AR]=0;
-        // gfx1250 uses registered CE instead) and off on gfx950. No env override.
-        {"DefaultOff_2Shot_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx1250"},
         // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
-        // RCCL_CE_AR_MAX_MSG_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
+        // RCCL_CE_AR_2SHOT_MAX_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
         // returns true, confirming the default-on wiring.
-        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_MAX_MSG_BYTES", "1048576"}}, "gfx1250"},
+        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_2SHOT_MAX_BYTES", "1048576"}}, "gfx1250"},
         {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
         // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
@@ -255,8 +252,16 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (kCeArMaxMsgBytesDefault / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
+        // Min-bound env-override: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
+        // 252 * sizeof(float) = 1008 bytes < 1024 -- rejected.
+        // 256 * sizeof(float) = 1024 bytes == min  -- accepted.
+        // Both counts are divisible by nRanks=4.
+        {"MinBoundRejects_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 252, ncclSum, ncclFloat32, false,
+            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
+        {"AtMinBoundPasses_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 256, ncclSum, ncclFloat32, true,
+            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
     };
 
     for(const auto& tc : cases)
@@ -285,8 +290,10 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // cap must not see a suite or shell override, or gfx1250's table default
         // (off) becomes on. RCCL_CE_ALLREDUCE is env-first, so an inherited 0
         // fails DefaultOn, which expects the gfx1250 default (unset).
-        if (env.find("RCCL_CE_AR_MAX_MSG_BYTES") == env.end())
-            cfg.clearVariable("RCCL_CE_AR_MAX_MSG_BYTES");
+        if (env.find("RCCL_CE_AR_2SHOT_MAX_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_2SHOT_MAX_BYTES");
+        if (env.find("RCCL_CE_AR_2SHOT_MIN_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_2SHOT_MIN_BYTES");
         if (env.find("RCCL_CE_ALLREDUCE") == env.end())
             cfg.clearVariable("RCCL_CE_ALLREDUCE");
         ProcessIsolatedTestRunner::registerTest(cfg);
@@ -300,13 +307,13 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
 
 
 // ---------------------------------------------------------------------------
-// rcclCeAr2ShotMax / ncclCeInit staging-buffer growth.
+// rcclCeAr2ShotMax(comm) / ncclCeInit staging-buffer growth.
 //
 // ncclCeInit (ce_coll.cc:111-114) grows ceArMaxBytes past
 // NCCL_CE_AR_TMPBUF_DEFAULT_BYTES when rcclCeAr2ShotMax returns a larger
 // value.  Two sources can produce that:
 //   (a) table->ceNonRegMax[ncclFuncAllReduce] > default, read via archThresholds
-//   (b) RCCL_CE_AR_MAX_MSG_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
+//   (b) RCCL_CE_AR_2SHOT_MAX_BYTES env var (rcclParamCeArMaxMsgBytes() >= 0)
 //
 // The tests below verify that the chunk-layout functions
 // (ncclCeAllReduceSlotChunkBytes, ncclCeAllReduceChooseChunkBytes) remain

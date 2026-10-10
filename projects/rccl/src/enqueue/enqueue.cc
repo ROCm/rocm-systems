@@ -19,6 +19,7 @@
 #include "channel.h"
 #include "rocmwrap.h"
 #include "rccl_vars.h"
+#include "rccl_arch_thresholds.h"
 #include "profiler.h"
 #include "transport.h"
 #include "register_inline.h"
@@ -4693,7 +4694,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           // message must fit the 2-shot window and the allocated buffer.
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
           const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
+          const size_t twoShotMin = rcclCeAr2ShotMin(comm);
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1) {
             ceAllReduceFits = false;
           } else {
@@ -4709,12 +4711,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       bool ceArSymRegistered =
         info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment;
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-      // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
-      // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
-      // rcclSelectAllGather Branch #3 reports, so selection and dispatch agree.
+      // Sym-window CE AllGather (-R 2) above the symk/CE crossover. Requires
+      // CTAPolicy=ZERO, matching rcclSelectAllGather Branch #3 so selection
+      // and dispatch agree.
       bool ceAgSymRegistered =
         !rcclNcclAlgoEnvIsSet() &&
         info->coll == ncclFuncAllGather && ceAvailable && !hasSysmemSegment &&
+        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) &&
         rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing);
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);

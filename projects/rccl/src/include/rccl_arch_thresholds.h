@@ -25,6 +25,13 @@ enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 // inconsistent with the no-suppression meaning needed for symMaxR2 unused/uncapped slots.
 static constexpr size_t kThreshUnlimited = SIZE_MAX;
 
+// Returns true when totalBytes falls within the [ceMin, ceMax] window.
+// ceMax == 0 means disabled (returns false for any size).
+// ceMax == SIZE_MAX (kThreshUnlimited) means no upper bound.
+inline bool rcclWindowFits(size_t totalBytes, size_t ceMin, size_t ceMax) {
+  return ceMax > 0 && totalBytes >= ceMin && totalBytes <= ceMax;
+}
+
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
@@ -53,9 +60,14 @@ struct rcclArchThresholds {
   // ceNonRegMax[func] = 0 means CE-Scratch / CE 2-shot disabled for that collective.
   // AllReduce 2-shot: this is a selector cap only. ceARTmpBuf is allocated at
   // NCCL_CE_AR_TMPBUF_DEFAULT_BYTES and grown only when this entry (or
-  // RCCL_CE_AR_MAX_MSG_BYTES) is larger.
+  // RCCL_CE_AR_2SHOT_MAX_BYTES) is larger.
   size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
   size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
+
+  // CE registered-window lower bound per collective, total bytes.
+  // CE-registered fires when ceRegMin[func] <= totalBytes <= ceRegMax[func].
+  // 0 means no lower bound. Independent of ceNonRegMin (the non-registered / scratch path).
+  size_t ceRegMin[RCCL_DDA_FUNC_COUNT];
 
   // CE registered-window upper bound per collective, total bytes.
   // For AllReduce: registered CE copies through user symmetric windows (tuning cap only).
