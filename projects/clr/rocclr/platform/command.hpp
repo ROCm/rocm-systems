@@ -120,6 +120,7 @@ class Event : public RuntimeObject {
     uint64_t submitted_;
     uint64_t start_;
     uint64_t end_;
+    uint64_t gpu_end_ = 0ULL;  //!< End time in the GPU clock domain, 0 if not recorded
 
     uint64_t correlation_id_;
     bool enabled_;             //!< Profiling enabled for the wave limiter
@@ -131,6 +132,7 @@ class Event : public RuntimeObject {
       submitted_ = 0ULL;
       start_ = 0ULL;
       end_ = 0ULL;
+      gpu_end_ = 0ULL;
       correlation_id_ = 0ULL;
     }
   } profilingInfo_;
@@ -178,6 +180,9 @@ class Event : public RuntimeObject {
 
   //! Return the profiling info.
   const ProfilingInfo& profilingInfo() const { return profilingInfo_; }
+
+  //! Record this command's end time in the GPU clock domain.
+  void setGpuEndTimestamp(uint64_t end) { profilingInfo_.gpu_end_ = end; }
 
   //! Return this command's execution status.
   int32_t status() const { return status_.load(std::memory_order_relaxed); }

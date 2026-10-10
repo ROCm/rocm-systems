@@ -121,7 +121,13 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     // Hence for now make sure CPU status is updated by calling awaitCompletion();
     awaitEventCompletion();
     eStop.awaitEventCompletion();
-    ms = static_cast<float>(eStop.time(false) - time(false)) * kNsToMs;
+    const int64_t startGpuTs = gpuTime();
+    const int64_t stopGpuTs = eStop.gpuTime();
+    if (startGpuTs != 0 && stopGpuTs != 0) {
+      ms = static_cast<float>(stopGpuTs - startGpuTs) * kNsToMs;
+    } else {
+      ms = static_cast<float>(eStop.time(false) - time(false)) * kNsToMs;
+    }
   }
   return hipSuccess;
 }
@@ -134,6 +140,12 @@ int64_t Event::time(bool getStartTs) const {
   } else {
     return static_cast<int64_t>(event_->profilingInfo().end_);
   }
+}
+
+// ================================================================================================
+int64_t Event::gpuTime() const {
+  assert(event_ != nullptr);
+  return static_cast<int64_t>(event_->profilingInfo().gpu_end_);
 }
 
 // ================================================================================================
