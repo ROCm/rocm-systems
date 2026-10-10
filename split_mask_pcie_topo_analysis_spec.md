@@ -542,7 +542,9 @@ Without root privilege, there is **no reliable unprivileged method** to discover
    - Groups by DSN and writes the link map to a file (e.g., `/var/run/rccl/switch_links.json`)
    - RCCL would need a small enhancement to read this file as a fallback when sysfs path is absent
 
-   **Advantages**: No kernel module needed, minimal privilege escalation (only `CAP_SYS_RAWIO`, not full root), can be run on-demand.
+   **Precedent — AINIC `disable_acs.sh`**: There is an existing operational pattern for this approach. The AINIC stack already runs a privileged script (`/apps/shared/disable_acs.sh`) at NIC bring-up time that iterates all PCI devices and uses `setpci` to access extended config space (ACS capability) as root. A DSN mapper helper could follow the same deployment model — run as a privileged step during NIC bring-up, alongside `disable_acs.sh`, to enumerate PCI bridges, extract DSN from extended capability `0x0003`, and build the inter-switch-link representation before RCCL initializes. This avoids introducing new operational workflows since the NIC bring-up sequence already executes privileged PCIe configuration steps.
+
+   **Advantages**: No kernel module needed, minimal privilege escalation (only `CAP_SYS_RAWIO`, not full root), can be run on-demand or integrated into existing NIC bring-up sequence.
 
    **Limitation**: Requires a minor RCCL code change to read the alternative link map format.
 
@@ -590,4 +592,3 @@ Without root privilege, there is **no reliable unprivileged method** to discover
 
    **For evaluation/prototyping**: Approach 2 — a setcap helper binary is the fastest path to validating that DSN-based grouping correctly identifies physical switch membership on the SMC300x platform, before investing in kernel module development.
 
-2. **NIC-aware split strategy**: Explore whether `NCCL_TESTS_SPLIT=DIV` or `MOD` can create communicators aligned with NIC topology to avoid cross-partition contention.

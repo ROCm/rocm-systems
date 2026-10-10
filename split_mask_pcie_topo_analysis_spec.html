@@ -1161,7 +1161,16 @@ sudo setcap cap_sys_rawio+ep /usr/local/bin/rccl-dsn-mapper</code></pre>
                 <li>Groups by DSN and writes the link map to a file (e.g., <code>/var/run/rccl/switch_links.json</code>)</li>
                 <li>RCCL would need a small enhancement to read this file as a fallback when sysfs path is absent</li>
             </ul>
-            <p><span class="tag green">Advantages</span> No kernel module needed, minimal privilege escalation (only <code>CAP_SYS_RAWIO</code>, not full root), can be run on-demand.</p>
+            <div class="callout" style="border-left-color: var(--blue);">
+                <strong>Precedent &mdash; AINIC <code>disable_acs.sh</code>:</strong> The AINIC stack already runs a privileged script
+                (<code>/apps/shared/disable_acs.sh</code>) at NIC bring-up time that iterates all PCI devices and uses <code>setpci</code>
+                to access extended config space (ACS capability) as root. A DSN mapper helper could follow the same deployment model &mdash;
+                run as a privileged step during NIC bring-up, alongside <code>disable_acs.sh</code>, to enumerate PCI bridges, extract DSN
+                from extended capability <code>0x0003</code>, and build the inter-switch-link representation before RCCL initializes.
+                This avoids introducing new operational workflows since the NIC bring-up sequence already executes privileged PCIe
+                configuration steps.
+            </div>
+            <p><span class="tag green">Advantages</span> No kernel module needed, minimal privilege escalation (only <code>CAP_SYS_RAWIO</code>, not full root), can be run on-demand or integrated into existing NIC bring-up sequence.</p>
             <p><span class="tag orange">Limitation</span> Requires a minor RCCL code change to read the alternative link map format.</p>
 
             <h4 style="color: var(--purple); margin-top: 24px;">Approach 3: udev Rule with DSN Extraction</h4>
@@ -1208,13 +1217,6 @@ sudo setcap cap_sys_rawio+ep /usr/local/bin/rccl-dsn-mapper</code></pre>
             </div>
         </div>
 
-        <div class="card cyan">
-            <h4>2. NIC-aware split strategy</h4>
-            <p>
-                Explore whether <code>NCCL_TESTS_SPLIT=DIV</code> or <code>MOD</code> can create
-                communicators aligned with NIC topology to avoid cross-partition contention.
-            </p>
-        </div>
     </section>
 
 </div>
