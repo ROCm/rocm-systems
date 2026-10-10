@@ -295,10 +295,12 @@ _RMA_EXAMPLE_COUNTS = re.compile(r"RMA/Example: (\d+) data ops, (\d+) aggregated
 
 def _unit_tests_mpi(rccl_install_dir):
     """Locate rccl-UnitTestsMPI, or return None when MPI tests were not built."""
-    for build_type in ("release", "debug"):
-        path = os.path.join(rccl_install_dir, "build", build_type, "test", "rccl-UnitTestsMPI")
-        if os.path.exists(path):
-            return path
+    src_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+    for root in (rccl_install_dir, src_root):
+        for build_type in ("release", "debug"):
+            path = os.path.join(root, "build", build_type, "test", "rccl-UnitTestsMPI")
+            if os.path.exists(path):
+                return path
     return None
 
 
@@ -354,12 +356,13 @@ def test_gin_proxy_batches_and_hints_through_rma_example(paths):
     """The GIN proxy forwards device puts to the adopted RMA plugin with the aggregation hint."""
     unit_bin = _unit_tests_mpi(paths.RCCL_INSTALL_DIR)
     if unit_bin is None:
-        pytest.skip("rccl-UnitTestsMPI not built; rebuild with --enable-mpi-tests")
+        pytest.skip("rccl-UnitTestsMPI not built; rebuild with --debug --enable-mpi-tests")
     if not os.path.exists(os.path.join(paths.OMPI_INSTALL_DIR, "bin", "mpirun")):
         pytest.skip("mpirun not found under OMPI_INSTALL_DIR")
 
     # A run is capped by the batch and the queue, and its last op is never hinted, so
-    # hinted <= puts - puts / min(batch, queue); a batch of one hints nothing.
+    # hinted <= puts - puts / min(batch, queue); a batch of one hints nothing. The lower
+    # bound assumes the burst outpaces the proxy, which a full CTA against this queue does.
     for batch, extra_env in ((1, {"NCCL_GIN_PROXY_POLL_BATCH": "1"}),
                              (4, {"NCCL_GIN_PROXY_POLL_BATCH": "4"}),
                              (32, {})):
