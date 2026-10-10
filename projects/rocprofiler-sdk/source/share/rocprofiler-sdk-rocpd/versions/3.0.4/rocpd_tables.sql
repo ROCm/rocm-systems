@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.5
+-- RocPD schema version 3.0.4
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -296,7 +296,6 @@ CREATE TABLE IF NOT EXISTS
         "grid_size_z" INTEGER NOT NULL,
         "graph_exec_id" INTEGER NOT NULL DEFAULT 0,
         "graph_node_id" INTEGER NOT NULL DEFAULT 0,
-        "pipe_id" INTEGER NOT NULL DEFAULT -1,
         "region_name_id" INTEGER,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,

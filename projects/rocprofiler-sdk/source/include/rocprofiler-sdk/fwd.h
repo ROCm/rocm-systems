@@ -899,6 +899,11 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
 }
 
 /**
+ * @brief The NULL value of a kernel dispatch pipe ID. Used when the hardware pipe is unknown.
+ */
+#define ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE (-1)
+
+/**
  * @brief ROCProfiler kernel dispatch information
  *
  */

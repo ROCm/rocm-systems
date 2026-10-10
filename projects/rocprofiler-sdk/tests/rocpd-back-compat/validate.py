@@ -39,6 +39,8 @@ Key invariants verified:
            out_graph_launch_trace.csv not created for pre-latest schemas.
   * CSV  — above columns / file ARE present for the latest schema.
   * Perfetto — .pftrace exists and is non-empty for every schema.
+  * CSV / Perfetto / OTF2 — kernel dispatch pipe_id absent for schemas < 3.0.5;
+            present (with the -1 default) for the latest schema.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
 
@@ -79,6 +81,37 @@ def _otf2_location_names(otf2_path: Path) -> list:
 
     _, readers = OTF2Reader(str(otf2_path)).read()
     return [str(loc.name) for loc in readers[0].definitions.locations]
+
+
+def _pftrace_kernel_pipe_ids(pftrace_path: Path) -> tuple:
+    """Return (kernel dispatch slice count, sorted pipe_id values) from a Perfetto trace."""
+    from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
+
+    with PerfettoReader(str(pftrace_path)) as reader:
+        kernels = reader.query_tp(
+            "SELECT id FROM slice WHERE category = 'kernel_dispatch'"
+        )
+        pipe_ids = reader.query_tp("""
+            SELECT args.int_value FROM slice JOIN args USING(arg_set_id)
+            WHERE slice.category = 'kernel_dispatch' AND args.key = 'debug.pipe_id'
+            """)
+    return len(kernels), sorted(int(v) for v in pipe_ids.get("int_value", []))
+
+
+def _otf2_kernel_pipe_ids(otf2_path: Path) -> tuple:
+    """Return (kernel dispatch region count, sorted pipe_id values) from an OTF2 trace."""
+    from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
+
+    df, _ = OTF2Reader(str(otf2_path)).read()
+    kernels = df[df["category"] == "kernel_dispatch"]
+    pipe_ids = [
+        value
+        for attribute_sets in kernels["attributes"]
+        for attribute_set in attribute_sets
+        for attribute, value in attribute_set.items()
+        if attribute.name == "pipe_id"
+    ]
+    return len(kernels), sorted(pipe_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +288,48 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.5 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
+
+    Verifies that the pipe_id column is not in the kernel trace CSV.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        print(
+            f"Schema {old_schema} is newer than 3.0.5, calling test_csv_for_schema_3_0_5_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
+
+    kernel_csv = output_root / old_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {old_schema}: {kernel_csv}"
+    assert "pipe_id" not in _csv_columns(
+        kernel_csv
+    ), f"pipe_id unexpectedly present in kernel CSV for schema {old_schema}"
+
+
+def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Schema 3.0.5 additions must be present for the latest schema.
+
+    Verifies that the kernel trace CSV carries pipe_id, including the -1 (unknown) default.
+    """
+    kernel_csv = output_root / latest_schema / "csv" / "out_kernel_trace.csv"
+    assert (
+        kernel_csv.exists()
+    ), f"out_kernel_trace.csv not found for schema {latest_schema}: {kernel_csv}"
+    with open(kernel_csv) as fh:
+        pipe_ids = sorted(int(row["Pipe_Id"]) for row in csv_mod.DictReader(fh))
+    assert pipe_ids == [
+        -1,
+        2,
+    ], f"unexpected pipe_id values in kernel CSV for schema {latest_schema}: {pipe_ids}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 
@@ -276,6 +351,49 @@ def test_pftrace_completes_without_error_latest(output_root, latest_schema):
     pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
     assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
     assert pftrace.stat().st_size > 0, f".pftrace is empty for schema {latest_schema}"
+
+
+# ---------------------------------------------------------------------------
+# Perfetto tests — schema 3.0.5 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_pftrace_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
+
+    Verifies that kernel dispatch slices carry no pipe_id annotation.
+    """
+    pytest.importorskip("perfetto", reason="perfetto package not installed")
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        print(
+            f"Schema {old_schema} is newer than 3.0.5, calling test_pftrace_for_schema_3_0_5_changes_present instead"
+        )
+        return test_pftrace_for_schema_3_0_5_changes_present(output_root, old_schema)
+
+    pftrace = output_root / old_schema / "pftrace" / "out_results.pftrace"
+    assert pftrace.exists(), f".pftrace not found for schema {old_schema}: {pftrace}"
+    num_kernels, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    assert (
+        num_kernels > 0
+    ), f"no kernel dispatch slices in .pftrace for schema {old_schema}"
+    assert (
+        not pipe_ids
+    ), f"pipe_id unexpectedly present in .pftrace for schema {old_schema}: {pipe_ids}"
+
+
+def test_pftrace_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Schema 3.0.5 additions must be present for the latest schema.
+
+    Verifies that kernel dispatch slices carry pipe_id, including the -1 (unknown) default.
+    """
+    pytest.importorskip("perfetto", reason="perfetto package not installed")
+    pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
+    assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
+    _, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    assert pipe_ids == [
+        -1,
+        2,
+    ], f"unexpected pipe_id values in .pftrace for schema {latest_schema}: {pipe_ids}"
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +462,51 @@ def test_otf2_graph_launch_locations_latest(output_root, latest_schema):
         f"Expected 'HIP Graph Launch' OTF2 locations for schema {latest_schema} "
         f"but none found.  All locations: {loc_names}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OTF2 tests — schema 3.0.5 (kernel dispatch pipe_id)
+# ---------------------------------------------------------------------------
+
+
+def test_otf2_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
+
+    Verifies that kernel dispatch regions carry no pipe_id attribute.
+    """
+    pytest.importorskip("otf2", reason="otf2 package not installed")
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        print(
+            f"Schema {old_schema} is newer than 3.0.5, calling test_otf2_for_schema_3_0_5_changes_present instead"
+        )
+        return test_otf2_for_schema_3_0_5_changes_present(output_root, old_schema)
+
+    otf2_path = output_root / old_schema / "otf2" / "out_results.otf2"
+    assert (
+        otf2_path.exists()
+    ), f"OTF2 output not found for schema {old_schema}: {otf2_path}"
+    num_kernels, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    assert num_kernels > 0, f"no kernel dispatch regions in OTF2 for schema {old_schema}"
+    assert (
+        not pipe_ids
+    ), f"pipe_id unexpectedly present in OTF2 for schema {old_schema}: {pipe_ids}"
+
+
+def test_otf2_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Schema 3.0.5 additions must be present for the latest schema.
+
+    Verifies that kernel dispatch regions carry pipe_id, including the -1 (unknown) default.
+    """
+    pytest.importorskip("otf2", reason="otf2 package not installed")
+    otf2_path = output_root / latest_schema / "otf2" / "out_results.otf2"
+    assert (
+        otf2_path.exists()
+    ), f"OTF2 output not found for schema {latest_schema}: {otf2_path}"
+    _, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    assert pipe_ids == [
+        -1,
+        2,
+    ], f"unexpected pipe_id values in OTF2 for schema {latest_schema}: {pipe_ids}"
 
 
 if __name__ == "__main__":
