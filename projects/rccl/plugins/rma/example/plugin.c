@@ -87,7 +87,7 @@ __hidden ncclResult_t rmaGetProperties(int dev, ncclNetProperties_v12_t* props) 
   props->maxRecvs = 1;
   // Serves the GIN proxy, so NCCL_GIN_TYPE=2 keeps it selected.
   props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
-  props->netDeviceVersion = 0;
+  props->netDeviceVersion = NCCL_NET_DEVICE_INVALID_VERSION;
   props->vProps.ndevs = 1;
   props->vProps.devs[0] = dev;
   props->maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
@@ -168,8 +168,8 @@ __hidden ncclResult_t rmaFinalize(void* ctx) {
   ncclDebugLogger_t log = __atomic_load_n(&logFn, __ATOMIC_RELAXED);
   if (log) {
     log(NCCL_LOG_INFO, NCCL_INIT | NCCL_NET, __FILE__, __LINE__, "RMA/Example: %lu data ops, %lu aggregated",
-          (unsigned long)__atomic_load_n(&nDataOps, __ATOMIC_RELAXED),
-          (unsigned long)__atomic_load_n(&nAggregatedOps, __ATOMIC_RELAXED));
+        (unsigned long)__atomic_load_n(&nDataOps, __ATOMIC_RELAXED),
+        (unsigned long)__atomic_load_n(&nAggregatedOps, __ATOMIC_RELAXED));
   }
   free(ctx);
   return ncclSuccess;
