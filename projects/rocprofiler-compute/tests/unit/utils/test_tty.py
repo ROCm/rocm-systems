@@ -13,7 +13,6 @@ import pytest
 
 import config
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
-from memory_chart.mem_chart import strip_ansi
 from utils.tty import (
     _render_membw_guidance,
     convert_time_columns,
@@ -33,6 +32,7 @@ from utils.utils_analysis import (
     build_call_trees,
     build_operator_summary,
 )
+from utils.utils_common import strip_ansi
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 

@@ -10,9 +10,10 @@ import pytest
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts
-from memory_chart.mem_chart import MemChart, plot_mem_chart, progress_bar, strip_ansi
+from memory_chart.mem_chart import MemChart, plot_mem_chart, progress_bar
 from memory_chart.units import display_unit, panel_units
 from tests.unit.memory_chart.layout_cases import CONFIG_ARCHS, panel_config
+from utils.utils_common import strip_ansi
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 
