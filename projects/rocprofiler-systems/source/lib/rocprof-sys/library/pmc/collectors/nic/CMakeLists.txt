@@ -13,7 +13,6 @@ set(pmc_nic_sources
     ${CMAKE_CURRENT_LIST_DIR}/device.hpp
     ${CMAKE_CURRENT_LIST_DIR}/collector.hpp
     ${CMAKE_CURRENT_LIST_DIR}/nic_traits.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/perfetto_policy.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_policy.hpp
 )
 

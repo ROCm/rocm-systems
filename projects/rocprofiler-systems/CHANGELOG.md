@@ -29,6 +29,13 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   path is now validated against the target's mount namespace before attaching, failing
   cleanly with a diagnostic instead.
 
+### Removed
+
+- Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
+  trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
+  now an unknown-argument error); the `tracing.legacy` key was removed from JSON
+  configuration export.
+
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 
 ### Changed

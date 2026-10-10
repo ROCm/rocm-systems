@@ -24,9 +24,7 @@ namespace rocprofsys::rocprofiler_sdk
 struct roctx_client_config
 {
     bool        pause_resume_enabled{ false };
-    bool        use_perfetto{ false };
     bool        use_timemory{ false };
-    bool        perfetto_annotations{ false };
     std::string selected_trace_regions;
 };
 
@@ -105,8 +103,7 @@ template <typename MarkerWriterPolicy>
 roctx_client<MarkerWriterPolicy>::roctx_client(std::shared_ptr<control::session> session,
                                                const roctx_client_config& roctx_cfg)
 : m_config{ roctx_cfg }
-, m_writer{ roctx_cfg.use_perfetto, roctx_cfg.use_timemory,
-            roctx_cfg.perfetto_annotations }
+, m_writer{ roctx_cfg.use_timemory }
 , m_session{ std::move(session) }
 , m_trigger{ std::make_unique<control::triggers::roctx>(
       m_session, roctx_cfg.selected_trace_regions) }

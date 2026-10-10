@@ -32,7 +32,6 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/perfetto_fwd.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
 #include "core/timemory.hpp"
@@ -818,7 +817,7 @@ rocprofsys_init_tooling_hidden(void)
                     std::chrono::duration<double>{ spec.duration });
 
                 // Safety-net subscriber for category-traited recording paths
-                // (timemory storage, perfetto trace_events from callbacks not
+                // (timemory storage, trace-cache events from callbacks not
                 // covered by a subsystem pause subscriber).
                 get_control_session()->subscribe(
                     { .on_pause =
@@ -913,13 +912,6 @@ rocprofsys_init_tooling_hidden(void)
         sampling::block_signals();
     }
 
-    // perfetto initialization
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Setting up Perfetto...");
-        rocprofsys::perfetto::setup();
-    }
-
     if(get_use_causal())
     {
         causal::start_experimenting();
@@ -956,17 +948,8 @@ rocprofsys_init_tooling_hidden(void)
         }
     }
 
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Starting Perfetto...");
-        rocprofsys::perfetto::start();
-    }
-
     categories::setup();
 
-    // if static objects are destroyed in the inverse order of when they are
-    // created this should ensure that finalization is called before perfetto
-    // ends the tracing session
     static auto const _ensure_finalization = ensure_finalization();
 
     return true;
@@ -1421,14 +1404,6 @@ rocprofsys_finalize_hidden(void)
     LOG_DEBUG("Flushing pending region cache entries...");
     rocprofsys_flush_pending_region_cache_hidden();
 
-    bool _perfetto_output_error = false;
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Finalizing perfetto...");
-        rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error, _output_registry);
-    }
-
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
@@ -1527,12 +1502,6 @@ rocprofsys_finalize_hidden(void)
 
     _finalization.stop();
 
-    if(_perfetto_output_error)
-    {
-        throw std::runtime_error(fmt::format("Error opening perfetto output file: {}",
-                                             get_perfetto_output_filename()));
-    }
-
     if(_push_count > _pop_count)
     {
         LOG_WARNING("rocprofsys_push_trace/rocprofsys_push_trace_with_args was called "
@@ -1579,9 +1548,6 @@ rocprofsys_reset_for_reattach_hidden(void)
 
 namespace
 {
-// if static objects are destroyed randomly (relatively uncommon behavior)
-// this might call finalization before perfetto ends the tracing session
-// but static variable in rocprofsys_init_tooling_hidden is more likely
 auto _ensure_finalization = ensure_finalization(true);
 auto _manager             = tim::manager::instance();
 auto _settings            = tim::settings::shared_instance();

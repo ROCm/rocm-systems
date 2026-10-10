@@ -7,7 +7,6 @@
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/cache_policy.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/gpu_perf_counter_traits.hpp"
-#include "library/pmc/collectors/gpu_perf_counter/perfetto_policy.hpp"
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
@@ -18,7 +17,6 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter
 struct production_config
 {
     using SettingsApi = collectors::settings_policy;
-    using PerfettoApi = gpu_perf_counter::perfetto_policy;
     using CacheApi    = gpu_perf_counter::cache_policy;
 };
 

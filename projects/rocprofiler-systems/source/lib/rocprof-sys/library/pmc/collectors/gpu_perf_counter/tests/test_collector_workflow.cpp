@@ -32,7 +32,7 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing
 {
 
 // ============================================================================
-// Test stub policies (replace real cache/perfetto/settings to avoid globals)
+// Test stub policies (replace real cache/settings to avoid globals)
 // ============================================================================
 
 struct captured_sample
@@ -68,18 +68,6 @@ struct test_cache_policy
     }
 };
 
-struct test_perfetto_policy
-{
-    using counter_track = void;
-
-    template <typename DeviceEntries>
-    static void init_storage(const DeviceEntries&)
-    {}
-    static void setup_counter_tracks(size_t, const std::vector<counter_metadata>&) {}
-    static void store_sample(size_t, const metrics&, std::uint64_t) {}
-    static void post_process(const enabled_metrics&) {}
-};
-
 struct test_settings_policy
 {
     static enabled_metrics get_gpu_perf_counter_enabled_metrics()
@@ -89,14 +77,11 @@ struct test_settings_policy
               counter_definition{ .name = "SQ_BUSY_CYCLES", .device_index = 0 } }
         };
     }
-
-    static bool get_use_perfetto_legacy_metrics() { return false; }
 };
 
 struct test_config
 {
     using SettingsApi = test_settings_policy;
-    using PerfettoApi = test_perfetto_policy;
     using CacheApi    = test_cache_policy;
 };
 

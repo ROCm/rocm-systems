@@ -33,7 +33,6 @@ inline constexpr const char* PRINT_ENV          = "ROCPROFSYS_PRINT_ENV";
 // --- Tracing ---
 inline constexpr const char* TRACE         = "ROCPROFSYS_TRACE";
 inline constexpr const char* USE_TRACE     = "ROCPROFSYS_USE_TRACE";
-inline constexpr const char* TRACE_LEGACY  = "ROCPROFSYS_TRACE_LEGACY";
 inline constexpr const char* PERFETTO_FILE = "ROCPROFSYS_PERFETTO_FILE";
 inline constexpr const char* PERFETTO_BUFFER_SIZE_KB =
     "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB";
