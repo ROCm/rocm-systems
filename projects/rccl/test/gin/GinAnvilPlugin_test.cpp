@@ -319,6 +319,34 @@ TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRange) {
   plugin_.finalize(ictx);
 }
 
+// AICOMRCCL-2339: the slot bound can now trip inside one context's logical
+// contexts, after earlier ones already took a span ref. The failed bind must
+// drop that ref and unregister the span.
+TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRangeInsideLogicalContexts) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 1;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 2, 1), ncclInvalidArgument);
+
+  const ncclGinAnvilIpcBufEntry* ipcTable = nullptr;
+  int ipcCount = -1;
+  ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
+  EXPECT_EQ(ipcCount, 0);
+
+  plugin_.destroyContext(ginCtx);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G14: successful signal bind clears pending list.
 TEST_F(GinAnvilPluginTest, BindSignals_Success) {
   void* ictx = nullptr;
@@ -458,7 +486,28 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   EXPECT_EQ(hostCtx[1].signals - hostCtx[0].signals, 4);
   EXPECT_EQ(hostCtx[2].signals - hostCtx[1].signals, 4);
   EXPECT_EQ(hostCtx[0].signals - hostCtxB.signals, 4);
-  EXPECT_NE(hostCtx[0].signal_remote_addrs, hostCtx[1].signal_remote_addrs);
+
+  // Each context's peer table must point at its own stripe on every peer.
+  const int nRanks = hostCtx[0].nRanks;
+  ASSERT_GT(nRanks, 0);
+  constexpr ptrdiff_t kStripeBytes = 4 * sizeof(uint64_t);
+  std::vector<uintptr_t> addrsB(nRanks), addrs0(nRanks), addrs1(nRanks), addrs2(nRanks);
+  ASSERT_EQ(hipMemcpy(addrsB.data(), hostCtxB.signal_remote_addrs, nRanks * sizeof(uintptr_t), hipMemcpyDeviceToHost),
+            hipSuccess);
+  ASSERT_EQ(hipMemcpy(addrs0.data(), hostCtx[0].signal_remote_addrs, nRanks * sizeof(uintptr_t),
+                      hipMemcpyDeviceToHost),
+            hipSuccess);
+  ASSERT_EQ(hipMemcpy(addrs1.data(), hostCtx[1].signal_remote_addrs, nRanks * sizeof(uintptr_t),
+                      hipMemcpyDeviceToHost),
+            hipSuccess);
+  ASSERT_EQ(hipMemcpy(addrs2.data(), hostCtx[2].signal_remote_addrs, nRanks * sizeof(uintptr_t),
+                      hipMemcpyDeviceToHost),
+            hipSuccess);
+  for (int pe = 0; pe < nRanks; pe++) {
+    EXPECT_EQ((ptrdiff_t)(addrs0[pe] - addrsB[pe]), kStripeBytes) << "peer " << pe;
+    EXPECT_EQ((ptrdiff_t)(addrs1[pe] - addrs0[pe]), kStripeBytes) << "peer " << pe;
+    EXPECT_EQ((ptrdiff_t)(addrs2[pe] - addrs1[pe]), kStripeBytes) << "peer " << pe;
+  }
 
   // Queue ownership remains at the connection level by design.
   EXPECT_EQ(hostCtx[0].queueHandles, hostCtx[1].queueHandles);
@@ -784,10 +833,11 @@ TEST_F(GinAnvilPluginTest, ConnCheck_HealthyConnectivitySucceeds) {
   plugin_.finalize(ictx);
 }
 
-// AICOMRCCL-2339: the comm-wide collectives in the bind path are per span, not
-// per logical context. Binding a context with nContexts=3 must still cost one
-// local-base allgather and one conn-check, or ncclDevCommCreate pays a bootstrap
-// round trip for every logical context.
+// AICOMRCCL-2339: binding a context with nContexts=3 must cost one local-base
+// allgather, not one per logical context. The conn-check counts below would also
+// hold with a per-context conn-check, because the first call marks the comm as
+// checked and the rest skip. BindSignals_SkippedConnCheckStillRunsOncePerSpan
+// pins the per-span conn-check placement.
 TEST_F(GinAnvilPluginTest, BindSignals_CommWideCollectivesRunOncePerSpan) {
   void* rawDevLsa = nullptr;
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 8), hipSuccess);

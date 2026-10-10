@@ -317,6 +317,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's

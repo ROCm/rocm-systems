@@ -409,16 +409,20 @@ end:
       if (ginStateDevComm->ginCtx[commIdx]) backend->ncclGin->destroyContext(ginStateDevComm->ginCtx[commIdx]);
     }
     free(ginStateDevComm);
-    devComm->backendIndex = 0;
-    devComm->ginConnectionCount = 0;
-    devComm->ginContextCount = 0;
-    devComm->ginConnectionStride = 0;
-    devComm->ginConnectionStride_rcp32 = 0;
-    devComm->ginContextStride = 0;
-    memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
-    memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
+    ncclGinDevCommClearFields(devComm);
   }
   return ret;
+}
+
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->backendIndex = 0;
+  devComm->ginConnectionCount = 0;
+  devComm->ginContextCount = 0;
+  devComm->ginConnectionStride = 0;
+  devComm->ginConnectionStride_rcp32 = 0;
+  devComm->ginContextStride = 0;
+  memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
+  memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
 }
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,

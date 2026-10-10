@@ -419,7 +419,9 @@ __global__ void kernelSignalContextSelection(ncclGinAnvilSdmaGPUContext* context
 TEST_F(GinAnvilSdmaTemplateTest, SignalApis_SelectLogicalContext) {
   DeviceBuffer<uint64_t> d_signals(2);
   DeviceBuffer<uint64_t> d_counters(2);
-  d_signals.zero();
+  // Seed context 1's cell so a 0 afterwards can only come from ResetSignal on contextId=1.
+  const uint64_t seedSignals[2] = {0, 33};
+  d_signals.copyFrom(seedSignals, 2);
   d_counters.zero();
   ncclGinAnvilSdmaGPUContext hostCtx[2]{};
   for (int i = 0; i < 2; i++) {
