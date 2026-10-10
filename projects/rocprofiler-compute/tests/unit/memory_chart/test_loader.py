@@ -6,7 +6,9 @@
 import copy
 import json
 from collections import Counter
+from unittest.mock import Mock
 
+import common
 import pytest
 
 from memory_chart import loader
@@ -28,6 +30,18 @@ READ_ARROW = {
     "category": "read",
 }
 INNER = {"id": "inner", "title": "Inner"}
+
+
+@pytest.fixture
+def console_error(monkeypatch):
+    """The loader's console_error, which records the message and exits."""
+    error = Mock(side_effect=SystemExit(1))
+    common.patch_console(monkeypatch, "memory_chart.loader", "error", error=error)
+    return error
+
+
+def error_message(console_error):
+    return console_error.call_args.args[1]
 
 
 def gfx950_data():
@@ -110,11 +124,11 @@ def test_arch_without_layout_has_no_chart(gpu_arch):
     assert Layouts.for_arch(gpu_arch) is None
 
 
-def test_an_arch_in_two_layout_files_is_an_error(tmp_path, caplog):
+def test_an_arch_in_two_layout_files_is_an_error(tmp_path, console_error):
     paths = [write_layout(tmp_path, gfx950_data(), f"{n}.json") for n in "ab"]
     with pytest.raises(SystemExit):
         loader._index_by_arch(paths)
-    assert "gfx950 is also listed by a.json" in caplog.text
+    assert "gfx950 is also listed by a.json" in error_message(console_error)
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +204,25 @@ def test_nested_blocks_take_their_parent_and_column():
         "arrow-from-an-attached-block",
     ],
 )
-def test_malformed_layout_is_rejected(tmp_path, caplog, data, message):
+def test_malformed_layout_is_rejected(tmp_path, console_error, data, message):
     with pytest.raises(SystemExit):
         load_layout(write_layout(tmp_path, data))
-    assert message in caplog.text
+    assert message in error_message(console_error)
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (None, "cannot read the layout"),
+        ("{", "cannot read the layout"),
+        ("[]", "must be a JSON object"),
+    ],
+    ids=["missing-file", "invalid-json", "not-an-object"],
+)
+def test_unreadable_layout_is_rejected(tmp_path, console_error, text, message):
+    path = tmp_path / "layout.json"
+    if text is not None:
+        path.write_text(text, encoding="utf-8")
+    with pytest.raises(SystemExit):
+        load_layout(path)
+    assert message in error_message(console_error)
