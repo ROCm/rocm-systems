@@ -920,6 +920,35 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
+// The NaN FIFO is one slice unless NCCL_PROTO names NaN, then 2 MiB, and 8 MiB
+// when the gfx1250 TDM path is on. Sizes are literals so a change to the
+// elems-per-thread macros is caught rather than mirrored.
+TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SetDefaultBuffSizes_NanFifoDepth",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        int sizes[NCCL_NUM_PROTOCOLS] = {0};
+        SetMicroEnvAbsent("NCCL_PROTO");
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(128 * 1024, sizes[NCCL_PROTO_NAN]);
+
+        SetMicroEnv("NCCL_PROTO", "Simple,NaN");
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = -1;
+#endif
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(2 << 20, sizes[NCCL_PROTO_NAN]);
+#if ENABLE_TDM_NAN
+        comm->nanTdmMinBytes = 0;
+        rcclSetDefaultBuffSizes(comm, sizes);
+        EXPECT_EQ(8 << 20, sizes[NCCL_PROTO_NAN]);
+#endif
+        ClearMicroEnv();
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // rcclFuncMaxSendRecvCount -- rccl_wrap.cc:1656-1660. Thin wrapper delegating
 // to the header-inline ncclFuncMaxSendRecvCount (enqueue.h); RCCL_EXPOSE_STATIC

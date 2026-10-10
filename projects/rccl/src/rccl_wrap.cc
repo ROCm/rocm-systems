@@ -2533,6 +2533,10 @@ void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
   const char* nanProtoEnv = ncclGetEnv("NCCL_PROTO");
   int nanElemsPerThread = (nanProtoEnv && strcasestr(nanProtoEnv, "nan")) ? NCCL_NAN_STEP_ELEMS_PER_THREAD :
                                                                            NCCL_NAN_ELEMS_PER_THREAD;
+#if ENABLE_TDM_NAN
+  if (nanElemsPerThread == NCCL_NAN_STEP_ELEMS_PER_THREAD && comm->nanTdmMinBytes >= 0)
+    nanElemsPerThread = NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD;
+#endif
   defaultBuffSizes[NCCL_PROTO_NAN] = nanElemsPerThread * NCCL_MAX_NTHREADS * NCCL_STEPS * sizeof(uint64_t);
 }
 

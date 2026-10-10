@@ -3462,7 +3462,12 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
     // ranks: 286 GB/s at a 48 KiB chunk against 252 at 256 KiB. The crossover
     // is around 2 MiB per channel; below it the longer chunk is worth more than
     // the cache residency, so 64 MiB and 128 MiB deliberately stay untouched.
-    while (chunkSize > 65536 && (size_t)nBytes / (size_t)nChannels > (2u << 20)) chunkSize /= 2;
+    // The TDM path streams the FIFO past the caches and wants the full chunk.
+    bool tdm = false;
+#if ENABLE_TDM_NAN
+    tdm = comm->nanTdmMinBytes >= 0 && chunkSize >= comm->nanTdmMinBytes;
+#endif
+    while (!tdm && chunkSize > 65536 && (size_t)nBytes / (size_t)nChannels > (2u << 20)) chunkSize /= 2;
   }
   // Buffer-based ceiling; plugins may increase chunk size up to this limit.
   int bufferMaxChunkSize = chunkSize;

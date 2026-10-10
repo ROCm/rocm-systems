@@ -74,6 +74,25 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
 #endif
 
+// Build gate for the TDM path of the NaN-flag protocol (-DENABLE_TDM_NAN=ON), defined like
+// ENABLE_TDM_SIMPLE above.
+#ifndef ENABLE_TDM_NAN
+#define ENABLE_TDM_NAN 0
+#endif
+
+// NaN-flag TDM staging, shared with the SIMPLE stage above (one protocol runs at a time). Each
+// warp gets a receive window and a source window of RCCL_TDM_NAN_WINDOW_BYTES, and the block
+// one all-ones window that the sentinel restore stores from. With the generic kernel's 83.5 KiB
+// of other LDS, 8 warps of 12 KiB windows come to 290 KiB of the 320 KiB per workgroup.
+#if ENABLE_TDM_NAN && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#ifndef RCCL_TDM_NAN_WINDOW_BYTES
+#define RCCL_TDM_NAN_WINDOW_BYTES 12288
+#endif
+#else
+#undef RCCL_TDM_NAN_WINDOW_BYTES
+#define RCCL_TDM_NAN_WINDOW_BYTES 0
+#endif
+
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
 #else
@@ -268,6 +287,11 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * read as flat and was reported as saturated; it was single-shot and inside the
  * run-to-run spread, so re-measure with repeats before changing this. */
 #define NCCL_NAN_STEP_ELEMS_PER_THREAD 128
+/* The gfx1250 TDM path pays a fixed sync per op (poll, sentinel restore, tensorcnt
+ * wait), so it wants a deep step instead: 8 MiB FIFO (1 MiB per step) took 1 GiB
+ * AllReduce from 257 to 328 GB/s busbw and AlltoAll from 195 to 210; the register
+ * path is flat across 2-8 MiB. Only used while the TDM path is enabled. */
+#define NCCL_NAN_TDM_STEP_ELEMS_PER_THREAD 512
 #define NCCL_NAN_MAX_NTHREADS NCCL_LL128_MAX_NTHREADS
 #define NCCL_NAN_SENTINEL64 0xFFFFFFFFFFFFFFFFull
 
@@ -742,6 +766,9 @@ struct ncclKernelComm {
   int cheapPostSendFenceOff; // RCCL: true if cheap post-peer fence is disabled (comm-global)
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
+#endif
+#if ENABLE_TDM_NAN
+  int nanTdmMinBytes; // RCCL: smallest NaN-flag op, in bytes, moved by TDM; -1 = never
 #endif
   int patSharedQps; // true if PAT ReduceScatter and AllGather share one connection set
   int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels

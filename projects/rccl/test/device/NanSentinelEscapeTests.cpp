@@ -308,7 +308,10 @@ constexpr NanDtype kNanDtypes[] = {
 // Elements per rank (or per peer): one under a row, and one spanning many
 // slices and FIFO laps with a partial last slice. Both even, so 16-bit payloads
 // fill whole dwords.
-constexpr size_t kCounts[] = {72, 40008};
+const std::vector<size_t> kCounts = {72, 40008};
+// The TDM runs add one spanning many windows per warp, again with a partial
+// last row.
+const std::vector<size_t> kTdmCounts = {72, 40008, 1000002};
 
 uint32_t loadDword(const std::vector<uint8_t>& b, size_t off) {
   uint32_t d;
@@ -511,9 +514,9 @@ void runColl(Ranks& R, const std::vector<std::vector<uint8_t>>& in, size_t recvB
   }
 }
 
-void primsAllGather(Ranks& R) {
+void primsAllGather(Ranks& R, const std::vector<size_t>& counts) {
   for (const NanDtype& dt : kNanDtypes) {
-    for (size_t count : kCounts) {
+    for (size_t count : counts) {
       SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
       std::vector<std::vector<uint8_t>> in(R.n), out;
       std::vector<uint8_t>              want;
@@ -531,9 +534,9 @@ void primsAllGather(Ranks& R) {
 }
 
 // AlltoAll takes the NaN protocol on its send/recv path.
-void primsAllToAll(Ranks& R) {
+void primsAllToAll(Ranks& R, const std::vector<size_t>& counts) {
   for (const NanDtype& dt : kNanDtypes) {
-    for (size_t count : kCounts) {
+    for (size_t count : counts) {
       SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
       const size_t                      block = count * dt.size;
       std::vector<std::vector<uint8_t>> in(R.n), wire(R.n), out;
@@ -557,9 +560,9 @@ void primsAllToAll(Ranks& R) {
   }
 }
 
-void primsAllReduce(Ranks& R) {
+void primsAllReduce(Ranks& R, const std::vector<size_t>& counts) {
   for (const NanDtype& dt : kNanDtypes) {
-    for (size_t count : kCounts) {
+    for (size_t count : counts) {
       SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
       std::vector<std::vector<uint8_t>> in(R.n), out;
       for (int r = 0; r < R.n; r++) in[r] = reducePayload(dt, r, R.n, count);
@@ -575,9 +578,9 @@ void primsAllReduce(Ranks& R) {
   }
 }
 
-void primsReduceScatter(Ranks& R) {
+void primsReduceScatter(Ranks& R, const std::vector<size_t>& counts) {
   for (const NanDtype& dt : kNanDtypes) {
-    for (size_t count : kCounts) {
+    for (size_t count : counts) {
       SCOPED_TRACE(std::string(dt.name) + " count " + std::to_string(count));
       std::vector<std::vector<uint8_t>> in(R.n), out;
       for (int r = 0; r < R.n; r++) in[r] = reducePayload(dt, r, R.n, count * R.n);
@@ -591,24 +594,25 @@ void primsReduceScatter(Ranks& R) {
 
 // Communicator setup (mostly loading librccl's kernels) dwarfs the collectives,
 // so each child process runs all of its collectives on one set of communicators.
+template <const std::vector<size_t>* Counts>
 void runPrimsRing() {
   Ranks R;
   ASSERT_NO_FATAL_FAILURE(initRanks(R));
   {
     SCOPED_TRACE("AllGather");
-    primsAllGather(R);
+    primsAllGather(R, *Counts);
   }
   {
     SCOPED_TRACE("AlltoAll");
-    primsAllToAll(R);
+    primsAllToAll(R, *Counts);
   }
   {
     SCOPED_TRACE("AllReduce");
-    primsAllReduce(R);
+    primsAllReduce(R, *Counts);
   }
   {
     SCOPED_TRACE("ReduceScatter");
-    primsReduceScatter(R);
+    primsReduceScatter(R, *Counts);
   }
   finiRanks(R);
 }
@@ -618,20 +622,25 @@ void runPrimsTree() {
   ASSERT_NO_FATAL_FAILURE(initRanks(R));
   {
     SCOPED_TRACE("AllReduce");
-    primsAllReduce(R);
+    primsAllReduce(R, kCounts);
   }
   finiRanks(R);
 }
 
-ProcessIsolatedTestRunner::TestConfig primsConfig(const char* name, const char* algo, int gpus, void (*body)()) {
+// tdmMinBytes, when set, is RCCL_TDM_NAN_MIN_BYTES. Builds without ENABLE_TDM_NAN ignore it.
+ProcessIsolatedTestRunner::TestConfig primsConfig(const char* name, const char* algo, int gpus, void (*body)(),
+                                                  const char* tdmMinBytes = nullptr) {
+  std::unordered_map<std::string, std::string> env = {
+    {"NCCL_PROTO", "NaN"},
+    {"NCCL_ALGO", algo},
+    {"RCCL_DDA_ENABLE", "0"},
+    {"NCCL_IB_DISABLE", "1"},
+    {"NCCL_SOCKET_IFNAME", "lo"},
+    {"RCCL_TDM_NAN_ENABLE", tdmMinBytes ? "1" : "0"},
+  };
+  if (tdmMinBytes) env["RCCL_TDM_NAN_MIN_BYTES"] = tdmMinBytes;
   return ProcessIsolatedTestRunner::TestConfig(name, body)
-    .withEnvironment({
-      {"NCCL_PROTO", "NaN"},
-      {"NCCL_ALGO", algo},
-      {"RCCL_DDA_ENABLE", "0"},
-      {"NCCL_IB_DISABLE", "1"},
-      {"NCCL_SOCKET_IFNAME", "lo"},
-    })
+    .withEnvironment(env)
     .withTimeout(std::chrono::seconds(300))
     .withNumGpus(gpus);
 }
@@ -695,7 +704,17 @@ TEST(PrimsNanSentinelEscape, Ring)
 {
   const int gpus = primsGpus();
   if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
-  RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.Ring", "Ring", gpus, runPrimsRing));
+  RUN_ISOLATED_TESTS(primsConfig("PrimsNanSentinelEscape.Ring", "Ring", gpus, runPrimsRing<&kCounts>));
+}
+
+// The same collectives with every primitive op on the TDM path (gfx1250 builds
+// with -DENABLE_TDM_NAN=ON; elsewhere this repeats the register path).
+TEST(PrimsNanSentinelEscape, RingTdm)
+{
+  const int gpus = primsGpus();
+  if (!gpus) GTEST_SKIP() << "needs at least 2 GPUs";
+  RUN_ISOLATED_TESTS(
+    primsConfig("PrimsNanSentinelEscape.RingTdm", "Ring", gpus, runPrimsRing<&kTdmCounts>, /*tdmMinBytes=*/"0"));
 }
 
 // AllReduce, the only collective with a NaN tree kernel.

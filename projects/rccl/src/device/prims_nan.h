@@ -504,6 +504,162 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+#if TDM_SUPPORTED && RCCL_TDM_NAN_WINDOW_BYTES
+  // TDM path. The wire format is the register path's, byte for byte: a FIFO byte sits at the
+  // same offset as the user byte it carries, and an op's last slice is padded to the same row
+  // count GenericOp() would pick. The two paths can therefore face each other on a link, and
+  // the choice is made per op. Each warp moves contiguous row-aligned chunks through its LDS
+  // windows instead of a slice through registers, so a chunk is one bulk FIFO poll, one bulk
+  // restore and one bulk forward rather than a b128 access per lane per row.
+  static constexpr int RowBytes = WARP_SIZE * 16;
+  static constexpr int TdmWindow = RCCL_TDM_NAN_WINDOW_BYTES;
+  static_assert(TdmWindow % RowBytes == 0, "TDM NaN windows hold whole rows");
+  // The FIFO is shared with a peer, so it is system scope and kept out of local caches, as
+  // the register path's FIFO accesses are on gfx1250.
+  static constexpr CachePolicy kTdmFifo = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+  static constexpr CachePolicy kTdmUser = createCachePolicy(TemporalHint::RT, MemScope::DEV);
+
+  // A tensor op takes its addresses and sizes from SGPRs.
+  __device__ __forceinline__ static int uniform(int x) {
+    return __builtin_amdgcn_readfirstlane(x);
+  }
+  template <typename P>
+  __device__ __forceinline__ static P* uniformPtr(P* p) {
+    const uint64_t v = (uint64_t)p;
+    const uint32_t lo = __builtin_amdgcn_readfirstlane((uint32_t)v);
+    const uint32_t hi = __builtin_amdgcn_readfirstlane((uint32_t)(v >> 32));
+    return (P*)(((uint64_t)hi << 32) | lo);
+  }
+
+  // Bytes of FIFO an op of nelem elements occupies, padding included.
+  __device__ __forceinline__ static int padBytes(int nelem) {
+    constexpr int SliceBytes = PackPerSlice * 16;
+    const int bytes = nelem * (int)sizeof(T);
+    const int full = bytes / SliceBytes * SliceBytes;
+    const int rows = divUp(bytes - full, RowBytes);
+    const int nr = rows == 0 ? 0 : (PackPerThread > 1 && rows <= 1) ? 1 : (PackPerThread > 2 && rows <= 2) ? 2 : PackPerThread;
+    return full + nr * RowBytes;
+  }
+
+  // Keeps the first n bytes of x (n may fall outside [0, 16]) and zeroes the rest.
+  __device__ __forceinline__ static v4u keepBytes(v4u x, int n) {
+#pragma unroll
+    for (int d = 0; d < 4; d++) {
+      const int k = n - 4 * d;
+      x[d] = k >= 4 ? x[d] : k <= 0 ? 0u : x[d] & ((1u << (8 * k)) - 1);
+    }
+    return x;
+  }
+
+  __device__ __forceinline__ static bool nanPack(v4u x) {
+    const v4u a[1] = {x};
+    return anyNan<1>(a);
+  }
+
+  // escapeSentinel() for one pack.
+  __device__ __forceinline__ static v4u escapePack(v4u x) {
+    constexpr int First = sizeof(T) <= 4 ? 0 : 1, Stride = sizeof(T) <= 4 ? 1 : 2;
+#pragma unroll
+    for (int d = First; d < 4; d += Stride) x[d] = x[d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[d];
+    return x;
+  }
+
+  // Every warp writes the whole sentinel window before its first restore, so it never stores
+  // from bytes it has not written itself. Other warps only ever write the same all-ones.
+  __device__ __forceinline__ static void tdmFillSentinel(int lane) {
+    char* s = ncclNanTdmSentinel();
+    const v4u ones = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    for (int b = lane * 16; b < TdmWindow; b += RowBytes) *(v4u*)(s + b) = ones;
+    __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
+  }
+
+  // Loads FIFO bytes [0, n) into win until none of them holds the sentinel. A retry reloads
+  // from the first row that still did, since every row ahead of it is complete.
+  __device__ __forceinline__ void tdmPoll(const char* fifo, char* win, int n, int lane, int& abortCache) {
+    int from = 0, spins = 0;
+    while (true) {
+      tdm::asyncLoadToLDS<SyncPolicy::Async, kTdmFifo>((const uint8_t*)fifo + from, (uint8_t*)win + from, n - from);
+      tdm::tdmWait();
+      int first = n;
+      for (int b = from + lane * 16; b < n; b += RowBytes) {
+        if (nanPack(*(const v4u*)(win + b))) {
+          first = b - lane * 16;
+          break;
+        }
+      }
+#pragma unroll
+      for (int m = WARP_SIZE / 2; m > 0; m /= 2) first = min(first, __shfl_xor(first, m));
+      first = uniform(first);
+      if (first >= n) return;
+      from = first;
+      if (checkAbort(abortCache, 1, spins)) return;
+    }
+  }
+
+  template <int RECV, int SEND, int SrcBuf, int DstBuf>
+  __device__ __forceinline__ void tdmOp(T const* srcPtr, T* dstPtr, int nelem, bool postOp, int& abortCache) {
+    constexpr int SRC = SrcBuf != -1 ? 1 : 0;
+    constexpr int DST = DstBuf != -1 ? 1 : 0;
+    const int lane = wid;
+    const int nwarps = nthreads / WARP_SIZE;
+    char* rwin = ncclNanTdmWindow(warpInBlock, 0);
+    char* swin = ncclNanTdmWindow(warpInBlock, 1);
+    char* out = RECV ? rwin : swin;
+    const char* sent = ncclNanTdmSentinel();
+    char* recvFifo = RECV ? uniformPtr((char*)recvPtr(0)) : nullptr;
+    char* sendFifo = SEND ? uniformPtr((char*)sendPtr(0)) : nullptr;
+    const uint8_t* src = SRC ? uniformPtr((const uint8_t*)srcPtr) : nullptr;
+    uint8_t* dst = DST ? uniformPtr((uint8_t*)dstPtr) : nullptr;
+    const int bytes = uniform(nelem * (int)sizeof(T));
+    const int padN = uniform(padBytes(nelem));
+    const int per = uniform(min(TdmWindow, divUp(divUp(padN, nwarps), RowBytes) * RowBytes));
+    if (RECV) tdmFillSentinel(lane);
+
+    for (int off = warp * per; off < padN; off += nwarps * per) {
+      const int n = min(per, padN - off);
+      const int u = max(0, min(n, bytes - off));
+      if (SRC && u > 0) tdm::asyncLoadToLDS<SyncPolicy::Async, kTdmUser>(src + off, (uint8_t*)swin, u);
+      if (RECV) {
+        tdmPoll(recvFifo + off, rwin, n, lane, abortCache);
+        // The slot is consumed once it is in LDS. The credit that lets the peer refill it is
+        // only published after every warp has drained this store.
+        for (int b = 0; b < n; b += TdmWindow) {
+          tdm::asyncStoreFromLDS<SyncPolicy::Async, kTdmFifo>((const uint8_t*)sent, (uint8_t*)recvFifo + off + b,
+                                                              min(TdmWindow, n - b));
+        }
+      } else if (SRC) {
+        tdm::tdmWait();
+      }
+
+      // A plain receive forwards the window untouched.
+      if (SRC || SEND || postOp) {
+        for (int b = lane * 16; b < n; b += RowBytes) {
+          v4u v;
+          if (SRC) {
+            // Past the user bytes the window holds stale data; the wire carries zeros there.
+            v4u s = keepBytes(*(const v4u*)(swin + b), u - b);
+            if (SrcBuf == Input) s = applyPreOp(redOp, s);
+            v = RECV ? applyReduce(redOp, *(const v4u*)(rwin + b), s) : s;
+          } else {
+            v = *(const v4u*)(rwin + b);
+          }
+          if (postOp) v = applyPostOp(redOp, v);
+          if (SEND) v = escapePack(v);
+          *(v4u*)(out + b) = v;
+        }
+        __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
+      }
+
+      if (SEND) tdm::asyncStoreFromLDS<SyncPolicy::Async, kTdmFifo>((const uint8_t*)out, (uint8_t*)sendFifo + off, n);
+      if (DST && u > 0) tdm::asyncStoreFromLDS<SyncPolicy::Async, kTdmUser>((const uint8_t*)out, dst + off, u);
+      tdm::tdmWait();
+    }
+    // The tensor stores bypass this WGP's vector cache, so a register-path load of the same
+    // user bytes later in the kernel must not hit a line cached before them.
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+  }
+#endif
+
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
@@ -527,33 +683,43 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     barrier();
 
     sqtt_marker_enter("PRIM_NAN_DATA_PROCESS");
-    nelem -= DataEltPerSlice * warp;
-    srcPtr += DataEltPerSlice * warp;
-    dstPtr += DataEltPerSlice * warp;
-    if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
-    // warp is wave-uniform, so this loop and the row dispatch are scalar
-    // branches. A slice that fits in one row -- every slice of a small op --
-    // moves 1 KiB instead of a full slice of padding.
-    while (nelem > 0) {
-      const int eltInSlice = min(nelem, DataEltPerSlice);
-      if (PackPerThread > 1 && eltInSlice <= EltPerRow) {
-        runSlice<1, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
-                                                abortCache, eltInSlice, postOp);
-      } else if (PackPerThread > 2 && eltInSlice <= 2 * EltPerRow) {
-        runSlice<2, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
-                                                abortCache, eltInSlice, postOp);
-      } else {
-        runSlice<PackPerThread, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend,
-                                                            lane, abortCache, eltInSlice, postOp);
+    bool useTdm = false;
+#if TDM_SUPPORTED && RCCL_TDM_NAN_WINDOW_BYTES
+    if constexpr (MaxRecv <= 1 && MaxSend <= 1) {
+      const int minBytes = ncclShmem.comm.nanTdmMinBytes;
+      useTdm = minBytes >= 0 && accPtr == nullptr && nelem * (int)sizeof(T) >= minBytes;
+      if (useTdm) tdmOp<RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, nelem, postOp, abortCache);
+    }
+#endif
+    if (!useTdm) {
+      nelem -= DataEltPerSlice * warp;
+      srcPtr += DataEltPerSlice * warp;
+      dstPtr += DataEltPerSlice * warp;
+      if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+      // warp is wave-uniform, so this loop and the row dispatch are scalar
+      // branches. A slice that fits in one row -- every slice of a small op --
+      // moves 1 KiB instead of a full slice of padding.
+      while (nelem > 0) {
+        const int eltInSlice = min(nelem, DataEltPerSlice);
+        if (PackPerThread > 1 && eltInSlice <= EltPerRow) {
+          runSlice<1, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                  abortCache, eltInSlice, postOp);
+        } else if (PackPerThread > 2 && eltInSlice <= 2 * EltPerRow) {
+          runSlice<2, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                  abortCache, eltInSlice, postOp);
+        } else {
+          runSlice<PackPerThread, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv,
+                                                              nsend, lane, abortCache, eltInSlice, postOp);
+        }
+#pragma unroll
+        for (int i = 0; i < MaxRecv; i++) recvFifo[i] += PackPerSlice * nwarps;
+#pragma unroll
+        for (int i = 0; i < MaxSend; i++) sendFifo[i] += PackPerSlice * nwarps;
+        srcPtr += DataEltPerSlice * nwarps;
+        dstPtr += DataEltPerSlice * nwarps;
+        if (accPtr != nullptr) accPtr += DataEltPerSlice * nwarps;
+        nelem -= DataEltPerSlice * nwarps;
       }
-#pragma unroll
-      for (int i = 0; i < MaxRecv; i++) recvFifo[i] += PackPerSlice * nwarps;
-#pragma unroll
-      for (int i = 0; i < MaxSend; i++) sendFifo[i] += PackPerSlice * nwarps;
-      srcPtr += DataEltPerSlice * nwarps;
-      dstPtr += DataEltPerSlice * nwarps;
-      if (accPtr != nullptr) accPtr += DataEltPerSlice * nwarps;
-      nelem -= DataEltPerSlice * nwarps;
     }
 
     abort = abortCache;

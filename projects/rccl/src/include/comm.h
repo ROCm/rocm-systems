@@ -768,6 +768,9 @@ struct ncclComm {
 #if ENABLE_TDM_SIMPLE
   int tdmSimpleEnable; // RCCL: route copy-shaped SIMPLE slices through the TDM mover
 #endif
+#if ENABLE_TDM_NAN
+  int nanTdmMinBytes; // RCCL: smallest NaN-flag op, in bytes, moved by TDM; -1 = never
+#endif
   int localRank;
   int localRanks;
   int maxLocalRanks;
