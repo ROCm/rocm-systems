@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -141,9 +142,15 @@ class CheckReplayCompatTests(unittest.TestCase):
             stdout="GPU[0]\tGPU[1]\nCard series: Instinct MI300X\nCard series: Instinct MI300X\n",
             stderr="",
         )
-        env = crc.probe_host_replay_env()
+        with tempfile.TemporaryDirectory() as tmp:
+            lib_dir = Path(tmp) / "lib"
+            lib_dir.mkdir()
+            (lib_dir / "libamdhip64.so.7.15.26291").write_bytes(b"")
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}, clear=False):
+                env = crc.probe_host_replay_env()
         self.assertEqual(env.visible_gpus, 2)
         self.assertEqual(env.comgr_version, "3.0")
+        self.assertEqual(env.hip_runtime_version, "7.15.26291")
 
     def test_parse_hip_version_formats(self) -> None:
         self.assertEqual(

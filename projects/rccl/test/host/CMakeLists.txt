@@ -447,10 +447,6 @@ function(rccl_standalone_setup)
   # every branch so target_link_libraries(... GTest::GTest) below works
   # regardless of which resolution path was taken.
   if(TARGET GTest::gtest AND NOT TARGET GTest::GTest)
-    # Promote before aliasing: GTest's package config creates GTest::gtest as a
-    # non-GLOBAL imported target, and ALIAS of one of those needs CMake 3.18,
-    # above this project's declared 3.16 minimum. Promotion works from 3.11 and
-    # only from the directory that created the target, which is this file.
     set_target_properties(GTest::gtest PROPERTIES IMPORTED_GLOBAL TRUE)
     add_library(GTest::GTest ALIAS GTest::gtest)
   endif()
@@ -481,11 +477,10 @@ function(rccl_standalone_setup)
   if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
   endif()
-  message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
+  message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
   message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
 
   # --- Detect whether the system amdsmi.h exposes the UALoE fabric struct ---
-  # Compile-only (STATIC_LIBRARY) avoids link failures from amdsmi symbols.
   include(CheckCXXSourceCompiles)
   unset(AMDSMI_FABRIC_API CACHE)
   unset(AMDSMI_HEADER_HAS_FABRIC_TELEMETRY CACHE)
@@ -521,14 +516,7 @@ function(rccl_standalone_setup)
     message(STATUS "amdsmi fabric API not found (AMDSMI_FABRIC_DIRECT disabled)")
   endif()
 
-  # --- Detect HIP fabric API support (mirrors top-level CMakeLists.txt) ---
-  # mem_manager.h only defines its own hipMemFabricHandle_st fallback when
-  # HIP_FABRIC_API is undefined; on HIP runtimes that already provide the type
-  # (e.g. ROCm 7.14+), omitting this define causes a redefinition conflict
-  # with hip_runtime_api.h.
-  # Compile-only (STATIC_LIBRARY), like the amdsmi probe above: with the default
-  # EXECUTABLE target type these checks link, which drags in the HIP runtime at
-  # configure time even though the binary itself is linked with -no-hip-rt.
+  # --- Detect HIP fabric API support ---
   include(CheckSymbolExists)
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
   check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
@@ -578,7 +566,6 @@ function(rccl_standalone_setup)
     ${ACCL_PROFILER_DIR}
     ${RCCL_INCLUDE_DIRS}
   )
-  # Standalone HostUnitTests never find_package(hip); in-tree already has hip::host.
   if(NOT TARGET hip::host)
     find_package(hip QUIET)
   endif()
@@ -590,9 +577,6 @@ function(rccl_standalone_setup)
         $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
     endif()
   endforeach()
-  # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
-  # scope the extra include to just that file to avoid os.h/rocmwrap.h
-  # conflicts with the hipified sources used by other wrappers.
   set_source_files_properties(accl_profiler_wrapper.cc PROPERTIES
     COMPILE_FLAGS "-I${RCCL_SRC_ROOT}/src/include/plugin -I${RCCL_SRC_ROOT}/src/include"
   )
@@ -902,6 +886,20 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   elseif(_variant STREQUAL "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
+  endif()
+  rccl_apply_hip_compile_only(${_init_tgt})
+
+  # GTest::GTest is a namespaced target that only exists in the standalone
+  # build (created by rccl_standalone_setup()); in-tree builds link via
+  # ${MICRO_TEST_LINK_LIBS} (raw paths) inside rccl_add_micro_binary, and
+  # rccl_apply_host_only_flags() already supplies -no-hip-rt/-Wl,--gc-sections.
+  if(NOT BUILD_TESTS)
+    target_link_options(${_init_tgt} PRIVATE -no-hip-rt -Wl,--gc-sections)
+    target_link_libraries(${_init_tgt} PRIVATE
+      GTest::GTest
+      Threads::Threads
+      fmt::fmt-header-only
+    )
   endif()
 endforeach()
 

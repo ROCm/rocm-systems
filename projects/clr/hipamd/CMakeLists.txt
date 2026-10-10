@@ -23,7 +23,6 @@ include(GNUInstallDirs)
 #  By default, CMake will search for a folder named opencl or ROCm-OpenCL-Runtime relative to the current path. Specify -DAMD_OPENCL_PATH=$OPENCL_DIR if opencl source is in obscure location.
 list(APPEND CMAKE_MODULE_PATH ${HIP_COMMON_DIR}/cmake)
 
-
 #############################
 # Options
 #############################
@@ -239,9 +238,7 @@ endif()
 # Determine HIP_PLATFORM
 if(NOT DEFINED HIP_PLATFORM)
     if(NOT DEFINED ENV{HIP_PLATFORM})
-        execute_process(COMMAND ${__HIPCONFIG_EXECUTABLE__} --platform
-            OUTPUT_VARIABLE HIP_PLATFORM
-            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(HIP_PLATFORM "amd")
     else()
         set(HIP_PLATFORM $ENV{HIP_PLATFORM} CACHE STRING "HIP Platform")
     endif()
@@ -366,7 +363,6 @@ execute_process(COMMAND test ${CMAKE_INSTALL_PREFIX} -ef ${CMAKE_CURRENT_SOURCE_
     RESULT_VARIABLE INSTALL_SOURCE)
 if(NOT ${INSTALL_SOURCE} EQUAL 0)
     if(WIN32)
-      install(DIRECTORY ${HIP_COMMON_BIN_DIR} DESTINATION . USE_SOURCE_PERMISSIONS)
       if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/src/" DESTINATION ${CMAKE_INSTALL_BINDIR}
                 FILES_MATCHING PATTERN "*.pdb"
