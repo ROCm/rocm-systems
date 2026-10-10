@@ -84,6 +84,7 @@ if(TARGET rocshmem-demo)
         ENVIRONMENT ${MPI_ENV_VARS}
         PRELOAD "${PRELOAD_ENV}"
         PASS_REGULAR_EXPRESSION "Finalization complete"
+        SKIP_REGULAR_EXPRESSION "rocSHMEM demo unavailable"
         FIXTURES_SETUP rocshmem-tracing
         DISABLED "${IS_DISABLED}")
 
@@ -96,5 +97,6 @@ if(TARGET rocshmem-demo)
         TIMEOUT 45
         ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/rocshmem-tracing-test.rank-0.json
         FIXTURES_REQUIRED rocshmem-tracing
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
         DISABLED "${IS_DISABLED}")
 endif()

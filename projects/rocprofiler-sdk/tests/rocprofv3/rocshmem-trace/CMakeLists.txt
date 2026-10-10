@@ -60,7 +60,13 @@ if(NOT MPIRUN_EXECUTABLE)
     set(IS_DISABLED ON)
 endif()
 
-set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1)
+# Both ranks are node-local, so confine Open MPI to the self/shared-memory transports and
+# keep it off the ob1 network components. CI runners expose RoCE devices whose kernel
+# driver ABI does not match the installed libibverbs; probing them floods the log with
+# libibverbs warnings and has been observed to wedge the ranks during teardown. This
+# matches the MPI_ENV_VARS used by the sibling tests/rocshmem-trace test.
+set(MPI_ENV_VARS OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+                 OMPI_MCA_btl=self,vader OMPI_MCA_pml=ob1 PSM3_DEVICES=self,shm)
 
 # rocSHMEM cannot bootstrap with a single PE (MPI_Win_create fails) so the demo is
 # launched with -np 2. Each rank gets its own per-rank output directory keyed by
@@ -85,7 +91,8 @@ if(TARGET rocshmem-demo)
         DEPENDS rocshmem-demo
         TIMEOUT 60
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
+        SKIP_REGULAR_EXPRESSION "rocSHMEM demo unavailable"
         FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
         DISABLED "${IS_DISABLED}")
 
@@ -101,5 +108,6 @@ if(TARGET rocshmem-demo)
         TIMEOUT 45
         LABELS "integration-tests"
         FIXTURES_REQUIRED rocprofv3-test-rocshmem-tracing
+        SKIP_REGULAR_EXPRESSION "SKIPPED"
         DISABLED "${IS_DISABLED}")
 endif()
