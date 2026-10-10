@@ -3250,10 +3250,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
     return;
   }
 
-  // Order is important, we want to translate the end time first to ensure that packet duration is
-  // not impacted by clock measurement latency jitter.
-  time.end = TranslateTime(end);
-  time.start = TranslateTime(start);
+  TranslateTimePair(start, end, time.start, time.end);
 }
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) {
@@ -3268,10 +3265,69 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
     return;
   }
 
+  TranslateTimePair(start, end, time.start, time.end);
+}
+
+void GpuAgent::SyncClocksForTick(uint64_t tick) {
+  // Limit errors due to correlated pair certainty to ~0.5us.
+  // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
+  // clock read certainty is <4us.
+  if (((t1_.GPUClockCounter - t0_.GPUClockCounter) >> 2) + t1_.GPUClockCounter < tick) SyncClocks();
+
+  // Only allow short (error bounded) extrapolation for times during program execution.
+  // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
+  const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
+
+  if (t1_.GPUClockCounter == t0_.GPUClockCounter) return;
+
+  const double ratio = double(t1_.SystemClockCounter - t0_.SystemClockCounter) /
+      double(t1_.GPUClockCounter - t0_.GPUClockCounter);
+
+  // One re-synchronization at most.  The previous form of this check looped
+  // twice and re-synchronized on its final pass as well, which rebased t1_
+  // after the elapsed value had already been computed against the old pair --
+  // the sum that followed then added the new t1_.SystemClockCounter to a delta
+  // measured from the old one, displacing the result by the whole re-sync
+  // interval.  Re-synchronizing a second time cannot help in any case: a tick
+  // still out of bounds after one sync disagrees with the CPU clock itself.
+  if (int64_t(ratio * double(int64_t(tick - t1_.GPUClockCounter))) >= max_extrapolation)
+    SyncClocks();
+}
+
+void GpuAgent::TranslateTimePair(uint64_t start_tick, uint64_t end_tick, uint64_t& start_out,
+                                 uint64_t& end_out) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+
+#ifdef _WIN32
+  // See TranslateTimeLocked for why the offset is applied here.
+  start_tick -= gpu_clock_offset_;
+  end_tick -= gpu_clock_offset_;
+#endif
+
+  // Decide on re-synchronization once, driven by the later of the two ticks, so
+  // that both translations below read the same correlated pair.  Translating
+  // the two ticks through separate calls allowed the first to re-synchronize
+  // and the second to use the new pair, which on a system whose GPU and CPU
+  // clocks disagree shifts one endpoint relative to the other and can report an
+  // interval that ends before it starts.
+  SyncClocksForTick(end_tick);
+
   // Order is important, we want to translate the end time first to ensure that packet duration is
   // not impacted by clock measurement latency jitter.
-  time.end = TranslateTime(end);
-  time.start = TranslateTime(start);
+  end_out = TranslateTimeLocked(end_tick);
+  start_out = TranslateTimeLocked(start_tick);
+}
+
+uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+
+#ifdef _WIN32
+  // See TranslateTimeLocked for why the offset is applied here.
+  tick -= gpu_clock_offset_;
+#endif
+
+  SyncClocksForTick(tick);
+  return TranslateTimeLocked(tick);
 }
 
 /*
@@ -3282,24 +3338,12 @@ for early times.
 Intervals larger than t0_ will be frequency adjusted.  This admits a numerical error of not more
 than twice the frequency stability (~10^-5).
 */
-uint64_t GpuAgent::TranslateTime(uint64_t tick) {
-  // Only allow short (error bounded) extrapolation for times during program execution.
-  // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
-  const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
-
-  std::lock_guard<std::mutex> lock(t1_lock_);
-
-#ifdef _WIN32
+uint64_t GpuAgent::TranslateTimeLocked(uint64_t tick) {
   // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
   // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
-  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
-  tick -= gpu_clock_offset_;
-#endif
-  // Limit errors due to correlated pair certainty to ~0.5us.
-  // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
-  // clock read certainty is <4us.
-  if (((t1_.GPUClockCounter - t0_.GPUClockCounter) >> 2) + t1_.GPUClockCounter < tick) SyncClocks();
+  // base).  The offset is subtracted by the callers above before interpolation
+  // (0 until first detection).  gpu_clock_offset_ is read and written under
+  // t1_lock_ to avoid data races.
 
   // Good for ~300 yrs
   // uint64_t sysdelta = t1_.SystemClockCounter - t0_.SystemClockCounter;
@@ -3315,16 +3359,9 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
   int64_t elapsed = 0;
   double ratio;
 
-  // Valid ticks only need at most one SyncClocks.
-  for (int i = 0; i < 2; i++) {
-    ratio = double(t1_.SystemClockCounter - t0_.SystemClockCounter) /
-        double(t1_.GPUClockCounter - t0_.GPUClockCounter);
-    elapsed = int64_t(ratio * double(int64_t(tick - t1_.GPUClockCounter)));
-
-    // Skip clock sync if under the extrapolation limit.
-    if (elapsed < max_extrapolation) break;
-    SyncClocks();
-  }
+  ratio = double(t1_.SystemClockCounter - t0_.SystemClockCounter) /
+      double(t1_.GPUClockCounter - t0_.GPUClockCounter);
+  elapsed = int64_t(ratio * double(int64_t(tick - t1_.GPUClockCounter)));
 
   system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
 
