@@ -2343,6 +2343,127 @@ TEST_F(GinMPIDeviceTests, Barrier_TwoRanks) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// AICOMRCCL-2339 regression: each logical context must have independent
+// signal cells. Rank 1 deliberately arrives late at the second barrier. Before
+// the fix, both contexts incremented one shared cell during the first barrier,
+// so rank 0's second wait matched that stale count and returned immediately.
+struct AllContextsBarrierObservation {
+  uint64_t secondBarrierCycles;
+  uint64_t ctxPeerSignals[2];
+  uint64_t* ctxSignalPtrs[2];
+};
+
+__global__ void allContextsConsecutiveBarrierKernel(
+    int rank, uint64_t delayTicks, AllContextsBarrierObservation* observation, struct ncclDevComm devComm) {
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), ncclGinAllContexts(devComm), ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+
+  if (rank == 1) {
+    uint64_t start = wall_clock64();
+    while (wall_clock64() - start < delayTicks) {}
+  }
+  ncclCoopCta().sync();
+
+  uint64_t start = wall_clock64();
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  if (threadIdx.x != 0) return;
+
+  observation->secondBarrierCycles = wall_clock64() - start;
+  const int peer = 1 - rank;
+  const uint32_t sigIndex = devComm.worldGinBarrier.signal0 + peer;
+  // Index 0 and ginConnectionCount are logical contexts 0 and 1 on connection 0.
+  // Indices 0 and 1 land on different connections when ginConnectionCount > 1,
+  // both with contextId 0, so that pair passes even if one connection still aliases.
+  const int ctxIndex[2] = {0, (int)devComm.ginConnectionCount};
+  for (int i = 0; i < 2; i++) {
+    ncclGin gin{devComm, ctxIndex[i]};
+    observation->ctxPeerSignals[i] = gin.readSignal(sigIndex, 64, cuda::memory_order_relaxed);
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+    ncclGinCtx ginCtx{};
+    ginCtx.handle = gin._ginHandle;
+    ginCtx.contextId = gin.contextId;
+    ginCtx.backend = NCCL_NET_DEVICE_GIN_ANVIL_SDMA;
+    ginCtx.rank = devComm.rank;
+    ginCtx.nRanks = devComm.nRanks;
+    observation->ctxSignalPtrs[i] =
+        ncclGinApi_GetSignalPtr<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, sigIndex).ptr;
+#endif
+  }
+}
+
+TEST_F(GinMPIDeviceTests, Barrier_AllContextsConsecutiveSignalsDoNotAlias_SingleNode) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    GTEST_SKIP() << "AICOMRCCL-2339 is specific to the Anvil-SDMA backend";
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+  if (nodeLocalRanks() != 2)
+    GTEST_SKIP() << "Requires both ranks on one node";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1;
+  ncclCommUserRank(comm, &rank);
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  // Two logical contexts on every connection. ncclDevCommCreate rounds the
+  // request up to a multiple of ginConnectionCount, which is at most
+  // NCCL_GIN_MAX_CONNECTIONS, so this stays at two per connection when
+  // NCCL_GIN_NCONNECTIONS is not 1. A request of 2 with two connections
+  // yields contextId 0 on each handle and the alias check below passes
+  // with the stripes still shared.
+  reqs.ginContextCount = 2 * NCCL_GIN_MAX_CONNECTIONS;
+  reqs.worldGinBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+  ASSERT_GT((int)devComm.ginConnectionCount, 0);
+  ASSERT_GE((int)devComm.ginContextCount / (int)devComm.ginConnectionCount, 2);
+
+  AllContextsBarrierObservation* dObservation = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dObservation, sizeof(AllContextsBarrierObservation)));
+  auto observationCleanup = makeScopeGuard([&]() {
+    if (dObservation) (void)hipFree(dObservation);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dObservation, 0, sizeof(AllContextsBarrierObservation)));
+
+  // wall_clock64 is fixed-rate (hipDeviceAttributeWallClockRate). clock64 is
+  // each GPU's shader clock, so a tick budget burned on rank 1 is not the
+  // same real time as the delta rank 0 records. 10 ms, shared via the slower
+  // device's rate so both ranks program the same tick count.
+  int rateKhz = 0;
+  ASSERT_EQ(hipSuccess, hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0));
+  ASSERT_GT(rateKhz, 0);
+  int commonRateKhz = 0;
+  MPI_Allreduce(&rateKhz, &commonRateKhz, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+  const uint64_t kDelayTicks = 10ull * static_cast<uint64_t>(commonRateKhz);
+  MPI_Barrier(MPI_COMM_WORLD);
+  allContextsConsecutiveBarrierKernel<<<1, kGinKernelThreads, 0, stream>>>(
+      rank, kDelayTicks, dObservation, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+  AllContextsBarrierObservation observation{};
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(&observation, dObservation, sizeof(observation), hipMemcpyDeviceToHost));
+  if (rank == 0) {
+    EXPECT_GE(observation.secondBarrierCycles, kDelayTicks / 4)
+        << "second AllContexts barrier returned before delayed peer arrival";
+    EXPECT_EQ(observation.ctxPeerSignals[0], 2u);
+    EXPECT_EQ(observation.ctxPeerSignals[1], 2u);
+#if NCCL_GIN_ANVIL_SDMA_ENABLE
+    EXPECT_NE(observation.ctxSignalPtrs[0], observation.ctxSignalPtrs[1])
+        << "logical contexts must not alias the same signal cell";
+#endif
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Same barrier as barrier2RanksKernel but over the world team, so every rank
 // has 3 peers instead of 1.
 __global__ void barrier4RanksKernel(int iters, struct ncclDevComm devComm) {

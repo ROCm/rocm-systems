@@ -14,6 +14,7 @@
 #include "debug.h"
 #include "dev_runtime.h"
 #include <hip/hip_runtime.h>
+#include <malloc.h>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -41,7 +42,16 @@ struct State {
   int connCheckWriteCalls = 0;
   int connCheckVerifyCalls = 0;
   std::vector<unsigned long long> connCheckWriteStamps;
+  int bootstrapAllGatherCalls = 0;
+  int lastWideAllGatherSize = 0;
+  int wideAllGatherOverruns = 0;
+  int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  // First input address resolved since the last Reset/SetLsaSelfAddr. Later
+  // inputs map to lsaSelfAddr plus their offset from it. A flag marks it latched,
+  // so an input of 0 is not mistaken for "unset".
+  uintptr_t lsaInputBase = 0;
+  bool lsaInputBaseSet = false;
 };
 
 struct FakeSdmaOpaque {
@@ -65,7 +75,13 @@ void SetBootstrapIntResult(const int* values, int count) {
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
-void SetLsaSelfAddr(void* addr) { g.lsaSelfAddr = addr; }
+void SetLsaSelfAddr(void* addr) {
+  g.lsaSelfAddr = addr;
+  // Drop the latched input base so the next resolve is relative to this address,
+  // not the first arena that happened to be resolved.
+  g.lsaInputBase = 0;
+  g.lsaInputBaseSet = false;
+}
 void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
 int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
 int GetConnCheckVerifyCalls() { return g.connCheckVerifyCalls; }
@@ -77,6 +93,10 @@ unsigned long long GetConnCheckWriteStamp(int call) {
 const std::vector<int>& GetLastIntraNodeAllGatherRanks() { return g.lastIntraNodeAllGather.ranks; }
 int GetLastIntraNodeAllGatherRank() { return g.lastIntraNodeAllGather.rank; }
 int GetLastIntraNodeAllGatherNranks() { return g.lastIntraNodeAllGather.nranks; }
+int GetBootstrapAllGatherCalls() { return g.bootstrapAllGatherCalls; }
+int GetLastWideAllGatherSize() { return g.lastWideAllGatherSize; }
+int GetWideAllGatherOverruns() { return g.wideAllGatherOverruns; }
+int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
 int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
@@ -125,8 +145,34 @@ static ncclResult_t stubIntAllGather(void* allData, int nranks, int size) {
   return ncclSuccess;
 }
 
+// bootstrapAllGather writes one slot per world rank. Non-int callers pass a
+// calloc'd buffer, so check it can hold nranks slots before writing them; an
+// undersized buffer is recorded rather than overrun.
+static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
+  if (GinAnvilPluginStubs::g.bootstrapFail) return ncclInternalError;
+  GinAnvilPluginStubs::g.lastWideAllGatherSize = size;
+  if (nranks < 1 || size < 1) return ncclSuccess;
+  const size_t slot = static_cast<size_t>(size);
+  if (malloc_usable_size(allData) < static_cast<size_t>(nranks) * slot) {
+    GinAnvilPluginStubs::g.wideAllGatherOverruns++;
+    return ncclInternalError;
+  }
+  // Single-process sim: keep the caller's own slot, give every empty slot peer data.
+  unsigned char* bytes = static_cast<unsigned char*>(allData);
+  std::vector<unsigned char> zero(slot, 0);
+  for (int i = 0; i < nranks; ++i) {
+    unsigned char* p = bytes + static_cast<size_t>(i) * slot;
+    if (memcmp(p, zero.data(), slot) == 0) memset(p, 0xA5, slot);
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   (void)commState;
+  GinAnvilPluginStubs::g.bootstrapAllGatherCalls++;
+  if (size != static_cast<int>(sizeof(int))) {
+    return stubWideAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
+  }
   return stubIntAllGather(allData, GinAnvilPluginStubs::g.bootstrapNranks, size);
 }
 
@@ -145,6 +191,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, 
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.ranks.assign(ranks, ranks + nranks);
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.rank = rank;
   GinAnvilPluginStubs::g.lastIntraNodeAllGather.nranks = nranks;
+  GinAnvilPluginStubs::g.intraNodeAllGatherCalls++;
   return stubIntAllGather(allData, nranks, size);
 }
 
@@ -158,12 +205,17 @@ ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, in
 
 ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void** outAddr) {
   (void)devr;
-  (void)addr;
   if (GinAnvilPluginStubs::g.lsaAddrFail) {
     *outAddr = nullptr;
     return ncclSuccess;
   }
-  *outAddr = GinAnvilPluginStubs::g.lsaSelfAddr;
+  uintptr_t input = reinterpret_cast<uintptr_t>(addr);
+  if (!GinAnvilPluginStubs::g.lsaInputBaseSet) {
+    GinAnvilPluginStubs::g.lsaInputBase = input;
+    GinAnvilPluginStubs::g.lsaInputBaseSet = true;
+  }
+  uintptr_t offset = input - GinAnvilPluginStubs::g.lsaInputBase;
+  *outAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.lsaSelfAddr) + offset);
   return ncclSuccess;
 }
 
