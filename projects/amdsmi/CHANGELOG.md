@@ -30,6 +30,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  
   - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
 
+- **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
+  - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `{"node": {}}`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
+
+- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` when passed a list of CPER records**.  
+  - The list branch called `isinstance()` with a subscripted generic, which Python rejects at runtime, so the documented list-of-dicts input always failed. `bytes` input was unaffected. Input that is neither `bytes` nor a list now raises `AmdSmiParameterException`.
+
+- **Fixed a segmentation fault in the DRM example when run without root**.  
+  - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The structure is now zero-initialized and the loop runs only when the query succeeds.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

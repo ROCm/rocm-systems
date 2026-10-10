@@ -15,6 +15,7 @@ import collections
 import json
 import math
 import os
+import re
 import stat
 import sys
 import unittest
@@ -421,6 +422,7 @@ class TestCliBase(unittest.TestCase):
                     item_index = 0
 
                 sub_found = False
+                requires_value = False
                 if item_index >= 0:
                     if items[item_index][-1:] == ",":
                         items[item_index] = items[item_index][:-1]
@@ -459,8 +461,14 @@ class TestCliBase(unittest.TestCase):
                         if items[item_index + 1][0:1] == self.openBracket:
                             items[item_index + 1] = items[item_index + 1][1:]
                         sub_arg = items[item_index + 1]
+                        # A single space before the next token is a real argparse metavar;
+                        # argparse pads 2+ spaces before the help-text column when there is none.
+                        gap = re.search(
+                            r"(?:^|\s)" + re.escape(items[item_index]) + r",?( +)\S", line
+                        )
+                        requires_value = bool(gap) and len(gap.group(1)) == 1
                         # Expand out sub_args
-                        if sub_arg.isupper() and sub_arg in self.sub_args:
+                        if requires_value and sub_arg in self.sub_args:
                             sub_found = True
                             for item in self.sub_args[sub_arg]:
                                 options.append(f"{items[item_index]} {item}")
@@ -550,6 +558,11 @@ class TestCliBase(unittest.TestCase):
                             pass
                         elif "Reset" in match_str and items[item_index] == "--profile":
                             options.append("{reset_profile}")
+                        elif requires_value:
+                            self.common.print(
+                                f"{self.tab}Untested (no sweep values for {sub_arg}): "
+                                f"amd-smi {cmd.split()[1]} {items[item_index]}"
+                            )
                         else:
                             options.append(items[item_index])
             if match_str in line:
