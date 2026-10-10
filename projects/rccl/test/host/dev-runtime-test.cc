@@ -5526,6 +5526,12 @@ TEST(DevrGinContextsTotal, MixedBackends_TakesLargestRoundedCount) {
   ginState.backends[0].ginCommCount = 4;
   ginState.backends[1].ginCommCount = 3;
   EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
+
+  // Mirrored order: the further-rounding backend must still win when it is
+  // visited first. Without the max-over-backends accumulator this would return 4.
+  ginState.backends[0].ginCommCount = 3;
+  ginState.backends[1].ginCommCount = 4;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
 }
 
 // Branch: a backend reporting no connections must not divide by zero.
