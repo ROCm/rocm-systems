@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <timemory/settings/settings.hpp>
 
@@ -1023,6 +1024,66 @@ protected:
         open_reader_for_written_db(out_dir);
     }
 
+    template <typename Exception>
+    void expect_prepare_for_processing_throws(
+        const std::shared_ptr<metadata_registry>& metadata, std::vector<agent> agents,
+        std::string_view expected_substring)
+    {
+        const scoped_force_rocpd_metadata_registration force_rocpd;
+
+        const auto prev_out = tim::settings::output_path();
+        const auto out_dir  = m_temp_dir / "processor_prepare_throws";
+        std::filesystem::create_directories(out_dir);
+        tim::settings::output_path() = out_dir.string();
+        rocprofsys::reset_database_path_memo();
+        const scoped_restore_output_path restore_out{ prev_out };
+
+        auto mgr = std::make_shared<agent_manager>();
+        for(auto& agent_entry : agents)
+        {
+            mgr->insert_agent(agent_entry);
+        }
+
+        output_file_registry registry;
+        rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
+                                     static_cast<int>(k_ppid), registry };
+
+        EXPECT_THAT(
+            [&] { processor.prepare_for_processing(); },
+            testing::ThrowsMessage<Exception>(testing::HasSubstr(expected_substring)));
+        EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())
+            << "rejected metadata must not create a rocpd database";
+    }
+
+    static kernel_dispatch_sample make_kernel_dispatch(std::uint64_t queue_id,
+                                                       std::size_t   stream_id)
+    {
+        constexpr std::uint64_t k_start_ts = 5000;
+        constexpr std::uint64_t k_end_ts   = 6000;
+        constexpr std::uint32_t k_group    = 64;
+        constexpr std::uint32_t k_grid     = 256;
+        return { k_start_ts, k_end_ts, k_thread_id, k_managed_gpu_handle,
+                 1,          1,        queue_id,    0,
+                 0,          0,        0,           k_group,
+                 1,          1,        k_grid,      1,
+                 1,          stream_id };
+    }
+
+    static scratch_memory_sample make_scratch_memory(std::uint64_t queue_id,
+                                                     std::size_t   stream_id,
+                                                     std::int32_t  operation)
+    {
+        constexpr std::uint64_t k_start_ts   = 3000;
+        constexpr std::uint64_t k_end_ts     = 3100;
+        constexpr std::uint64_t k_alloc_size = 131072;
+        return { k_start_ts,   k_end_ts,
+                 k_thread_id,  k_managed_gpu_handle,
+                 queue_id,     "SCRATCH_MEMORY",
+                 operation,    0,
+                 k_alloc_size, 100,
+                 50,           stream_id };
+    }
+
     static std::string extract_rocpd_uuid(const std::filesystem::path& db_path)
     {
         std::ifstream     db_file{ db_path, std::ios::binary };
@@ -1271,31 +1332,22 @@ TEST_F(rocpd_write_read_test_interface, nic_rdma_pmc_catalog_target_arch)
 
 TEST_F(rocpd_write_read_test_interface, nic_pmc_info_invalid_target_arch_rejected)
 {
-    const scoped_force_rocpd_metadata_registration force_rocpd;
-
-    const auto prev_out = tim::settings::output_path();
-    const auto out_dir  = m_temp_dir / "processor_invalid_arch";
-    std::filesystem::create_directories(out_dir);
-    tim::settings::output_path() = out_dir.string();
-    rocprofsys::reset_database_path_memo();
-    const scoped_restore_output_path restore_out{ prev_out };
-
     auto metadata       = make_seeded_metadata({});
     auto bad_pmc        = make_nic_metadata_pmc(k_nic_pmcs[0]);
     bad_pmc.target_arch = "AINIC";
     metadata->add_pmc_info(bad_pmc);
 
-    auto  mgr = std::make_shared<agent_manager>();
-    agent nic = nic_agent();
-    mgr->insert_agent(nic);
+    expect_prepare_for_processing_throws<std::invalid_argument>(
+        metadata, { nic_agent() }, "Invalid PMC target_arch: AINIC");
+}
 
-    output_file_registry registry;
-    rocpd_processor_t    processor{ metadata, mgr, static_cast<int>(k_pid),
-                                 static_cast<int>(k_ppid), registry };
+TEST_F(rocpd_write_read_test_interface, prepare_with_empty_metadata_string_throws)
+{
+    auto metadata = make_seeded_metadata({});
+    metadata->add_string("");
 
-    EXPECT_THROW(processor.prepare_for_processing(), std::invalid_argument);
-    EXPECT_TRUE(find_rocpd_database_in_directory(out_dir).empty())
-        << "invalid PMC metadata must not create a rocpd database";
+    expect_prepare_for_processing_throws<std::runtime_error>(
+        metadata, {}, "Trying to register empty string");
 }
 
 TEST_F(rocpd_write_read_test_interface, gpu_and_nic_pmc_keep_distinct_target_arch)
@@ -1532,6 +1584,164 @@ TEST_F(rocpd_write_read_test_interface, event_counts_match_inserted_data)
                                   .end_ts      = k_kd_end_ts,
                                   .workgroup_x = k_workgroup_size_x,
                                   .grid_x      = k_grid_size_x });
+}
+
+// ---------------------------------------------------------------------------
+// Hub validation errors propagate out of handle()
+// ---------------------------------------------------------------------------
+
+TEST_F(rocpd_write_read_test_interface, handle_region_unregistered_thread_throws)
+{
+    constexpr std::uint64_t k_unregistered_thread_id = 999;
+
+    run_processor_and_open_reader({}, {}, [](rocpd_processor_t& processor) {
+        const region_sample reg{
+            k_unregistered_thread_id, "hipMemcpy", 1, 0, 5000, 5200, "", "", "HIP_API"
+        };
+        EXPECT_THAT([&] { processor.handle(reg); },
+                    testing::ThrowsMessage<std::runtime_error>(
+                        testing::HasSubstr("Thread not registered")));
+    });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_region_arg_with_empty_name_throws)
+{
+    const auto region_args = get_args_string(function_args_t{
+        { .arg_number = 0U, .arg_type = "void*", .arg_name = "", .arg_value = "0x0" } });
+
+    run_processor_and_open_reader({}, {}, [&](rocpd_processor_t& processor) {
+        const region_sample reg{ k_thread_id, "hipMemcpy", 1,           0,        5000,
+                                 5200,        "",          region_args, "HIP_API" };
+        EXPECT_THAT([&] { processor.handle(reg); },
+                    testing::ThrowsMessage<std::runtime_error>(
+                        testing::HasSubstr("Type or name is empty for Arg Data")));
+    });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_queue_throws)
+{
+    constexpr std::uint64_t k_unregistered_queue_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent() },
+        [](const std::shared_ptr<metadata_registry>& metadata) {
+            seed_gpu_queue_stream(metadata);
+            seed_kernel_symbol(metadata, 1, "throw_test_kernel");
+        },
+        [](rocpd_processor_t& processor) {
+            const auto kds = make_kernel_dispatch(k_unregistered_queue_id, k_stream_id);
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Queue not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_stream_throws)
+{
+    constexpr std::size_t k_unregistered_stream_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent() },
+        [](const std::shared_ptr<metadata_registry>& metadata) {
+            seed_gpu_queue_stream(metadata);
+            seed_kernel_symbol(metadata, 1, "throw_test_kernel");
+        },
+        [](rocpd_processor_t& processor) {
+            const auto kds = make_kernel_dispatch(k_queue_id, k_unregistered_stream_id);
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_kernel_dispatch_unregistered_thread_throws)
+{
+    constexpr std::uint64_t k_unregistered_thread_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent() },
+        [](const std::shared_ptr<metadata_registry>& metadata) {
+            seed_gpu_queue_stream(metadata);
+            seed_kernel_symbol(metadata, 1, "throw_test_kernel");
+        },
+        [](rocpd_processor_t& processor) {
+            auto kds      = make_kernel_dispatch(k_queue_id, k_stream_id);
+            kds.thread_id = k_unregistered_thread_id;
+            EXPECT_THAT([&] { processor.handle(kds); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Thread not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_unregistered_queue_throws)
+{
+    constexpr std::uint64_t k_unregistered_queue_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent() }, seed_gpu_queue_stream, [](rocpd_processor_t& processor) {
+            const auto sms = make_scratch_memory(
+                k_unregistered_queue_id, k_stream_id,
+                static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC));
+            EXPECT_THAT([&] { processor.handle(sms); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Queue not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_scratch_memory_unregistered_stream_throws)
+{
+    constexpr std::size_t k_unregistered_stream_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent() }, seed_gpu_queue_stream, [](rocpd_processor_t& processor) {
+            const auto sms = make_scratch_memory(
+                k_queue_id, k_unregistered_stream_id,
+                static_cast<std::int32_t>(ROCPROFILER_SCRATCH_MEMORY_ALLOC));
+            EXPECT_THAT([&] { processor.handle(sms); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_memory_copy_unregistered_stream_throws)
+{
+    constexpr std::size_t k_unregistered_stream_id = 999;
+
+    run_processor_and_open_reader(
+        { managed_gpu_agent(), managed_cpu_agent() }, {},
+        [](rocpd_processor_t& processor) {
+            const memory_copy_sample mcs{ 6500,
+                                          7000,
+                                          k_thread_id,
+                                          k_managed_gpu_handle,
+                                          k_managed_cpu_handle,
+                                          "MEMORY_COPY_HOST_TO_DEVICE",
+                                          4096,
+                                          1,
+                                          0,
+                                          0x100000,
+                                          0x7F0000000000,
+                                          k_unregistered_stream_id };
+            EXPECT_THAT([&] { processor.handle(mcs); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Stream not registered")));
+        });
+
+    EXPECT_TRUE(m_reader->get_events().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1789,10 +1999,13 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     run_processor_and_open_reader(
         { managed_gpu_agent() },
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::gpu,
-                                                        .name        = "my_track",
-                                                        .target_arch = "GPU",
-                                                        .description = "IN_TIME" }));
+            constexpr size_t k_unregistered_agent_index = 999;
+            metadata->add_pmc_info(
+                make_agent_pmc_row({ .type             = agent_type::gpu,
+                                     .agent_type_index = k_unregistered_agent_index,
+                                     .name             = "my_track",
+                                     .target_arch      = "GPU",
+                                     .description      = "IN_TIME" }));
             add_process_scoped_track(metadata, "my_track");
         },
         [](rocpd_processor_t& processor) {
@@ -1808,14 +2021,75 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     // Validate: profiler_hub::reader_t read-back matches inserted values.
     const auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 1U);
-    expect_named_pmc_arch(pmc_infos, { .name                 = "my_track",
-                                       .expected_arch        = "GPU",
-                                       .expected_agent_type  = "GPU",
-                                       .expected_symbol      = "my_track",
-                                       .expected_units       = "",
-                                       .expected_description = "IN_TIME" });
+    const auto& pmc_info = pmc_infos.front();
+    EXPECT_EQ(pmc_info->name, "my_track");
+    EXPECT_EQ(pmc_info->target_arch, "GPU");
+    EXPECT_EQ(pmc_info->description, "IN_TIME");
+    EXPECT_EQ(pmc_info->agent_info, nullptr);
+    ASSERT_NE(pmc_info->node_info, nullptr);
+    EXPECT_EQ(pmc_info->node_info->hostname,
+              rocprofsys::node_info::get_instance().node_name);
+    ASSERT_NE(pmc_info->process_info, nullptr);
+    EXPECT_EQ(pmc_info->process_info->pid, k_pid);
 
     expect_reader_has_tracks({ "my_track" });
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_unregistered_pmc_throws)
+{
+    // Prepare: track is registered, PMC info is not.
+    run_processor_and_open_reader(
+        { managed_gpu_agent() },
+        [](const std::shared_ptr<metadata_registry>& metadata) {
+            add_process_scoped_track(metadata, "unregistered_track");
+        },
+        [](rocpd_processor_t& processor) {
+            constexpr std::uint64_t k_timestamp = 9500;
+            constexpr std::uint64_t k_event_id  = 5;
+            const in_time_sample    its{
+                0, "unregistered_track", k_timestamp, "{}", k_event_id, 3, 0, "", ""
+            };
+            EXPECT_THAT([&] { processor.handle(its); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("PMC Info not registered")));
+        });
+
+    // Validate: rejected sample left nothing behind and the database is still readable.
+    EXPECT_TRUE(m_reader->get_all_pmc_info().empty());
+    EXPECT_TRUE(m_reader->get_events().empty());
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_pmc_event_unregistered_track_throws)
+{
+    // Prepare: PMC info is registered, track is not.
+    run_processor_and_open_reader(
+        { managed_gpu_agent() },
+        [](const std::shared_ptr<metadata_registry>& metadata) {
+            metadata->add_pmc_info(make_agent_pmc_row(
+                { .type = agent_type::gpu, .name = "SQ_WAVES", .target_arch = "GPU" }));
+        },
+        [](rocpd_processor_t& processor) {
+            const pmc_event_with_sample pmc{ 0,
+                                             "unregistered_track",
+                                             10000,
+                                             "{}",
+                                             10,
+                                             5,
+                                             42,
+                                             "",
+                                             "",
+                                             0,
+                                             static_cast<std::uint8_t>(agent_type::gpu),
+                                             "SQ_WAVES",
+                                             1024.0,
+                                             static_cast<std::int64_t>(k_thread_id) };
+            EXPECT_THAT([&] { processor.handle(pmc); },
+                        testing::ThrowsMessage<std::runtime_error>(
+                            testing::HasSubstr("Track not registered")));
+        });
+
+    // Validate: the event inserted before the track check was rolled back.
+    EXPECT_TRUE(m_reader->get_events().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -2119,6 +2393,35 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
                             .expected_description = "KFD page fault counter" });
 
     expect_reader_has_tracks({ "KFD Events [GPU 0]" });
+}
+
+TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_unknown_agent_throws)
+{
+    // Prepare: no agent matches the sample's device_id.
+    run_processor_and_open_reader(
+        { managed_gpu_agent() }, [](const std::shared_ptr<metadata_registry>&) {},
+        [](rocpd_processor_t& processor) {
+            constexpr std::uint32_t k_unknown_device_id = 999;
+            const kfd_sample        sample{ k_thread_id,
+                                     "KFD_PAGE_FAULT",
+                                     14000,
+                                     14500,
+                                     "",
+                                     "kfd",
+                                     "KFD Events [GPU 0]",
+                                     "{}",
+                                     k_unknown_device_id,
+                                     static_cast<std::uint8_t>(agent_type::gpu),
+                                     "kfd_page_fault",
+                                     1.0,
+                                     static_cast<std::int64_t>(k_thread_id) };
+            EXPECT_THAT([&] { processor.handle(sample); },
+                        testing::ThrowsMessage<std::out_of_range>(
+                            testing::HasSubstr("Agent not found for type index")));
+        });
+
+    // Validate: the failed sample wrote no region.
+    EXPECT_TRUE(m_reader->get_events().empty());
 }
 
 // ---------------------------------------------------------------------------
