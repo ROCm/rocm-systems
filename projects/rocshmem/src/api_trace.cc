@@ -24,12 +24,12 @@
 
 #include "rocshmem/api_trace.h"
 #include "rocshmem/rocshmem_common.hpp"
+#include "rocshmem/rocshmem_config.h"  // defines ROCSHMEM_ROCPROFILER_REGISTER when set via cmake
 #include <cstddef>
 #include <cstdint>
 
 #if defined(ROCSHMEM_ROCPROFILER_REGISTER)
 #    include <rocprofiler-register/rocprofiler-register.h>
-#    include "rocshmem/rocshmem_config.h"
 
 #    define ROCP_REG_VERSION                                                             \
         ROCPROFILER_REGISTER_COMPUTE_VERSION_3(ROCSHMEM_VENDOR_MAJOR_VERSION,            \
@@ -134,7 +134,7 @@ RocshmemGetFunctionTable_impl()
             &rocshmem_signal_wait_until_on_stream_impl
         };
 
-#if defined(ROCSHMEM_ROCPROFILER_REGISTER) && ROCSHMEM_ROCPROFILER_REGISTER > 0
+#if defined(ROCSHMEM_ROCPROFILER_REGISTER)
     std::array<void*, 1>                       table_array{ tbl };
     rocprofiler_register_library_indentifier_t lib_id =
         rocprofiler_register_library_indentifier_t{};
