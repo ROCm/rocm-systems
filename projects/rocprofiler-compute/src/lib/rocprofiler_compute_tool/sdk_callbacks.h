@@ -90,6 +90,16 @@ struct kernel_symbol_record_t
     uint32_t    sgpr_count       = 0;
 };
 
+/// A GPU agent. Keyed by its handle in tool_data_t but never written with it:
+/// the SDK offsets handles randomly per process, so only node_id identifies a
+/// device outside this process.
+struct agent_record_t
+{
+    uint32_t    node_id = 0;
+    std::string name;
+    std::string product_name;
+};
+
 /// kernel_id is kept for the kernel filter and not written: the dispatch
 /// artifact carries it.
 struct counter_info_record_t
@@ -107,6 +117,7 @@ struct tool_data_t
     std::string                                          output_filename{};
     std::string                                          dispatch_filename{};
     std::string                                          kernel_symbols_filename{};
+    std::string                                          agents_filename{};
     std::unordered_map<uint64_t, std::string>            counter_id_name_map{};
     std::string                                          requested_counters{};
     std::string                                          kernel_filter_include_regex{};
@@ -114,6 +125,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>                   counter_records;
     std::vector<dispatch_record_t>                       dispatch_records;
     std::unordered_map<uint64_t, kernel_symbol_record_t> kernel_symbols{};
+    std::unordered_map<uint64_t, agent_record_t>         agents{};
     std::set<uint64_t>                                   target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
     pc_sampling_feature_t::ptr pc_sampling{std::make_shared<pc_sampling_feature_t>()};

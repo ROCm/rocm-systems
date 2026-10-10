@@ -23,11 +23,12 @@ from utils.utils_analysis import (
     build_operator_summary,
     find_native_artifacts,
     join_native_counters,
+    number_gpus_by_node,
     parse_top_level_location,
     rollup_node_stats,
 )
 
-ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols")
+ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
 
 
 def native_counters(*rows):
@@ -2788,6 +2789,12 @@ def test_find_native_artifacts_skips_an_incomplete_set(tmp_path, monkeypatch):
     assert find_native_artifacts(tmp_path) == []
     assert len(warnings) == 1
     assert "dispatch" in warnings[0]
+
+
+def test_number_gpus_by_node_numbers_every_node_once_in_order():
+    agents = pd.DataFrame({"node_id": [5, 2, 3, 2]})
+
+    assert number_gpus_by_node(agents) == {2: 0, 3: 1, 5: 2}
 
 
 def test_join_native_counters_takes_dispatch_and_symbol_columns():
