@@ -32,6 +32,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
 #include "fakes/signature-drift.h"
 
@@ -420,41 +421,8 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
-// ---------------------------------------------------------------------------
-// Team accessors (host variants).
-// ---------------------------------------------------------------------------
-// Seams rather than fixed returns: ncclTeamRankIsMember/ncclTeamRankToTeam are
-// real inline code that divides by the team's stride, so a zero-initialised
-// ncclTeam_t here would SIGFPE the moment a test reached the symmetric arm of
-// ncclDevrWorldToLsaRank. The defaults describe the contiguous, stride-1 team
-// the comm already says it has; a test that needs a strided or offset team
-// installs its own.
-static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->nRanks, comm->rank, 1};
-}
-std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
-extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-extern "C" ncclTeam_t ncclTeamRail(ncclComm_t) { return ncclTeam_t{}; }
-
-// The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
-// shape as the real host accessors in nccl_device/core.cc, reading the sizes
-// ncclDevrInitOnce already computed, minus their ncclDevrInitOnce call: these
-// are reached from inside that very function's callees, so calling it here
-// would recurse. Stride 1 for the same SIGFPE reason as the world team above.
-static ncclTeam_t DefaultTeamCft(ncclComm_t comm, ncclCftTeamMode_t) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->devrState.cftSize, comm->devrState.cftSelf, 1};
-}
-std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft = DefaultTeamCft;
-ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode) { return g_devrTeamCft(comm, mode); }
-
-static ncclTeam_t DefaultTeamCftMultimem(ncclComm_t comm) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->devrState.cftMcSize, comm->devrState.cftMcSelf, 1};
-}
-std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem = DefaultTeamCftMultimem;
-ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm) { return g_devrTeamCftMultimem(comm); }
+// The host-side ncclTeam* accessors live in fakes/nccl_device_core_fakes.cc, named
+// for src/nccl_device/core.cc which defines them; this file's Reset chains theirs.
 
 // ---------------------------------------------------------------------------
 // CFT logical endpoints (real in cft_dev_runtime.cc).
@@ -560,9 +528,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
-  g_devrTeamWorld                               = DefaultTeamWorld;
-  g_devrTeamCft                                 = DefaultTeamCft;
-  g_devrTeamCftMultimem                         = DefaultTeamCftMultimem;
+  ResetNcclDeviceCoreFakes();
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
   g_devrNcclCommRegister                        = DefaultCommRegister;

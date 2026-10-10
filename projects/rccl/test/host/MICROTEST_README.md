@@ -253,10 +253,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
-  `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
-  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  `gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
+  point. Covers every function in the file: type
+  negotiation, signal-requirement validation, `ncclGinConnectOnce` (including
+  NVIDIA/nccl#2279 `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment and the
+  strided team a rail-only comm connects), devComm setup (per-backend version
+  tables, stride validation, failure cleanup) and free, finalize, window
+  registration, and last-error queries, plus the proxy-thread CPU affinity pin.
+  A scripted `ncclGin_t` in the test file stands in for the plugin, so every
+  failure arm is reachable by failing a chosen call. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+  Every line and every source-level branch in `gin_host.cc` is covered; what
+  `llvm-cov` still reports as missed branches is inside `NCCLCHECK`/`WARN`
+  macro expansions at call sites whose failure arm no test drives.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -344,7 +354,9 @@ test:
    `ScopedHook` helper in `ScopedHook.h` (see
    [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook)),
    which installs the hook, counts calls, and restores the previous behaviour
-   automatically on scope exit.
+   automatically on scope exit. Reach for the other
+   [shared test-side helpers](#shared-test-side-helpers) before hand-rolling a
+   failure counter, a wait loop, or a scope guard.
 4. **Only exercise faked seams.** Every external symbol the `#include`d `.cc`
    reaches must be satisfied by `fakes/`: a missing symbol surfaces as a
    link error, a wrongly
@@ -396,6 +408,7 @@ symbol.
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
+| `src/debug.cc` (`ncclDebugLog`, `ncclDebugLevelMask`, `ncclSetThreadName`, ...) | `fakes/nccl_fakes.cc` |
 | `src/enqueue/enqueue.cc`'s own symbols (targets that do not compile the real file) | `fakes/enqueue_fakes.cc` |
 | `src/init.cc` comm lifecycle + CTA/channel params | `fakes/comm_fakes.cc` |
 | `src/init_nvtx.cc` | `fakes/init_nvtx_fakes.cc` |
@@ -408,6 +421,7 @@ symbol.
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
+| `src/nccl_device/core.cc` host `ncclTeam*` accessors | `fakes/nccl_device_core_fakes.cc` (except `ncclTeamLsa`; see below) |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
@@ -442,7 +456,7 @@ and that default silently selects which production arm runs. Driving a seam mean
 marker. The marker travels with the declaration rather than a block comment so it cannot drift from
 what it describes. Call *counters* do not take the marker unless the counter itself is unread.
 
-Five things do NOT follow the TU-per-file rule, deliberately:
+These do NOT follow the TU-per-file rule, deliberately:
 
 - `fakes/collective_stubs.cc` is a fail-loud floor for the collective *launch*
   pipeline (`ncclLaunchKernel` and friends), which `enqueue.cc` itself defines.
@@ -468,6 +482,12 @@ Five things do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
+- `ncclTeamLsa` stays in `fakes/devcomm_fakes.cc` rather than moving to
+  `fakes/nccl_device_core_fakes.cc` with the other `src/nccl_device/core.cc`
+  accessors: its default silently satisfies the `nRanks ==
+  comm->nRanks` comparison every `devcomm-test.cc` filter makes, and the trap
+  comment warning about that is what keeps those tests honest. Moving the hook
+  without moving the readers that depend on the warning is how it would get lost.
 - `IsArchMatch` and the `allocTracker` data symbol stay in `p2p-test.cc`
   itself rather than a fakes file, because neither has an owning production
   TU to name a fakes file after: `IsArchMatch` is declared in the
@@ -623,6 +643,28 @@ single branch depends on HIP version (only one arm is live per build, but the
 test can't know which at authoring time), pair the factories that drive each
 version's arm so the test passes regardless of the toolchain — see
 `ForceLegacyCudaRegister` + `ForceLegacyIpcCapable` in `p2p-test.cc`.
+
+## Shared test-side helpers
+
+The scaffolding a test needs on *its* side of the seam — scripting a fake's
+failure, waiting for a worker thread, cleaning up on the fatal-assert path — is
+the same in every binary, so it lives in a header next to the tests rather than
+being re-invented per TU. Each is one small header named after the type it
+declares:
+
+| Header | Use it for |
+|---|---|
+| `ScopedHook.h` | Install behaviour on a `std::function` seam, count the calls, restore the previous behaviour on scope exit. See [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook). |
+| `ScriptedFailure.h` | "Fail call N of this entry point." A fake holds one per entry point and asks `at(++calls)` what to return; the test writes `fake_.failConnect = {ncclSystemError, 2}`. Replaces the `g_fooCalls` + `g_failFooCall` pair that otherwise grows per seam. |
+| `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
+| `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
+| `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
+
+When a test grows a helper that is not specific to its unit under test, promote
+it here rather than leaving it in the TU — a per-TU copy is how four tests end
+up with four slightly different "wait for the thread" loops. Helpers that *are*
+specific to one unit stay with it (`TaskPrepScene.h` for the task-prep scene,
+`fakes/ras_*_test_support.h` for the RAS fixtures).
 
 ## Dealing with each kind of dependency
 
