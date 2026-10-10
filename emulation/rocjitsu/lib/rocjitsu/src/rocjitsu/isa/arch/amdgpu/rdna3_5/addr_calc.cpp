@@ -53,6 +53,9 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!soffset)
     return std::nullopt;
   off += *soffset;
+  // Only the non-buffer addressing section defines a negative sum as undefined.
+  if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
   if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
   return (*base + off) & ~0x3ULL;

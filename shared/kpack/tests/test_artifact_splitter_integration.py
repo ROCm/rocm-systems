@@ -25,7 +25,12 @@ from rocm_kpack.coff.kpack_transform import HIPF_MAGIC as COFF_HIPF_MAGIC
 from rocm_kpack.coff.kpack_transform import HIPK_MAGIC as COFF_HIPK_MAGIC
 from rocm_kpack.coff.kpack_transform import WRAPPER_SIZE as COFF_WRAPPER_SIZE
 from rocm_kpack.coff.surgery import CoffSurgery
-from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler, RocBLASHandler
+from rocm_kpack.database_handlers import (
+    AotritonHandler,
+    ComposableKernelHandler,
+    MIOpenHandler,
+    RocBLASHandler,
+)
 from rocm_kpack.elf.kpack_transform import HIPF_MAGIC as ELF_HIPF_MAGIC
 from rocm_kpack.elf.surgery import ElfSurgery
 from rocm_kpack.kpack_transform import kpack_offload_binary, read_kpack_ref_marker
@@ -1174,6 +1179,99 @@ class TestArtifactSplitterIntegration:
         assert len(visitor.database_files_by_arch["gfx942"]) == 1
         assert visitor.database_files_by_arch["gfx942"][0][0] == ck_dll
         assert ck_dll in visitor.exclude_from_generic
+
+    def test_ck_static_libs_classified_as_database(self, toolchain, tmp_path):
+        """CK per-arch static archives are database files; the unsuffixed
+        archive is not."""
+        test_dir = tmp_path / "prefix"
+        lib_dir = test_dir / "lib"
+        lib_dir.mkdir(parents=True)
+
+        names = [
+            "libdevice_conv_operations_gfx942.a",
+            "libdevice_conv_operations_gfx942_xnackp.a",
+            "libdevice_conv_operations_gfx1100.a",
+            "libdevice_conv_operations.a",
+        ]
+        for name in names:
+            (lib_dir / name).write_bytes(b"!<arch>\n" + b"\x00" * 100)
+
+        visitor = FileClassificationVisitor(
+            toolchain=toolchain,
+            database_handlers=[ComposableKernelHandler()],
+            verbose=False,
+        )
+        for name in names:
+            visitor.visit_file(lib_dir / name, test_dir)
+
+        assert {p.name for p, _ in visitor.database_files_by_arch["gfx942"]} == {
+            "libdevice_conv_operations_gfx942.a",
+            "libdevice_conv_operations_gfx942_xnackp.a",
+        }
+        assert [p.name for p, _ in visitor.database_files_by_arch["gfx1100"]] == [
+            "libdevice_conv_operations_gfx1100.a"
+        ]
+        assert set(visitor.database_files_by_arch) == {"gfx942", "gfx1100"}
+        assert {p.name for p in visitor.exclude_from_generic} == set(names[:3])
+
+    @pytest.mark.parametrize("gpu_targets", [None, ["gfx942"]])
+    def test_ck_static_libs_split_per_arch(self, toolchain, tmp_path, gpu_targets):
+        """CK per-target archives and their CMake exports shard together into
+        <prefix>_<arch>, xnack spellings side by side; the unsuffixed archive,
+        its export and the package config stay generic; gpu_targets drops
+        unselected arches entirely."""
+        input_dir = tmp_path / "test_artifact"
+        input_dir.mkdir()
+        prefix = "math-libs/composable_kernel/stage"
+        write_artifact_manifest(input_dir, [prefix])
+        stage = input_dir / prefix
+        exports = "lib/cmake/composable_kernel"
+        (stage / exports).mkdir(parents=True)
+
+        def per_target(token):
+            stem = f"{exports}/composable_kerneldevice_conv_operations_{token}Targets"
+            return [
+                f"lib/libdevice_conv_operations_{token}.a",
+                f"{stem}.cmake",
+                f"{stem}-release.cmake",
+            ]
+
+        files = {
+            "gfx942": per_target("gfx942")
+            + per_target("gfx942_xnackp")
+            + per_target("gfx942_xnack_"),
+            "gfx1100": per_target("gfx1100"),
+        }
+        generic = [
+            "lib/libdevice_conv_operations.a",
+            f"{exports}/composable_kernelConfig.cmake",
+            f"{exports}/composable_kerneldevice_conv_operationsTargets.cmake",
+        ]
+        for relative in [*generic, *(r for rs in files.values() for r in rs)]:
+            (stage / relative).write_text(relative)
+
+        output_dir = tmp_path / "output"
+        splitter = ArtifactSplitter(
+            artifact_prefix="composable-kernel_dev",
+            toolchain=toolchain,
+            database_handlers=[ComposableKernelHandler()],
+            verbose=True,
+            gpu_targets=gpu_targets,
+        )
+        splitter.split(input_dir, output_dir)
+
+        def contents(artifact):
+            root = output_dir / artifact / prefix
+            return sorted(
+                p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()
+            )
+
+        assert contents("composable-kernel_dev_generic") == sorted(generic)
+        for arch, relatives in files.items():
+            if gpu_targets is not None and arch not in gpu_targets:
+                assert not (output_dir / f"composable-kernel_dev_{arch}").exists()
+            else:
+                assert contents(f"composable-kernel_dev_{arch}") == sorted(relatives)
 
     def test_gpu_targets_filters_database_files(self, toolchain, tmp_path):
         """

@@ -11,6 +11,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
 * Disable HRR capture feature
+* Support for recovering the allocation properties of an imported virtual memory handle. `hipMemGetAllocationPropertiesFromHandle()` now reports `hipMemLocationTypeHost` for a host-backed allocation obtained from `hipMemImportFromShareableHandle()`, instead of always reporting device memory. For a device-backed allocation it reports the owning device rather than whichever device was current when the handle was imported.
 
 ### Resolved issues
 
