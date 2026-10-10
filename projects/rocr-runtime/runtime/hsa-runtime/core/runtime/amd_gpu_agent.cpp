@@ -3289,13 +3289,11 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
-#ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
-  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+  // On some GPUs (e.g. gfx1250), AQL dispatch timestamps use a different epoch
+  // than GetClockCounters' GPUClockCounter (same clock rate, different base).
+  // Subtract the detected offset before interpolation (0 until first detection).
   tick -= gpu_clock_offset_;
-#endif
+
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
   // clock read certainty is <4us.
@@ -3324,6 +3322,17 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
     // Skip clock sync if under the extrapolation limit.
     if (elapsed < max_extrapolation) break;
     SyncClocks();
+  }
+
+  // Detect epoch mismatch between AQL timestamps and GetClockCounters GPU clock.
+  // After two SyncClocks, t1_ is fresh.  For a recently-completed dispatch, tick
+  // should be close to t1_.GPUClockCounter.  If still far apart (> 1 second),
+  // the gap is a fixed epoch offset — not real elapsed time.
+  // Once detected, gpu_clock_offset_ is applied on all subsequent calls above.
+  if (gpu_clock_offset_ == 0 && elapsed > max_extrapolation) {
+    gpu_clock_offset_ = int64_t(tick - t1_.GPUClockCounter);
+    tick -= gpu_clock_offset_;
+    elapsed = int64_t(ratio * double(int64_t(tick - t1_.GPUClockCounter)));
   }
 
   system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
