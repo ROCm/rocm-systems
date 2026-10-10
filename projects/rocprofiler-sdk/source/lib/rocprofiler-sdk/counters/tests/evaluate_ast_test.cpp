@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -72,6 +73,33 @@ isIdentical(const EvaluateAST& eval_ast, const RawAST& raw_ast)
     return true;
 }
 }  // namespace
+
+TEST(evaluate_ast, hive_id)
+{
+    const auto     metric     = Metric("gfx9", "hive_id", "", "", "", "", "yes", 0);
+    const uint64_t hive_ids[] = {0,
+                                 std::numeric_limits<int64_t>::max(),
+                                 uint64_t{1} << 63,
+                                 13090470484380752230ULL,
+                                 std::numeric_limits<uint64_t>::max()};
+    auto           agent      = rocprofiler_agent_t{};
+    auto records = std::unordered_map<uint64_t, std::vector<rocprofiler_counter_record_t>>{};
+
+    for(auto hive_id : hive_ids)
+    {
+        SCOPED_TRACE(hive_id);
+        agent.hive_id = hive_id;
+        auto property = rocprofiler::counters::get_agent_property("hive_id", agent);
+        EXPECT_GE(property, 0);
+        EXPECT_EQ(property, hive_id);
+
+        EvaluateAST::read_special_counters(agent, {metric}, records);
+        const auto& values = records.at(metric.id());
+        ASSERT_EQ(values.size(), 1);
+        EXPECT_DOUBLE_EQ(values.front().counter_value, static_cast<double>(hive_id));
+        EXPECT_GE(values.front().counter_value, 0.0);
+    }
+}
 
 TEST(evaluate_ast, basic_copy)
 {
