@@ -1256,8 +1256,8 @@ function(add_other_tests)
             ENV_VARS "ROCSHMEM_MAX_NUM_CONTEXTS=1024")
     end_test_group()
 
-    # Fence tests - don't work with RO backend (AIROCSHMEM-418)
-    begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "ipc;gda" GPUS "all")
+    # Fence tests
+    begin_test_group(CATEGORY "FENCE" TIER full BACKENDS "all" GPUS "all")
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 1 THREADS 64 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 8 THREADS 256 MAX_MSG_SIZE 1048576)
         add_rocshmem_functional_test(NAME fence_putwavesignal RANKS 2 WORKGROUPS 32 THREADS 1024 MAX_MSG_SIZE 65536)

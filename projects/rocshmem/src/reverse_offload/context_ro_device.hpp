@@ -409,6 +409,12 @@ class ROContext : public Context {
 
   __device__ volatile char *get_status_flag();
 
+  __device__ void count_network_nbi_posted();
+
+  __device__ void proxy_fence();
+
+  __device__ void record_nbi_fenced(uint64_t posted);
+
   BlockHandle *block_handle{nullptr};
 
   int ro_net_win_id{-1};
