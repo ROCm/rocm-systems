@@ -10,7 +10,7 @@
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
-#include "rocjitsu/vm/amdgpu/pm4.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -449,7 +449,8 @@ public:
   /// @retval true the range was installed.
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
-  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                                bool sealed_ram = false);
 
   /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
   /// @retval true the range was unmapped.
@@ -590,7 +591,7 @@ private:
   int duplicate_debug_notifier(int fd);
   int retry_debug_notifications(pid_t target_pid, bool invoke_result_hook = false);
   bool signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id, uint32_t process_id,
-                                      uint64_t exception_mask);
+                                      uint64_t exception_mask, bool wait_for_ack = true);
 
   bool on_wave_single_step_complete(amdgpu::Wavefront &wf);
   void apply_debug_event_publication_hook_for_testing(const std::shared_ptr<KfdProcess> &proc);

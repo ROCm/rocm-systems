@@ -292,27 +292,30 @@ fn emulators_cmd(long: bool, json: bool) {
     println!("\n* = default emulator for new profiles");
 }
 
-/// Best-effort: materialise all builtin state on disk — agents,
-/// topologies, and profiles — writing only what's missing. Not fatal;
-/// the user can always force a full rewrite with `mirage state
-/// builtins`.
+/// Best-effort: materialise the builtin state that lives on disk —
+/// agents and topologies — writing only what's missing. Not fatal; the
+/// user can always force a full rewrite with `mirage state builtins`.
+///
+/// Not profiles. Mirage generates those from the rocjitsu configs it
+/// ships, on demand, and writes none — so there is nothing here to
+/// unpack and nothing that can fail to be unpacked. See
+/// [`mirage_builtin::profiles`].
 ///
 /// Shared by the CLI ([`dispatch`]) and the daemon so both surfaces
 /// auto-unpack the builtins the first time they run, instead of
 /// requiring the user to invoke `mirage state builtins` by hand.
 ///
 /// A failure here is said out loud rather than only `tracing::warn!`ed,
-/// because it is never local to the builtins. Everything mirage knows
-/// about profiles, agents and topologies is files in one directory, so a
-/// directory it cannot write reads as a machine with no configuration at
-/// all: `profile list` prints nothing and exits 0, and `run` then blames
-/// a missing `mi350x` — which exists, and would have been written here.
-/// `config_dir_hint` turns that into the sentence the user needs.
+/// because it is never local to the builtins. What mirage knows about
+/// agents and topologies is files in one directory, so a directory it
+/// cannot write reads as a machine with no hardware at all: `agent list`
+/// prints nothing and exits 0, and `run` then blames a topology whose
+/// agent reference dangles. `config_dir_hint` turns that into the
+/// sentence the user needs.
 pub fn ensure_builtins_present() {
     let outcome = [
         mirage_builtin::ensure_agents(false).map(|_| ()),
         mirage_builtin::ensure_topologies(false).map(|_| ()),
-        mirage_builtin::ensure_profiles(false).map(|_| ()),
     ]
     .into_iter()
     .find_map(Result::err);
@@ -708,7 +711,7 @@ pub struct ExecArgsCli {
 
 #[derive(Subcommand, Debug)]
 pub enum StateCmd {
-    /// (Re)write the builtin agents, topologies and profiles under
+    /// (Re)write the builtin agents and topologies under
     /// `<MIRAGE_CONFIG>`.
     ///
     /// Every command writes back any builtin that has gone missing, so
@@ -719,6 +722,10 @@ pub enum StateCmd {
     /// replacing it would destroy the only copy. Delete it first if you
     /// want the shipped version back — that is what a delete of an
     /// edited builtin is for.
+    ///
+    /// Builtin profiles are not written at all: mirage generates them
+    /// from the RocJITsu configs it ships, so they are always current and
+    /// there is nothing to refresh.
     Builtins,
     /// Remove mirage's runtime directory and reclaim orphaned containers.
     ///
@@ -732,8 +739,9 @@ pub enum StateCmd {
         force: bool,
         /// Also remove the mirage config directory: every agent,
         /// topology and profile, including the ones you wrote. Mirage
-        /// writes its own builtin agents, topologies and profiles back
-        /// the next time it runs; nothing else comes back.
+        /// writes its own builtin agents and topologies back the next
+        /// time it runs, and its builtin profiles never left; nothing
+        /// else comes back.
         #[arg(long)]
         all: bool,
     },
@@ -833,8 +841,8 @@ pub struct RunArgs {
     /// would have gone into a synthesised config — `--gpus-per-node`,
     /// `--exec-mode`, `-o`/`--option`, `--plugin` — cannot also be
     /// honoured and are refused rather than ignored. Put them in the
-    /// config file instead. `--cpu-thread-budget` is the exception: it
-    /// is applied to a session copy of the file.
+    /// config file instead. `--cpu-thread-budget` and `--wait-checking`
+    /// are applied to a session copy of the file.
     #[arg(
         long,
         value_name = "PATH",
@@ -850,6 +858,16 @@ pub struct RunArgs {
     /// the run gets a session copy carrying the budget.
     #[arg(long = "cpu-thread-budget", value_name = "N")]
     cpu_thread_budget: Option<u32>,
+    /// Override memory wait checking on every CU and GPU for this run:
+    /// on enables ordinary checks, off disables all checks, and all also
+    /// enables gfx1250 XCNT checks. Omit to keep config settings/defaults.
+    ///
+    /// Use `--wait-checking=off` if warnings appear incorrect or checking slows
+    /// a workload. Beats `-o wait_checking=MODE` and composes with
+    /// `--cpu-thread-budget`, including with `--config`: both settings go
+    /// into the same session copy.
+    #[arg(long, value_name = "MODE", value_parser = ["on", "off", "all"])]
+    wait_checking: Option<String>,
     /// Run the emulator in out-of-process daemon mode. This is the
     /// default; the flag is accepted for explicitness and under the
     /// upstream `rocjitsu` spelling `--attach`, which means the same
@@ -937,6 +955,7 @@ impl Default for RunArgs {
             plugins: Vec::new(),
             config: None,
             cpu_thread_budget: None,
+            wait_checking: None,
             daemon: false,
             in_process: false,
             clear_env_vars: false,
@@ -1111,6 +1130,13 @@ fn long_profiles(names: &[String]) -> Vec<serde_json::Value> {
                 "name": p.name,
                 "emulator": p.emulator.emulator,
                 "description": p.description,
+                // Mirage generates its builtin profiles rather than
+                // writing them, so a script can no longer tell one from
+                // a profile the user wrote by looking for the file —
+                // there is no file. It is also what says whether `mirage
+                // profile delete` will work on this name.
+                "builtin": mirage_core::store::builtin_profile(n).is_some()
+                    && !mirage_core::paths::profile_path(n).exists(),
             }),
             // The text form prints "(unreadable)" for one of these. A
             // reader of the JSON needs the same fact, and needs it as a
@@ -1142,9 +1168,9 @@ fn report_replaced_builtin(kind: DocKind, name: &str, stored: Stored) {
     }
     let kind = kind.as_str();
     eprintln!(
-        "mirage: {name} was a builtin {kind} mirage ships, and this replaced it. \
-         Nothing you wrote was lost; `mirage {kind} delete {name}` restores the \
-         shipped version."
+        "mirage: {name} was a builtin {kind}, and this took its name. Nothing you \
+         wrote was lost; `mirage {kind} delete {name}` gives the name back to the \
+         builtin."
     );
 }
 
@@ -1261,6 +1287,27 @@ fn report_change(json: bool, kind: DocKind, name: &str, verb: &str) -> anyhow::R
     Ok(())
 }
 
+/// Say why a name with no file behind it does not name a document.
+///
+/// No file is not always no document: a builtin profile is generated at
+/// run time and never written, so `mirage profile list` shows it and a
+/// flat "no such profile" answers a name the user has just read out of
+/// that list.
+///
+/// Telling the two apart used to be done by calling the store's
+/// *delete*, whose refusal is the sentence wanted here — which meant
+/// asking a question by performing the act. Between the existence check
+/// above and that call, another process creating the profile has its
+/// file removed: before the confirmation prompt, with `--force` never
+/// consulted, and the delete then reports the profile as missing. This
+/// only ever needs to look a name up.
+fn missing_document(kind: DocKind, name: &str) -> mirage_core::error::MirageError {
+    if kind == DocKind::Profile && mirage_core::store::builtin_profile(name).is_some() {
+        return mirage_core::store::generated_profile_refusal(name);
+    }
+    mirage_core::error::MirageError::not_found(kind, name)
+}
+
 /// Delete one stored document, having asked first unless told not to.
 ///
 /// One function for all three resource verbs because everything here is
@@ -1299,7 +1346,7 @@ fn delete_document(
     // bad name it is rather than probed for on disk.
     mirage_core::store::validate_name(kind, name)?;
     if !kind.path(name).exists() {
-        return Err(mirage_core::error::MirageError::not_found(kind, name).into());
+        return Err(missing_document(kind, name).into());
     }
     if !force && !confirm(&format!("delete {word} {name}?"))? {
         if json {
@@ -1360,6 +1407,14 @@ fn delete_document(
 /// config directory mirage cannot write is exactly the case where the
 /// old claim was worst, and it is the case where this one says no.
 fn restore_shipped(kind: DocKind, name: &str) -> bool {
+    // A builtin profile is generated rather than seeded, so removing the
+    // file that shadowed it *is* the restore — there is nothing to write
+    // and nothing that can fail to be written. Reading it back off disk
+    // like the other two kinds would report `false` for the one case
+    // that is always true.
+    if kind == DocKind::Profile {
+        return mirage_core::store::builtin_profile(name).is_some();
+    }
     if mirage_core::store::shipped(kind, name).is_none() {
         return false;
     }
@@ -2074,6 +2129,7 @@ const CONFIG_SECTIONS: [&str; 2] = ["vm", "topology"];
 
 /// The emulator option `--cpu-thread-budget` is a spelling of.
 const CPU_THREAD_BUDGET_OPTION: &str = "cpu_thread_budget";
+const WAIT_CHECKING_OPTION: &str = "wait_checking";
 
 /// Resolve `--config <path>` to an absolute path, having checked that it
 /// is a config file the emulator can actually be given.
@@ -2164,6 +2220,7 @@ fn apply_profile_overrides(
         && a.plugins.is_empty()
         && a.config.is_none()
         && a.cpu_thread_budget.is_none()
+        && a.wait_checking.is_none()
         && a.num_nodes.is_none()
         && a.gpus_per_node.is_none()
         && a.hacks.is_empty()
@@ -2252,12 +2309,14 @@ fn apply_profile_overrides(
     // build does not have compiled in is left to bring-up to report:
     // there is no schema here to check against, and refusing on that
     // basis would blame the option for a missing backend.
-    // `--cpu-thread-budget` is a spelling of the `cpu_thread_budget` option, so it
-    // is checked like one: a backend without that option refuses the flag instead
-    // of accepting it and dropping it.
+    // Dedicated flags also name backend options; reject unsupported options
+    // instead of accepting flags that the selected backend would drop.
     let mut option_keys: Vec<String> = options.iter().map(|(k, _)| k.clone()).collect();
     if a.cpu_thread_budget.is_some() {
         option_keys.push(CPU_THREAD_BUDGET_OPTION.to_string());
+    }
+    if a.wait_checking.is_some() {
+        option_keys.push(WAIT_CHECKING_OPTION.to_string());
     }
     if let Some(spec) = find_emulator(&profile.emulator.emulator) {
         let name = &spec.name;
@@ -2276,6 +2335,12 @@ fn apply_profile_overrides(
         profile.emulator.options.insert(
             CPU_THREAD_BUDGET_OPTION.to_string(),
             SimpleValue::Number(i64::from(budget)),
+        );
+    }
+    if let Some(mode) = &a.wait_checking {
+        profile.emulator.options.insert(
+            WAIT_CHECKING_OPTION.to_string(),
+            SimpleValue::String(mode.clone()),
         );
     }
     // Drop-in `--config <path>`: an explicit emulator config file
@@ -2971,12 +3036,20 @@ async fn state_cmd(cmd: StateCmd, json: bool) -> anyhow::Result<ExitCode> {
 
 /// `mirage state builtins`: refresh every builtin document on disk.
 ///
-/// All three kinds, always. This used to be three `?`-chained calls, so
-/// the first kind holding an edited builtin abandoned the other two — and
-/// then said "Every other builtin was refreshed", which was false, and
-/// under `--json` threw away the report of everything that *had* been
-/// refreshed. Repairing an edited agent, topology and profile therefore
-/// took three runs to even discover.
+/// Both kinds that have a file, always. This used to be three
+/// `?`-chained calls, so the first kind holding an edited builtin
+/// abandoned the others — and then said "Every other builtin was
+/// refreshed", which was false, and under `--json` threw away the report
+/// of everything that *had* been refreshed. Repairing an edited agent
+/// and topology therefore took two runs to even discover.
+///
+/// Builtin profiles are not refreshed because they are not on disk:
+/// mirage generates each one from the rocjitsu config it ships, every
+/// time it is asked for, so there is no stale copy for this command to
+/// rewrite. A profile *file* is the user's own, and refreshing it is
+/// exactly what this command must not do. It is named instead, because a
+/// file under a builtin's name silently outranks the generated one
+/// everywhere else.
 ///
 /// Exit 0 when nothing failed, edited builtins included. `--help`
 /// presents "a builtin you have edited is left alone and named" as the
@@ -2990,7 +3063,6 @@ fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
     let kinds = [
         (DocKind::Agent, mirage_builtin::ensure_agents(true)?),
         (DocKind::Topology, mirage_builtin::ensure_topologies(true)?),
-        (DocKind::Profile, mirage_builtin::ensure_profiles(true)?),
     ];
 
     if json {
@@ -3052,7 +3124,55 @@ fn builtins_cmd(json: bool) -> anyhow::Result<ExitCode> {
              (`mirage <kind> delete <name>`) and run `mirage state builtins` again."
         );
     }
+
+    // A profile file under a builtin's name is the definition that name
+    // resolves to, for good — the store looks at disk before it
+    // generates, and this command cannot refresh the file because it
+    // cannot tell a profile the user wrote from one an older mirage
+    // seeded before it stopped seeding them. Which leaves the file
+    // invisible: `profile show mi350x` answers with a definition that no
+    // longer matches what mirage ships, `profile list --long` calls it
+    // not-a-builtin, and this command, whose whole job is to say what is
+    // stale, has never mentioned profiles at all. So name them. Nothing
+    // here writes or removes anything.
+    let shadowed = shadowed_builtin_profiles();
+    if !shadowed.is_empty() {
+        let n = Plural(shadowed.len());
+        eprintln!(
+            "mirage: {} profile file{} share{} a name with a builtin profile, and {} \
+             what that name resolves to:",
+            shadowed.len(),
+            n.pick("", "s"),
+            n.pick("s", ""),
+            n.pick("is", "are"),
+        );
+        for name in &shadowed {
+            eprintln!(
+                "  profile   {name} -> {}",
+                mirage_core::paths::profile_path(name).display()
+            );
+        }
+        eprintln!(
+            "mirage: mirage generates its builtin profiles rather than storing them, so \
+             this command has no copy of yours to refresh and leaves the file as it is. \
+             To hand the name back to the builtin, delete it \
+             (`mirage profile delete <name>`)."
+        );
+    }
     Ok(ExitCode::from(0))
+}
+
+/// Name every builtin profile that a file on disk stands in for.
+///
+/// The store looks at disk before it generates, so such a file is the
+/// definition the name resolves to — in `profile show`, in `run`, and in
+/// `profile list`, which reports it as not being a builtin at all.
+fn shadowed_builtin_profiles() -> Vec<&'static str> {
+    mirage_builtin::profiles()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| mirage_core::paths::profile_path(name).exists())
+        .collect()
 }
 
 /// Stop every live run and remove mirage's on-disk state.
@@ -3330,6 +3450,7 @@ mod tests {
             name: "mi450x".to_string(),
             description: None,
             emulator: EmulatorDef {
+                extra: Default::default(),
                 emulator: EmulatorKind::from("rocjitsu"),
                 plugins: Default::default(),
                 exec_mode: ExecMode::Functional,
@@ -3851,18 +3972,83 @@ mod tests {
         // `--num-nodes` is not in that set: how many nodes the emulated
         // machine has is mirage's business, not the emulator config's.
         parse_run(&["--config", "cfg.json", "--num-nodes", "2", "--", "./app"]).unwrap();
-        // Nor is `--cpu-thread-budget`, which upstream `rocjitsu` also takes
-        // alongside `--config`. The backend applies it to a copy of the file.
+        // Both dedicated launch overrides compose with `--config`:
+        // the backend applies them to a copy of the file.
         let run = parse_run(&[
             "--config",
             "cfg.json",
             "--cpu-thread-budget",
             "4",
+            "--wait-checking=off",
             "--",
             "./app",
         ])
         .unwrap();
         assert_eq!(run.cpu_thread_budget, Some(4));
+        assert_eq!(run.wait_checking.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn wait_checking_alone_overrides_the_profile_and_dash_o() {
+        for mode in ["on", "off", "all"] {
+            let mut profile = sample_profile();
+            profile
+                .emulator
+                .options
+                .insert("wait_checking".into(), SimpleValue::String("all".into()));
+            let args = parse_run(&[
+                "--wait-checking",
+                mode,
+                "-o",
+                "wait_checking=on",
+                "--",
+                "./app",
+            ])
+            .unwrap();
+            let result = apply_profile_overrides(&mut profile, &args).unwrap();
+            assert!(matches!(result, MaybeRef::Owned(_)));
+            assert_eq!(
+                profile.emulator.options.get("wait_checking"),
+                Some(&SimpleValue::String(mode.into()))
+            );
+        }
+        // With no override, keep the profile's policy rather than inserting a CLI default.
+        let mut profile = sample_profile();
+        profile
+            .emulator
+            .options
+            .insert("wait_checking".into(), SimpleValue::String("off".into()));
+        assert!(matches!(
+            apply_profile_overrides(&mut profile, &RunArgs::default()).unwrap(),
+            MaybeRef::Ref(_)
+        ));
+        assert_eq!(
+            profile.emulator.options.get("wait_checking"),
+            Some(&SimpleValue::String("off".into()))
+        );
+    }
+
+    #[test]
+    fn wait_checking_refuses_invalid_missing_or_repeated_modes() {
+        for args in [
+            vec!["--wait-checking"],
+            vec!["--wait-checking", "warn"],
+            vec!["--wait-checking="],
+            vec!["--wait-checking=ALL"],
+        ] {
+            let error = parse_run(&args).unwrap_err().to_string();
+            assert!(error.contains("--wait-checking"), "{error}");
+        }
+        assert!(
+            parse_run(&[
+                "--wait-checking=all",
+                "--wait-checking",
+                "off",
+                "--",
+                "./app",
+            ])
+            .is_err()
+        );
     }
 
     /// The flag is a spelling of the `cpu_thread_budget` option, so it has to
@@ -4078,19 +4264,22 @@ exit 0
 
     #[test]
     fn purge_fails_when_the_runtime_directory_survives() {
-        use std::os::unix::fs::PermissionsExt as _;
-
         let _lock = mirage_core::paths::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(root.path());
         let runtime = mirage_core::paths::mirage_runtime_dir();
-        // A directory whose contents cannot be unlinked: `chmod 500` on
-        // the parent of a file is enough, and is what a stuck mount or a
-        // root-owned leftover looks like.
-        let stuck = runtime.join("stuck");
-        std::fs::create_dir_all(&stuck).unwrap();
-        std::fs::write(stuck.join("held"), "x").unwrap();
-        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o500)).unwrap();
+        // Something at the runtime path that `remove_dir_all` refuses and
+        // leaves behind: a plain file, which fails with `ENOTDIR`. What a
+        // stuck mount or a root-owned leftover produces is the same thing
+        // as far as purge is concerned — a path that is still there after
+        // the removal, and must not be reported as purged.
+        //
+        // Written with `chmod 500` on a subdirectory this test passed
+        // everywhere but CI, which runs as root in a container: root
+        // ignores the mode bits, the tree comes away, and the test then
+        // fails on a machine where nothing is wrong.
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, "x").unwrap();
 
         // Blocking rather than `#[tokio::test]`: the lock guard above must
         // not be held across an await.
@@ -4100,11 +4289,13 @@ exit 0
             .unwrap()
             .block_on(purge(false, false));
 
-        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o700)).unwrap();
         let survived = runtime.exists();
         mirage_core::paths::clear_test_root();
 
-        assert!(survived, "the test needs a directory purge cannot remove");
+        assert!(
+            survived,
+            "the test needs a runtime path purge cannot remove"
+        );
         // `ExitCode` has no `PartialEq`; its `Debug` is the only thing to
         // compare, and comparing it against a known value rather than a
         // literal string keeps the test independent of how std renders it.
@@ -4225,18 +4416,17 @@ exit 0
 
     #[test]
     fn state_builtins_refreshes_every_kind_and_survives_an_edited_one() {
-        // The three kinds were `?`-chained, so the first one holding an
-        // edited builtin abandoned the other two — and then claimed
-        // "Every other builtin was refreshed", which was false. Repairing
-        // an edited agent, topology and profile took three runs to even
-        // discover.
+        // The kinds were `?`-chained, so the first one holding an edited
+        // builtin abandoned the rest — and then claimed "Every other
+        // builtin was refreshed", which was false. Repairing an edited
+        // agent and topology took two runs to even discover.
         let _lock = mirage_core::paths::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         mirage_core::paths::set_test_root(root.path());
 
         ensure_builtins_present();
         // Edit one of each kind, in the order the command visits them, so
-        // that stopping at the first would hide the other two.
+        // that stopping at the first would hide the second.
         let mut agent = mirage_core::store::agent_get("mi300x").unwrap();
         agent.vm.gpu.num_xcds = 1;
         mirage_core::state::write_json(&mirage_core::paths::agent_path("mi300x"), &agent).unwrap();
@@ -4244,6 +4434,9 @@ exit 0
         topology.num_nodes = 3;
         mirage_core::state::write_json(&mirage_core::paths::topology_path("MI350X-2x8"), &topology)
             .unwrap();
+        // And a profile written over a builtin's name. This one is not a
+        // builtin at all any more — mirage generates its own and writes
+        // nothing — so the command must not so much as look at it.
         let mut profile = mirage_core::store::profile_get("mi450x").unwrap();
         profile.description = Some("mine".to_string());
         mirage_core::state::write_json(&mirage_core::paths::profile_path("mi450x"), &profile)
@@ -4251,9 +4444,9 @@ exit 0
 
         let code = builtins_cmd(false).unwrap();
 
-        // All three survived, which is only possible if all three kinds
-        // ran, and the run is not a failure: nothing was lost and every
-        // other document was refreshed.
+        // All three survived, which is only possible if both kinds ran,
+        // and the run is not a failure: nothing was lost and every other
+        // document was refreshed.
         assert_eq!(
             mirage_core::store::agent_get("mi300x")
                 .unwrap()
@@ -4273,6 +4466,17 @@ exit 0
                 .unwrap()
                 .description,
             Some("mine".to_string())
+        );
+        // Deleting it hands the name back to the generated profile,
+        // without `state builtins` having to put anything there.
+        mirage_core::store::profile_delete("mi450x").unwrap();
+        assert!(
+            !mirage_core::paths::profile_path("mi450x").exists(),
+            "a builtin profile is never written"
+        );
+        assert_eq!(
+            mirage_core::store::profile_get("mi450x").unwrap(),
+            mirage_builtin::profile_named("mi450x").unwrap()
         );
         mirage_core::paths::clear_test_root();
         assert_eq!(
@@ -4477,6 +4681,75 @@ exit 0
             !e.contains("answer"),
             "the missing document is the answer, not the prompt: {e}"
         );
+    }
+
+    /// A profile file under a builtin's name is reported, not refreshed.
+    ///
+    /// This is the document an older mirage seeded, before it stopped
+    /// seeding profiles and started generating them. It shadows the
+    /// generated one permanently, and nothing said so: `state builtins`
+    /// reported only agents and topologies, so the one command whose job
+    /// is naming stale copies was silent about the only copy it cannot
+    /// refresh.
+    #[test]
+    fn a_profile_file_shadowing_a_builtin_is_named() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        let path = mirage_core::paths::profile_path("mi350x");
+        mirage_core::state::write_json(
+            &path,
+            &serde_json::json!({
+                "name": "mi350x",
+                "emulator": {
+                    "emulator": "rocjitsu",
+                    "exec_mode": "Functional",
+                    "options": {},
+                    "plugins": {},
+                    "topology": {"agent": "MI350X", "gpus_per_node": 1, "num_nodes": 1}
+                }
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(shadowed_builtin_profiles(), vec!["mi350x"]);
+        assert_eq!(builtins_cmd(false).unwrap(), ExitCode::from(0));
+        assert!(path.is_file(), "and reporting it does not disturb it");
+        let still = mirage_core::state::read_json::<serde_json::Value>(&path).unwrap();
+        assert_eq!(
+            still["emulator"]["topology"]["agent"], "MI350X",
+            "nor rewrite it"
+        );
+    }
+
+    /// Finding out what a name is does not delete anything.
+    ///
+    /// A generated builtin has no file, so classifying one used to be
+    /// done by calling the store's delete and reading its refusal. The
+    /// state this sets up is the one a concurrent `profile create`
+    /// leaves behind a moment after the existence check has already
+    /// answered false — and that delete removed it, before the
+    /// confirmation prompt and without consulting `--force`, then
+    /// reported the profile as missing.
+    #[test]
+    fn classifying_a_generated_builtin_never_removes_a_file() {
+        let _lock = mirage_core::paths::test_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        mirage_core::paths::set_test_root(root.path());
+        ensure_builtins_present();
+
+        let path = mirage_core::paths::profile_path("mi350x");
+        mirage_core::state::write_json(
+            &path,
+            &serde_json::json!({"name": "mi350x", "emulator": {"emulator": "rocjitsu"}}),
+        )
+        .unwrap();
+
+        let e = missing_document(DocKind::Profile, "mi350x").to_string();
+        assert!(e.contains("mi350x") && e.contains("builtin"), "{e}");
+        assert!(path.is_file(), "somebody else's profile is still theirs");
     }
 
     /// The shipped version is on disk before mirage says it is back.

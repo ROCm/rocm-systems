@@ -1387,9 +1387,9 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 
   if(wf_info.pe_group_logical_lane_id == 0) {
     // Only the leader lane updates the counter (Does it require atomics?)
-    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
-    //                                        __ATOMIC_RELAXED,
-    //                                        __HIP_MEMORY_SCOPE_AGENT);
+    // uint32_t local_qp_counter =
+    //     atomic::fetch_add<atomic::memory_scope::device,
+    //                       atomic::memory_order::relaxed>(&qp_counter[pe], 1);
     // local_qp_counter %= num_qps_per_pe;
     // qp_index = (local_qp_counter * num_pes) + pe;
     qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;
@@ -1493,41 +1493,17 @@ __device__ inline void GDAContext::tile_quiet_gda_workers(int pe, int worker_id,
 
 __device__ inline void GDAContext::tile_put_contig_slices_nbi(
     char *dst, const char *src, size_t bytes, int pe, int qp_index,
-    int worker_id, int worker_count) {
-  constexpr size_t kMinSlice = 64;
-  if (worker_count == 1 || bytes < kMinSlice * static_cast<size_t>(worker_count)) {
-    if (worker_id == 0 && bytes != 0) {
-      tile_put_chunk_nbi(dst, src, bytes, pe, qp_index);
-    }
-    return;
-  }
-  const size_t n = static_cast<size_t>(worker_count);
-  const size_t chunk = bytes / n;
-  const size_t start = static_cast<size_t>(worker_id) * chunk;
-  const size_t len =
-      (worker_id == worker_count - 1) ? (bytes - start) : chunk;
-  if (len != 0) {
-    tile_put_chunk_nbi(dst + start, src + start, len, pe, qp_index);
+    int worker_id, [[maybe_unused]] int worker_count) {
+  if (worker_id == 0 && bytes != 0) {
+    tile_put_chunk_nbi(dst, src, bytes, pe, qp_index);
   }
 }
 
 __device__ inline void GDAContext::tile_get_contig_slices_nbi(
     char *dst, const char *src, size_t bytes, int pe, int qp_index,
-    int worker_id, int worker_count) {
-  constexpr size_t kMinSlice = 64;
-  if (worker_count == 1 || bytes < kMinSlice * static_cast<size_t>(worker_count)) {
-    if (worker_id == 0 && bytes != 0) {
-      tile_get_chunk_nbi(dst, src, bytes, pe, qp_index);
-    }
-    return;
-  }
-  const size_t n = static_cast<size_t>(worker_count);
-  const size_t chunk = bytes / n;
-  const size_t start = static_cast<size_t>(worker_id) * chunk;
-  const size_t len =
-      (worker_id == worker_count - 1) ? (bytes - start) : chunk;
-  if (len != 0) {
-    tile_get_chunk_nbi(dst + start, src + start, len, pe, qp_index);
+    int worker_id, [[maybe_unused]] int worker_count) {
+  if (worker_id == 0 && bytes != 0) {
+    tile_get_chunk_nbi(dst, src, bytes, pe, qp_index);
   }
 }
 
@@ -1807,6 +1783,7 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -1873,6 +1850,7 @@ __device__ inline int GDAContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1903,6 +1881,7 @@ __device__ inline int GDAContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -1936,6 +1915,7 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   ActiveWFInfo wf_info(pe);
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
@@ -2002,6 +1982,7 @@ __device__ inline int GDAContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2032,6 +2013,7 @@ __device__ inline int GDAContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
+  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
   int local_pe{-1};
   const bool ipc_avail = ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe);
 
@@ -2344,7 +2326,7 @@ __device__ inline int GDAContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim <= 0) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
     LOGD_WARN("Invalid tile reduce arguments for GDA backend");
     return ROCSHMEM_ERROR;
   }

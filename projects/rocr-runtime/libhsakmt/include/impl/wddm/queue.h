@@ -268,12 +268,13 @@ private:
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   GpuMemoryHandle doorbell_mem_;
   uint64_t *doorbell_ptr_;          //!< amd_signal_t::hardware_doorbell_ptr exposed to ROCr
-  volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;
-  bool thread_stop_;
+  std::thread fault_monitor_thread_;
+  std::atomic<bool> thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
+  static void FaultMonitorThread(ComputeQueue *queue);
 
   uint64_t scratch_waves_;
   uint64_t dispatch_waves_;

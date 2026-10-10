@@ -41,6 +41,7 @@ endif()
 
 option(CLR_BUILD_HIP "Build HIP" OFF)
 option(CLR_BUILD_OCL "Build OCL" OFF)
+option(CLR_HRR_CODEGEN_CHECK "Generate and validate HRR generated sources during CLR builds" OFF)
 option(USE_NEW_HOSTCALL_IMPL
   "Use the new phase/occupancy-based hostcall implementation" OFF)
 
@@ -118,12 +119,18 @@ if(CLR_BUILD_HIP)
     endif()
 endif()
 
-if(CLR_BUILD_HIP)
-    option(BUILD_SHARED_LIBS "Build the shared library" ON)
-    if (NOT BUILD_SHARED_LIBS)
-        add_compile_definitions(BUILD_STATIC_LIBS)
-    endif()
+option(BUILD_SHARED_LIBS "Build the shared library" ON)
+
+# Static HIP embeds rocclr objects into amdhip64 and requires BUILD_STATIC_LIBS.
+# OpenCL uses BUILD_SHARED_LIBS only to select the amdocl library type.
+if(CLR_BUILD_HIP AND NOT BUILD_SHARED_LIBS)
+    add_compile_definitions(BUILD_STATIC_LIBS)
 endif()
+
+# Applies the host sanitizer flags to this scope, so it has to sit below BUILD_SHARED_LIBS,
+# which selects the sanitizer runtime linkage.
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/CLRSanitizers.cmake")
+
 if((CLR_BUILD_HIP AND HIP_PLATFORM STREQUAL "amd") OR CLR_BUILD_OCL)
     add_subdirectory(rocclr)
 elseif(HIP_PLATFORM STREQUAL "amd")

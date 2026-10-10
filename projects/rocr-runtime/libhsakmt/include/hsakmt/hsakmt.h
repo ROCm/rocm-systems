@@ -1430,6 +1430,18 @@ hsaKmtHandleImport(
     HsaHandleImportFlags* Flags
 );
 
+/**
+  Queries the placement and size of an allocation from its DMA-BUF fd.
+  The fd is not consumed. Returns HSAKMT_STATUS_NOT_SUPPORTED when the
+  kernel cannot describe the buffer.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfo(
+    int DMABufFd,           // IN
+    HsaDmaBufInfo* Info     // OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleExport(
@@ -1497,6 +1509,22 @@ hsaKmtGetAmdGPUDeviceFd(
   HsaAMDGPUDeviceHandle DeviceHandle, //IN
   int *fd //OUT
 );
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSizeCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSize(
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
 
 #ifdef __cplusplus
 }   //extern "C"

@@ -4,10 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 
-#include <hwloc.h>
-#include <hwloc/linux-libnuma.h>
-#include <numa.h>
-
 #include <vector>
 #include <algorithm>
 

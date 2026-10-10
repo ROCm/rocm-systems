@@ -21,45 +21,39 @@ executes its own CUs while helpers can execute eligible MMA instructions.
 `async_helper_threads` extends the existing allocation tables. Omission or -1
 selects the configured policy; zero disables helpers. Explicit counts range
 from 0 to 128 and take priority over the automatic budget. Automatic selection
-uses CPU affinity, keeping engine/dispatch cost at most 32. Helpers are additive;
-the shipped single-GPU server presets stop at 48 total threads.
+uses CPU affinity and the target's allocation table. Desktop and older CDNA
+presets stop at an engine/dispatch cost of 24. gfx950 adds eight helpers for
+32 total threads; gfx1250 uses up to 40 engine/dispatch threads and eight
+helpers for 48 total.
 
-| Budget / affinity | gfx950 E/D/H | gfx1250 E/D/H | Total execution threads |
+| Budget / affinity | gfx950 E/D/H | gfx1250 E/D/H | Total gfx950 / gfx1250 |
 |---:|---:|---:|---:|
-| 1 | 1/1/0 | 1/1/0 | 1 |
-| 2 | 1/2/0 | 1/2/0 | 2 |
-| 4 | 2/3/0 | 1/4/0 | 4 |
-| 8 | 2/7/0 | 2/7/0 | 8 |
-| 16 | 8/9/0 | 8/9/0 | 16 |
-| 24 | 8/17/0 | 8/17/0 | 24 |
-| 32 | 8/25/0 | 8/25/0 | 32 |
-| 34 | 8/25/2 | 8/25/2 | 34 |
-| 36 | 8/25/4 | 8/25/4 | 36 |
-| 40 | 8/25/8 | 8/25/8 | 40 |
-| 48 and above | 8/25/16 | 8/25/16 | 48 |
+| 1 | 1/1/0 | 1/1/0 | 1 / 1 |
+| 2 | 1/2/0 | 1/2/0 | 2 / 2 |
+| 4 | 2/3/0 | 1/4/0 | 4 / 4 |
+| 8 | 2/7/0 | 2/7/0 | 8 / 8 |
+| 16 | 8/9/0 | 8/9/0 | 16 / 16 |
+| 24 | 8/17/0 | 8/17/0 | 24 / 24 |
+| 32 | 8/17/8 | 8/25/0 | 32 / 32 |
+| 40 | 8/17/8 | 8/33/0 | 32 / 40 |
+| 48 and above | 8/17/8 | 8/33/8 | 32 / 48 |
 
 A budget between entries selects the lower entry; 12 selects 8. Explicit
-`cpu_thread_budget` limits the combined allocation. Affinity of 64 still selects
-48: the measurements do not justify more than 16 preset helpers. Custom JSON
-allocations and explicit knobs remain available for experiments.
+`cpu_thread_budget` limits the combined allocation. Larger hosts retain the
+highest table entry. Custom JSON allocations and explicit knobs remain
+available for workloads that benefit from more workers.
 
-Both targets preserve the synchronous engine/dispatch allocations through 32.
-Reserving helpers within that budget regressed Gluon FP16 by displacing CU
-workers, even with cached independence admission. Adding helpers above 32
-avoids that tradeoff. `async_helper_threads: 0` disables helpers while retaining
-8/25/0 on larger hosts. No workload classification is needed in the selector.
+Both server targets add helpers after reaching their engine/dispatch ceiling.
+Lower-budget comparisons on IREE, Gluon and Tensile favor retaining general
+CU workers over reserving helper slots. Helpers are created lazily when
+eligible MMA reaches the adapter. Disabling helpers retains 8/17/0 on gfx950
+and 8/33/0 on gfx1250 at larger budgets. These defaults limit CPU use while
+retaining matrix overlap; they are not universal throughput optima.
 
-The 32-thread CPU cap is a conservative resource policy, not a universal
-throughput optimum. Extra dispatch workers can outperform extra helpers on
-CU-rich workloads such as large-grid Gluon FP16. Helpers offer their largest
-gains when few workgroups limit CU parallelism. The preset keeps the existing
-CPU allocation and spends additional affinity on this complementary path;
-helpers are created lazily, only when eligible MMA reaches the adapter.
-
-Desktop and MI210 presets retain 1/D/0 through D=32; CDNA3 retains the landed
-mixed E/D table with H=0. Two- and four-GPU presets keep **1/1/0** for RCCL.
-Mirage embeds these native tables in its RocJITsu backend and exposes the helper
-option alongside the engine, dispatch and total-budget options.
+Desktop and MI210 presets stop at 1/24/0; CDNA3 stops at 8/17/0.
+Two- and four-GPU presets keep **1/1/0** for RCCL. Mirage embeds these native
+tables in its rocjitsu backend and exposes the helper option alongside the
+engine, dispatch and total-budget options.
 
 ```sh
 rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
@@ -80,6 +74,12 @@ jobs release dependencies independently; a slow earlier job does not hold an
 unrelated completed result. The issuer polls or joins jobs and destroys decoded
 instructions on their allocator's owning thread. Admission plans retain code
 snapshots and decisions; their temporary decodes never escape a scan.
+
+Each issuer uses a stable, hashed starting position when selecting a free
+helper, preferring reuse across consecutive jobs. This preference does not pin
+threads or guarantee cache locality. Other free slots remain available, and
+pools larger than 64 helpers retain first-word priority. Selection still falls
+back inline after a bounded number of failed reservation attempts.
 
 Both publication and completion use release/acquire synchronization. Helpers
 inherit the issuer's floating-point environment. A bounded warm wait precedes

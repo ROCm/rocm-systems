@@ -2848,14 +2848,14 @@ bool KernelBlitManager::ShaderCopyBufferBatchRaw(
   }
   const size_t max_operations_per_dispatch =
       (kernarg_pool_chunk_size - kernarg_reservation) / sizeof(CopyBufferBatchDescriptor);
-  const size_t descriptor_buffer_bytes =
-      max_operations_per_dispatch * sizeof(CopyBufferBatchDescriptor);
   bool attach_signal = false;
 
   for (size_t operation_offset = 0; operation_offset < copy_operations.size();
        operation_offset += max_operations_per_dispatch) {
     const size_t operation_count =
         std::min(max_operations_per_dispatch, copy_operations.size() - operation_offset);
+    // Reserve only the size this dispatch requires.
+    const size_t descriptor_buffer_bytes = operation_count * sizeof(CopyBufferBatchDescriptor);
     void* descriptor_buffer = gpu().allocKernArg(descriptor_buffer_bytes, kCBAlignment);
     CopyBufferBatchDescriptor* descriptors =
         static_cast<CopyBufferBatchDescriptor*>(descriptor_buffer);
@@ -3207,18 +3207,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   if (!p2pCopyOps.empty()) {
     // Always pass prior wait events to maintain stream ordering for the batch.
     if (!hsaCopyBatch(p2pCopyOps, &priorWaitEvents, &batchSignals)) {
-      // Swap ops cannot fall back to shader copy (it only does one-directional
-      // copy, not a bidirectional swap). Fail the entire batch if any swap op
-      // was in the SDMA batch that failed.
-      bool hasSwap = false;
+      // Shader copy is linear only; fail the batch if it has swap/indirect ops.
+      bool hasNonLinear = false;
       for (const auto& op : p2pCopyOps) {
-        if (op.metadata.copyOpType_ == amd::CopyMetadata::kCopyOpSwap) {
-          hasSwap = true;
+        if (op.metadata.copyOpType_ != amd::CopyMetadata::kCopyOpLinear) {
+          hasNonLinear = true;
           break;
         }
       }
-      if (hasSwap) {
-        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap ops failed");
+      if (hasNonLinear) {
+        LogError("KernelBlitManager::copyBufferBatch: SDMA batch with swap/indirect ops failed");
         return false;
       }
       LogWarning(

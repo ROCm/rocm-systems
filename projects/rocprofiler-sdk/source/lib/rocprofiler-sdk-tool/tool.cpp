@@ -194,6 +194,12 @@ struct chained_siginfo
     std::optional<sigaction_t> action  = {};
 };
 
+struct child_t
+{
+    pid_t pid{};
+    int   status{};
+};
+
 auto&
 get_chained_signals()
 {
@@ -364,6 +370,17 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
 // any context that needs to support pause/resume functionality should add itself to this list
 auto pause_resume_contexts = context_id_set_t{};
 
+// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
+// callback) as the single source of truth. The dispatch callbacks run synchronously on the same
+// thread within a pass, so they read the pass from this thread-local. The (asynchronous) counter
+// record callback receives it through the per-pass user_data. tid and pass are packed together
+// because user_data is a single 64-bit slot -- Linux tids are pid_t (32-bit) and pass counts are
+// small, so this is lossless and preserves the thread id the record still carries.
+thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
+
+// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
+thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
 struct kernel_rename_and_stream_data
@@ -393,9 +410,25 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
+    // The iteration filter is stateful: every consultation advances the kernel's iteration count,
+    // and --kernel-iteration-range numbers the launches the application made. Kernel replay
+    // re-dispatches one launch once per counter group, and each pass reaches this function, so
+    // consulting the filter per pass would charge a single launch one iteration per pass and reject
+    // every pass past the end of the range -- the counter groups behind those passes are then never
+    // configured and their data is silently dropped.
+    //
+    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
+    // advances the count by the one launch that actually happened, and the rest of that dispatch's
+    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
+    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
+    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
+    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
+    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
+        return *tl_replay_dispatch_targeted;
+
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
-    return target_kernels.rlock(
+    const auto _is_target = target_kernels.rlock(
         [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
             return _kernel_iteration.wlock(
                 [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
@@ -408,6 +441,9 @@ is_targeted_kernel(uint64_t                                        _kern_id,
                 _kern_id_v);
         },
         _kern_id);
+
+    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
+    return _is_target;
 }
 
 auto&
@@ -1639,15 +1675,6 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
     return profiles->second[profile_pos % profiles->second.size()];
 }
 
-// Kernel replay uses the SDK's authoritative pass index (delivered via the KERNEL_REPLAY PASS
-// callback) as the single source of truth. The counter dispatch callback runs synchronously on the
-// same thread within a pass, so it reads the pass from this thread-local.
-// The (asynchronous) counter record callback receives it through the per-pass user_data. tid and
-// pass are packed together because user_data is a single 64-bit slot -- Linux tids are pid_t
-// (32-bit) and pass counts are small, so this is lossless and preserves the thread id the record
-// still carries.
-thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
-
 // The two 32-bit fields that share the single 64-bit user_data slot: the enqueuing thread id (a
 // Linux tid, i.e. 32-bit pid_t) and the replay pass index. Modeled as a struct so pack/unpack is a
 // plain field access instead of hand-rolled shifts and masks. The width of each field is asserted
@@ -2572,6 +2599,9 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     {
         // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
         payload->replay_pass_count = kernel_replay_pass_count_callback;
+        // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
+        // not carry into it; pass 0 below will record a fresh one.
+        tl_replay_dispatch_targeted.reset();
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
@@ -2866,6 +2896,17 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
+        // In selected-regions mode, these profiling contexts intentionally start stopped.
+        // Reference-counted mode retains its existing attach behavior until its process-lifetime
+        // state can be reset safely at an attachment-session boundary.
+        if(tool::get_config().selected_regions && !tool::get_config().selected_regions_ref_count &&
+           pause_resume_contexts.count(context_ids[i]) > 0)
+        {
+            ROCP_INFO << "Attach mode: leaving selected-regions context ID "
+                      << context_ids[i].handle << " stopped until roctxProfilerResume";
+            continue;
+        }
+
         if(int status = 0;
            rocprofiler_context_is_active(context_ids[i], &status) == ROCPROFILER_STATUS_SUCCESS &&
            status == 0)
@@ -4359,44 +4400,26 @@ get_sigaction_function()
 bool signal_handler_exit =
     rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 
-// Read once here because getenv() is not async-signal-safe; <= 0 waits indefinitely.
-int signal_abort_flush_timeout_sec =
-    rocprofiler::tool::get_env("ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS", 10);
+// Bounds the blocking waits during signal finalization: the SIGABRT flush wait and the
+// child-reap poll. Read once here because getenv() is not async-signal-safe; <= 0 waits
+// indefinitely.
+int signal_finalize_wait_timeout_sec =
+    rocprofiler::tool::get_env("ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS", 10);
 
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
 
-std::optional<int>
-wait_pid(pid_t _pid, int _opts = 0)
+// Returns the waitpid()
+//   result: >0 = child reaped (fills _status),
+//   result: =0 = still alive
+//   result: <0 = gone/unwaitable (e.g. ECHILD when the app reaped the child itself).
+child_t
+wait_pid(pid_t _pid, int _opts)
 {
-    auto this_pid  = getpid();
-    auto this_ppid = getppid();
-    auto this_tid  = common::get_tid();
-    auto this_func = std::string_view{__FUNCTION__};
-
-    ROCP_INFO << fmt::format("[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for child {}",
-                             this_ppid,
-                             this_pid,
-                             this_tid,
-                             this_func,
-                             _pid);
-
-    int   _status = 0;
-    pid_t _pid_v  = -1;
-    _opts |= WUNTRACED;
-    do
-    {
-        if((_opts & WNOHANG) > 0)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{100});
-        }
-        _pid_v = waitpid(_pid, &_status, _opts);
-    } while(_pid_v == 0);
-
-    if(_pid_v < 0) return std::nullopt;
-    return _status;
+    child_t ret{};
+    ret.pid = waitpid(_pid, &ret.status, _opts | WUNTRACED);
+    return ret;
 }
 
 extern "C" {
@@ -4520,6 +4543,9 @@ diagnose_status(pid_t _pid, int _status)
 void
 wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::string_view context)
 {
+    constexpr auto this_func = __FUNCTION__;
+    namespace chrono         = std::chrono;
+
     auto get_children = [&this_pid]() {
         auto fname    = fmt::format("/proc/{}/task/{}/children", this_pid, this_pid);
         auto ifs      = std::ifstream{fname};
@@ -4540,17 +4566,50 @@ wait_for_children(pid_t this_pid, pid_t this_ppid, uint64_t this_tid, std::strin
 
     auto _children = get_children();
     ROCP_WARNING << fmt::format(
-        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for {} children to exit",
+        "[PPID={}][PID={}][TID={}][{}] rocprofv3 waiting for children [{}] to exit",
         this_ppid,
         this_pid,
         this_tid,
         context,
-        _children.size());
+        fmt::join(_children, ", "));
 
-    for(auto itr : _children)
+    const auto _deadline =
+        (signal_finalize_wait_timeout_sec > 0)
+            ? chrono::steady_clock::now() + chrono::seconds{signal_finalize_wait_timeout_sec}
+            : chrono::steady_clock::time_point::max();
+
+    while(!_children.empty() && chrono::steady_clock::now() <= _deadline)
     {
-        auto status = wait_pid(itr, WUNTRACED | WNOHANG);
-        if(status) diagnose_status(itr, status.value());
+        for(size_t i = 0; i < _children.size(); ++i)
+        {
+            const auto [_rc, _status] = wait_pid(_children[i], WUNTRACED | WNOHANG);
+
+            if(_rc == 0) continue;                               // still alive: keep it
+            if(_rc > 0) diagnose_status(_children[i], _status);  // reaped: report status
+
+            // Reaped or gone (already reaped by the app): drop it by swapping the last element
+            // into this slot.
+            // NOTE: with ++i we skip re-checking that swapped-in element this pass, but
+            // the next pass handles it (bounded by _deadline). Updates to removal should
+            // keep the loop increment correct so nothing is examined twice or lost.
+            _children[i] = _children.back();
+            _children.pop_back();
+        }
+
+        if(!_children.empty()) std::this_thread::sleep_for(chrono::milliseconds{100});
+    }
+
+    if(!_children.empty())
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}][TID={}][{}] gave up waiting for children [{}]: finalize wait "
+            "budget ({}s) exhausted",
+            this_ppid,
+            this_pid,
+            this_tid,
+            this_func,
+            fmt::join(_children, ", "),
+            signal_finalize_wait_timeout_sec);
     }
 }
 
@@ -4654,9 +4713,16 @@ signal_finalization_worker()
     }
 
     // Best-effort reap to avoid leaving zombies if the app keeps running (e.g. a chained handler
-    // that returns). We do NOT drive the signal into children -- delivering it to a separate PID
-    // is the app's/OS's job; a child that received the signal finalizes via its own worker.
-    wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    // that returns). We do NOT signal the children. That is the app's/OS's job. A child that
+    // received the signal finalizes via its own worker.
+    //
+    // signo == 0 is the normal-exit wake (finalize_rocprofv3 then join): no signal was
+    // delivered, so a child the app left running is the app's own business. Reaping it would
+    // block on a child that may never exit, so skip it.
+    if(sw.signo != 0)
+    {
+        wait_for_children(this_pid, this_ppid, this_tid, this_func);
+    }
 
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal... complete",
@@ -4720,7 +4786,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     // So wait for the flush here, then return into abort(). Unlike the async signals, this can
     // block on a lock the aborting thread holds as abort() often fires from lock-holding runtime
     // paths, e.g. heap-corruption detection. Bound the wait with
-    // ROCPROF_ABORT_FLUSH_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
+    // ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS and fall through into abort() on expiry: a core dump
     // beats a hung process. <= 0 waits forever.
     if(signo == SIGABRT)
     {
@@ -4728,12 +4794,12 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
         {
             // FUTEX_WAIT_BITSET takes an absolute CLOCK_MONOTONIC deadline, so compute it once and
             // let the kernel track the time remaining across wakeups. <= 0 waits indefinitely.
-            const auto bounded  = (signal_abort_flush_timeout_sec > 0);
+            const auto bounded  = (signal_finalize_wait_timeout_sec > 0);
             auto       deadline = timespec{};
             if(bounded)
             {
                 clock_gettime(CLOCK_MONOTONIC, &deadline);
-                deadline.tv_sec += signal_abort_flush_timeout_sec;
+                deadline.tv_sec += signal_finalize_wait_timeout_sec;
             }
 
             while(sw.finalize_done.load(std::memory_order_acquire) == 0)

@@ -98,6 +98,7 @@ The probe-call envelope, in emit order, is: an in-flight-load drain; the special
 ### Spill bracket
 
 `build_spill_bracket()` produces the prologue (saves) and epilogue (restores) that wrap the call:
+
 - **VGPRs** — a direct `build_scratch_store_dword` in the prologue, `build_scratch_load_dword` in the epilogue.
 - **AccVGPRs** — the same builders with `acc=true` (CDNA scratch `acc` bit), addressing the accumulator file directly; no bridge. CDNA-only.
 - **SGPRs** — bridged through one VGPR (`plan.spill_bridge_vgpr`): `v_writelane` then a scratch store in the prologue; a scratch load, load-wait, then `v_readlane` in the epilogue. The single bridge is reused, so each SGPR restore is its own load/wait/readlane.
@@ -134,6 +135,7 @@ Three validators sit at the orchestrator boundary, separated so each can evolve 
 Pure predicate over the anchor instruction and its position. Permanent structural checks only — no `InstrumentationPoint` involvement. Reusable by future predicate-based anchor selection (Instrumentor walks blocks and filters candidates) without inheriting milestone noise.
 
 Rules enforced:
+
 - `anchor_offset` is dword aligned.
 - `anchor.size()` is 4 or 8 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
 - `anchor.raw_encoding()` is non-null.
@@ -182,6 +184,7 @@ ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`,
 ### Spill Builders (`code/builders/spill_builders.h`) [DBI-only]
 
 Multi-word, generation-specific encoders for the spill bracket, split out from the scalar helpers because their prefixes/opcodes move by ISA and they return variable-length word lists. Not shared with DBT (which emits scratch through its own target-specific path):
+
 - `build_scratch_store_dword` / `build_scratch_load_dword` — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT `seg=SCRATCH` encoding (2 words, 13-bit signed offset, `lds`=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, `sve`=0). Both take an `acc` flag that, on CDNA, sets the FLAT `acc` bit to address the AccVGPR file directly (RDNA throws — no acc file).
 - `build_v_writelane_b32` / `build_v_readlane_b32` — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix `0x34`, RDNA `0x35`).
 - `build_wait_loads_complete` / `build_wait_stores_complete` — the async-access fences. CDNA uses a unified `s_waitcnt`; RDNA4 splits into `s_wait_loadcnt` (loads on LOADCNT) and `s_wait_storecnt` (stores on STORECNT). `build_wait_all_loads_complete` is the boundary drain used by `emit_probe_call`.
@@ -192,9 +195,31 @@ An unmodeled arch throws `UnimplementedInst`. The hard arch gates on spilling ar
 
 The plain VALU ops emitted outside the spill bracket, which `instruction_builder.h` (scalar by construction) and `spill_builders.h` (scoped to the bracket) are not the home for. Today the two argument-materialization forms of `v_mov_b32`: `build_v_mov_b32_imm`, the `v_mov_b32 vN, <literal>` pair — a VOP1 word whose `src0` names the literal constant, plus the literal word — and `build_v_mov_b32_src`, the single-word `v_mov_b32 vN, <src>` used for a register-sourced argument slot (the EXEC temp holding the anchor mask). `build_v_mov_b32_src` rejects the literal `src0` code, since that form needs the trailing literal word only `build_v_mov_b32_imm` emits. Both cover all ten AMDGPU targets, each through its own generation's builder and opcode table — the encodings agree at this opcode, but the generated VOP1 `op` field is 7 bits on cdna5 and rdna4 and 8 bits on the other eight generations, so a shared packer would be right only for opcodes that fit both.
 
+### Scalar Memory Builders (`code/builders/smem_builders.h`) [DBI-only]
+
+SMEM is scalar but not SOP, so `instruction_builder.h` (SOP-only by its own documentation) is not its home, and it is not part of the spill bracket `spill_builders.h` covers. Today `build_s_load_dwordx2` and `build_wait_scalar_loads_complete`, both covering **all ten AMDGPU targets**. These are pure encoders with no DBI-specific semantics, so they follow `instruction_builder.h` and `vector_builders.h` rather than `spill_builders.h`, whose narrower scope comes from the scratch addressing modes and the CDNA `acc` bit.
+
+The wrapper exists because three things vary and every one of them is silent when wrong.
+
+**SBASE is the register index halved** on every generation, and the decoder multiplies it back, so an unhalved base loads through the wrong address.
+
+**"No SGPR offset" has two shapes.** CDNA1–4 gate the register and the immediate with independent `SOFFSET_EN` and `IMM` bits, so an immediate-only load clears the former and sets the latter. RDNA has neither bit and instead carries an always-present `SOFFSET` field that must name NULL. **The NULL code moved**, from 125 on RDNA1/2 to 124 from RDNA3 on. Leaving it zero names `s0`, so the load silently adds whatever that register holds. Each case takes the code from its own generation's operand table for that reason.
+
+**The immediate field changes name and width**: `offset` at 21 bits through RDNA3.5, `ioffset` at 24 bits on RDNA4 and CDNA5. Both are **signed**, so `max_smem_byte_offset` bounds a forward offset one bit below the field width (`0x0FFFFF` and `0x7FFFFF`) rather than at the unsigned maximum.
+
+The scalar-load wait is a separate counter from anything in `spill_builders.h`: the monolithic `s_waitcnt 0` covers it through RDNA3.5, but GFX12 splits the counters and it becomes `s_wait_kmcnt` (CDNA5 has no `s_waitcnt` opcode at all). `build_wait_loads_complete`'s LOADCNT orders VMEM, not SMEM.
+
+**Three things no simulator test can validate**, all instances of the standing rule that the simulator does not model everything hardware does. The model builds RDNA's offset operand from the immediate alone and ignores `SOFFSET` entirely. It retires scalar loads synchronously, so removing the completion wait does not change a simulated result. And it *zero*-extends the immediate offset (`generated/cdna3/smem.cpp` uses `static_cast<int>(enc->offset)`, unlike the deliberate `<< 20 >> 20` the tree uses where it does model a signed displacement), so an out-of-range offset simulates as a large forward access and runs backwards on hardware. The builder's bound is the only thing rejecting it.
+
+`tests/patch/smem_builder_test.cpp` asserts SOFFSET against the *encoded word*, since a decode discards it. The offset bound is covered differently: the builder rejects an out-of-range offset, so the test asserts the rejection rather than inspecting a word. The wait has no in-tree observable and is documented rather than tested.
+
 ### Kernel Descriptor Scan (`code/kernel_descriptor_scan.h`) [shared with DBT]
 
 Enumerates a code object's kernel descriptors and derives per-kernel allocation facts. `scan_kernel_descriptors(image, text_offset, text_size)` returns each kernel's descriptor file offset, entry, and `private_segment_fixed_size`, with overflow-safe extent checks and a descriptor-bounded-by-owning-section guard (rejects malformed ELFs). `kernel_wavefront_size` and `descriptor_vgpr_granularity_for_wavefront` decode the wave-size-dependent VGPR encoding granule (shared with DBT so the two cannot diverge); the orchestrator multiplies `(GRANULATED_WORKITEM_VGPR_COUNT + 1)` by that granule to get the kernel's VGPR count. The orchestrator currently rejects anything but a single kernel.
+
+The same header decodes the descriptor's kernarg fields, also shared with DBT. `kernarg_segment_ptr_slot` returns the user-SGPR index the kernarg pointer occupies, which is the summed width of whichever of private_segment_buffer (4), dispatch_ptr (2) and queue_ptr (2) the descriptor enables ahead of it. It answers whether or not the pointer is enabled, so a caller *inserting* the pointer can ask for the slot before setting the bit. `kernarg_segment_ptr_sgpr` is the narrower question, empty unless `has_kernarg_segment_ptr`. `kernarg_preload_length` / `kernarg_preload_offset` decode the two halves of the one `kernarg_preload` field. `kernel_descriptor_initial_sgpr_count` adds the dense system SGPRs the hardware initializes after the user block — enabled workgroup IDs, then WORKGROUP_INFO — giving one past the last SGPR the launch ABI writes; DBT repairs that range when it inserts a kernarg pointer, DBI uses it as a floor for framework storage.
+
+The pointer those first two name is **live only at the kernel entry**. Nothing reserves the pair; the register allocator reclaims it after its last use, which in compiled kernels is typically within the first handful of instructions. A consumer that needs the value at an arbitrary later site has to capture it at entry rather than read the pair there.
 
 ### Register Liveness Analysis [shared with DBT]
 
@@ -279,10 +304,12 @@ public:
 
 ### RegisterRef / RegisterSet [shared with DBT]
 
-**Files:** `isa/register_set.h`, `isa/register_set.cpp`
+**File:** `isa/register_set.h`
 **Used by:** DBT semantic translator, DBI SpillManager and liveness
 
 ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index, uint8_t width)` measured in 32-bit lanes. `RegisterSet` is three disjoint bitsets (SGPR / VGPR / ACC_VGPR) sized to the union of CDNA and RDNA hardware bounds (`REGISTER_SET_MAX_*`). For scratch selection across both families, `REGISTER_SET_ALLOCATABLE_SGPRS` gives the conservative `min(CDNA, RDNA)` bound.
+
+`RegisterSet` aliases the header-only `RegisterSetT`, selecting `RegisterSetWordType::Avx2M256` on AVX2 targets and `RegisterSetWordType::StandardUint64` otherwise. The enum selects an internal storage type (`__m256i` or a scalar unsigned integer) without passing vector types as template arguments. The register-set unit tests instantiate both storage types in AVX2 builds so the scalar fallback remains compiled and tested.
 
 `RegisterSet` exposes `expand` / `erase` / `contains` / `none` / `size` / `intersects`, the standard set operators (`|=`, `&=`, `-=`), and a `for_each` visitor that yields tracked single-lane `RegisterRef`s in (SGPR, VGPR, AccVGPR) ascending-index order.
 

@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 15 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 17 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -23,7 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 
-// LogCapture.hpp's ncclDebugLevel/ncclDebugMask come from fakes/nccl_fakes.cc,
+// LogCapture.hpp's ncclDebugLevelMask/ncclDebugMask come from fakes/nccl_fakes.cc,
 // which this binary already links. A libc-only unit reports via plain
 // fprintf(stderr), so CaptureLog works without raising the level.
 
@@ -197,6 +197,10 @@ static void DefaultPerror(const char* prefix) {
 
 static void DefaultExit(int status) { throw MicroExit{status}; }
 
+static int DefaultGethostname(char* name, size_t len) { return ::gethostname(name, len); }
+
+static int DefaultAccess(const char* path, int mode) { return ::access(path, mode); }
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -215,6 +219,8 @@ std::function<size_t(const void*, size_t, size_t, FILE*)> g_fwrite = DefaultFwri
 std::function<int(FILE*)> g_fflush = DefaultFflush;
 std::function<void(const char*)> g_perror = DefaultPerror;
 std::function<void(int)> g_exit = DefaultExit;
+std::function<int(char*, size_t)> g_gethostname = DefaultGethostname;
+std::function<int(const char*, int)> g_access = DefaultAccess;
 
 void ScriptRead(ssize_t ret, int err, std::string data) {
   g_readScript.push_back(MicroReadStep{ret, err, std::move(data)});
@@ -240,6 +246,8 @@ void ResetLibcFakes() {
   g_fflush = DefaultFflush;
   g_perror = DefaultPerror;
   g_exit = DefaultExit;
+  g_gethostname = DefaultGethostname;
+  g_access = DefaultAccess;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -294,6 +302,8 @@ size_t micro_fwrite(const void* ptr, size_t size, size_t nmemb, FILE* stream) {
 }
 int micro_fflush(FILE* stream) { return g_fflush(stream); }
 void micro_perror(const char* prefix) { g_perror(prefix); }
+int micro_gethostname(char* name, size_t len) { return g_gethostname(name, len); }
+int micro_access(const char* path, int mode) { return g_access(path, mode); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.

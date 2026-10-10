@@ -60,7 +60,7 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
     threading::offset_this_id(true);
     threading::set_thread_name("omni.sampler");
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // notify thread started
     if(_ready)
@@ -232,7 +232,7 @@ sampler::shutdown()
         if(polling_finished)
         {
             // wait for the thread to finish
-            auto _fut = polling_finished->get_future();
+            auto const _fut = polling_finished->get_future();
             _fut.wait_for(msec_t{ 10 * _freq });
             _thread->join();
         }
