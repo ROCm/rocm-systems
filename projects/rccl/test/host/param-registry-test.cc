@@ -20,6 +20,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -79,7 +80,7 @@ class ParamRegistryMicrotest : public ::testing::Test {
     return {NCCL_PARAM_TYPE_I32, flags, "int32_t", key, "test param"};
   }
 
-  // Registers fake_ under Key(suffix) and arranges for TearDown to remove it.
+  // Registers fake under key and arranges for TearDown to remove it.
   ncclResult_t Register(const std::string& key, FakeParam* fake, uint64_t flags = NCCL_PARAM_FLAG_NONE) {
     registeredKeys_.push_back(key);
     return ncclParamRegistry::add(key, MakeInfo(key.c_str(), flags), fake);
@@ -91,13 +92,17 @@ class ParamRegistryMicrotest : public ::testing::Test {
 TEST_F(ParamRegistryMicrotest, Add_RegistersSoFindReturnsTheSameEntry) {
   std::string key = Key();
   FakeParam fake(42);
-  ASSERT_EQ(ncclSuccess, Register(key, &fake));
+  ASSERT_EQ(ncclSuccess,
+            Register(key, &fake, NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_CACHED));
 
   auto* entry = ncclParamRegistry::find(key);
   ASSERT_NE(nullptr, entry);
   EXPECT_EQ(&fake, entry->param);
   EXPECT_STREQ(key.c_str(), entry->info.key);
   EXPECT_EQ(NCCL_PARAM_TYPE_I32, entry->info.typeId);
+  EXPECT_EQ(static_cast<uint64_t>(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_CACHED), entry->info.flags);
+  EXPECT_STREQ("int32_t", entry->info.typeStr);
+  EXPECT_STREQ("test param", entry->info.desc);
 }
 
 TEST_F(ParamRegistryMicrotest, Find_UnknownKeyReturnsNullptr) {
@@ -133,7 +138,18 @@ TEST_F(ParamRegistryMicrotest, Remove_UnregistersSoFindReturnsNullptrAfterward) 
 }
 
 TEST_F(ParamRegistryMicrotest, Remove_OfAnUnknownKeyIsANoOpThatStillSucceeds) {
+  // Asserts more than the return code: remove() unconditionally returns
+  // ncclSuccess, so a map.clear() in its place would pass a return-code-only
+  // check too. A live entry surviving proves this really was a no-op.
+  std::string key = Key();
+  FakeParam fake(5);
+  ASSERT_EQ(ncclSuccess, Register(key, &fake));
+  const auto sizeBefore = ncclParamRegistry::instance().size();
+
   EXPECT_EQ(ncclSuccess, ncclParamRegistry::remove(Key("_NEVER_REGISTERED")));
+
+  EXPECT_EQ(sizeBefore, ncclParamRegistry::instance().size());
+  EXPECT_NE(nullptr, ncclParamRegistry::find(key));
 }
 
 TEST_F(ParamRegistryMicrotest, Remove_ThenReRegisteringTheSameKeySucceeds) {
@@ -162,11 +178,13 @@ TEST_F(ParamRegistryMicrotest, Instance_ReflectsEveryAddedEntryByKey) {
 
 TEST_F(ParamRegistryMicrotest, State_IsASingletonSharedAcrossAllAccessors) {
   // ncclParamRegistryInstance() is the C-linkage accessor every DSO resolves
-  // to the same symbol through; state()/instance()/mutex() all derive from
-  // it, so two calls must observe the same underlying RegistryState.
-  EXPECT_EQ(ncclParamRegistryInstance(), ncclParamRegistryInstance());
-  EXPECT_EQ(&ncclParamRegistry::state(), &ncclParamRegistry::state());
-  EXPECT_EQ(&ncclParamRegistry::mutex(), &ncclParamRegistry::mutex());
+  // to the same symbol through; state() casts its return, and instance()/
+  // mutex() hand out the map and mutex living inside that one RegistryState.
+  // Cross-comparing them (not each against itself) proves they share state
+  // rather than each independently happening to be self-consistent.
+  EXPECT_EQ(ncclParamRegistryInstance(), static_cast<void*>(&ncclParamRegistry::state()));
+  EXPECT_EQ(&ncclParamRegistry::state().map, &ncclParamRegistry::instance());
+  EXPECT_EQ(&ncclParamRegistry::state().mtx, &ncclParamRegistry::mutex());
 }
 
 }  // namespace
