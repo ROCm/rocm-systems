@@ -17,6 +17,23 @@
     * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
     * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
     * `rocshmem_signal_wait_until`
+* Type Support:
+    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
+      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
+        * RMA:
+             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
+        * RMA with signal:
+             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
+        * Point-to-point synchronization:
+             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
+        * Collectives:
+             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
+             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
+             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
+* Add `-tc` argument to functional test, to specify type coverage. Allows `full` `minimal` 
+  or custom list `<type_1>:<type_2>:...`
+    * `full` exercises all types that an API support
+    * `minimal` tests a minimal set of types, made for quick rocshmem functionality testing
 
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
