@@ -200,6 +200,139 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+# Dispatch thread trace as a replay pass of its own. With --att, pass 0 traces each
+# targeted dispatch with counter collection switched off, and the counter groups follow on
+# passes 1..N with the trace switched off. Counter records must still number their groups
+# 0..N-1, and each dispatch must be traced exactly once rather than once per pass.
+find_library(
+    kernel_replay_attdecoder_LIBRARY
+    NAMES rocprof-trace-decoder
+    HINTS ${ROCM_PATH}
+    PATHS ${ROCM_PATH}
+    PATH_SUFFIXES lib)
+
+set(KERNEL_REPLAY_ATT_DISABLED ON)
+if(kernel_replay_attdecoder_LIBRARY)
+    cmake_path(GET kernel_replay_attdecoder_LIBRARY PARENT_PATH
+               kernel_replay_attdecoder_LIB_DIR)
+    set(KERNEL_REPLAY_ATT_DISABLED OFF)
+endif()
+
+add_test(
+    NAME rocprofv3-test-kernel-replay-att-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${kernel_replay_attdecoder_LIB_DIR} --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc
+        SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1)
+
+# RUN_SERIAL: the validate step compares SQ counters, which count every wave on the
+# device, across each dispatch's passes, so GPU work from concurrent tests makes it fail
+# intermittently. The rocprofiler_kernel_replay lock only serializes the replay tests with
+# each other.
+set_tests_properties(
+    rocprofv3-test-kernel-replay-att-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-att-data
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
+add_test(
+    NAME rocprofv3-test-kernel-replay-att-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att/out_results.json --passes 2
+        --common-counters SQ_WAVES SQ_INSTS_VALU --expected-counters SQ_WAVES
+        SQ_INSTS_VALU GRBM_COUNT GRBM_GUI_ACTIVE --thread-trace)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-att-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-att-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
+# With --att and no --kernel-iteration-range, only each kernel's first launch is profiled.
+# The app launches its three kernels several times each, and the HIP runtime adds one copy
+# kernel for hipMemcpyToSymbol, so four dispatches are a kernel's first launch: the later
+# launches must be neither traced nor replayed, and each profiled one still carries both
+# counter passes.
+add_test(
+    NAME rocprofv3-test-kernel-replay-att-first-iteration-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${kernel_replay_attdecoder_LIB_DIR} --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc
+        SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel
+        --kernel-replay-beta-enabled --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration -o out --
+        $<TARGET_FILE:kernel-replay> 65536 3)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-att-first-iteration-generate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-generate-env}"
+               RESOURCE_LOCK
+               rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               rocprofv3-test-kernel-replay-att-first-iteration-data
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
+add_test(
+    NAME rocprofv3-test-kernel-replay-att-first-iteration-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration/out_results.json
+        --passes 2 --expected-dispatch-count 4 --common-counters SQ_WAVES SQ_INSTS_VALU
+        --thread-trace -k
+        "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or one_thread_trace_per_dispatch"
+    )
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-att-first-iteration-validate
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "integration-tests;kernel-replay;thread-trace"
+               ENVIRONMENT
+               "${rocprofv3-validate-env}"
+               FIXTURES_REQUIRED
+               rocprofv3-test-kernel-replay-att-first-iteration-data
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${KERNEL_REPLAY_ATT_DISABLED})
+
 # One-pass baseline for performance scaling checks (same workload, single --pmc group).
 add_test(
     NAME rocprofv3-test-kernel-replay-baseline-generate

@@ -54,6 +54,19 @@ def pytest_addoption(parser):
         default=None,
         help="optional exact number of logical dispatches expected in the counter records",
     )
+    parser.addoption(
+        "--thread-trace",
+        action="store_true",
+        default=False,
+        help="the run used --att, so every profiled dispatch must carry exactly one thread trace",
+    )
+    parser.addoption(
+        "--expected-counters",
+        action="store",
+        nargs="+",
+        default=None,
+        help="union of the counters across the run's groups (defaults to the five-group set)",
+    )
 
 
 @pytest.fixture
@@ -72,6 +85,16 @@ def expected_passes(request):
 @pytest.fixture
 def expected_dispatch_count(request):
     return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
+def expect_thread_trace(request):
+    return request.config.getoption("--thread-trace")
+
+
+@pytest.fixture
+def expected_counters(request):
+    return request.config.getoption("--expected-counters")
 
 
 @pytest.fixture

@@ -361,6 +361,13 @@ auto  att_device_trace_id =
     std::atomic<rocprofiler_dispatch_id_t>{std::numeric_limits<uint64_t>::max()};
 std::mutex att_shader_data;
 
+// Dispatch thread trace under kernel replay lives on its own context, apart from get_client_ctx(),
+// so a replay pass can switch the trace off without also dropping that pass's kernel dispatch,
+// memory copy and API records. replay_thread_trace_agents holds the GPU agents it is configured on;
+// both are written once in tool_init, before any dispatch, and only read afterwards.
+auto att_replay_context         = rocprofiler_context_id_t{0};
+auto replay_thread_trace_agents = std::unordered_set<rocprofiler_agent_id_t>{};
+
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
 thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
     delete thread_dispatch_rename;
@@ -378,8 +385,48 @@ auto pause_resume_contexts = context_id_set_t{};
 // small, so this is lossless and preserves the thread id the record still carries.
 thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 
-// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
-thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+// What kernel replay decided for one logical dispatch when the SDK asked for its pass count.
+//
+// The iteration filter is stateful: every consultation advances the kernel's iteration count, and
+// --kernel-iteration-range numbers the launches the application made. Replay turns one launch into
+// several executions, so the filter is consulted exactly once per logical dispatch, at CONFIG, and
+// every later callback for the same dispatch id -- each replay pass, or the single run of a
+// dispatch that ends up not replayed -- reuses the answer. Deciding at CONFIG rather than on the
+// first pass also lets a dispatch that no filter selects run once instead of being replayed for
+// nothing.
+//
+// CONFIG, the passes and the dispatch callbacks all run synchronously on the enqueuing thread, and
+// a lookup only matches the dispatch id the plan was made for, so a plan cannot leak into another
+// dispatch.
+//
+// With --att, a targeted dispatch gets one extra pass ahead of its counter passes: pass 0 runs the
+// dispatch thread trace with counter collection switched off, and counter group g runs on pass
+// g + 1 with the trace switched off. The two never share a pass -- the trace perturbs the counters,
+// and both services write the single per-dispatch user_data slot the SDK hands out.
+struct replay_dispatch_plan_t
+{
+    rocprofiler_dispatch_id_t dispatch_id       = 0;
+    bool                      targeted          = false;
+    bool                      thread_trace_pass = false;
+    uint64_t                  counter_passes    = 0;
+
+    uint64_t total_passes() const { return (thread_trace_pass ? 1 : 0) + counter_passes; }
+
+    // The counter group a replay pass collects, or nullopt for the thread trace pass.
+    std::optional<uint64_t> counter_group(uint64_t pass) const
+    {
+        if(!thread_trace_pass) return pass;
+        if(pass == 0) return std::nullopt;
+        return pass - 1;
+    }
+};
+
+thread_local auto tl_replay_plan = std::optional<replay_dispatch_plan_t>{};
+
+// Iteration counts behind counter collection's targeting decision. Kernel replay's CONFIG consults
+// the same counts, so a kernel numbers its launches the same way whether or not replay handles
+// them.
+auto counter_kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
@@ -410,25 +457,9 @@ bool
 is_targeted_kernel(uint64_t                                        _kern_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
-    // The iteration filter is stateful: every consultation advances the kernel's iteration count,
-    // and --kernel-iteration-range numbers the launches the application made. Kernel replay
-    // re-dispatches one launch once per counter group, and each pass reaches this function, so
-    // consulting the filter per pass would charge a single launch one iteration per pass and reject
-    // every pass past the end of the range -- the counter groups behind those passes are then never
-    // configured and their data is silently dropped.
-    //
-    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
-    // advances the count by the one launch that actually happened, and the rest of that dispatch's
-    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
-    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
-    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
-    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
-    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
-        return *tl_replay_dispatch_targeted;
-
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
-    const auto _is_target = target_kernels.rlock(
+    return target_kernels.rlock(
         [&_kernel_iteration](const targeted_kernels_map_t& _targets_v, uint64_t _kern_id_v) {
             return _kernel_iteration.wlock(
                 [&_targets_v](kernel_iteration_t& _kernel_iter, uint64_t _kernel_id) {
@@ -441,9 +472,6 @@ is_targeted_kernel(uint64_t                                        _kern_id,
                 _kern_id_v);
         },
         _kern_id);
-
-    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
-    return _is_target;
 }
 
 auto&
@@ -451,6 +479,14 @@ get_client_ctx()
 {
     static rocprofiler_context_id_t context_id{0};
     return context_id;
+}
+
+// tool_init only configures kernel replay alongside counter collection; ROCPROF_KERNEL_REPLAY
+// without it logs an error and the run proceeds without replay.
+bool
+kernel_replay_active()
+{
+    return tool::get_config().kernel_replay && tool::get_config().counter_collection;
 }
 
 void
@@ -1759,6 +1795,54 @@ get_replay_group_count(rocprofiler_agent_id_t agent_id)
     return (profiles == profiles_map.end()) ? 0 : profiles->second.size();
 }
 
+// The plan kernel replay made at CONFIG for this dispatch, or null when replay never planned it (a
+// HIP graph launch or a multi-packet submission, which the SDK runs without CONFIG).
+const replay_dispatch_plan_t*
+get_replay_plan(rocprofiler_dispatch_id_t dispatch_id)
+{
+    return (tl_replay_plan && tl_replay_plan->dispatch_id == dispatch_id) ? &*tl_replay_plan
+                                                                          : nullptr;
+}
+
+replay_dispatch_plan_t
+plan_replay_dispatch(const rocprofiler_kernel_dispatch_info_t& dispatch_info)
+{
+    auto plan        = replay_dispatch_plan_t{};
+    plan.dispatch_id = dispatch_info.dispatch_id;
+    plan.targeted    = is_targeted_kernel(dispatch_info.kernel_id, counter_kernel_iteration);
+    if(plan.targeted)
+    {
+        plan.thread_trace_pass = replay_thread_trace_agents.count(dispatch_info.agent_id) > 0;
+        plan.counter_passes    = get_replay_group_count(dispatch_info.agent_id);
+    }
+    return plan;
+}
+
+// Whether a dispatch the thread trace sees under kernel replay should be traced. The trace runs on
+// the replay's thread trace pass, or on the single run of a targeted dispatch that has no counter
+// group to collect. When a planned replay falls back to a single run (e.g. an incomplete
+// snapshot), counter collection keeps it and the trace is skipped. A dispatch replay never planned
+// keeps counter collection and is not traced either.
+bool
+replay_traces_dispatch(rocprofiler_dispatch_id_t dispatch_id)
+{
+    const auto* plan = get_replay_plan(dispatch_id);
+    if(!plan || !plan->targeted || !plan->thread_trace_pass) return false;
+    if(tl_current_replay_pass) return !plan->counter_group(*tl_current_replay_pass).has_value();
+    return plan->counter_passes == 0;
+}
+
+// Whether a dispatch is profiled. One that kernel replay planned reuses the plan's answer, so its
+// passes do not consult the stateful iteration filter again; any other dispatch consults it.
+bool
+is_targeted_dispatch(rocprofiler_kernel_id_t                         kernel_id,
+                     rocprofiler_dispatch_id_t                       dispatch_id,
+                     common::Synchronized<kernel_iteration_t, true>& kernel_iteration)
+{
+    if(const auto* plan = get_replay_plan(dispatch_id)) return plan->targeted;
+    return is_targeted_kernel(kernel_id, kernel_iteration);
+}
+
 int64_t
 get_instruction_index(rocprofiler_pc_t pc)
 {
@@ -1964,7 +2048,18 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       rocprofiler_user_data_t* userdata_shader)
 {
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    userdata_shader->value       = dispatch_id;
+
+    // Under kernel replay, user_data is only written when the trace runs: the SDK hands every
+    // service on a dispatch the same slot, and on a dispatch the trace skips it belongs to counter
+    // collection.
+    if(kernel_replay_active())
+    {
+        if(!replay_traces_dispatch(dispatch_id)) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
+        userdata_shader->value = dispatch_id;
+        return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
+    }
+
+    userdata_shader->value = dispatch_id;
 
     if(is_targeted_kernel(kernel_id, kernel_iteration))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
@@ -2061,12 +2156,11 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
                           rocprofiler_user_data_t*                     user_data,
                           void* /*callback_data_args*/)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    if(!is_targeted_dispatch(
+           kernel_id, dispatch_data.dispatch_info.dispatch_id, counter_kernel_iteration))
     {
         return;
     }
@@ -2074,11 +2168,23 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     {
         // Under kernel replay every targeted dispatch selects its group deterministically by pass
         // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
-        // non-replayed dispatch (single group) is pass 0. Thread the pass index (+ enqueuing tid)
-        // to the async record callback via user_data so replay_pass reflects the group actually
-        // collected rather than async record arrival order.
-        const auto pass    = tl_current_replay_pass.value_or(0);
-        auto       profile = get_replay_profile(agent_id, pass);
+        // non-replayed dispatch (single group) is pass 0. The plan maps the pass to its counter
+        // group, which is the pass itself unless a thread trace pass comes first. Thread the group
+        // index (+ enqueuing tid) to the async record callback via user_data so replay_pass
+        // reflects the group actually collected rather than async record arrival order.
+        const auto pass  = tl_current_replay_pass.value_or(0);
+        auto       group = std::optional<uint64_t>{pass};
+        if(const auto* plan = get_replay_plan(dispatch_data.dispatch_info.dispatch_id);
+           plan && tl_current_replay_pass)
+            group = plan->counter_group(pass);
+
+        // The thread trace pass locally stops counter collection, so the SDK should not ask.
+        ROCP_CI_LOG_IF(ERROR, !group) << "kernel replay: counter collection asked for a group on "
+                                         "the thread trace pass of dispatch "
+                                      << dispatch_data.dispatch_info.dispatch_id;
+        if(!group) return;
+
+        auto profile = get_replay_profile(agent_id, *group);
         // If we're inside a replay pass (pass index published on this thread) the agent must have
         // counter groups -- that's the reason the SDK is replaying this dispatch. Missing groups
         // here is a tool/SDK mismatch that would silently drop this pass's data.
@@ -2090,7 +2196,7 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
         // nothing for this dispatch and the record callback should not fire, but user_data is the
         // record path's only source of thread id and pass index, and leaving it at its default
         // would surface as thread_id 0 with replay_pass 0 if a record ever did arrive.
-        user_data->value = pack_replay_user_data(common::get_tid(), pass);
+        user_data->value = pack_replay_user_data(common::get_tid(), *group);
         if(profile) *config = *profile;
     }
     else if(auto profile = get_device_counting_service(agent_id))
@@ -2570,21 +2676,51 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
 // The pass count must match the number of counter groups collectable on THIS dispatch's agent --
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
 // that pass i maps to group i with no wrap/skip on agents with a different or partial group set
-// (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
-// disables replay.
+// (the global --pmc group count can differ per agent). Returning 1 (a single group, none, or a
+// dispatch no filter selects) disables replay.
 uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
-    auto&      agent_profiles = get_agent_profiles();
-    const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
-    const auto n =
-        (profiles == agent_profiles.profiles.end()) ? size_t{0} : profiles->second.size();
+    const auto* plan = get_replay_plan(dispatch_info.dispatch_id);
+    ROCP_CI_LOG_IF(ERROR, !plan) << "kernel replay: no CONFIG plan for dispatch "
+                                 << dispatch_info.dispatch_id;
+    const auto n = (plan) ? plan->total_passes() : get_replay_group_count(dispatch_info.agent_id);
     return (n == 0) ? 1 : n;
 }
 
-// Kernel replay CONFIG callback: install the pass-count callback during PHASE_ENTER so the SDK can
-// query the number of replay passes for each dispatch.
+// Switch services for a replay pass of a dispatch planned with a thread trace pass: pass 0 traces
+// with counter collection off, and pass 1 swaps them. The SDK keeps a local toggle for the rest of
+// the loop and restores both contexts when the loop ends, so later passes need nothing.
+void
+select_thread_trace_pass_services(const rocprofiler_callback_tracing_kernel_replay_data_t& payload)
+{
+    auto toggle = [&payload](bool enable, rocprofiler_context_id_t ctx, std::string_view what) {
+        auto fn = enable ? payload.replay_start_context : payload.replay_stop_context;
+        if(!fn || ctx.handle == 0) return;
+        // NOT_STARTED: the context was inactive when the loop began (e.g. paused through roctx),
+        // so there is nothing to switch for this dispatch.
+        const auto status = fn(ctx);
+        ROCP_CI_LOG_IF(ERROR,
+                       status != ROCPROFILER_STATUS_SUCCESS &&
+                           status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED)
+            << "kernel replay: could not " << (enable ? "start " : "stop ") << what << " for pass "
+            << payload.current_pass << ": " << rocprofiler_get_status_string(status);
+    };
+
+    if(payload.current_pass == 0)
+    {
+        toggle(false, counter_collection_ctx, "counter collection");
+    }
+    else if(payload.current_pass == 1)
+    {
+        toggle(false, att_replay_context, "thread trace");
+        toggle(true, counter_collection_ctx, "counter collection");
+    }
+}
+
+// Kernel replay CONFIG callback: plan the dispatch and install the pass-count callback during
+// PHASE_ENTER so the SDK can query the number of replay passes for it.
 void
 kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t* /*user_data*/,
@@ -2597,11 +2733,8 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        tl_replay_plan             = plan_replay_dispatch(payload->dispatch_info);
         payload->replay_pass_count = kernel_replay_pass_count_callback;
-        // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
-        // not carry into it; pass 0 below will record a fresh one.
-        tl_replay_dispatch_targeted.reset();
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
     {
@@ -2618,6 +2751,10 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                 << "kernel replay: SDK published current_pass=" << payload->current_pass
                 << " out of range for total_passes=" << payload->total_passes;
             tl_current_replay_pass = payload->current_pass;
+
+            if(const auto* plan = get_replay_plan(payload->dispatch_info.dispatch_id);
+               plan && plan->thread_trace_pass)
+                select_thread_trace_pass_services(*payload);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
@@ -3433,6 +3570,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             tool::att_no_intercept::configure(callbacks.att_shader_data,
                                               tool::get_config().kernel_filter_range);
 
+        // Kernel replay runs dispatch thread trace as a pass of its own (see
+        // replay_dispatch_plan_t), which needs a context replay can switch per pass. Device-mode
+        // traces are not dispatch-scoped, so they keep their own paths and are not given a pass.
+        const bool att_replay = kernel_replay_active() && !att_no_intercept &&
+                                !handle_consecutive_kernels && !handle_marker_trace;
+        if(att_replay) create_pause_resume_ctx(att_replay_context, "kernel replay thread trace");
+
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
             if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
@@ -3457,15 +3601,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             }
             else if(!handle_consecutive_kernels && !handle_marker_trace)
             {
-                ROCPROFILER_CALL(
-                    rocprofiler_configure_dispatch_thread_trace_service(get_client_ctx(),
-                                                                        id,
-                                                                        agent_params.data(),
-                                                                        agent_params.size(),
-                                                                        callbacks.att_dispatch,
-                                                                        callbacks.att_shader_data,
-                                                                        tool_data),
-                    "thread trace service configure");
+                ROCPROFILER_CALL(rocprofiler_configure_dispatch_thread_trace_service(
+                                     att_replay ? att_replay_context : get_client_ctx(),
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     callbacks.att_dispatch,
+                                     callbacks.att_shader_data,
+                                     tool_data),
+                                 "thread trace service configure");
+                if(att_replay) replay_thread_trace_agents.emplace(id);
             }
             else
             {
@@ -3483,6 +3628,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         // Any agent not removed by above loop was not in the agents_map list
         for(const auto& entry : gpu_idx_set)
             ROCP_ERROR << "Invalid GPU Device Index: " << entry;
+
+        if(att_replay) start_context(att_replay_context, "kernel replay thread trace");
     }
 
     const auto defer_counter_start{tool::get_config().selected_regions};

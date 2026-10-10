@@ -40,6 +40,7 @@
 # (The app verifies its own results in the generate step, guarding the restored data itself.)
 
 import collections
+import re
 import sys
 
 # Python 3.6 compatibility: dataclasses added in 3.7
@@ -330,6 +331,43 @@ def test_dispatch_id_constant_across_replay_passes(json_data, expected_passes):
         )
 
 
+# rocprofv3 names each thread trace file <agent>_shader_engine_<se>_<dispatch_id>.att.
+_ATT_FILENAME = re.compile(r"(\d+)_shader_engine_(\d+)_(\d+)\.att$")
+
+
+def test_one_thread_trace_per_dispatch(json_data, expect_thread_trace):
+    # With --att, replay traces a dispatch on one pass of its own ahead of its counter passes. A
+    # trace on every pass would write the same agent/shader-engine/dispatch file once per pass, and
+    # a trace on a dispatch without counter records (or the reverse) would mean the two services
+    # disagreed about which dispatches were profiled.
+    if not expect_thread_trace:
+        pytest.skip("--thread-trace was not specified")
+
+    att_files = _sdk(json_data).get("strings", {}).get("att_filenames")
+    assert att_files, "run used --att but produced no thread trace files"
+
+    keys = []
+    for name in att_files:
+        match = _ATT_FILENAME.search(name)
+        assert match, f"unexpected thread trace file name: {name}"
+        keys.append(tuple(int(group) for group in match.groups()))
+
+    repeated = sorted(
+        key for key, count in collections.Counter(keys).items() if count > 1
+    )
+    assert not repeated, (
+        "dispatches traced more than once, as (agent, shader_engine, dispatch_id): "
+        f"{repeated}"
+    )
+
+    traced = {dispatch_id for _, _, dispatch_id in keys}
+    counted = set(_dispatch_passes(_sdk(json_data)))
+    assert traced == counted, (
+        f"traced dispatch_ids {sorted(traced)} != dispatch_ids with counter records "
+        f"{sorted(counted)}"
+    )
+
+
 def test_expected_logical_dispatch_count(json_data, expected_dispatch_count):
     if expected_dispatch_count is None:
         pytest.skip("--expected-dispatch-count was not specified")
@@ -444,7 +482,7 @@ def test_replayed_kernels_present(json_data):
         assert any(kernel in (n or "") for n in names), f"{kernel} not found in {names}"
 
 
-def test_expected_counters_present(json_data):
+def test_expected_counters_present(json_data, expected_counters):
     sdk = _sdk(json_data)
     id_to_name = _counter_id_to_name(sdk)
     seen = set()
@@ -453,7 +491,7 @@ def test_expected_counters_present(json_data):
             name = id_to_name.get(int(sub["counter_id"]["handle"]))
             if name:
                 seen.add(name)
-    for counter in EXPECTED_COUNTERS:
+    for counter in expected_counters or EXPECTED_COUNTERS:
         assert counter in seen, f"counter {counter} not collected; seen={sorted(seen)}"
 
 
