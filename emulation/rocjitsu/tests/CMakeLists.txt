@@ -3974,6 +3974,21 @@ if(RJ_ENABLE_HIP_TESTS)
         # gfx1201.
         rj_add_hip_test(hip_ds_transpose_acc_test ARCH gfx950)
 
+        # GLOBAL_LOAD_LDS_* is a CDNA3/CDNA4 instruction family, so this stays
+        # on gfx950 regardless of the host architecture used for the generic
+        # HIP smoke tests.
+        rj_add_hip_test(hip_global_load_lds_test ARCH gfx950)
+        rj_add_hip_test_case(
+            hip_global_load_lds_test
+            "HipGlobalLoadLdsTest.Dwordx4WritesLdsAtThreadStride"
+            CONFIG ${RJ_CDNA4_KMD_CONFIG}
+        )
+        rj_add_hip_test_case(
+            hip_global_load_lds_test
+            "HipGlobalLoadLdsTest.Dwordx4AppliesM0LdsOffset"
+            CONFIG ${RJ_CDNA4_KMD_CONFIG}
+        )
+
         rj_add_hip_test(
             cdna4_to_cdna3_lds_hip_test
             ARCH gfx950
