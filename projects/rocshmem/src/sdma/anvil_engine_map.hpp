@@ -38,17 +38,18 @@ inline bool isSdmaPartition(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEngines
   return numSdmaXgmiEngines == 0 && numSdmaEnginesTotal > 0;
 }
 
-// True when the doubled OAM-map id cannot be used as-is. A partition (no xGMI
-// engines) folds even when the doubled id is in range: same-device peers share
-// the map diagonal and would otherwise all land on engine 0. An id past the
-// engines this node reports folds too. numSdmaEnginesTotal == 0 never folds,
-// so the modulo below is not asked to divide by zero.
-inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal,
-                                  int doubledEngineId) {
-  const bool partition = isSdmaPartition(numSdmaXgmiEngines, numSdmaEnginesTotal);
-  const bool outOfRange =
-      numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
-  return partition || outOfRange;
+// Engines Anvil may place queues on. On a partition only engine 0: the partition's second engine
+// never sees a doorbell written from a GPU kernel (ROCM-32598), and Anvil rings every doorbell from
+// the device, so a queue there hangs on its first packet. 0 when the counts are unknown.
+inline uint32_t usableSdmaEngines(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal) {
+  return isSdmaPartition(numSdmaXgmiEngines, numSdmaEnginesTotal) ? 1 : numSdmaEnginesTotal;
+}
+
+// True when the doubled OAM-map id is past the engines this node reports. Partitions never get
+// here: they always use engine 0. numSdmaEnginesTotal == 0 never folds, so the modulo below is not
+// asked to divide by zero.
+inline bool oamMapEngineNeedsFold(uint32_t numSdmaEnginesTotal, int doubledEngineId) {
+  return numSdmaEnginesTotal > 0 && static_cast<uint32_t>(doubledEngineId) >= numSdmaEnginesTotal;
 }
 
 // Fold the undoubled OAM-map value and both PCI functions into the engines this
@@ -88,12 +89,12 @@ inline PciFunctionBus pciFunctionBus(const std::string& busId) {
   return loc;
 }
 
-// True when taking `requested` more queues would exceed the queue budget, counted across all
-// engines as numEnginesTotal * queuesPerEngine. Either count being 0 means the budget is unknown,
-// which is never reported as exhausted.
-inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEnginesTotal,
+// True when taking `requested` more queues would exceed the queue budget, counted across the usable
+// engines as numEngines * queuesPerEngine. Either count being 0 means the budget is unknown, which
+// is never reported as exhausted.
+inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEngines,
                                 uint32_t queuesPerEngine) {
-  const uint32_t budget = numEnginesTotal * queuesPerEngine;
+  const uint32_t budget = numEngines * queuesPerEngine;
   return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
 }
 
