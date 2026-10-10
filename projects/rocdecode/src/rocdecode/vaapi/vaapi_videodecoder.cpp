@@ -36,6 +36,10 @@ THE SOFTWARE.
 // (e.g. loaded by libavcodec in the same process) from winning the symbol
 // table and intercepting rocdecode's VA calls.
 //
+// On Windows the vtable is populated from rocm_sysdeps_va_win32.dll and
+// rocm_sysdeps_va.dll loaded at runtime via LoadLibraryExW, so rocdecode.dll
+// carries no link-time dependency on the sysdeps VA DLLs.
+//
 // Macros are defined here, after the headers, so that:
 //  - Type declarations from <va/va.h> are still visible for the compiler.
 //  - The CHECK_VAAPI macro (which calls vaErrorStr at invocation time, not
@@ -44,14 +48,20 @@ THE SOFTWARE.
 static VaapiLoader *g_va_loader = nullptr;
 
 // clang-format off
+#ifdef _WIN32
+#define vaGetDisplayWin32(...)        (g_va_loader->fn.vaGetDisplayWin32(__VA_ARGS__))
+#else
 #define vaGetDisplayDRM(...)          (g_va_loader->fn.vaGetDisplayDRM(__VA_ARGS__))
+#endif
 #define vaInitialize(...)             (g_va_loader->fn.vaInitialize(__VA_ARGS__))
 #define vaTerminate(...)              (g_va_loader->fn.vaTerminate(__VA_ARGS__))
 #define vaSetInfoCallback(...)        (g_va_loader->fn.vaSetInfoCallback(__VA_ARGS__))
 #define vaQueryVendorString(...)      (g_va_loader->fn.vaQueryVendorString(__VA_ARGS__))
 #define vaErrorStr(...)               (g_va_loader->fn.vaErrorStr(__VA_ARGS__))
 #define vaMaxNumProfiles(...)         (g_va_loader->fn.vaMaxNumProfiles(__VA_ARGS__))
+#define vaMaxNumEntrypoints(...)      (g_va_loader->fn.vaMaxNumEntrypoints(__VA_ARGS__))
 #define vaQueryConfigProfiles(...)    (g_va_loader->fn.vaQueryConfigProfiles(__VA_ARGS__))
+#define vaQueryConfigEntrypoints(...) (g_va_loader->fn.vaQueryConfigEntrypoints(__VA_ARGS__))
 #define vaGetConfigAttributes(...)    (g_va_loader->fn.vaGetConfigAttributes(__VA_ARGS__))
 #define vaCreateConfig(...)           (g_va_loader->fn.vaCreateConfig(__VA_ARGS__))
 #define vaDestroyConfig(...)          (g_va_loader->fn.vaDestroyConfig(__VA_ARGS__))

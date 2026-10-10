@@ -170,12 +170,12 @@ cmake --install . --config Release
 
   **Windows:**
 
-  Before running tests or samples, add the rocDecode, VA-API, and FFmpeg DLL directories to your PATH
+  Before running tests or samples, add the rocDecode and FFmpeg DLL directories to your PATH
   so that executables can locate the required DLLs at runtime. `ROCM_PATH` must stay set as well, so
   that libva can locate the VA-API driver:
 
   ```bat
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release
   ```
 
@@ -247,7 +247,7 @@ guide for other options.
   ```bat
   set ROCM_PATH=<path-to-rocm-installation>
   set FFMPEG_ROOT=<path-to-ffmpeg>
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode"
   cmake --build . --config Release
@@ -282,7 +282,7 @@ guide for other options.
   ```bat
   set ROCM_PATH=<path-to-rocm-installation>
   set FFMPEG_ROOT=<path-to-ffmpeg>
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-test && cd rocdecode-test
   cmake "%ROCM_PATH%\share\rocdecode\test"
   cmake --build . --config Release
