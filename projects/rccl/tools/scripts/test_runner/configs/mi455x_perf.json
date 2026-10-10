@@ -12,7 +12,7 @@
   "env_variables": {
     "NCCL_CUMEM_ENABLE": "1",
     "NCCL_MNNVL_ENABLE": "1",
-    "RCCL_USE_AMD_SMI_LIB": "0",
+    "RCCL_USE_AMD_SMI_LIB": "1",
     "HSA_NO_SCRATCH_RECLAIM": "1",
     "RCCL_MSCCL_ENABLE": "0",
     "NCCL_DEBUG": "VERSION"
