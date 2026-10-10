@@ -17,6 +17,7 @@ from common.common import ERROR_MAP, PASS, VERBOSITY_QUIET, Common, amdsmi
 
 SUCCESS = amdsmi.AmdSmiStatus.SUCCESS
 INVAL = amdsmi.AmdSmiStatus.INVAL
+IO = amdsmi.AmdSmiStatus.IO
 NOT_SUPPORTED = amdsmi.AmdSmiStatus.NOT_SUPPORTED
 
 
@@ -25,6 +26,8 @@ def _harness():
     common = object.__new__(Common)
     common.error_map = ERROR_MAP
     common.verbose = VERBOSITY_QUIET
+    common.PASS = PASS
+    common.ANY_FAIL = "ANY_FAIL"
     common._status_failures = None
     return common
 
@@ -60,6 +63,25 @@ class TestExpectStatusAlone(unittest.TestCase):
         with self.assertRaises(AssertionError) as ctx:
             with self.common.expect_status("msg", NOT_SUPPORTED):
                 pass
+        self.assertIn(PASS, str(ctx.exception))
+        return
+
+    def test_any_fail_accepts_api_error(self):
+        with self.common.expect_status("msg", self.common.ANY_FAIL):
+            _raise(IO)
+        return
+
+    def test_any_fail_rejects_successful_return(self):
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.expect_status("msg", self.common.ANY_FAIL):
+                pass
+        self.assertIn(PASS, str(ctx.exception))
+        return
+
+    def test_any_fail_rejects_exception_with_success_status(self):
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.expect_status("msg", self.common.ANY_FAIL):
+                _raise(SUCCESS)
         self.assertIn(PASS, str(ctx.exception))
         return
 
@@ -118,6 +140,13 @@ class TestExpectStatusInSweep(unittest.TestCase):
         with self.common.status_sweep():
             with self.common.expect_status("msg", SUCCESS):
                 pass
+        self.assertIsNone(self.common._status_failures)
+        return
+
+    def test_any_fail_accepts_api_error_in_sweep(self):
+        with self.common.status_sweep():
+            with self.common.expect_status("msg", self.common.ANY_FAIL):
+                _raise(IO)
         self.assertIsNone(self.common._status_failures)
         return
 
