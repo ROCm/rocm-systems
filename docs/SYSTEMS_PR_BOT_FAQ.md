@@ -194,8 +194,36 @@ ______________________________________________________________________
 ## 🔎 pre-commit
 
 **What does it check?**
-All pre-commit hooks defined in `.pre-commit-config.yaml` must pass.
-This typically includes linting, formatting (black, isort), and other code-quality checks.
+The bot requires the formatting workflows scheduled for the PR's target
+branch. Each workflow publishes a distinct check name:
+`pre-commit / runtimes`, `pre-commit` (RocJITsu), `pre-commit / cuid`, or
+`pre-commit / rocprofiler-compute`. All four run on PRs targeting `develop`;
+the runtimes workflow is restricted to that branch. The bot waits for every
+scheduled check, including checks that have not appeared yet when polling starts.
+
+These PR workflows have no trigger-level path filters. Each named job first
+uses `.github/actions/scoped-formatting` to examine a complete local Git diff
+between the PR's merge base and head. Its include/exclude expressions decide
+whether to run the formatter. A job with no matching inputs succeeds after
+that inspection, without installing formatters or checking out source and
+submodules. The initial checkout fetches commit/tree history and the small
+shared action; file contents are fetched when needed. Changes to the shared
+action activate all four formatting scopes.
+
+GitHub's server-side path filters and PR-files API can omit paths on large
+PRs. Neither controls formatting scheduling or scope selection. Scope
+inspection includes deleted paths and both sides of renames, uses NUL-delimited
+filenames, and fails the job if Git cannot establish an unambiguous comparison.
+
+The runtimes and rocjitsu workflows use the root `.pre-commit-config.yaml`.
+The CUID and rocprofiler-compute workflows use their project configurations.
+Their check names and branch filters are declared in
+`tools/systems_pr_bot/policy.yml`; automated tests verify that the named jobs
+are scheduled without path filters or job-level conditions. Workflow-local
+include/exclude expressions control formatting work, not which checks the bot
+requires. The bot's advisory file checks still use the PR-files API and show
+an explicit warning when its file count differs from the PR's total; that
+partial list never removes a required formatting check.
 
 **How to fix**
 Run the checks locally, let them auto-fix where possible, then commit the result:
@@ -208,13 +236,19 @@ git add -u
 git commit -m "chore: apply pre-commit fixes"
 ```
 
+For a project configuration, add `--config projects/<project>/.pre-commit-config.yaml`
+to the `pre-commit run` command.
+
 ______________________________________________________________________
 
 ## 🔎 CodeQL
 
 **What does it check?**
 GitHub's [CodeQL](https://codeql.github.com/) static-analysis engine scans the code added in this PR for known security vulnerabilities.
-The bot fails this check when CodeQL reports **critical**, **high**, or **error**-severity alerts.
+CodeQL's own workflows report their results on the PR. The bot currently
+requires formatting checks only; when a CodeQL check is added to
+`checks.required_check_runs`, it uses that check's conclusion rather than
+reading code-scanning alerts.
 
 Common findings include:
 
@@ -276,12 +310,29 @@ Draft PR, pre-commit, CodeQL) do **not** add the label.
 
 **How are pre-commit and CodeQL shown?**
 
-These run as separate CI workflows. The bot waits for them and folds their results into the same table — `pre-commit` and a single combined `CodeQL` row. The CodeQL row fails if CodeQL reports any error / critical / high severity alert.
+Required workflows appear in the table under their exact check names. The bot
+selects the expected names by target branch from trusted base-branch policy
+before it polls the GitHub API, then reads every page of current check runs. A missing or pending
+required check keeps the bot waiting; a failure is reported immediately.
+Checks outside the target branch's requirements do not satisfy or block them.
+CodeQL is enforced by its own workflows; it is included in this table only if
+its check name is declared in `checks.required_check_runs`. The bot does not
+query code-scanning alerts.
 
 **The bot timed out — what do I do?**
 
-If `pre-commit` or CodeQL takes longer than 15 minutes, the bot times out.
-Push an empty commit to re-trigger the workflow or close and reopen PR:
+The bot times out after 15 minutes if an expected check is missing or still
+running. Compare the required names in the PR's **base-commit**
+`tools/systems_pr_bot/policy.yml` with the checks reported on the PR head. The
+privileged bot executes that trusted base policy; policy changes in the PR
+take effect only after merge. A renamed check cannot satisfy its old name,
+even when it has passed. RocJITsu retains the `pre-commit` name so the base
+policy can still find it while the other workflows gain distinct names.
+
+For a missing check, inspect its name and the workflow's branch filters; required
+formatting checks are scheduled independently of changed paths. For a running
+check, inspect its job for queued runners or stalled steps. Once the cause is
+resolved, push a commit to trigger a fresh policy run:
 
 ```bash
 git commit --allow-empty -m "ci: retrigger policy check"
