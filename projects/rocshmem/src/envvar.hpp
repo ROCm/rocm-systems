@@ -578,6 +578,7 @@ namespace envvar {
     extern const var<size_t> threshold;
     extern const var<int32_t> num_channels;
     extern const var<bool> spread_channels;
+    extern const var<int32_t> fail_connect_local_rank;
   }  // namespace sdma
 
   /**

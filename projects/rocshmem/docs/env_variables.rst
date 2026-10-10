@@ -255,3 +255,11 @@ control the behavior of rocSHMEM.
       - ``0``
       - | ``0``: Apply wf_id spreading only for the default (shared) context.
         | ``1``: Apply wf_id spreading for all contexts.
+
+    * - | ``ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK``
+        | Debugging aid. The node-local rank given here reports its SDMA connect to its
+        | last peer as failed, after wiring the earlier peers. Every node-local rank
+        | then drops SDMA and uses IPC memcpy, as it would after a real connect failure.
+      - ``-1``
+      - | ``-1``: Never force a failure.
+        | ``n``: Force a failure on node-local rank ``n``.
