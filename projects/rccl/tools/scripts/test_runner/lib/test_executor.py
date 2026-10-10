@@ -1168,6 +1168,11 @@ class TestExecutor:
         self.emit_enabled = bool(
             getattr(args, "emit_results", False) or getattr(args, "db_push", False)
         )
+        # Incremental emission paths: initialized here so _open_incremental_writer()
+        # (called from setup_directories → _prepare_incremental_emit) can set them.
+        # DO NOT reassign these after setup_directories() or the paths get wiped.
+        self._incremental_jsonl_path = None
+        self._incremental_run_json_path = None
 
         # Setup directories
         self.setup_directories()
@@ -1202,10 +1207,8 @@ class TestExecutor:
         # __init__ (before setup_directories) so _prepare_incremental_emit() can use it.
         self.test_records = []       # rich per-test records for the emitter
         self._emit_log_counter = 0   # keeps captured-log filenames unique
-        # Incremental emission state: set by _open_incremental_writer() once
-        # setup_directories() has established workspace_dir and results_dir.
-        self._incremental_jsonl_path = None   # path to live tests.jsonl
-        self._incremental_run_json_path = None # path to live run.json
+        # _incremental_jsonl_path and _incremental_run_json_path are initialized
+        # before setup_directories() above; do not reassign here.
 
         # Rerun tracking
         self.failed_test_info = []  # Store info needed to rerun failed tests
