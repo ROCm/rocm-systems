@@ -9,7 +9,11 @@ C++ code implementing the instruction's behavior in the simulator.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
+from amdisa.codegen.execute.floating_policy import (
+    F16_FLUSHED_SOURCE_CALLS,
+    F16_TRANSCENDENTAL_CALLS,
+    FLUSH_NEAREST_F32_OPS,
+)
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
@@ -552,6 +556,15 @@ def _lower_less_greater_once(node: SemaNode, ctx: LoweringContext) -> str | None
     return f'([&]() {{ auto a = {lhs}; auto b = {rhs}; return (a < b) || (a > b); }}())'
 
 
+def _uses_f16_mode_arithmetic(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether node lowers to fp_mode::arithmetic_f16."""
+    return (
+        ctx.mode_arithmetic
+        and ctx.exec_model == ExecModel.VECTOR
+        and node.ty == SemaType.F16
+    )
+
+
 def _mode_arithmetic(
     node: SemaNode, ctx: LoweringContext, operation: str, operands: list[str]
 ) -> str | None:
@@ -569,7 +582,11 @@ def _mode_arithmetic(
     arguments = operands + (
         ['0.0' if width == 64 else '0.0f'] if len(operands) == 2 else []
     )
-    arguments += [f'wf.fp_round_mode_{mode}()', f'wf.fp_denorm_mode_{mode}()']
+    arguments.append(f'wf.fp_round_mode_{mode}()')
+    # F16 sources are flushed at the register read; the helper only takes the
+    # rounding control. Destination finishing owns output-denormal handling.
+    if width != 16:
+        arguments.append(f'wf.fp_denorm_mode_{mode}()')
     if operation == 'FMA' and ctx.dx9_zero_fma:
         operation = 'FMA_DX9_ZERO'
     if width == 32 and operation in ('ADD', 'MUL', 'FMA', 'FMA_DX9_ZERO'):
@@ -602,6 +619,11 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
     if kind in _INFIX_OPS:
         if (expr := _lower_less_greater_once(node, ctx)) is not None:
             return expr
+        if kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL) and (
+            _uses_f16_mode_arithmetic(node, ctx)
+        ):
+            operands = [_flushed_f16_source(child, ctx) for child in node.children[:2]]
+            return _mode_arithmetic(node, ctx, kind.name, operands)
         lhs = _lower_expr(node.children[0], ctx)
         rhs = _lower_expr(node.children[1], ctx)
         if kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL):
@@ -628,13 +650,11 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::pow({lhs}, {rhs})'
 
     if kind == SemaNodeKind.LDEXP:
-        val = _lower_expr(node.children[0], ctx)
         exp = _lower_expr(node.children[1], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
-            return (
-                f'amdgpu::fp_mode::ldexp_f16({val}, {exp}, '
-                'wf.fp_denorm_mode_f16_f64())'
-            )
+            val = _flushed_f16_source(node.children[0], ctx)
+            return f'amdgpu::fp_mode::ldexp_f16({val}, {exp})'
+        val = _lower_expr(node.children[0], ctx)
         if ctx.exec_model == ExecModel.VECTOR and node.ty in (
             SemaType.F32,
             SemaType.F64,
@@ -647,12 +667,21 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::ldexp({val}, {exp})'
 
     if kind in _STD_MATH:
-        arg = _lower_expr(node.children[0], ctx)
+        arg = None
+        # SALU forms keep their existing behavior; they have no hardware captures.
+        if kind == SemaNodeKind.FLOOR and ctx.exec_model == ExecModel.VECTOR:
+            arg = _input_flushed_source(node.children[0], ctx)
+        if arg is None:
+            arg = _lower_expr(node.children[0], ctx)
         return f'{_STD_MATH[kind]}({arg})'
 
     if kind == SemaNodeKind.FRACT:
         arg = _lower_expr(node.children[0], ctx)
         return f'[&]() {{ auto v = {arg}; return v - std::floor(v); }}()'
+
+    if kind == SemaNodeKind.FMA and _uses_f16_mode_arithmetic(node, ctx):
+        operands = [_flushed_f16_source(child, ctx) for child in node.children[:3]]
+        return _mode_arithmetic(node, ctx, 'FMA', operands)
 
     if kind == SemaNodeKind.FMA:
         a = _lower_expr(node.children[0], ctx)
@@ -1124,31 +1153,35 @@ def _lower_dst_write(
     # conversion to host float and back. These forms only exist on targets
     # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
     selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
-    writes_minmax_bits = _is_float_minmax(selection_node)
-    if writes_minmax_bits:
+    writes_bits = _is_float_minmax(selection_node)
+    if writes_bits:
         _, rhs = _float_minmax_selection(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
         )
         needs_bitcast = 0
-    elif selection_node is not rhs_node and _is_integral_rounding(selection_node):
-        # The rounding operation already returns F32/F64. Apply output modifiers
-        # to those bits using GPU MODE, independently of the host rounding mode.
-        dtype = f'f{selection_node.ty.size}'
-        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+    elif selection_node is not rhs_node and (
+        result := _destination_result(selection_node, ctx)
+    ):
+        # _destination_result supplies destination-format bits, rounding here
+        # when the operation has not already done so. Apply OMOD/CLAMP to those
+        # bits using GPU MODE, independently of host rounding.
+        dtype, bits, transcendental = result
+        declaration = vop3_modifiers.output_policy_decl(
+            dtype, output_fields, transcendental=transcendental
+        )
         if declaration not in ctx.body_preamble:
             ctx.body_preamble.append(declaration)
-        rounded = _lower_expr(selection_node, ctx)
-        bits = f'std::bit_cast<uint{selection_node.ty.size}_t>({rounded})'
         rhs = vop3_modifiers.apply_output(dtype, bits)
         needs_bitcast = 0
+        writes_bits = True
     else:
         rhs = _lower_expr(rhs_node, ctx)
         needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
     binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
-    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_minmax_bits:
+    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_bits:
         if ctx.mode_arithmetic and _contains_mode_arithmetic(rhs_node):
             rhs = (
                 f'amdgpu::fp_mode::finish_arithmetic_f16({rhs}, '
@@ -1409,7 +1442,7 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'cvt_f16_f32': 'util::f32_to_f16_mode(std::bit_cast<float>(static_cast<uint32_t>({0})), wf.fp16_ovfl())',
     'cvt_f32_f16': 'std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>({0})))',
     # VALU applies MODE policy; keep the existing raw SALU conversion separate.
-    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode())',
+    'cvt_f32_f16_valu': 'amdgpu::fp_mode::cvt_f32_f16({0}, wf.cu().arch(), wf.ieee_mode())',
     'cvt_f32_bf16': 'std::bit_cast<uint32_t>(util::bf16_to_f32(static_cast<uint16_t>({0})))',
     'cvt_f32_fp8': 'std::bit_cast<uint32_t>(util::fp8_e4m3_to_f32(static_cast<uint8_t>({0})))',
     'cvt_f32_bf8': 'std::bit_cast<uint32_t>(util::bf8_e5m2_to_f32(static_cast<uint8_t>({0})))',
@@ -1856,6 +1889,21 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
 }
 
 
+def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether a call lowers to an F16 helper that expects a flushed source."""
+    callee = node.call_name or ''
+    if len(node.children) != 2:
+        return False
+    # Pseudo-scalar F16 transcendentals are VALU instructions with SGPR operands.
+    if callee.startswith('pseudo_scalar_') and callee.endswith('_f16'):
+        return True
+    if ctx.exec_model != ExecModel.VECTOR:
+        return False
+    if callee == 'cvt_f32_f16_valu':
+        return True
+    return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
+
+
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a .call node through inline ops, helper registry, or VOP3 modifiers."""
     callee = node.call_name or ''
@@ -1870,8 +1918,18 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_float_compare(node, ctx)
     if callee.startswith(FLOAT_MINMAX_CALL):
         return _lower_float_minmax(node, ctx)
+    if (
+        callee == 'ceil'
+        and len(node.children) == 2
+        and ctx.exec_model == ExecModel.VECTOR
+    ):
+        if (source := _input_flushed_source(node.children[1], ctx)) is not None:
+            return f'util::ceil_scalar({source})'
 
-    args = [_lower_expr(c, ctx) for c in node.children[1:]]
+    if _takes_flushed_f16_source(node, ctx):
+        args = [_flushed_f16_source(node.children[1], ctx)]
+    else:
+        args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
     if callee == 'mul_legacy':
         if (arithmetic := _mode_arithmetic(node, ctx, 'MUL_LEGACY', args)) is not None:
@@ -2099,6 +2157,66 @@ def _raw_float_sources(
     return dtype, reads, modifiers
 
 
+def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
+    """Return a floating source value after ABS/NEG and MODE input flushing.
+
+    The register bits are flushed in their own format, before an F16 source is
+    widened. Flushing keeps the sign, so it commutes with ABS/NEG. Return None
+    when ``node`` is not a direct floating register read.
+    """
+    modifiers = None
+    if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
+        if len(node.children) < 5:
+            return None
+        has_neg = node.children[3].lit_value == '1'
+        has_abs = node.children[4].lit_value == '1'
+        if has_abs or has_neg:
+            modifiers = (
+                node.children[2].lit_value or '0',
+                'inst_.abs' if has_abs else '0u',
+                'inst_.neg' if has_neg else '0u',
+            )
+        node = node.children[1]
+    if not (node.ty and node.ty.base == 'F' and node.ty.size in (16, 32, 64)):
+        return None
+    dtype = f'f{node.ty.size}'
+    while node.kind == SemaNodeKind.CAST:
+        node = node.children[0]
+    if node.kind != SemaNodeKind.INSTOPERAND:
+        return None
+    policy = input_policy.policy_expr(dtype)
+    if ctx.exec_model == ExecModel.VECTOR:
+        # Resolve MODE once, before the lane loop.
+        declaration = input_policy.policy_decl(dtype)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
+        policy = input_policy.NAME
+    fmt = f'amdgpu::fp_format::{input_policy.FORMATS[dtype]}'
+    bits = f'amdgpu::input_denormal::flush_input<{fmt}>({_lower_expr(node, ctx)}, {policy})'
+    if dtype == 'f16':
+        value = f'util::f16_to_f32(static_cast<uint16_t>({bits}))'
+    else:
+        value = f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({bits})'
+    if modifiers is not None:
+        index, abs_field, neg_field = modifiers
+        value = (
+            f'amdgpu::source_modifier::apply_to_float({value}, {index}, '
+            f'{abs_field}, {neg_field})'
+        )
+    return value
+
+
+def _flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> str:
+    """Return an F16 helper operand, flushed by MODE before it is widened.
+
+    The F16 arithmetic, LDEXP, conversion and transcendental helpers expect
+    their sources already input-flushed; see _input_flushed_source.
+    """
+    if (source := _input_flushed_source(node, ctx)) is None:
+        raise ValueError(f'F16 operand is not a floating register read: {node}')
+    return source
+
+
 def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a floating VOPC relation to comparison::evaluate on raw encodings."""
     op = (node.call_name or '').removeprefix(FLOAT_COMPARE_CALL)
@@ -2118,6 +2236,68 @@ def _is_integral_rounding(node: SemaNode) -> bool:
         node.kind in (SemaNodeKind.FLOOR, SemaNodeKind.TRUNC)
         or (node.kind == SemaNodeKind.CALL and node.call_name in ('ceil', 'rndne'))
     )
+
+
+def _uses_shared_f64_arithmetic_output(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether F64 arithmetic uses the migrated destination modifier stage.
+
+    LDEXP retains expression-level div_apply_omod/CLAMP, although its result is
+    already MODE-rounded. Moving it to the shared stage requires validating its
+    modifier policy separately.
+    """
+    return (
+        node.ty == SemaType.F64
+        and ctx.mode_arithmetic
+        and _contains_mode_arithmetic(node)
+        and not any(n.kind == SemaNodeKind.LDEXP for n in node.walk())
+    )
+
+
+def _destination_result(
+    node: SemaNode, ctx: LoweringContext
+) -> tuple[str, str, bool] | None:
+    """Return (dtype, bits, transcendental) for a result rounded to its format.
+
+    Migrated VOP3 writes round before the shared OMOD/CLAMP stage. Return None
+    to retain expression-level modifiers. See output_modifier.h for migration
+    scope and hardware evidence.
+    """
+    if _is_integral_rounding(node):
+        rounded = _lower_expr(node, ctx)
+        return (
+            f'f{node.ty.size}',
+            f'std::bit_cast<uint{node.ty.size}_t>({rounded})',
+            False,
+        )
+    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
+    if node.ty == SemaType.F64:
+        if node.kind == SemaNodeKind.CALL and node.call_name == 'std::bit_cast<double>':
+            # The conversion helper already returns F64 register bits.
+            return 'f64', _lower_expr(node.children[1], ctx), False
+        if _uses_shared_f64_arithmetic_output(node, ctx):
+            # The arithmetic helper rounds and flushes in the guest MODE.
+            return 'f64', f'std::bit_cast<uint64_t>({_lower_expr(node, ctx)})', False
+        return None
+    if node.ty != SemaType.F16:
+        return None
+    # F16 encodings occupy the low half of a 32-bit lane.
+    value = _lower_expr(node, ctx)
+    transcendental = False
+    if mode_arithmetic:
+        half = (
+            f'amdgpu::fp_mode::finish_arithmetic_f16({value}, '
+            'wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl())'
+        )
+    else:
+        transcendental = any(
+            _contains_call(node, call) for call in sorted(F16_TRANSCENDENTAL_CALLS)
+        )
+        half = (
+            f'util::f32_to_f16_mode({value}, wf.fp16_ovfl())'
+            if ctx.mode_sensitive_f16_dst
+            else f'util::f32_to_f16({value})'
+        )
+    return 'f16', f'static_cast<uint32_t>({half})', transcendental
 
 
 def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:
@@ -2218,21 +2398,16 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_omod CALL to inline VOP3 OMOD code.
-
-    Operates in float domain: bit_cast input to float/double, apply omod,
-    returns float/double.
-
-    CALL children: [ID('apply_omod'), rhs_expr]
-    """
+    """Lower expression-level OMOD for results not handled at the destination."""
+    if node.ty == SemaType.F16:
+        raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
     if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
         return cube_omod(_lower_expr(node.children[1], ctx))
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
-    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
-    fp_type = 'double' if wide_result else 'float'
+    fp_type = 'double' if is_f64 else 'float'
     mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
     environment = (
         f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
@@ -2244,11 +2419,6 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         omod_expr = (
             'amdgpu::fp_mode::effective_omod(wf.cu().arch(), '
             'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst_.omod)'
-        )
-    elif node.ty == SemaType.F16:
-        omod_expr = (
-            'amdgpu::fp_mode::effective_f16_omod(wf.cu().arch(), '
-            'wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod)'
         )
     elif node.ty == SemaType.BF16:
         omod_expr = (
@@ -2299,38 +2469,27 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}); }}()'
         )
-    if node.ty == SemaType.F16 and any(
-        _contains_call(node.children[1], op)
-        for op in ('log', 'log2', 'exp', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos')
-    ):
-        return f'amdgpu::fp_mode::apply_omod_f16({rhs}, {omod_expr}, wf.fp16_ovfl())'
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         f' const uint32_t effective_omod = {omod_expr};'
         f' if (effective_omod == 1) v *= 2.0{suffix};'
         f' else if (effective_omod == 2) v *= 4.0{suffix};'
         f' else if (effective_omod == 3) v *= 0.5{suffix};'
-        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if wide_result else "f32"}(v, effective_omod);'
+        f' v = amdgpu::fp_mode::finalize_omod_{"f64" if is_f64 else "f32"}(v, effective_omod);'
         f' return v; }}()'
     )
 
 
 def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_clamp CALL to inline VOP3 CLAMP code.
-
-    Operates in float domain: bit_cast input to float/double, apply clamp,
-    returns float/double. The final bit_cast back to uint32_t/uint64_t
-    happens at the destination write site.
-
-    CALL children: [ID('apply_clamp'), rhs_expr]
-    """
+    """Lower expression-level CLAMP for results not handled at the destination."""
+    if node.ty == SemaType.F16:
+        raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
-    wide_result = is_f64 or (node.ty == SemaType.F16 and mode_arithmetic)
-    fp_type = 'double' if wide_result else 'float'
+    fp_type = 'double' if is_f64 else 'float'
     mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
     environment = (
         f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '

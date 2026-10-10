@@ -2469,7 +2469,7 @@ TEST(NewerOmodExecutionTest, MulReportsOnlyPermittedExceptionClasses) {
   }
 }
 
-TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) {
+TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsWithSimdEnabledAndForcedScalar) {
   struct ArchCase {
     rj_code_arch_t arch;
     uint16_t mul_f32_opcode;
@@ -2534,8 +2534,8 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
         EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
       }
 
-      // Pin OMOD finalization independently from CLAMP. FP32 underflow caused
-      // by halving a normal result preserves its sign; an input -0 becomes +0.
+      // Pin OMOD finalization independently from CLAMP. Underflow caused by
+      // halving a normal result preserves its sign; an input -0 becomes +0.
       wf->set_exec(0x7u);
       constexpr std::array<uint32_t, 3> kF32Inputs{
           std::bit_cast<uint32_t>(std::numeric_limits<float>::min()),
@@ -2574,9 +2574,11 @@ TEST(NewerOmodExecutionTest, F32AndF64FinalizeExactResultsInScalarAndSimdPaths) 
           decode_valid(*decoder, unclamped_f64_words.data()));
       ASSERT_NE(unclamped_f64, nullptr);
       EXPECT_TRUE(cu->execute_instruction(unclamped_f64.get(), *wf).succeeded());
+      // gfx1201 keeps the sign of a halved F64 -min_normal, as it does for F32.
+      // The gfx1250 expectation is derived from gfx1201; CDNA5 is not measured.
       for (std::size_t lane = 0; lane < kF64Inputs.size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(vb + 8, lane), 0u);
-        EXPECT_EQ(cu->read_vgpr(vb + 9, lane), 0u);
+        EXPECT_EQ(cu->read_vgpr(vb + 9, lane), lane == 1 ? 0x80000000u : 0u);
       }
 
       if (!wf->is_halted())
@@ -6035,7 +6037,7 @@ TEST(Rdna4CvtF16Test, F32OverflowHonorsFp16OvflMode) {
     wf->halt();
 }
 
-TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
+TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeWithSimdEnabledAndForcedScalar) {
   for (bool force_scalar : {false, true}) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarGuard guard(force_scalar);
@@ -6083,7 +6085,7 @@ TEST(Rdna4CvtF16Test, U16OverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
   }
 }
 
-TEST(Rdna4Fp16ValuTest, AddOverflowHonorsFp16OvflModeInScalarAndSimdPaths) {
+TEST(Rdna4Fp16ValuTest, AddOverflowHonorsFp16OvflModeWithSimdEnabledAndForcedScalar) {
   for (bool force_scalar : {false, true}) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarGuard guard(force_scalar);
@@ -9097,7 +9099,8 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
-        // SDWA scaling and directed guest rounding apply to the same wide result.
+        // Current, hardware-unverified SDWA behavior: scaling and directed guest
+        // rounding apply to the same wide result.
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 2u << 2, 0x4000u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 6, 0x4000u},
@@ -9106,7 +9109,8 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 4, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400beefu,
                   amdgpu::sdwa::WORD_1},
-        // Scaling must precede F16 narrowing, including overflow and tiny results.
+        // Pin legacy scaling before F16 narrowing for overflow and tiny results.
+        // SDWA has no capture evidence for this order; VOP3 captures do not validate it.
         ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0, 0x7bffu},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, 0x0800u},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3c00u, 3, 0, 0},

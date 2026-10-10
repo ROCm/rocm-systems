@@ -23,9 +23,10 @@ Execution semantics are provided by ``SemanticsSpec`` from
 
 import cgen
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
+    F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
-    ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -69,7 +70,6 @@ from amdisa.codegen.shared_baselines import (
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
-    vop3_dst_mod_f64,
 )
 from amdisa.codegen.execute.vector_special import (
     gen_vector_mbcnt,
@@ -1045,10 +1045,16 @@ class CodeGenerator:
 
     @staticmethod
     def _apply_sdwa_f16_omod(
-        body: str, instruction: str, *, rounded_result: bool = False
+        body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Apply SDWA OMOD at the F16 producer, before result narrowing."""
-        helper = 'finish_rounded_f16' if rounded_result else 'round_f16_result'
+        """Retain the producer's legacy SDWA F16 OMOD ordering.
+
+        TRANS producers already return rounded halves; ordinary producers scale
+        before narrowing. Arithmetic producers retain their MODE-aware helper.
+        This ordering lacks SDWA hardware validation; VOP3 captures do not
+        establish it. Migrating SDWA requires separate capture evidence.
+        """
+        helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
             'util::f32_to_f16_mode(',
             f'amdgpu::sdwa::{helper}({instruction}, wf, ',
@@ -2222,7 +2228,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -2241,7 +2249,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -6531,13 +6541,17 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                # Integer sources take no ABS/NEG, but the float result takes
+                # CLAMP and OMOD like any other VOP3 float result.
+                is_integer_to_float = cls == 'vector_unary' and dtype in (
                     'f32_i32',
                     'f32_u32',
                     'f32_ubyte0',
                     'f32_ubyte1',
                     'f32_ubyte2',
                     'f32_ubyte3',
+                    'f64_i32',
+                    'f64_u32',
                 )
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
@@ -6549,7 +6563,7 @@ class CodeGenerator:
                     is_vop3
                     and (
                         is_float_op
-                        or is_integer_to_f32
+                        or is_integer_to_float
                         or is_f32_to_integer
                         or is_f16_input_conversion
                     )
@@ -6558,8 +6572,8 @@ class CodeGenerator:
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = set() if is_integer_to_f32 else {'neg'}
-                    if has_abs and not is_integer_to_f32:
+                    ef = set() if is_integer_to_float else {'neg'}
+                    if has_abs and not is_integer_to_float:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     if 'clamp' in inst_fields and not is_f32_to_integer:
@@ -6774,6 +6788,10 @@ class CodeGenerator:
                     and dtype == 'f64'
                     and is_vop3
                 ):
+                    # F64 FMA/FMAC retain finish_f64 OMOD/CLAMP on scalar and
+                    # SIMD paths instead of output_modifier::apply, unlike
+                    # ADD/MUL. output_modifier.h records the V_FMA_F64 captures
+                    # that favor the shared stage.
                     src_loads = ''.join(
                         f'    double src{i}_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[i]}, lane));\n'
                         for i in range(3)
@@ -6803,6 +6821,7 @@ class CodeGenerator:
                         '  }\n'
                     )
                 if cls == 'vector_binop' and op == 'fmac' and dtype == 'f64':
+                    # VOP3 retains the same finish_f64 output policy as FMA above.
                     src_mods = ''
                     finish = ''
                     if is_vop3:
@@ -13146,7 +13165,7 @@ class CodeGenerator:
                             _local_body = self._apply_sdwa_f16_omod(
                                 _local_body,
                                 '*this',
-                                rounded_result=sem.name in ROUNDED_F16_OPS,
+                                transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
@@ -14580,7 +14599,7 @@ class CodeGenerator:
                 prefixed_body = self._apply_sdwa_f16_omod(
                     prefixed_body,
                     'inst',
-                    rounded_result=sem.name in ROUNDED_F16_OPS,
+                    transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                 )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):

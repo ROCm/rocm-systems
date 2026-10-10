@@ -548,7 +548,11 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 
 namespace sdwa {
 
-/// @brief Instruction policy for SDWA scaling, shared with its VOP3 form.
+/// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
+/// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
+/// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
+/// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
+/// the producer helper's responsibility.
 enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
@@ -808,6 +812,7 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
 }
 
 /// @brief Apply SDWA scaling before narrowing a semantic F16 result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
@@ -821,6 +826,7 @@ inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float va
 }
 
 /// @brief Apply SDWA scaling to an already rounded half transcendental result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
                                    bool fp16_ovfl) {
@@ -829,6 +835,8 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 }
 
 /// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
+/// @details Retained legacy ordering, without SDWA hardware validation; migrated
+/// VOP3 arithmetic instead modifies the rounded half. See output_modifier.h.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
@@ -887,7 +895,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
   if (omod == 0)
     return value;
   if constexpr (Format == ResultFormat::F16) {
-    // F16 scaling precedes narrowing in the semantic result producer.
+    // The producer has already applied F16 scaling; finalize its encoded result.
     return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
   } else if constexpr (Format == ResultFormat::PK_F16) {
     const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);

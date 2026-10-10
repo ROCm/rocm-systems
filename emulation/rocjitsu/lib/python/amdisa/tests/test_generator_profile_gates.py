@@ -19,6 +19,11 @@ from amdisa.__main__ import (
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.codegen.execute.floating_policy import (
+    F16_TRANS_OPERATIONS,
+    FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
+)
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_cvt_scalef32,
@@ -27,7 +32,8 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
+from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
+from amdisa.sema_derive import derive_sema_block
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
@@ -68,6 +74,14 @@ def _repo_root() -> Path:
 def _mrisa_dir() -> Path:
     default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
     return Path(os.environ.get('MRISA_PATH', default))
+
+
+def _lower_unary(name: str, arch_name: str = '') -> str:
+    sem = derive_semantics(name, 'ENC_VOP1')
+    block = derive_sema_block(sem)
+    return lower_sema_block(
+        block, LoweringContext(exec_model=block.pragma, arch_name=arch_name)
+    )
 
 
 def _gen_mfma(
@@ -647,6 +661,25 @@ def test_generated_execution_helper_includes_are_scoped(
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared
+
+
+def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
+    execute_shared_path: Path,
+):
+    shared = execute_shared_path.read_text()
+    for instruction in sorted(FLUSH_NEAREST_F32_OPS):
+        for encoding in ('vop1', 'vop3'):
+            body = _generated_function_body(
+                shared,
+                f'inline void execute_{instruction.lower()}_{encoding}',
+            )
+            assert body.count('fp_mode::ScopedEnvironment environment(0);') == 1
+
+    for encoding in ('vop1', 'vop3'):
+        sin_body = _generated_function_body(
+            shared, f'inline void execute_v_sin_f32_{encoding}'
+        )
+        assert 'fp_mode::ScopedEnvironment environment(0);' not in sin_body
 
 
 def test_gfx1250_model_include_graph_does_not_reach_vm(
@@ -2876,13 +2909,7 @@ def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     assert 'util::bf8_e5m2_fnuz_to_f32' in packed
     assert 'util::bf8_e5m2_to_f32' not in packed
 
-    unary = gen_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna3',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna3')
     assert 'util::fp8_e4m3_fnuz_to_f32' in unary
     assert 'util::fp8_e4m3_to_f32' not in unary
 
@@ -2907,21 +2934,16 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
     assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
     assert 'wf.fp16_ovfl()' in narrow
 
-    unary = gen_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna4',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
     assert 'util::fp8_e4m3_to_f32' in unary
     assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
 
 
 def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
-    unary = gen_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
+    unary = _lower_unary('V_CVT_F16_F32')
 
-    assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
+    assert 'util::f32_to_f16_mode(' in unary
+    assert ', wf.fp16_ovfl())' in unary
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
@@ -2934,10 +2956,10 @@ def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
 
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None
-    assert 'if (wf.fp16_ovfl())' in add_probe
-    assert 'util::f32_to_f16_ovfl_simd' in add_probe
-    assert 'util::f32_to_f16_simd' in add_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_probe
+    # The MODE-aware helper now owns both FP16_OVFL narrowing variants.
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_probe
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_probe
+    assert 'native_arithmetic_matches' not in add_probe
 
 
 def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
@@ -3416,6 +3438,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         execute_shared, 'v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3'
     )
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
@@ -3486,8 +3509,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'write_vop3_true16_dst' not in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
 
@@ -3511,7 +3533,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     true16_binary = _generated_method_body(
         gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in true16_binary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in true16_binary
     assert (
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
@@ -3586,10 +3608,11 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             assert 'vop3_opsel' not in body
             assert 'read_vop3_true16_src' not in body
             assert '>> 16' not in body
-            assert (
-                'static_cast<uint16_t>('
-                'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
-            )
+            # The source half is flushed under MODE before it is widened.
+            flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+            assert flush in body
+            assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+            assert body.index('util::f16_to_f32(') < body.index(flush)
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
             assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
@@ -3659,10 +3682,59 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     assert 'f32_to_f16_ovfl_simd' in vop2
     assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
-    assert 'if (wf.fp16_ovfl())' in vop3
-    assert 'f32_to_f16_ovfl_simd' in vop3
+    # VOP3 delegates FP16_OVFL narrowing to its MODE-aware SIMD helper.
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
     assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
+
+
+@pytest.fixture(scope='module', params=['local', 'shared'])
+def generated_f16_sdwa_consumers(request, tmp_path_factory):
+    output = tmp_path_factory.mktemp(f'f16_sdwa_{request.param}')
+    architectures = ['rdna2'] if request.param == 'local' else ['rdna1', 'rdna2']
+    _run(
+        SimpleNamespace(
+            isafiles=[
+                f'{arch}:{_mrisa_dir() / f"amdgpu_isa_{arch}.xml"}'
+                for arch in architectures
+            ],
+            gen_isas=True,
+            gen_dbt=False,
+            isa_output=str(output),
+            dbt_output=None,
+        )
+    )
+    return request.param, output
+
+
+@pytest.mark.parametrize(
+    'instruction,helper',
+    [(op.instruction, 'finish_rounded_f16') for op in F16_TRANS_OPERATIONS]
+    + [
+        (f'V_{op.upper()}_F16', 'round_f16_result')
+        for op in sorted(INPUT_FLUSHED_ROUNDING)
+    ]
+    + [('V_ADD_F16', 'finish_arithmetic_f16')],
+)
+def test_generated_f16_sdwa_preserves_unvalidated_legacy_ordering(
+    generated_f16_sdwa_consumers, instruction, helper
+):
+    """Pin current helper selection; no SDWA captures establish its ordering."""
+    route, output = generated_f16_sdwa_consumers
+    encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert f'amdgpu::sdwa::{helper}(' in body
+    for other in {'finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'} - {
+        helper
+    }:
+        assert f'amdgpu::sdwa::{other}(' not in body
 
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
@@ -6421,8 +6493,13 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
     body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'util::f16_to_f32' in body
-    assert 'source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg)' in body
+    # The raw half is flushed, widened, then given ABS/NEG.
+    flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+    assert body.index('source_modifier::apply_to_float(') < body.index(
+        'util::f16_to_f32'
+    )
+    assert body.index('util::f16_to_f32') < body.index(flush)
+    assert '0, inst_.abs, inst_.neg)' in body
     assert 'amdgpu::fp_mode::cvt_f32_f16' in body
     assert 'wf.fp_denorm_mode_f16_f64()' in body
     assert 'wf.ieee_mode()' in body

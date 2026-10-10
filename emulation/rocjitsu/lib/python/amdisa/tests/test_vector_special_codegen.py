@@ -16,7 +16,6 @@ from amdisa.codegen.execute.simd_codegen import (
     local_coverage_probe,
     simd_probe_line,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
 from amdisa.codegen.execute.vector_special import (
     _TRIG_PREOP_CHUNK_BITS,
     _TRIG_PREOP_TWO_OVER_PI_CHUNKS,
@@ -41,11 +40,10 @@ from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
 
 
 def test_cls_i32_codegen():
-    scalar = gen_vector_unary(['vdst'], ['src0'], 'cls_i32', None)
     semantic = _INLINE_UNARY_OPS['cls_i32']
     simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
 
-    for emitted in (scalar, semantic, simd):
+    for emitted in (semantic, simd):
         assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
         assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
         assert 'countl_zero(abs_val)) - 1' not in emitted
@@ -240,12 +238,10 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     rcp_generic = simd_probe_line('v_rcp_f16_vop3')
     rcp_true16 = simd_probe_line('v_rcp_f16_vop3', true16_vop3=True)
 
-    assert 'if (wf.fp16_ovfl())' in add_generic
-    assert 'util::f32_to_f16_ovfl_simd' in add_generic
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in add_generic
-    assert 'if (wf.fp16_ovfl())' in add_true16
-    assert 'util::f32_to_f16_ovfl_simd' in add_true16
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_true16
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_generic
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_true16
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
@@ -260,6 +256,8 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     div_fixup_true16 = simd_probe_line('v_div_fixup_f16_vop3', true16_vop3=True)
     assert 'if (!wf.fp16_ovfl())' not in div_fixup_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
     fmac_generic = simd_probe_line('v_fmac_f16_vop3')
     fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
     assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
+    apply_output,
+    output_policy_decl,
     vop3_src_mod,
     vop3_dst_mod,
 )
@@ -55,14 +57,6 @@ def _fp8_rne_encode_call(cvt_fn: str, value_expr: str, use_fp16_ovfl: bool) -> s
     if use_fp16_ovfl:
         return f'{cvt_fn}({value_expr}, wf.fp16_ovfl())'
     return f'{cvt_fn}({value_expr})'
-
-
-def _fp8_sr_encode_call(
-    cvt_fn: str, value_expr: str, seed_expr: str, use_fp16_ovfl: bool
-) -> str:
-    if use_fp16_ovfl:
-        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
-    return f'{cvt_fn}({value_expr}, {seed_expr})'
 
 
 def _shared_inst_operand(opnd: str) -> bool:
@@ -1015,10 +1009,8 @@ def _gen_division_result(
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
         L.append('  const uint64_t vcc = wf.vcc_mask();')
-    elif is_vop3:
-        L.append(
-            f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'
-        )
+    if is_vop3:
+        L.append(output_policy_decl(dtype or 'f32'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for index, operand in enumerate(src):
@@ -1031,16 +1023,11 @@ def _gen_division_result(
     L.append(
         f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
     )
-    if operation == 'fixup' and is_vop3:
-        L.append(
-            f'    result = div_apply_omod(result, wf.fp_round_mode_{mode}(), omod);'
-        )
-        L.append(
-            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
-        )
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, std::bit_cast<{bits}>(result));'
-    )
+    result = f'std::bit_cast<{bits}>(result)'
+    if is_vop3:
+        # Both scale the rounded result, then clamp (checked on gfx1201).
+        result = apply_output(dtype or 'f32', result)
+    L.append(f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, {result});')
     L.append('  }')
     return '\n'.join(L)
 
@@ -2329,17 +2316,6 @@ def _parse_scalef32_op(op: str):
         raise ValueError(f'cannot determine direction for {op}: {dst_fmt} vs {src_fmt}')
 
     return stochastic, mode, dst_fmt, src_fmt, direction
-
-
-def _read_as_f32(src_name: str, src_fmt: str) -> str:
-    """Return C++ expression to read a source value as float."""
-    if src_fmt == 'f32':
-        return f'std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane)))'
-    elif src_fmt == 'f16':
-        return f'util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    elif src_fmt == 'bf16':
-        return f'util::bf16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    raise ValueError(f'unsupported source format: {src_fmt}')
 
 
 def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:
