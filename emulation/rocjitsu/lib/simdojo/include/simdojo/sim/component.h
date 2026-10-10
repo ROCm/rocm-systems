@@ -186,6 +186,15 @@ protected:
   /// thread during event processing.
   void schedule_event(Event *event, Tick timestamp, std::unique_ptr<Message> message = nullptr);
 
+  /// @brief The current simulation tick of the partition that owns this
+  ///        component.
+  ///
+  /// @details Zero before the engine has processed an event, and zero for a
+  /// component with no live partition -- one not yet added to a created
+  /// engine, or one whose engine has been shut down.
+  /// @returns The owning partition's current tick.
+  Tick current_tick() const;
+
 private:
   std::vector<std::unique_ptr<Port>> ports_;        ///< Owned ports.
   PartitionID partition_id_ = INVALID_PARTITION_ID; ///< Assigned partition.
