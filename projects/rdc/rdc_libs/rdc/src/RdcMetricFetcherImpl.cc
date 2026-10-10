@@ -989,7 +989,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       value->status = amdsmi_get_clk_freq(processor_handle, clk_type, &f);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = f.frequency[f.current];
+        if (f.num_supported > 0 && f.num_supported <= AMDSMI_MAX_NUM_FREQUENCIES &&
+            f.current < f.num_supported && f.current < AMDSMI_MAX_NUM_FREQUENCIES) {
+          value->value.l_int = f.frequency[f.current];
+        } else {
+          value->status = AMDSMI_STATUS_NO_DATA;
+        }
       }
       break;
     }
