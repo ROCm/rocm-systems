@@ -21,6 +21,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
+  - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
+
 - **Fixed a one-byte overrun when reading the memory partition into a small buffer**.  
   - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
 
