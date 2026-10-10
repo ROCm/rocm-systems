@@ -409,7 +409,7 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
 # device symbol the archive has no name for, a union whose active member is not
 # recoverable. Unlike the generic NOOP handlers (which emit a vague
 # once-per-process message), these emit a loud, attributable warning naming the
-# specific API (finding H1), so when replay later fails the cause is traceable.
+# specific API, so when replay later fails the cause is traceable.
 #
 # These are intentionally NON-FATAL (they return hipSuccess) but they poison the
 # graph: ctx.mark_graph_incomplete records that the graph is now short a node,
@@ -833,6 +833,40 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemGetDefaultMemPool",
 }
 
+# APIs that pass an opaque handle playback does not translate, but that
+# already replay through a generated call. A new API with one of those
+# parameter types replays as a no-op until it is added here or given another
+# playback class. A hand-written handler belongs in MANUAL_PLAYBACK_APIS and
+# must not also be listed here.
+DIRECT_PLAYBACK_APIS: Set[str] = {
+    "hipDestroyExternalMemory",
+    "hipDestroyExternalSemaphore",
+    "hipDevResourceGenerateDesc",
+    "hipDeviceGetExecutionCtx",
+    "hipExecutionCtxDestroy",
+    "hipExecutionCtxGetDevResource",
+    "hipExecutionCtxGetDevice",
+    "hipExecutionCtxGetId",
+    "hipExecutionCtxRecordEvent",
+    "hipExecutionCtxStreamCreate",
+    "hipExecutionCtxSynchronize",
+    "hipExecutionCtxWaitEvent",
+    "hipExternalMemoryGetMappedBuffer",
+    "hipExternalMemoryGetMappedMipmappedArray",
+    "hipGraphicsMapResources",
+    "hipGraphicsResourceGetMappedPointer",
+    "hipGraphicsSubResourceGetMappedArray",
+    "hipGraphicsUnmapResources",
+    "hipGraphicsUnregisterResource",
+    "hipGreenCtxCreate",
+    "hipImportExternalMemory",
+    "hipImportExternalSemaphore",
+    "hipLibraryGetGlobal",
+    "hipLibraryGetManaged",
+    "hipSignalExternalSemaphoresAsync",
+    "hipWaitExternalSemaphoresAsync",
+}
+
 # ---------------------------------------------------------------------------
 # Playback APIs whose recorded destination must resolve to a live allocation
 # before the real API is called: API name -> destination parameter name.
@@ -1012,9 +1046,9 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
 #
 # normalise_field_type() lowers every pointer to a uint64_t holding the
 # capture-time address, so by default the pointee never reaches the archive.
-# For an input struct that is silent data loss (section 8.3): replay is handed
-# an address from a process that no longer exists. A Deref entry tells the
-# generator to carry the pointee itself.
+# For an input struct that is silent data loss: replay is handed an address
+# from a process that no longer exists. A Deref entry tells the generator to
+# carry the pointee itself.
 #
 # Capture: the generated shim memcpy's `size` bytes (or `count` elements) out of
 # the pointer into the event, and sets <param>_present.
@@ -1928,7 +1962,7 @@ _HEADER_PREAMBLE = """\
  *   - uint8_t  <param>_present    1 when the argument was non-null
  *   - uint32_t <param>_n          element count, for array arguments only
  * Without them a pointer argument reaches the archive as a capture-time host
- * address and nothing else, which is the payload-loss class of section 8.3.
+ * address and nothing else, which is the payload-loss class.
  *
  * The structs use #pragma pack(1) so layout is identical on all platforms.
  * ============================================================================
@@ -1960,8 +1994,12 @@ _HEADER_PREAMBLE = """\
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
-#define HRR_VERSION ((uint16_t)7u)
+ * a packed blob with the recorded pitch, reading past its end.
+ * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
+ * appended to HipDispatchTable. Each took a compiler ID, so the compiler
+ * API IDs moved up by two. develop still records both under v7. A v7
+ * reader decodes those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)8u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2801,6 +2839,22 @@ _PLAYBACK_HANDLE_TRANSLATE = {k: v[0] for k, v in _PLAYBACK_HANDLE_INFO.items()}
 _PLAYBACK_HANDLE_TRANSLATE['hipMemGenericAllocationHandle_t'] = \
     'ctx.translate_vmm_handle'
 
+# Opaque values playback cannot turn back into a live object. A generated
+# call would pass the recorded address from the capturing process, or a zero
+# for a type that cannot be recorded. hipDevice_t is an int and is not here.
+_UNTRANSLATED_PLAYBACK_TYPES = {
+    "hipKernel_t",
+    "hipLibrary_t",
+    "hipExternalMemory_t",
+    "hipExternalSemaphore_t",
+    "hipExecutionCtx_t",
+    "hipDevResourceDesc_t",
+    "hipUserObject_t",
+    "hipGraphicsResource_t",
+    "hipStreamCallback_t",
+    "hipHostFn_t",
+}
+
 # `void*` parameters that are really out buffers — the callee writes a handle
 # through them. Nothing in the type says so, so the generator used to treat the
 # recorded value as an ordinary opaque input and hand the runtime an address in
@@ -3001,6 +3055,17 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 #   param : dispatch-table parameter name being bridged
 #   pre   : lines emitted inside the guard ({name} -> param name)
 #   expr  : expression substituted for that argument inside the guard
+# APIs the tree declares before any SDK that CI builds playback against exports
+# them. The call is made through a symbol looked up in the loaded runtime at
+# replay time instead of a link-time reference, so hrr-playback still links
+# against an older amdhip64 and a replay on that runtime skips the call with a
+# warning. Declarations (and the enum types in the signature) must come from
+# the in-tree headers; see HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt.
+# Add an API here when its first CI build fails to link against the SDK.
+_PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
+    "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+})
+
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The table
     # (and therefore the recorded field) keeps the int device ordinal, so the
@@ -3217,6 +3282,33 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     return f"({t})a->{name}"
 
 
+def playback_defaults_to_noop(entry: ApiEntry) -> bool:
+    """True when a generated call would pass an untranslated opaque value.
+
+    DIRECT_PLAYBACK_APIS keeps the generated call for APIs that already had
+    one. The API matrix (tools/api-matrix/derive_manifest.py) calls this too,
+    so its expected replay class cannot drift from what the shim emits.
+    """
+    return (entry.name not in DIRECT_PLAYBACK_APIS
+            and any(_get_base_type(p.raw_type) in _UNTRANSLATED_PLAYBACK_TYPES
+                    for p in entry.params))
+
+
+def _noop_playback_shim(api: str) -> str:
+    """Warn once and return success. The call's effect is not reproduced."""
+    return (f"static hipError_t playback_{api}"
+            f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
+            f"  (void)ctx; (void)payload;\n"
+            f"  static bool warned = false;\n"
+            f"  if (!warned) {{\n"
+            f"    warned = true;\n"
+            f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {api} — \"\n"
+            f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
+            f"  }}\n"
+            f"  return hipSuccess;\n"
+            f"}}\n")
+
+
 def generate_playback_shim(entry: ApiEntry) -> str:
     """Generate playback function for one API."""
     sname = f"hrr_args_{entry.name}"
@@ -3284,17 +3376,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # The static bool ensures the message fires once per process, not once per event,
     # so replays with thousands of events don't spam stderr.
     if entry.name in NOOP_PLAYBACK_APIS:
-        return (f"static hipError_t {fname}"
-                f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
-                f"  (void)ctx; (void)payload;\n"
-                f"  static bool warned = false;\n"
-                f"  if (!warned) {{\n"
-                f"    warned = true;\n"
-                f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {entry.name} — \"\n"
-                f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
-                f"  }}\n"
-                f"  return hipSuccess;\n"
-                f"}}\n")
+        return _noop_playback_shim(entry.name)
 
     # Per-API custom handler body (special in/out value handling).
     if entry.name in CUSTOM_PLAYBACK_BODIES:
@@ -3314,6 +3396,14 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append(f"  return hipSuccess;")
         lines.append("}")
         return "\n".join(lines) + "\n"
+
+    # Arguments the generator can translate get a real call. An opaque handle
+    # with no playback translation would be passed as an address from the
+    # capturing process, so that API replays as a no-op until a reviewed
+    # handler is added. DIRECT_PLAYBACK_APIS keeps the generated call for
+    # APIs that already had one. Editing hip_playback_generated.cpp does not.
+    if playback_defaults_to_noop(entry):
+        return _noop_playback_shim(entry.name)
 
     # payload points to the full hrr_args_* struct (header + fields).
     lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload);")
@@ -3445,11 +3535,30 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     args_str = ", ".join(call_args)
     void_ret = _is_void_return(entry.ret_type)
 
+    resolved = entry.name in _PLAYBACK_RUNTIME_RESOLVED_APIS
+    if resolved:
+        if entry.name in _PLAYBACK_ARG_BRIDGES:
+            sys.exit(f"ERROR: {entry.name} is runtime-resolved and has an arg bridge; "
+                     f"the two cannot be combined")
+        lines.append(f"  static const auto _fn = reinterpret_cast<decltype(&{entry.name})>(")
+        lines.append(f"      hrr_runtime_symbol(\"{entry.name}\"));")
+        lines.append(f"  if (_fn == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name} is not exported by this \"")
+        lines.append(f"              \"HIP runtime; skipping it during replay, results may \"")
+        lines.append(f"              \"differ from capture.\\n\");")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
+
     def _emit_call(target_lines: List[str], a_str: str) -> None:
+        callee = "_fn" if resolved else entry.name
         if void_ret:
-            target_lines.append(f"  {entry.name}({a_str});")
+            target_lines.append(f"  {callee}({a_str});")
         else:
-            target_lines.append(f"  hipError_t _r = (hipError_t){entry.name}({a_str});")
+            target_lines.append(f"  hipError_t _r = (hipError_t){callee}({a_str});")
 
     bridge = _PLAYBACK_ARG_BRIDGES.get(entry.name)
     if bridge:
@@ -3873,6 +3982,7 @@ def main() -> None:
         ("MANUAL_CAPTURE_APIS",  MANUAL_CAPTURE_APIS),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
         ("NOOP_PLAYBACK_APIS",   NOOP_PLAYBACK_APIS),
+        ("DIRECT_PLAYBACK_APIS", DIRECT_PLAYBACK_APIS),
         ("SKIP_IF_UNMAPPED_PLAYBACK_APIS", set(SKIP_IF_UNMAPPED_PLAYBACK_APIS)),
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
         ("SKIP_IF_UNMAPPED_DST_PLAYBACK_APIS",
@@ -3918,6 +4028,7 @@ def main() -> None:
         ("NOOP_PLAYBACK_APIS", NOOP_PLAYBACK_APIS),
         ("CUSTOM_PLAYBACK_BODIES", set(CUSTOM_PLAYBACK_BODIES)),
         ("MANUAL_PLAYBACK_APIS", MANUAL_PLAYBACK_APIS),
+        ("DIRECT_PLAYBACK_APIS", DIRECT_PLAYBACK_APIS),
     ]
     overlaps: List[str] = []
     for i, (first_name, first_set) in enumerate(replay_classes):

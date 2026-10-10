@@ -1,0 +1,6 @@
+# Rederived from the HRR tree by derive_manifest.py, whose inputs — the
+# generator, the playback driver and hip_api_trace.hpp — are all in this repo.
+# Only the baseline it is checked against belongs in git: a committed manifest
+# would be a second copy of the classification, free to go stale against the
+# generator it was derived from.
+api_classes.json

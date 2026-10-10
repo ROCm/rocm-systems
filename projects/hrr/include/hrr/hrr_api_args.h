@@ -44,7 +44,7 @@
  *   - uint8_t  <param>_present    1 when the argument was non-null
  *   - uint32_t <param>_n          element count, for array arguments only
  * Without them a pointer argument reaches the archive as a capture-time host
- * address and nothing else, which is the payload-loss class of section 8.3.
+ * address and nothing else, which is the payload-loss class.
  *
  * The structs use #pragma pack(1) so layout is identical on all platforms.
  * ============================================================================
@@ -76,8 +76,12 @@
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
-#define HRR_VERSION ((uint16_t)7u)
+ * a packed blob with the recorded pitch, reading past its end.
+ * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
+ * appended to HipDispatchTable. Each took a compiler ID, so the compiler
+ * API IDs moved up by two. develop still records both under v7. A v7
+ * reader decodes those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)8u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)

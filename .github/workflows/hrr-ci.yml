@@ -1,0 +1,1158 @@
+name: HRR CI
+
+# A GPU-only dispatch names the run after its id so the PR job can find it.
+# Every other event keeps a stable title.
+run-name: ${{ github.event.inputs.gpu_only == 'true' && format('hrr-gpu-{0}', github.event.inputs.dispatch_id) || format('HRR CI ({0})', github.event_name) }}
+
+# Pull requests always start the workflow. A workflow skipped by a top-level
+# "paths" filter creates no check at all, so a required "HRR CI Summary" would
+# wait forever on every PR that does not touch HRR. The gate job below does the
+# path filtering instead, and the summary job always reports.
+#
+# Pushes to develop run the same suites for one reason beyond post-merge signal:
+# a pull request can only restore caches from its own ref and from the base
+# branch, so without a develop run every PR would start with a cold ccache.
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+    paths:
+      - "projects/hrr/**"
+      - "!projects/hrr/skills/**"
+      - "projects/clr/hipamd/src/hrr/**"
+      - "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp"
+      - "projects/hip/include/hip/hip_runtime_api.h"
+      - ".github/workflows/hrr-ci.yml"
+      - ".github/actions/rocprofiler-sdk-util/resolve-ci-config/**"
+  workflow_dispatch:
+    inputs:
+      ignore_test_config:
+        description: "Run cases the YAML config would skip"
+        type: boolean
+        default: false
+      # The fields below are set by the integration dispatcher. A new workflow
+      # file cannot be dispatched until it is on the default branch, so the
+      # GPU job lives in this file and the PR run starts it with gpu_only.
+      gpu_only:
+        description: "Run one integration family against an existing build"
+        type: boolean
+        default: false
+      family:
+        description: "Integration family (gpu_only)"
+        type: string
+        default: ""
+      runner:
+        description: "Runner label (gpu_only)"
+        type: string
+        default: ""
+      use_container:
+        description: "Run inside the GPU container (gpu_only)"
+        type: boolean
+        default: false
+      sdk_version:
+        description: "ROCm SDK version the build used (gpu_only)"
+        type: string
+        default: ""
+      build_workspace:
+        description: "Absolute workspace path baked into the binaries (gpu_only)"
+        type: string
+        default: ""
+      build_run_id:
+        description: "Run id whose hrr-build artifact to download (gpu_only)"
+        type: string
+        default: ""
+      # workflow_dispatch allows at most ten inputs; this list is full.
+      build_sha:
+        description: "Commit the build compiled; the GPU job checks this out (gpu_only)"
+        type: string
+        default: ""
+      dispatch_id:
+        description: "Unique id the dispatcher uses to find this run (gpu_only)"
+        type: string
+        default: ""
+
+concurrency:
+  # Each GPU dispatch has its own group. Sharing the PR group would queue the
+  # families behind each other, and the schedule budget would skip them.
+  group: ${{ github.event.inputs.gpu_only == 'true' && format('hrr-ci-gpu-{0}', github.event.inputs.dispatch_id) || format('hrr-ci-{0}', github.event.pull_request.number || github.ref) }}
+  # Never cancel a develop run: it is what saves the ccache for later PRs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # One fat binary covers every family that has a test runner, so the GPU jobs
+  # download a single artifact instead of rebuilding per architecture.
+  #
+  # Every arch a pool can hand out has to be listed, not one representative per
+  # family: linux-gfx110X-gpu-rocm and linux-gfx120X-gpu-rocm are wildcard
+  # pools, and a machine whose arch is missing from the binary fails every
+  # workload with hipErrorInvalidImage (200) rather than skipping. gfx1250 is
+  # carried so the binary is ready once its runner is enabled below.
+  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
+  ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Path gate. The "on:" block cannot filter pull requests by path (see above),
+  # so this job lists the files the pull request changes and sets run=false when
+  # none is an HRR path. Every job below is then skipped, not failed, and
+  # "HRR CI Summary" still reports. Pushes and manual runs always run.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: "HRR paths changed?"
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          run=true
+          reason="not a pull request"
+          if [ -n "${PR_NUMBER}" ]; then
+            reason="the pull request changes an HRR path"
+            # The files API lists at most 3000 files; a PR that large is treated
+            # as relevant rather than guessed at.
+            gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
+              --jq '.[].filename' > changed-files.txt
+            if ! python3 - changed-files.txt <<'PY'
+          import sys
+
+          INCLUDE = (
+              "projects/hrr/",
+              "projects/clr/hipamd/src/hrr/",
+              "projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp",
+              "projects/hip/include/hip/hip_runtime_api.h",
+              ".github/workflows/hrr-ci.yml",
+              ".github/actions/rocprofiler-sdk-util/resolve-ci-config/",
+          )
+          EXCLUDE = ("projects/hrr/skills/",)
+
+          files = [line.strip() for line in open(sys.argv[1]) if line.strip()]
+          relevant = len(files) >= 3000 or any(
+              f.startswith(INCLUDE) and not f.startswith(EXCLUDE) for f in files
+          )
+          sys.exit(0 if relevant else 1)
+          PY
+            then
+              run=false
+              reason="the pull request changes no HRR path"
+            fi
+          fi
+          echo "run=${run}" >> "$GITHUB_OUTPUT"
+          echo "HRR CI: run=${run} (${reason})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # Generated-source and wire-compatibility gate. This is intentionally
+  # host-only and separate from the CLR build: an API-header PR must get a fast
+  # result even when no GPU job runs.
+  # ---------------------------------------------------------------------------
+  codegen:
+    name: "Generated sources"
+    needs: [gate]
+    if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+            projects/clr/hipamd/src/hrr
+          set-safe-directory: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # api_matrix.yaml is read with PyYAML by the matrix scripts below.
+      # Install only when yaml does not import. A version pin makes pip
+      # uninstall a newer copy, which fails when site-packages is read-only.
+      - name: Install PyYAML
+        run: python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
+
+      - name: Generate and compare
+        run: |
+          mkdir -p build/hrr-codegen/include/hrr
+          python3 projects/hrr/tools/gen_hrr_api_args.py \
+            --input projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp \
+            --public-header projects/hip/include/hip/hip_runtime_api.h \
+            --output-header build/hrr-codegen/include/hrr/hrr_api_args.h \
+            --output-capture build/hrr-codegen/hip_capture_generated.cpp \
+            --output-playback build/hrr-codegen/hip_playback_generated.cpp \
+            --check-hrr-coverage \
+            --manual-capture-source projects/clr/hipamd/src/hrr/hip_capture.cpp \
+            --silent
+
+          failed=0
+          diff -u projects/hrr/include/hrr/hrr_api_args.h \
+            build/hrr-codegen/include/hrr/hrr_api_args.h || failed=1
+          diff -u projects/clr/hipamd/src/hrr/hip_capture_generated.cpp \
+            build/hrr-codegen/hip_capture_generated.cpp || failed=1
+          diff -u projects/hrr/playback/hip_playback_generated.cpp \
+            build/hrr-codegen/hip_playback_generated.cpp || failed=1
+          if [ "${failed}" -ne 0 ]; then
+            echo "::error::checked-in HRR generated sources are stale; run projects/hrr/tools/gen_hrr_api_args.py --check-hrr-coverage"
+            exit 1
+          fi
+
+      - name: Check API ID compatibility
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "${BASE_SHA}" ] || [[ "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+          git show "${BASE_SHA}:projects/hrr/include/hrr/hrr_api_args.h" \
+            > build/hrr-codegen/base_hrr_api_args.h
+          python3 projects/hrr/tools/check_hrr_api_compat.py \
+            --base-header build/hrr-codegen/base_hrr_api_args.h \
+            --current-header build/hrr-codegen/include/hrr/hrr_api_args.h
+
+      # Everything is written under build/hrr-codegen: the derived manifest and
+      # the regenerated header are compared with the checked-in header, never
+      # written over it.
+      - name: Check API matrix
+        run: |
+          tools=projects/hrr/tools/api-matrix
+          out=build/hrr-codegen/api-matrix
+          tracked=projects/hrr/tests/integration/hrr_api_matrix_expectations.h
+          mkdir -p "${out}"
+
+          python3 "${tools}/derive_manifest.py" --quiet \
+            --output "${out}/api_classes.json"
+          python3 "${tools}/check_matrix.py" --check-workloads
+          python3 "${tools}/check_matrix.py" \
+            --manifest "${out}/api_classes.json" \
+            --emit-cxx "${out}/hrr_api_matrix_expectations.h"
+
+          if ! diff -u "${tracked}" "${out}/hrr_api_matrix_expectations.h"; then
+            echo "::error::${tracked} is stale; run derive_manifest.py, then check_matrix.py --emit-cxx, in projects/hrr/tools/api-matrix"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Host-only unit suite. These 23 cases link nothing but libstdc++/libc: they
+  # include <hip/hip_runtime.h> for types but issue no HIP calls, so they need
+  # neither a GPU nor the capture library and can run on any platform.
+  # ---------------------------------------------------------------------------
+  unit:
+    name: "Unit (${{ matrix.os }})"
+    needs: [gate]
+    if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+            projects/clr/hipamd/src
+            .github/workflows
+          set-safe-directory: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ROCm SDK (headers and toolchain only)
+        shell: bash
+        run: |
+          pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[devel]"
+          rocm-sdk init
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          extra=()
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The runner builds with MinGW, whose libstdc++/libgcc/winpthread
+            # DLLs are not on PATH for later steps, so a dynamically linked
+            # binary fails to start at all. Link them in instead.
+            extra+=(-DCMAKE_EXE_LINKER_FLAGS=-static)
+          fi
+          # Declarations of the HIP API come from this tree, ahead of the SDK's:
+          # the nightly SDK lags the tree, so an API added here is not in its
+          # headers yet. Only headers: the SDK still supplies the runtime library.
+          # cygpath -m gives the drive-letter form a native cmake accepts.
+          tree="$(cygpath -m "${PWD}" 2>/dev/null || echo "${PWD}")"
+          cmake -S projects/hrr -B build -GNinja -Wno-dev \
+            "${extra[@]}" \
+            "-DHRR_HIP_INCLUDE_DIRS=${tree}/projects/hip/include;${tree}/projects/clr/hipamd/include" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Assert the expected unit cases are present
+        shell: bash
+        run: |
+          # A case behind an #if leaves the binary with no signal at all -- not
+          # failed, not skipped, absent -- so a fully green suite can hide it.
+          # Assert the compiled set against the YAML before trusting the run.
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
+            export PATH
+          fi
+          shopt -s nullglob
+          bin=(build/tests/unit/hrr-unit-tests*)
+          if [ ${#bin[@]} -eq 0 ]; then
+            echo "::error::no unit binary under build/tests/unit"
+            exit 1
+          fi
+          python3 projects/hrr/tests/scripts/hrr_test_config.py lint \
+            projects/hrr/tests/config/unit.yaml \
+            projects/hrr/tests/config/integration.yaml \
+            --workflow .github/workflows/hrr-ci.yml
+          python3 projects/hrr/tests/scripts/hrr_test_config.py check \
+            --binary "${bin[0]}" \
+            --config projects/hrr/tests/config/unit.yaml
+
+      - name: Run unit suite
+        shell: bash
+        env:
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        run: |
+          # Named hrr-unit-tests.exe on Windows. Resolved with a bash glob
+          # rather than find, which on a Windows runner resolves to FIND.EXE.
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            # The recovery cases spawn hrr-playback.exe, which loads the SDK's
+            # HIP DLLs. Without them on PATH it dies with STATUS_DLL_NOT_FOUND
+            # before running anything.
+            PATH="$(cygpath -u "${ROCM_SDK}")/bin:${PATH}"
+            export PATH
+          fi
+          shopt -s nullglob
+          bin=(build/tests/unit/hrr-unit-tests*)
+          if [ ${#bin[@]} -eq 0 ]; then
+            echo "::error::no unit binary under build/tests/unit"
+            ls -R build/tests || true
+            exit 1
+          fi
+          ls -l "${bin[0]}"
+          python3 projects/hrr/tests/scripts/run_catch2.py \
+            --xml unit-${{ matrix.os }}.xml \
+            --config projects/hrr/tests/config/unit.yaml \
+            --arch none \
+            -- "${bin[0]}"
+
+      # The helpers the suites below rely on (JUnit wrapper, summary table,
+      # suite config). They are POSIX-process code; once is enough.
+      # test_api_matrix.py imports PyYAML, which setup-python does not provide.
+      - name: Test the CI helper scripts
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-unit-${{ matrix.os }}
+          path: unit-${{ matrix.os }}.xml
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Resolve the GPU runner labels from the shared CI config, the same way the
+  # rocprofiler-sdk workflows do.
+  # ---------------------------------------------------------------------------
+  ci_config:
+    name: "Resolve runners"
+    needs: [gate]
+    # Also runs for a gpu_only dispatch. The integration matrix below reads
+    # these outputs while that job decides to skip, and a skipped resolver
+    # makes that evaluation fail.
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      gfx90a_runner: ${{ steps.runner.outputs.gfx90a_runner }}
+      gfx94x_runner: ${{ steps.runner.outputs.gfx94x_runner }}
+      gfx950_runner: ${{ steps.runner.outputs.gfx950_runner }}
+      gfx103x_runner: ${{ steps.runner.outputs.gfx103x_runner }}
+      gfx110x_runner: ${{ steps.runner.outputs.gfx110x_runner }}
+      gfx120x_runner: ${{ steps.runner.outputs.gfx120x_runner }}
+      gfx1151_runner: ${{ steps.runner.outputs.gfx1151_runner }}
+    steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
+          set-safe-directory: true
+
+      - name: Resolve runner labels
+        id: runner
+        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+
+  # ---------------------------------------------------------------------------
+  # Builds CLR (which brings in-tree ROCr with it) to get an amdhip64 carrying
+  # the HRR capture shims, then projects/hrr against the SDK. The capture build
+  # is substituted at run time via LD_LIBRARY_PATH, not linked here. Produces
+  # one multi-architecture artifact consumed by every GPU job below.
+  # ---------------------------------------------------------------------------
+  build:
+    name: "Build (multi-arch)"
+    needs: [gate]
+    if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    # The integration binaries embed absolute paths into this workspace, so a
+    # containerised GPU job has to recreate it (see "Recreate build path").
+    outputs:
+      workspace: ${{ github.workspace }}
+      # The nightly index moves every day. The integration jobs install exactly
+      # this version so the capture amdhip64 never runs against a newer ROCr
+      # than the one it was built with, however long a GPU queue is.
+      sdk_version: ${{ steps.sdk.outputs.version }}
+    runs-on: azure-linux-scale-rocm
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      # Hash the compiler by content, not mtime: the SDK wheel is reinstalled
+      # every run, so an mtime check would miss on every single object.
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: "5G"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr
+            projects/clr
+            projects/hip
+            projects/rocr-runtime
+          set-safe-directory: true
+
+      # ROCclr pulls in OpenGL through ROCclrHSA.cmake even with CLR_BUILD_OCL
+      # off, so the GL development packages are required to configure CLR.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
+            libgl1-mesa-dev libglx-dev mesa-common-dev \
+            libclang-rt-18-dev ccache xxd
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install ROCm SDK
+        id: sdk
+        run: |
+          # CppHeaderParser is required by hipamd/src/CMakeLists.txt.
+          pip install --no-cache-dir CppHeaderParser
+          pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]"
+          rocm-sdk init
+          echo "version=$(python -c 'import importlib.metadata as m; print(m.version("rocm"))')" >> "$GITHUB_OUTPUT"
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      # Nothing survived between runs before this: the artifact fan-out only
+      # reuses a build WITHIN a run. ccache is the house convention (15
+      # workflows) and is carried across runs by actions/cache (9 workflows)
+      # because azure-linux-scale-rocm is ephemeral and keeps no state.
+      #
+      # This cache is a SPEED optimisation only and can never make a stale
+      # binary look fresh. The key exists to pick a good starting point; it
+      # is ccache itself that decides reuse, and it keys on the preprocessed
+      # source plus the command line plus the compiler contents. A changed
+      # input is therefore a miss by construction -- restoring a stale cache
+      # costs misses, never a wrong object. Do not replace this with a
+      # "skip the build if the key matches" scheme: that trades a correctness
+      # property for the same speed.
+      #
+      # Restore everywhere, save only from a push to develop. A pull request can
+      # restore its own caches and the base branch's but never write to
+      # develop's scope, and a per-run entry of up to 5 GB from every PR run
+      # would evict other workflows' caches. One develop entry per push seeds
+      # every PR instead.
+      - name: Restore ccache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: hrr-ccache-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            hrr-ccache-${{ runner.os }}-
+
+      - name: Zero ccache statistics
+        run: ccache --zero-stats
+
+      # CLR is built against this tree's ROCr, never the SDK's: CLR and ROCr
+      # change together in this repo, and the nightly's ROCr lags (a CLR that
+      # calls a new hsa_amd_* API does not compile against its headers).
+      # find_package(hsa-runtime64) finds this install first via
+      # CMAKE_PREFIX_PATH below. The SDK still supplies the compiler, comgr
+      # and device libraries.
+      #
+      # libdrm, libdrm_amdgpu, libnuma and libelf come from the SDK's bundled
+      # sysdeps (soname librocm_sysdeps_*), not the apt packages above. The GPU
+      # machines and the no-ROCm container do not have the system ones, so a
+      # ROCr linked against them fails to load there (libdrm.so.2). The SDK's
+      # own ROCr links these same sysdeps.
+      - name: Build ROCr from this tree
+        run: |
+          sysdeps="${ROCM_SDK}/lib/rocm_sysdeps"
+          export PKG_CONFIG_PATH="${sysdeps}/lib/pkgconfig"
+          cmake -S projects/rocr-runtime -B build/rocr -GNinja -Wno-dev \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${sysdeps};${ROCM_SDK}" \
+            "-DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/build/rocr-install"
+          cmake --build build/rocr -j
+          cmake --install build/rocr
+
+      # -DHIP_HRR_CAPTURE_ENABLED is what compiles capture into amdhip64
+      # (hip_capture.cpp); the tree has no CMake option for it. CI always sets
+      # it, so capture is always on in the build under test.
+      - name: Build amdhip64 with the HRR capture shims
+        run: |
+          cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            "-DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED -I${GITHUB_WORKSPACE}/build/rocr-install/include -I${GITHUB_WORKSPACE}/build/rocr-install/include/hsa" \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=${GITHUB_WORKSPACE}/build/rocr-install;${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/projects/hip" \
+            -DHIP_PLATFORM=amd \
+            -DCLR_BUILD_HIP=ON \
+            -DCLR_BUILD_OCL=OFF
+          cmake --build build/clr --target amdhip64 -j
+
+      - name: Build projects/hrr for every testable architecture
+        run: |
+          # C and C++ only. CMAKE_HIP_COMPILER_LAUNCHER is deliberately NOT
+          # set: HIP device compilation fans one TU out to a code object per
+          # --offload-arch and bundles them, and ccache's handling of that
+          # multi-output bundling is not something this workflow has proven.
+          # A wrong hit there would mean testing a binary that does not match
+          # its source, which is exactly the failure mode this cache is
+          # required not to introduce. The C++ half (CLR/amdhip64, the bulk of
+          # the wall clock) is cached; extend to HIP only after a run proves
+          # the arch-embedding check still passes on a fully cached build.
+          # Host C++ is compiled against this tree's public HIP headers (and the
+          # hip_version.h the CLR build above generated) ahead of the SDK's, so
+          # an API added to the tree builds before any nightly declares it. HIP
+          # device code keeps the SDK's headers. The SDK's libamdhip64 is only
+          # linked, never run: the integration jobs put build/clr first.
+          cmake -S projects/hrr -B build/hrr -GNinja -Wno-dev \
+            "-DHRR_HIP_INCLUDE_DIRS=${GITHUB_WORKSPACE}/projects/hip/include;${GITHUB_WORKSPACE}/projects/clr/hipamd/include;${GITHUB_WORKSPACE}/build/clr/hipamd/include" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DROCM_PATH="${ROCM_SDK}" \
+            -DCMAKE_HIP_COMPILER="${ROCM_SDK}/bin/amdclang++" \
+            -DCMAKE_HIP_FLAGS="--rocm-device-lib-path=${ROCM_SDK}/lib/llvm/amdgcn/bitcode" \
+            -DGPU_TARGETS="${HRR_ARCHS}" \
+            -DCMAKE_HIP_ARCHITECTURES="${HRR_ARCHS}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=ON
+          cmake --build build/hrr -j
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats --verbose || ccache --show-stats
+
+      - name: Assert the expected integration cases are present
+        run: |
+          # Listing needs no GPU: Catch2 registers cases in static initialisers
+          # and --list-tests never calls into HIP. Checked here rather than in
+          # the integration jobs so a compiled-out case fails once, straight
+          # away, instead of nine times after the fan-out.
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          python3 projects/hrr/tests/scripts/hrr_test_config.py check \
+            --binary build/hrr/tests/integration/hrr-integration-tests \
+            --config projects/hrr/tests/config/integration.yaml
+
+      - name: Confirm every architecture is embedded
+        run: |
+          found=$("${ROCM_SDK}"/lib/llvm/bin/llvm-objdump --offloading \
+            build/hrr/tests/integration/hrr-integration-tests \
+            | grep -o 'gfx[0-9a-z]*' | sort -u | tr '\n' ' ')
+          echo "embedded: ${found}"
+          for arch in ${HRR_ARCHS//;/ }; do
+            case " ${found} " in
+              *" ${arch} "*) ;;
+              *) echo "::error::${arch} missing from the fat binary"; exit 1 ;;
+            esac
+          done
+
+      - name: Save ccache
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: hrr-ccache-${{ runner.os }}-${{ github.run_id }}
+
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-build
+          path: |
+            build/hrr
+            build/clr/hipamd/lib
+            build/rocr-install/lib
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Integration check for every family that has a test runner.
+  #
+  # This job is the PR check. It runs on a hosted runner and dispatches the
+  # GPU work as its own workflow run. timeout-minutes does not include queue
+  # time, and cancelling one job inside this run would cancel the run, so a
+  # family that has no runner within 30 minutes is cancelled over there and
+  # reported green here. A device-less runner is handled inside the GPU job
+  # the same way: skip the suite, upload a skipped result, exit 0. A push to
+  # develop uses this same result. A suite failure or the execution timeout
+  # still fails the job.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: "Integration (${{ matrix.family }})"
+    needs: [gate, ci_config, build]
+    if: ${{ github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: read
+    # 30 minutes of queue, then the GPU job's own 30 minute execution cap,
+    # plus time to publish the JUnit.
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { family: gfx90a, container: true, runner: "${{ needs.ci_config.outputs.gfx90a_runner }}" }
+          # gfx94x uses the resolved 1-GPU runner: the 8-GPU gfx942 pool
+          # exposes /dev/kfd only to a job with a container spec.
+          - { family: gfx94x, runner: "${{ needs.ci_config.outputs.gfx94x_runner }}" }
+          # The T3 tier needs two visible devices and there is no 2-GPU pool,
+          # so gfx950 takes an 8-GPU machine; every other family skips T3.
+          # Do not pin HIP_VISIBLE_DEVICES: on the CCS pool fixed indices can
+          # be empty even though the job has GPUs.
+          - { family: gfx950, container: true, runner: "linux-gfx950-8gpu-ccs-ossci-rocm" }
+          - { family: gfx103x, runner: "${{ needs.ci_config.outputs.gfx103x_runner }}" }
+          - { family: gfx110x, runner: "${{ needs.ci_config.outputs.gfx110x_runner }}" }
+          - { family: gfx120x, runner: "${{ needs.ci_config.outputs.gfx120x_runner }}" }
+          - { family: gfx1151, runner: "${{ needs.ci_config.outputs.gfx1151_runner }}" }
+          # Not exposed by resolve-ci-config; taken from TheRock's family matrix.
+          - { family: gfx1150, runner: "linux-gfx1150-gpu-rocm" }
+          - { family: gfx1153, runner: "linux-gfx1153-gpu-rocm" }
+          # gfx1250 (MI455) is withheld until linux-mi455-gpu-rocm is healthy.
+          # If it is wanted sooner, add it as a separate non-blocking job, as
+          # therock-ci.yml does, so the report job never waits on that queue:
+          #
+          #   - { family: gfx1250, runner: "linux-mi455-gpu-rocm" }
+    steps:
+      - name: Checkout schedule helper
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: projects/hrr/tests/scripts/hrr_ci_schedule.py
+          sparse-checkout-cone-mode: false
+          set-safe-directory: true
+
+      - name: Dispatch GPU integration
+        id: gpu
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          # A branch, not a SHA: workflow_dispatch selects its workflow file
+          # from this ref. The GPU job then checks out BUILD_SHA, which is
+          # the commit this run compiled (the pull request's merge commit, or
+          # the pushed commit). The branch tip can move while the build runs.
+          REF: ${{ github.head_ref || github.ref_name }}
+          BUILD_SHA: ${{ github.sha }}
+          FAMILY: ${{ matrix.family }}
+          RUNNER: ${{ matrix.runner }}
+          USE_CONTAINER: ${{ matrix.container && 'true' || 'false' }}
+          SDK_VERSION: ${{ needs.build.outputs.sdk_version }}
+          BUILD_WORKSPACE: ${{ needs.build.outputs.workspace }}
+          BUILD_RUN_ID: ${{ github.run_id }}
+          IGNORE_TEST_CONFIG: ${{ inputs.ignore_test_config && 'true' || 'false' }}
+          # run_attempt changes on "Rerun failed jobs". The run id does not, so
+          # without it the previous GPU run is still listed under this title.
+          DISPATCH_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.family }}
+        run: |
+          set -euo pipefail
+          title="hrr-gpu-${DISPATCH_ID}"
+          sched="projects/hrr/tests/scripts/hrr_ci_schedule.py"
+          # Runs already using this title belong to an earlier dispatch.
+          seen="$(gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 40 \
+            --json databaseId,displayTitle,name,event \
+            --jq "[.[] | select(.event==\"workflow_dispatch\" and (.displayTitle==\"${title}\" or .name==\"${title}\")) | .databaseId] | join(\" \")" \
+            || true)"
+          set +e
+          dispatch_out="$(gh workflow run hrr-ci.yml --ref "${REF}" \
+            -f gpu_only=true \
+            -f "family=${FAMILY}" \
+            -f "runner=${RUNNER}" \
+            -f "use_container=${USE_CONTAINER}" \
+            -f "sdk_version=${SDK_VERSION}" \
+            -f "build_workspace=${BUILD_WORKSPACE}" \
+            -f "build_run_id=${BUILD_RUN_ID}" \
+            -f "build_sha=${BUILD_SHA}" \
+            -f "dispatch_id=${DISPATCH_ID}" \
+            -f "ignore_test_config=${IGNORE_TEST_CONFIG}" 2>&1)"
+          dispatch_rc=$?
+          set -e
+          printf '%s\n' "${dispatch_out}"
+          if [ "${dispatch_rc}" -ne 0 ]; then
+            exit "${dispatch_rc}"
+          fi
+
+          # gh prints the new run URL once it exists. Prefer that id. A URL
+          # that was already in the list is the previous attempt.
+          printed=""
+          while IFS= read -r line; do
+            case "${line}" in
+              *actions/runs/[0-9]*)
+                printed="${line##*/}"
+                printed="${printed%%[^0-9]*}"
+                break
+                ;;
+            esac
+          done <<EOF
+          ${dispatch_out}
+          EOF
+          case " ${seen} " in
+            *" ${printed} "*) printed="" ;;
+          esac
+
+          run_id=""
+          if [ -n "${printed}" ]; then
+            run_id="${printed}"
+          else
+            for _ in $(seq 1 24); do
+              listing="$(gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 40 \
+                --json databaseId,displayTitle,name,event,createdAt || true)"
+              run_id="$(printf '%s' "${listing}" | python3 "${sched}" --choose-run \
+                --title "${title}" --seen "${seen}" || true)"
+              if [ -n "${run_id}" ]; then
+                break
+              fi
+              sleep 5
+            done
+          fi
+          if [ -z "${run_id}" ]; then
+            echo "::error::GPU workflow run ${title} did not appear"
+            gh run list --workflow hrr-ci.yml --branch "${REF}" --limit 10 \
+              --json databaseId,displayTitle,event,status || true
+            exit 1
+          fi
+          echo "${run_id}" > "${GITHUB_WORKSPACE}/gpu-run-id.txt"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
+
+          action="poll"
+          while true; do
+            job_status="$(gh run view "${run_id}" --json jobs \
+              --jq "[.jobs[] | select(.name==\"Integration GPU (${FAMILY})\")][0].status // empty" \
+              || true)"
+            run_status="$(gh run view "${run_id}" --json status --jq .status || true)"
+            action="$(python3 "${sched}" --elapsed "${SECONDS}" \
+              --status "${job_status}" --run-status "${run_status}")"
+            if [ "${action}" != "poll" ]; then
+              break
+            fi
+            sleep 20
+          done
+
+          if [ "${action}" = "skip" ]; then
+            gh run cancel "${run_id}" || true
+            echo "::notice title=Integration skipped::${FAMILY} was not scheduled within 30 minutes"
+            python3 "${sched}" --write-skip "integration-${FAMILY}.xml" \
+              --message "not scheduled within 30 minutes"
+            echo "conclusion=skipped" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          exec_deadline=$((SECONDS + 40 * 60))
+          while [ "${SECONDS}" -lt "${exec_deadline}" ]; do
+            run_status="$(gh run view "${run_id}" --json status --jq .status || true)"
+            if [ "${run_status}" = "completed" ]; then
+              break
+            fi
+            sleep 20
+          done
+          run_status="$(gh run view "${run_id}" --json status --jq .status)"
+          if [ "${run_status}" != "completed" ]; then
+            echo "::error::GPU integration ${FAMILY} did not finish"
+            echo "conclusion=failure" >> "${GITHUB_OUTPUT}"
+            exit 1
+          fi
+          job_conclusion="$(gh run view "${run_id}" --json jobs \
+            --jq "[.jobs[] | select(.name==\"Integration GPU (${FAMILY})\")][0].conclusion // empty" \
+            || true)"
+          run_conclusion="$(gh run view "${run_id}" --json conclusion --jq .conclusion)"
+          if [ -z "${job_conclusion}" ] || [ "${job_conclusion}" = "skipped" ]; then
+            job_conclusion="${run_conclusion}"
+          fi
+          echo "conclusion=${job_conclusion}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download GPU results
+        if: ${{ success() && steps.gpu.outputs.conclusion != 'skipped' && steps.gpu.outputs.conclusion != '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: .
+          run-id: ${{ steps.gpu.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Propagate GPU result
+        if: ${{ success() && steps.gpu.outputs.conclusion != 'success' && steps.gpu.outputs.conclusion != 'skipped' }}
+        run: |
+          echo "::error::GPU integration ${{ matrix.family }} finished ${{ steps.gpu.outputs.conclusion }}"
+          exit 1
+
+      - name: Cancel unfinished GPU run
+        if: cancelled() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f gpu-run-id.txt ]; then
+            id="$(cat gpu-run-id.txt)"
+            status="$(gh run view "${id}" --json status --jq .status || true)"
+            if [ -n "${status}" ] && [ "${status}" != "completed" ]; then
+              gh run cancel "${id}" || true
+            fi
+          fi
+
+  # ---------------------------------------------------------------------------
+  # The GPU suite for one family. Started by the integration job above via
+  # workflow_dispatch, so its queue can be cancelled without cancelling the PR.
+  # ---------------------------------------------------------------------------
+  integration_gpu:
+    # A skipped job does not evaluate its name, so an expression here is shown
+    # as text on the pull request. The run name carries the family.
+    name: Integration GPU
+    if: ${{ github.event.inputs.gpu_only == 'true' }}
+    # A pull request does not define this input. Keep a real label here so the
+    # skipped job still parses; gpu_only replaces it with the family runner.
+    runs-on: ${{ github.event.inputs.gpu_only == 'true' && github.event.inputs.runner || 'ubuntu-24.04' }}
+    permissions:
+      actions: read
+      contents: read
+    # The suite runs in about 90 seconds. These are scarce single-GPU machines
+    # and the default timeout is six hours, so a workload that deadlocks on one
+    # part would hold a runner for the rest of the day and publish no log to
+    # say why. Fail instead, while the log still gets uploaded. Queue time is
+    # not part of this budget; the dispatcher owns that.
+    timeout-minutes: 30
+    # The OSSCI pod pools (gfx90a, gfx950) expose /dev/kfd only to a job with
+    # a container spec: run bare there and hipGetDeviceCount returns 100 with
+    # no devices. Every other pool is a bare machine and gets no container,
+    # since a null image runs the job directly on the runner.
+    container:
+      image: ${{ github.event.inputs.use_container == 'true' && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' || null }}
+      options: >-
+        --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 110
+        --group-add 993
+        --group-add 992
+        --ulimit memlock=-1:-1
+        --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --user 0:0
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Only the test runner: this job compiles nothing and takes its binaries
+      # from the build artifact. It has to come first, because checkout cleans
+      # the workspace and would delete an artifact unpacked before it.
+      # build_sha is the parent run's commit. Without it, this checkout follows
+      # the branch named in the dispatch and can pick up a newer config than
+      # the binaries.
+      - name: Checkout test runner
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.build_sha || github.sha }}
+          sparse-checkout: |
+            projects/hrr/tests/scripts/run_catch2.py
+            projects/hrr/tests/scripts/hrr_test_config.py
+            projects/hrr/tests/scripts/hrr_ci_schedule.py
+            projects/hrr/tests/config/integration.yaml
+          sparse-checkout-cone-mode: false
+          set-safe-directory: true
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      # Invoked through "python -m" and by script path throughout: on some of
+      # these self-hosted machines the console-script wrappers cannot execute,
+      # and the system Python has no ensurepip to build a virtualenv with.
+      - name: Install ROCm SDK
+        env:
+          SDK_VERSION: ${{ inputs.sdk_version }}
+        run: |
+          # devel as well as libraries: rocm-sdk init refuses to run without it.
+          # The version the build job used, not whatever the index has now.
+          python -m pip install --no-cache-dir \
+            --index-url "${ROCM_INDEX_URL}" "rocm[libraries,devel]${SDK_VERSION:+==${SDK_VERSION}}"
+          # Run as a module where possible. Falling back to the script means
+          # locating it: some of these machines install into a --user bin that
+          # is not on PATH, leaving command -v empty.
+          if ! python -m rocm_sdk init; then
+            cli="$(command -v rocm-sdk || true)"
+            if [ -z "${cli}" ]; then
+              cli="$(python -c 'import site;print(site.USER_BASE)')/bin/rocm-sdk"
+            fi
+            python "${cli}" init
+          fi
+          echo "ROCM_SDK=$(python -c 'import _rocm_sdk_devel,os;print(os.path.dirname(_rocm_sdk_devel.__file__))')" >> "$GITHUB_ENV"
+
+      # Unpacked under build/ so the tree matches the build machine's layout.
+      # The suite spawns each workload by re-execing HRR_TEST_EXE, which CMake
+      # bakes in as an absolute path, so the binary has to sit where it was
+      # built or every workload dies in execvp with 127.
+      - name: Download build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-build
+          path: build
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore executable bits
+        run: chmod +x build/hrr/playback/hrr-playback build/hrr/tests/*/hrr-*tests
+
+      # In a container the workspace is /__w/..., while HRR_TEST_EXE,
+      # HRR_PLAYBACK_EXE and the SDK RUNPATH were baked on the build machine.
+      # The tests re-exec /proc/self/exe, because a symlink to the checkout
+      # created on the container root can sit on a noexec mount: test -x
+      # succeeds and execve returns EACCES, which the suite reports as 127.
+      # The tool-cache link is what makes that RUNPATH resolve when a child
+      # cannot use LD_LIBRARY_PATH. ln -sfn will not replace a real directory.
+      - name: Recreate build path
+        env:
+          BUILD_WORKSPACE: ${{ inputs.build_workspace }}
+        run: |
+          # Never delete a real directory. On a shared host the baked path can
+          # be another runner's checkout. Only create the link when the path
+          # is missing or is already a symlink.
+          link_into() {
+            local path="$1" target="$2"
+            if [ -e "${path}" ] && [ ! -L "${path}" ]; then
+              echo "::error::${path} exists and is not a symlink; not deleting it"
+              exit 1
+            fi
+            mkdir -p "$(dirname "${path}")"
+            ln -sfn "${target}" "${path}"
+          }
+          if [ -n "${BUILD_WORKSPACE}" ] && [ "${BUILD_WORKSPACE}" != "${PWD}" ]; then
+            link_into "${BUILD_WORKSPACE}" "${PWD}"
+          fi
+          # Build-machine SDK path -> this container's tool cache.
+          if [ -d /__w/_tool ]; then
+            link_into /home/runner/_work/_tool /__w/_tool
+          fi
+          exe="${BUILD_WORKSPACE:-${PWD}}/build/hrr/tests/integration/hrr-integration-tests"
+          if [ ! -x "${exe}" ]; then
+            echo "::error::baked test binary is not executable: ${exe} (PWD=${PWD})"
+            ls -ld "${BUILD_WORKSPACE}" "${PWD}/build/hrr/tests/integration" || true
+            exit 1
+          fi
+
+      # CMake gives the binaries a RUNPATH to the SDK's lib directory, where
+      # the plain amdhip64 lives. LD_LIBRARY_PATH is searched before RUNPATH, so
+      # putting the capture build first here is what selects it.
+      - name: Run integration suite
+        env:
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        run: |
+          # Use a PyYAML that is already importable. Forcing 6.0.1 uninstalls
+          # 6.0.3 on runners whose site-packages is read-only.
+          python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
+          # hipamd/lib holds the amdhip64 carrying the capture shims and must
+          # precede the SDK, which ships a plain build under the same soname.
+          # rocr-install/lib is the ROCr built from this tree, which hipamd/lib's
+          # amdhip64 was compiled against; it must precede the SDK's ROCr.
+          # Keep the runner's existing path: setup-python puts libpython there,
+          # and replacing it makes python3 fail to start on some GPU machines.
+          # rocm_sysdeps/lib holds the librocm_sysdeps_* libraries that rocr-install's
+          # libhsa-runtime64 links (drm, numa, elf); it has no RUNPATH of its own.
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          # A labelled runner with no visible device is an infrastructure miss.
+          # Skip the suite and leave a skipped result so the check stays green.
+          # Exit 1 is "confirmed no device". Any other probe failure (broken
+          # ctypes, missing libpython) is not a device count and must not
+          # skip the GPU suite.
+          set +e
+          python3 - <<'PY'
+          import sys
+
+          try:
+              import ctypes
+              hip = ctypes.CDLL("libamdhip64.so.7")
+              count = ctypes.c_int()
+              status = hip.hipGetDeviceCount(ctypes.byref(count))
+          except Exception as exc:
+              print(f"GPU probe unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+              sys.exit(2)
+          print(f"hipGetDeviceCount: status={status}, devices={count.value}")
+          sys.exit(0 if status == 0 and count.value > 0 else 1)
+          PY
+          probe_rc=$?
+          set -e
+          if [ "$probe_rc" -eq 1 ]; then
+            echo "::notice title=Integration skipped::GPU runner has no visible ROCm-capable device"
+            python3 projects/hrr/tests/scripts/hrr_ci_schedule.py \
+              --write-skip "integration-${{ inputs.family }}.xml" \
+              --message "GPU runner has no visible ROCm-capable device"
+            exit 0
+          fi
+          # Keep passing logs to one result line per case. The wrapper captures
+          # Catch2 and subprocess output, and only emits it when the suite fails.
+          # Time out inside the job's 30 minutes, so a hang prints the cases
+          # that finished instead of being cancelled with no output.
+          #
+          # Which cases run is the suite config, not a selector written here.
+          # It lists the hidden [hrr] drivers (T0-T4, the kernel-argument
+          # regression, the HSA first-touch case) and leaves out the direct
+          # workloads they spawn, T5, and [hrr-repro]. --arch auto reads the
+          # GPU this machine actually has, so a rule can name one architecture
+          # of a wildcard pool. HRR_TEST_IGNORE_CONFIG runs the skipped cases.
+          python3 projects/hrr/tests/scripts/run_catch2.py \
+            --xml integration-${{ inputs.family }}.xml --timeout 1200 \
+            --config projects/hrr/tests/config/integration.yaml \
+            --os linux --arch auto \
+            -- ./build/hrr/tests/integration/hrr-integration-tests
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ inputs.family }}
+          path: integration-${{ inputs.family }}.xml
+          retention-days: 3
+
+  # ---------------------------------------------------------------------------
+  # Per-test reporting for every job above. Collected centrally because the
+  # publishing action is a container action and so cannot run on the Windows
+  # runners.
+  # ---------------------------------------------------------------------------
+  report:
+    name: "Test results"
+    needs: [gate, unit, integration]
+    if: ${{ always() && github.event.inputs.gpu_only != 'true' && needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Checkout summary script
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hrr/tests/scripts/summarize_junit.py
+          sparse-checkout-cone-mode: false
+          set-safe-directory: true
+
+      - name: Download all results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: results-*
+          merge-multiple: true
+
+      - name: Platform / family table
+        if: always()
+        run: |
+          # Written first so it sits above EnricoMi's suite dump on the job
+          # summary and on the HRR test results check page.
+          python3 projects/hrr/tests/scripts/summarize_junit.py \
+            --dir . \
+            --summary "${GITHUB_STEP_SUMMARY}"
+
+      - name: Publish
+        # Runs even when the table step exits 1 on unreadable XML.
+        if: always()
+        uses: EnricoMi/publish-unit-test-result-action@d0a4676d0e0b938bc201470d88276b7c74c712b3 # v2.24.0
+        with:
+          files: "*.xml"
+          check_name: "HRR test results"
+          comment_mode: "off"
+          # Fork pull requests get a read-only token, and creating a check run
+          # then fails with "Resource not accessible by integration". They keep
+          # the job summary, which needs no token.
+          check_run: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
+          job_summary: true
+          report_individual_runs: true
+          deduplicate_classes_by_file_name: true
+
+  # ---------------------------------------------------------------------------
+  # Single required-check target. Passes when the path gate skipped everything
+  # and when every job that ran succeeded; fails on any failure or cancellation,
+  # and on a skip the gate does not explain. Fork PRs skip build and integration
+  # on purpose, so those skips are accepted there.
+  # ---------------------------------------------------------------------------
+  hrr_ci_summary:
+    name: "HRR CI Summary"
+    if: ${{ always() && github.event.inputs.gpu_only != 'true' }}
+    needs: [gate, codegen, unit, ci_config, build, integration, report]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Evaluate
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          result = {name: job["result"] for name, job in needs.items()}
+          print(json.dumps(result, indent=2))
+
+          if result["gate"] != "success":
+              print("::error::path gate did not complete: " + result["gate"])
+              sys.exit(1)
+          if needs["gate"]["outputs"].get("run") != "true":
+              print("HRR CI skipped: the pull request changes no HRR path.")
+              sys.exit(0)
+
+          fork = os.environ["IS_FORK"] == "true"
+          optional = {"build", "integration"} if fork else set()
+          bad = [n for n, r in result.items()
+                 if r not in ("success",) and not (r == "skipped" and n in optional)]
+          if bad:
+              print("::error::HRR CI jobs not successful: " + ", ".join(sorted(bad)))
+              sys.exit(1)
+          PY

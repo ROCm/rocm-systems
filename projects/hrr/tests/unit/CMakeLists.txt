@@ -18,10 +18,10 @@ set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON)
 
-# ${CMAKE_CURRENT_SOURCE_DIR}/.. makes the local harness headers
-# (hrr_test_common.hh, hrr_test_process.hh) available. hrr_reader.h,
-# hip_playback.h, and hrr/hrr_api_args.h come transitively from hrr::reader.
-target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+# ../include makes the local harness headers (hrr_test_common.hh,
+# hrr_test_process.hh) available. hrr_reader.h, hip_playback.h, and
+# hrr/hrr_api_args.h come transitively from hrr::reader.
+target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader

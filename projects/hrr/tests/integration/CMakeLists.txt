@@ -32,9 +32,11 @@
 # wait on a planted FIFO.
 #
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
-# api_matrix.yaml.  Regenerate after an upstream classification change with:
-#   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
-#       <this dir>/hrr_api_matrix_expectations.h
+# api_matrix.yaml, both in ../../tools/api-matrix.  The build never runs the
+# generators.  Regenerate after an upstream classification change or an
+# api_matrix.yaml edit, from ../../tools/api-matrix:
+#   ./derive_manifest.py
+#   ./check_matrix.py --emit-cxx
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
@@ -109,10 +111,10 @@ elseif(HIP_PLATFORM STREQUAL "nvidia")
                               COMPILE_OPTIONS "--default-stream=per-thread")
 endif()
 
-# ${CMAKE_CURRENT_SOURCE_DIR}/.. -> local harness headers.
+# ../include -> local harness headers.
 # ../../playback -> hrr_reader.h / hip_playback.h (also propagated by hrr::reader).
 target_include_directories(hrr-integration-tests PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../include
   ${CMAKE_CURRENT_SOURCE_DIR}/../../playback
 )
 
@@ -133,6 +135,11 @@ target_link_libraries(hrr-integration-tests PRIVATE
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
+  # hsa-runtime64 is REQUIRED and linked just above, so the cases that call HSA
+  # directly can compile here. Define the macro they are guarded by next to the
+  # dependency so the two cannot drift apart; without it those cases vanish from
+  # the binary with no signal. tests/config/integration.yaml is the backstop.
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
   # executable exports only what its link-time libraries reference, and the

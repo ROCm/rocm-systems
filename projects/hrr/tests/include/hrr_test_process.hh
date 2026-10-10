@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -159,6 +160,11 @@ class SpawnProc {
         ::close(pipefd[1]);
       }
       ::execvp(exe_.c_str(), argv.data());
+      // 127 with no message is otherwise indistinguishable from a missing
+      // dynamic library. The loader writes its own line; this covers the
+      // execve failure itself (ENOENT, EACCES on a noexec mount).
+      dprintf(STDERR_FILENO, "hrr spawn: exec '%s': %s\n", exe_.c_str(),
+              strerror(errno));
       ::_exit(127);
     }
 
