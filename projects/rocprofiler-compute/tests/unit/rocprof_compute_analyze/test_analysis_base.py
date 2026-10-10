@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from utils import schema
 
 MODULE = "rocprof_compute_analyze.analysis_base"
 
@@ -42,6 +43,34 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 # ---------------------------------------------------------------------------
 # pre_processing output_format dispatch
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "option_name,workload_attr,values",
+    [
+        ("gpu_kernel", "filter_kernel_ids", [[0], [1]]),
+        ("gpu_id", "filter_gpu_ids", [["0"], ["1"]]),
+        ("gpu_dispatch_id", "filter_dispatch_ids", [["1"], [">2"]]),
+    ],
+)
+@pytest.mark.parametrize("singleton", [True, False], ids=["repeat", "per-path"])
+def test_pre_processing_assigns_filters_to_each_workload(
+    tmp_path, monkeypatch, option_name, workload_attr, values, singleton
+):
+    common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+    paths = [str(tmp_path / name) for name in ("first", "second")]
+    runs = {path: schema.Workload() for path in paths}
+    args = argparse.Namespace(output_format="stdout", **PRE_PROCESSING_ARGS)
+    args.path = [[path] for path in paths]
+    setattr(args, option_name, values[:1] if singleton else values)
+    analyzer = OmniAnalyze_Base(args, {})
+    monkeypatch.setattr(analyzer, "initalize_runs", lambda: runs)
+    monkeypatch.setattr(analyzer, "prepare_output_directory", lambda: None)
+
+    analyzer.pre_processing()
+
+    expected = [values[0], values[0]] if singleton else values
+    assert [getattr(runs[path], workload_attr) for path in paths] == expected
 
 
 def test_pre_processing_txt_creates_named_file(tmp_path, monkeypatch) -> None:

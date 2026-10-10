@@ -3,7 +3,10 @@
 
 """Integration tests for kernel iteration filtering during profiling."""
 
+from pathlib import Path
+
 import common
+import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
@@ -21,6 +24,11 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
 
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 1)
     assert sorted(list(file_dict.keys())) == CSVS
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    assert results_files
+    for results_file in results_files:
+        assert set(pd.read_csv(results_file)["Dispatch_ID"]) == {1}
+    assert set(common.read_counter_results(workload_dir)["Dispatch_ID"]) == {1}
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -32,6 +40,11 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
 
     file_dict = integration_common.check_csv_files(workload_dir, num_devices, 2)
     assert sorted(list(file_dict.keys())) == CSVS
+    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    assert results_files
+    for results_file in results_files:
+        assert set(pd.read_csv(results_file)["Dispatch_ID"]) == {1, 2}
+    assert set(common.read_counter_results(workload_dir)["Dispatch_ID"]) == {1, 2}
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

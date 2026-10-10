@@ -3,7 +3,6 @@
 
 """Integration tests for assorted profile CLI options."""
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -22,7 +21,9 @@ from tests.integration.common import (
 
 @pytest.mark.misc
 def test_analyze_rocpd(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    tmp_path,
 ):
     skip_unsupported_roofline_soc()
 
@@ -31,8 +32,11 @@ def test_analyze_rocpd(
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     db_name = "test"
+    analysis_dir = tmp_path / "analysis"
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
+        "--output-directory",
+        str(analysis_dir),
         "--output-format",
         "db",
         "--output-name",
@@ -41,7 +45,9 @@ def test_analyze_rocpd(
         workload_dir,
     ])
     assert code == 0
-    assert os.path.isfile(f"{db_name}.db")
+    database_path = analysis_dir / f"{db_name}.db"
+    assert database_path.is_file()
+    common.check_analysis_db(database_path, expected_workloads=1)
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py
@@ -69,7 +75,7 @@ def test_analyze_rocpd(
     }
 
     def check_cols(table_name, orm_obj):
-        conn = sqlite3.connect(f"{db_name}.db")
+        conn = sqlite3.connect(database_path)
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA table_info('{table_name}');")
         columns = cursor.fetchall()
@@ -81,7 +87,7 @@ def test_analyze_rocpd(
     for table_name, orm_obj in table_name_map.items():
         check_cols(table_name, orm_obj)
 
-    os.remove(f"{db_name}.db")
+    database_path.unlink()
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -106,6 +112,7 @@ def test_save_csv(
 
     csv_dir = Path(analysis_workload_dir)
     assert csv_dir.is_dir()
+    common.check_analysis_csv_dir(csv_dir)
 
     expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
     for csv_name in expected_view_csvs:
@@ -151,6 +158,6 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
     assert sorted(list(file_dict.keys())) == CSVS
 
-    # TODO - verify expected device id in results
+    # --device selects the GPU used by the roofline benchmark.
 
     common.clean_output_dir(config["cleanup"], workload_dir)

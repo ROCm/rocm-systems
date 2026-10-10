@@ -13,14 +13,18 @@ name each architecture would request and assert its source defines it.
 No GPU is required; the sources are plain strings built in the constructor.
 """
 
+import csv
 import fcntl
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
+from tests.common import check_roofline_csv
 
 try:
     from roofline.benchmark.gfx9.benchmark_gfx90a import Bench_gfx90a
@@ -265,3 +269,98 @@ def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
     assert "Waiting for GPU 0" in output
     assert "another rocprof-compute benchmark is in progress" in output
     assert "Acquired lock for GPU 0" in output
+
+
+@pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
+def test_run_benchmark_skips_unsupported_callbacks(bench_class, monkeypatch, tmp_path):
+    """Unsupported benchmark callbacks never run and export zero triplets."""
+    bench = bench_class(0, dict(CACHE_SIZES))
+    calls = []
+    supported_metrics = benchmark_base.PerfMetrics(20.0, 19.0, 21.0)
+
+    def callback(name):
+        def run(device):
+            assert device == 0
+            assert name not in bench.unsupported_data_types
+            calls.append(name)
+            return supported_metrics
+
+        return run
+
+    bench.tests = {name: callback(name) for name in bench.tests}
+    monkeypatch.setattr(bench, "gpu_benchmark_lock", lambda device: nullcontext())
+    monkeypatch.setattr(bench, "get_gfx_arch", lambda device: "test-arch")
+    monkeypatch.setattr(
+        benchmark_base.hip,
+        "hipGetDeviceProperties",
+        lambda device: SimpleNamespace(multiProcessorCount=120),
+    )
+
+    metrics = bench.run_benchmark(0)
+    expected_calls = [
+        name for name in bench.tests if name not in bench.unsupported_data_types
+    ]
+    assert calls == expected_calls
+    assert set(metrics) == set(bench.tests)
+    for name, values in metrics.items():
+        expected = (
+            benchmark_base.PerfMetrics(0, 0, 0)
+            if name in bench.unsupported_data_types
+            else supported_metrics
+        )
+        assert values == expected
+
+    csv_path = tmp_path / "roofline.csv"
+    bench.dump_csv(metrics, str(csv_path))
+    allowed_zero = {
+        bench.csv_cols_map[name]
+        for name in bench.unsupported_data_types
+        if name in bench.csv_cols_map
+    }
+    frame = check_roofline_csv(csv_path, allowed_zero=allowed_zero)
+    assert frame["device"].tolist() == [0]
+    if bench_class is Bench_gfx942:
+        assert allowed_zero == {
+            "MFMAF4Flops",
+            "MFMAF6Flops",
+            "MFMAF6F4Flops",
+            "MFMAMXF8Flops",
+        }
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert len(rows) == 2
+    for name in bench.unsupported_data_types:
+        if name in bench.csv_cols_map:
+            index = rows[0].index(bench.csv_cols_map[name])
+            assert rows[1][index : index + 3] == ["0", "0", "0"]
+
+
+def test_dump_csv_preserves_device_and_ordered_metric_triplets(tmp_path):
+    """CSV mean/Low/High columns retain map order and their matching values."""
+    bench = benchmark_base.Bench_base(0, {})
+    bench.csv_cols_map = {"F32": "FP32Flops", "HBM": "HBMBw", "I8": "I8Ops"}
+    metrics = {
+        "HBM": benchmark_base.PerfMetrics(200, 190, 210),
+        "I8": benchmark_base.PerfMetrics(300, 290, 310),
+        "F32": benchmark_base.PerfMetrics(100, 90, 110),
+    }
+    csv_path = tmp_path / "roofline.csv"
+
+    bench.dump_csv(metrics, str(csv_path))
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        assert list(csv.reader(handle)) == [
+            [
+                "device",
+                "FP32Flops",
+                "FP32FlopsLow",
+                "FP32FlopsHigh",
+                "HBMBw",
+                "HBMBwLow",
+                "HBMBwHigh",
+                "I8Ops",
+                "I8OpsLow",
+                "I8OpsHigh",
+            ],
+            ["0", "100", "90", "110", "200", "190", "210", "300", "290", "310"],
+        ]

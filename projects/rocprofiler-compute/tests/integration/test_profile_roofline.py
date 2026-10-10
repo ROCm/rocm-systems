@@ -9,6 +9,7 @@ from pathlib import Path
 import common
 import pytest
 
+from roofline.run_benchmark import load_bench
 from tests.integration import common as integration_common
 from tests.integration.common import (
     ROOF_ONLY_FILES,
@@ -17,6 +18,21 @@ from tests.integration.common import (
     num_kernels,
     skip_unsupported_roofline_soc,
 )
+
+
+def check_gpu_roofline_csv(workload_dir):
+    """Validate benchmark values, allowing zeros only for unsupported types."""
+    bench = load_bench(0, {})
+    allowed_zero = {
+        bench.csv_cols_map[name]
+        for name in bench.unsupported_data_types
+        if name in bench.csv_cols_map
+    }
+    frame = common.check_roofline_csv(
+        Path(workload_dir) / "roofline.csv", allowed_zero=allowed_zero
+    )
+    assert frame["device"].tolist() == [0]
+    return frame
 
 
 @pytest.mark.roofline_validation
@@ -34,6 +50,7 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     )
 
     assert returncode == 0
+    check_gpu_roofline_csv(workload_dir)
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -54,13 +71,8 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
             config, workload_dir, options, check_success=False, roof=True
         )
 
-        if returncode == 0:
-            roofline_csv = f"{workload_dir}/roofline.csv"
-            if os.path.exists(roofline_csv):
-                import pandas as pd
-
-                df = pd.read_csv(roofline_csv)
-                assert len(df) >= 0
+        assert returncode == 0
+        check_gpu_roofline_csv(workload_dir)
 
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
@@ -79,7 +91,7 @@ def test_roof_rocpd(
 
     # Validate profile outputs
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    assert (Path(workload_dir) / "roofline.csv").exists()
+    check_gpu_roofline_csv(workload_dir)
 
     # A roof-only workload has no PMC result artifacts to read.
     code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
@@ -227,7 +239,7 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     assert returncode == 0
 
     # Verify CSV
-    assert (Path(workload_dir) / "roofline.csv").exists()
+    check_gpu_roofline_csv(workload_dir)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -251,6 +263,8 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
             config, workload_dir, options, check_success=False, roof=True
         )
 
+        assert returncode == 0
+        check_gpu_roofline_csv(workload_dir)
         common.clean_output_dir(config["cleanup"], workload_dir)
     else:
         pytest.skip("plotext not available for CLI testing")
@@ -263,9 +277,11 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     options = ["--device", "0", "--roof-only"]
     workload_dir = common.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+    returncode = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=False, roof=True
     )
+    assert returncode == 0
+    check_gpu_roofline_csv(workload_dir)
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -289,6 +305,7 @@ def test_bench_only_basic(binary_handler_profile_rocprof_compute):
     workload_path = Path(workload_dir)
     roofline_csv = workload_path / "roofline.csv"
     assert roofline_csv.exists(), f"Expected {roofline_csv} to be created"
+    check_gpu_roofline_csv(workload_dir)
     # Bench-only must not produce profiling artifacts
     assert not (workload_path / "perfmon").exists()
     assert not (workload_path / "sysinfo.csv").exists()
@@ -370,7 +387,7 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
 
     assert returncode == 0, "Roofline profiling should succeed"
 
-    assert (Path(workload_dir) / "roofline.csv").exists()
+    check_gpu_roofline_csv(workload_dir)
 
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
