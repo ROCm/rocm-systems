@@ -30,6 +30,42 @@ HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(float)
 HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(char)
 HIP_GET_SYMBOL_SIZE_ADDRESS_DEFINE_GLOBALS(double)
 
+// Not using macros for the new tests because make its less readable and harder to find what exactly
+// is going on, so spell it out verbosely.
+__managed__ int managed_int_var = 0;
+__managed__ int managed_int_arr[kArraySize] = {};
+__managed__ float managed_float_var = 0;
+__managed__ float managed_float_arr[kArraySize] = {};
+__managed__ char managed_char_var = 0;
+__managed__ char managed_char_arr[kArraySize] = {};
+__managed__ double managed_double_var = 0;
+__managed__ double managed_double_arr[kArraySize] = {};
+
+__global__ void ManagedIntVarAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(&managed_int_var) == ptr;
+}
+__global__ void ManagedIntArrAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(managed_int_arr) == ptr;
+}
+__global__ void ManagedFloatVarAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(&managed_float_var) == ptr;
+}
+__global__ void ManagedFloatArrAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(managed_float_arr) == ptr;
+}
+__global__ void ManagedCharVarAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(&managed_char_var) == ptr;
+}
+__global__ void ManagedCharArrAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(managed_char_arr) == ptr;
+}
+__global__ void ManagedDoubleVarAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(&managed_double_var) == ptr;
+}
+__global__ void ManagedDoubleArrAddressKernel(void* ptr, bool* out) {
+  *out = static_cast<void*>(managed_double_arr) == ptr;
+}
+
 template <typename T, size_t N, void (*validation_kernel)(void*, bool*)>
 static void HipGetSymbolSizeAddressTest(const void* symbol) {
   constexpr auto size = N * sizeof(T);
@@ -77,6 +113,33 @@ HIP_TEST_CASE(Unit_hipGetSymbolSizeAddress_Positive_Basic) {
   SECTION("float") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(float); }
   SECTION("char") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(char); }
   SECTION("double") { HIP_GET_SYMBOL_SIZE_ADDRESS_TEST(double); }
+}
+
+HIP_TEST_CASE(Unit_hipGetSymbolSizeAddress_Positive_Managed) {
+  SECTION("int") {
+    HipGetSymbolSizeAddressTest<int, 1, ManagedIntVarAddressKernel>(SYMBOL(managed_int_var));
+    HipGetSymbolSizeAddressTest<int, kArraySize, ManagedIntArrAddressKernel>(
+        SYMBOL(managed_int_arr));
+  }
+
+  SECTION("float") {
+    HipGetSymbolSizeAddressTest<float, 1, ManagedFloatVarAddressKernel>(SYMBOL(managed_float_var));
+    HipGetSymbolSizeAddressTest<float, kArraySize, ManagedFloatArrAddressKernel>(
+        SYMBOL(managed_float_arr));
+  }
+
+  SECTION("char") {
+    HipGetSymbolSizeAddressTest<char, 1, ManagedCharVarAddressKernel>(SYMBOL(managed_char_var));
+    HipGetSymbolSizeAddressTest<char, kArraySize, ManagedCharArrAddressKernel>(
+        SYMBOL(managed_char_arr));
+  }
+
+  SECTION("double") {
+    HipGetSymbolSizeAddressTest<double, 1, ManagedDoubleVarAddressKernel>(
+        SYMBOL(managed_double_var));
+    HipGetSymbolSizeAddressTest<double, kArraySize, ManagedDoubleArrAddressKernel>(
+        SYMBOL(managed_double_arr));
+  }
 }
 
 HIP_TEST_CASE(Unit_hipGetSymbolAddress_Negative_Parameters) {
