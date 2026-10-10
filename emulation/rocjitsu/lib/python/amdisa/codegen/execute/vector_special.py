@@ -1823,25 +1823,25 @@ def _scale_read_vgpr_base(L: list[str], var: str, operand: str) -> None:
     )
 
 
-def _scale_unpack_element_raw(fmt: str, arch_name: str = '') -> list[str]:
+def _scale_unpack_element_raw(fmt: str) -> list[str]:
     bits = _scale_lowp_bits(fmt)
     mask = f'0x{((1 << bits) - 1):x}u'
     if bits == 4:
         return [
-            '    auto read_scaled_src = [&](uint32_t index) -> float {',
+            '    auto read_scaled_code = [&](uint32_t index) -> uint32_t {',
             f'      uint32_t raw = (src_payload >> (index * 4u)) & {mask};',
-            f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+            '      return raw;',
             '    };',
         ]
     if bits == 8:
         return [
-            '    auto read_scaled_src = [&](uint32_t index) -> float {',
+            '    auto read_scaled_code = [&](uint32_t index) -> uint32_t {',
             f'      uint32_t raw = static_cast<uint32_t>((src_payload >> (index * 8u)) & {mask});',
-            f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+            '      return raw;',
             '    };',
         ]
     return [
-        '    auto read_scaled_src = [&](uint32_t index) -> float {',
+        '    auto read_scaled_code = [&](uint32_t index) -> uint32_t {',
         '      uint32_t bit = index * 6u;',
         '      uint32_t word = bit / 32u;',
         '      uint32_t shift = bit & 31u;',
@@ -1849,7 +1849,7 @@ def _scale_unpack_element_raw(fmt: str, arch_name: str = '') -> list[str]:
         '      if (shift > 26u)',
         '        raw |= src_words[word + 1u] << (32u - shift);',
         f'      raw &= {mask};',
-        f"      return {_scale_decode_call(fmt, 'raw', arch_name)};",
+        '      return raw;',
         '    };',
     ]
 
@@ -1925,7 +1925,48 @@ def gen_vector_cvt_scale(
     else:
         raise ValueError(f'unsupported vector_cvt_scale direction: {direction}')
 
+    low_fmt = in_fmt if direction == 'unpack' else out_fmt
+    wide_fmt = out_fmt if direction == 'unpack' else in_fmt
+    low_fmt_cpp = {
+        'fp4': 'Fp4E2m1',
+        'fp6': 'Fp6E2m3',
+        'bf6': 'Bf6E3m2',
+        'fp8': 'Fp8E4m3',
+        'bf8': 'Bf8E5m2',
+    }[low_fmt]
+    wide_fmt_cpp = {'f32': 'F32', 'f16': 'F16', 'bf16': 'Bf16'}[wide_fmt]
+    direction_cpp = 'Unpack' if direction == 'unpack' else 'Pack'
+    stochastic_cpp = 'true' if stochastic else 'false'
+    scale_src = src[2] if stochastic else src[1]
+    seed_src = src[1]
+
     L: list[str] = []
+    # Preserve zero-EXEC behavior, where no operand is resolved at all. Finite
+    # scalar unpack and all scalar pack arithmetic remain direct expressions;
+    # exceptional unpack shares a compiled consumer with the SIMD fallback.
+    L.append('  if (!amdgpu::simd_force_scalar() && wf.exec() != 0) {')
+    L.append(
+        '    uint32_t simd_dst_base = wf.vgpr_alloc().base + '
+        '*Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, '
+        'vdst.vgpr_msb_role());'
+    )
+    L.append(
+        '    uint32_t simd_src_base = wf.vgpr_alloc().base + '
+        '*Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, '
+        'src0.vgpr_msb_role());'
+    )
+    L.append(
+        '    if (amdgpu::try_execute_mxfp_cvt_scale_simd<'
+        f'amdgpu::MxfpFormat::{low_fmt_cpp}, '
+        f'amdgpu::MxfpWideFormat::{wide_fmt_cpp}, {count}u, '
+        f'amdgpu::MxfpDirection::{direction_cpp}, {stochastic_cpp}>('
+    )
+    L.append(
+        f'            wf, simd_dst_base, simd_src_base, {scale_src}, {seed_src}, '
+        'inst_.opsel & 0x3u))'
+    )
+    L.append('      return;')
+    L.append('  }')
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -1940,7 +1981,6 @@ def gen_vector_cvt_scale(
         f'!regs.owns_vgpr_range(dst_base, {dst_word_count}u))'
     )
     L.append('      continue;')
-    scale_src = src[2] if stochastic else src[1]
     if direction == 'unpack':
         L.extend(_scale_e8m0_unpack_scale(scale_src))
     else:
@@ -1968,35 +2008,45 @@ def gen_vector_cvt_scale(
         else:
             raise ValueError(f'unsupported scaled unpack operation: {op}')
 
-        L.extend(_scale_unpack_element_raw(in_fmt, arch_name))
+        L.extend(_scale_unpack_element_raw(in_fmt))
+        L.append(
+            f'    auto dst_region = regs.write_vgpr_region('
+            f'dst_base, {dst_word_count}u, 1ULL << lane);'
+        )
+        if out_fmt != 'f32':
+            L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
+        L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
+        L.append('      const uint32_t code = read_scaled_code(index);')
+        L.append('      uint32_t bits;')
+        L.append(
+            f'      if (amdgpu::is_mxfp_unpack_exceptional<'
+            f'amdgpu::MxfpFormat::{low_fmt_cpp}>(code, static_cast<uint8_t>(scale_byte))) {{'
+        )
+        L.append(
+            f'        bits = amdgpu::convert_mxfp_unpack_scalar<'
+            f'amdgpu::MxfpFormat::{low_fmt_cpp}, '
+            f'amdgpu::MxfpWideFormat::{wide_fmt_cpp}>('
+            'code, static_cast<uint8_t>(scale_byte), wf.fp16_ovfl());'
+        )
+        L.append('      } else {')
+        decoded = _scale_decode_call(in_fmt, 'code', arch_name)
         if out_fmt == 'f32':
-            L.append(
-                f'    auto dst_region = regs.write_vgpr_region('
-                f'dst_base, {dst_word_count}u, 1ULL << lane);'
-            )
-            L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-            L.append('      float value = read_scaled_src(index) * scale;')
-            L.append(
-                '      dst_region.set_lane(index, lane, std::bit_cast<uint32_t>(value));'
-            )
-            L.append('    }')
-        elif out_fmt in ('f16', 'bf16'):
+            L.append(f'        float value = {decoded} * scale;')
+            L.append('        bits = std::bit_cast<uint32_t>(value);')
+        else:
             conv = (
                 'util::f32_to_f16_mode'
                 if out_fmt == 'f16'
                 else 'util::f32_to_bf16_rne_mode'
             )
-            L.append(
-                f'    auto dst_region = regs.write_vgpr_region('
-                f'dst_base, {dst_word_count}u, 1ULL << lane);'
-            )
-            L.append(f'    uint32_t dst_words[{dst_word_count}] = {{}};')
-            L.append(f'    for (uint32_t index = 0; index < {count}u; ++index) {{')
-            L.append(
-                f'      uint32_t bits = {conv}(read_scaled_src(index) * scale, wf.fp16_ovfl());'
-            )
+            L.append(f'        bits = {conv}({decoded} * scale, wf.fp16_ovfl());')
+        L.append('      }')
+        if out_fmt == 'f32':
+            L.append('      dst_region.set_lane(index, lane, bits);')
+        else:
             L.append('      dst_words[index / 2u] |= bits << ((index & 1u) * 16u);')
-            L.append('    }')
+        L.append('    }')
+        if out_fmt != 'f32':
             L.append(f'    for (uint32_t word = 0; word < {dst_word_count}u; ++word)')
             L.append('      dst_region.set_lane(word, lane, dst_words[word]);')
     elif direction == 'pack':
