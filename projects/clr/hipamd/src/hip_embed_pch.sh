@@ -128,6 +128,18 @@ EOF
   host_triple="$(uname -m)"
   set -x
 
+  # llvm-mc has no floating-point instructions to infer an ABI from in these
+  # hand-assembled .mcin sources, so on riscv64 it defaults to no float-ABI
+  # ELF flag at all, while the rest of the build (compiled by clang for
+  # riscv64-unknown-linux-gnu) defaults to lp64d (double-float), matching the
+  # system's own crti.o -- ld.lld then refuses to link them together ("cannot
+  # link object files with different floating-point ABI"). Pass matching
+  # flags explicitly on riscv64 so the generated object's ELF flags match.
+  mc_abi_flags=()
+  if [ "$(uname -m)" == "riscv64" ]; then
+    mc_abi_flags=(-triple=riscv64-unknown-linux-gnu -mattr=+d,+c -target-abi=lp64d)
+  fi
+
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++17 -nogpulib -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only --cuda-gpu-arch=gfx1030 -x hip $tmp/hip_pch.h -E >$tmp/pch_wave32.cui &&
 
   cat $tmp/hip_macros.h >> $tmp/pch_wave32.cui &&
@@ -140,7 +152,7 @@ EOF
 
   $LLVM_DIR/bin/clang -cc1 -O3 -emit-pch -triple amdgcn-amd-amdhsa -aux-triple "$host_triple" -fcuda-is-device -std=c++17 -fgnuc-version=4.2.1 -o $tmp/hip_wave64.pch -x hip-cpp-output - <$tmp/pch_wave64.cui &&
 
-  $LLVM_DIR/bin/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj &&
+  $LLVM_DIR/bin/llvm-mc -o hip_pch.o $tmp/hip_pch.mcin --filetype=obj "${mc_abi_flags[@]}" &&
 
   rm -rf $tmp
 }
@@ -185,9 +197,20 @@ __hipRTC_header_size:
 EOF
 
   set -x
+  # llvm-mc has no floating-point instructions to infer an ABI from in these
+  # hand-assembled .mcin sources, so on riscv64 it defaults to no float-ABI
+  # ELF flag at all, while the rest of the build (compiled by clang for
+  # riscv64-unknown-linux-gnu) defaults to lp64d (double-float), matching the
+  # system's own crti.o -- ld.lld then refuses to link them together ("cannot
+  # link object files with different floating-point ABI"). Pass matching
+  # flags explicitly on riscv64 so the generated object's ELF flags match.
+  mc_abi_flags=()
+  if [ "$(uname -m)" == "riscv64" ]; then
+    mc_abi_flags=(-triple=riscv64-unknown-linux-gnu -mattr=+d,+c -target-abi=lp64d)
+  fi
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib --hip-version=4.4 -isystem $HIP_INC_DIR -isystem $HIP_BUILD_INC_DIR -isystem $HIP_AMD_INC_DIR --cuda-device-only -D__HIPCC_RTC__ -x hip $tmp/hipRTC_header.h -E -P -o $tmp/hiprtc &&
   cat $macroFile >> $tmp/hiprtc &&
-  $LLVM_DIR/bin/llvm-mc -o $tmp/hiprtc_header.o $tmp/hipRTC_header.mcin --filetype=obj &&
+  $LLVM_DIR/bin/llvm-mc -o $tmp/hiprtc_header.o $tmp/hipRTC_header.mcin --filetype=obj "${mc_abi_flags[@]}" &&
   $LLVM_DIR/bin/clang $tmp/hiprtc_header.o -o $rtc_shared_lib_out -shared &&
   $LLVM_DIR/bin/clang -O3 --hip-path=$HIP_INC_DIR/.. -std=c++14 -nogpulib -nogpuinc -emit-llvm -c -o $tmp/tmp.bc --cuda-device-only -D__HIPCC_RTC__ --offload-arch=gfx906 -x hip-cpp-output $tmp/hiprtc &&
   rm -rf $tmp
@@ -198,4 +221,3 @@ case $TARGET in
     (generatepch) generate_pch ;;
     (*) die "Invalid target $TARGET" ;;
 esac
-
