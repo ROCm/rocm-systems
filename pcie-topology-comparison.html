@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCIe Topology Comparison: H20 vs MI300X — Why GDR Fails on MI300X with Split-Mask</title>
+    <style>
+        :root {
+            --dark-bg: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #334155;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --orange: #f59e0b;
+            --blue: #3b82f6;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --border: #334155;
+            --amd-red: #ED1C24;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--dark-bg);
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .header {
+            background: linear-gradient(135deg, #0f172a, #1e3a5f);
+            border-bottom: 3px solid var(--amd-red);
+            padding: 40px 60px;
+        }
+        .header h1 { font-size: 26px; font-weight: 700; }
+        .header .subtitle { color: var(--muted); font-size: 14px; margin-top: 6px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 60px; }
+        h2 {
+            font-size: 22px;
+            border-bottom: 2px solid var(--amd-red);
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+        }
+        h3 { font-size: 17px; color: var(--cyan); margin: 20px 0 10px 0; }
+        h4 { font-size: 15px; color: var(--orange); margin: 16px 0 8px 0; }
+        p { margin-bottom: 12px; }
+        section { margin-bottom: 40px; }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card.green { border-left: 4px solid var(--green); }
+        .card.red { border-left: 4px solid var(--red); }
+        .card.blue { border-left: 4px solid var(--blue); }
+        .card.purple { border-left: 4px solid var(--purple); }
+        .card.orange { border-left: 4px solid var(--orange); }
+
+        /* Diagram styling */
+        .diagram-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 20px 0;
+        }
+        @media (max-width: 900px) {
+            .diagram-grid { grid-template-columns: 1fr; }
+        }
+        .diagram-panel {
+            background: #0f172a;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            position: relative;
+        }
+        .diagram-panel.good { border-color: var(--green); }
+        .diagram-panel.bad { border-color: var(--red); }
+        .diagram-panel.fixed { border-color: var(--green); border-style: dashed; }
+        .diagram-title {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 16px;
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        .diagram-title.good { background: rgba(34,197,94,0.15); color: var(--green); }
+        .diagram-title.bad { background: rgba(239,68,68,0.15); color: var(--red); }
+        .diagram-title.fixed { background: rgba(34,197,94,0.15); color: var(--green); }
+
+        /* Tree diagram nodes */
+        .tree { font-family: 'Fira Code', 'Consolas', monospace; font-size: 13px; line-height: 1.8; }
+        .tree .node {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .node-root { background: #312e81; color: #c4b5fd; }
+        .node-brcm { background: #7c2d12; color: #fdba74; }
+        .node-brcm-down { background: #451a03; color: #fed7aa; }
+        .node-amd-bridge { background: #7f1d1d; color: #fca5a5; border: 1px dashed #ef4444; }
+        .node-gpu { background: #065f46; color: #6ee7b7; }
+        .node-gpu-nvidia { background: #064e3b; color: #6ee7b7; }
+        .node-nic { background: #1e3a5f; color: #93c5fd; }
+        .node-nic-up { background: #172554; color: #93c5fd; }
+        .node-nvme { background: #3f3f46; color: #a1a1aa; }
+        .node-mgmt { background: #3f3f46; color: #a1a1aa; }
+        .connector { color: var(--muted); }
+        .highlight-box {
+            background: rgba(239,68,68,0.08);
+            border: 1px dashed var(--red);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 4px 0 4px 20px;
+        }
+        .highlight-box.green {
+            background: rgba(34,197,94,0.08);
+            border-color: var(--green);
+        }
+
+        /* Distance counter */
+        .distance-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-left: 8px;
+        }
+        .distance-badge.good { background: var(--green); color: #000; }
+        .distance-badge.bad { background: var(--red); color: #fff; }
+
+        /* Comparison table */
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        th, td { padding: 10px 14px; text-align: left; border: 1px solid var(--border); }
+        th { background: var(--accent); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+        td { background: var(--card-bg); }
+        .good { color: var(--green); font-weight: 600; }
+        .bad { color: var(--red); font-weight: 600; }
+
+        code {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        pre {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 12.5px;
+            line-height: 1.6;
+            margin: 12px 0;
+            border: 1px solid #30363d;
+        }
+        .callout {
+            background: rgba(59,130,246,0.1);
+            border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .callout.warn {
+            background: rgba(245,158,11,0.1);
+            border-color: rgba(245,158,11,0.3);
+        }
+        .callout.danger {
+            background: rgba(239,68,68,0.1);
+            border-color: rgba(239,68,68,0.3);
+        }
+        .arrow-label {
+            display: inline-block;
+            font-size: 11px;
+            color: var(--muted);
+            font-style: italic;
+        }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: var(--muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 40px;
+        }
+        a { color: var(--blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>PCIe Topology Comparison: NVIDIA H20 vs AMD MI300X</h1>
+    <div class="subtitle">
+        Why Data Parallelism (Split-Mask) RCCL Performance Degrades on MI300X/MI308 + Pollara
+    </div>
+    <div class="subtitle" style="margin-top:8px;">
+        Related: <a href="8gpu-4nic-rccl-performance-report.html" style="color:var(--cyan);">8GPU-4NIC RCCL DP Performance Investigation Report</a>
+    </div>
+</div>
+
+<div class="container">
+
+    <!-- SECTION 1: THE KEY DIFFERENCE -->
+    <section>
+        <h2>1. The Key Architectural Difference</h2>
+
+        <div class="card blue">
+            <p>
+                The fundamental difference is how each GPU presents itself on the PCIe bus:
+            </p>
+            <table>
+                <tr>
+                    <th>Property</th>
+                    <th>NVIDIA H20</th>
+                    <th>AMD MI300X / MI308</th>
+                </tr>
+                <tr>
+                    <td>GPU PCIe Presentation</td>
+                    <td class="good">Direct PCIe endpoint</td>
+                    <td class="bad">PCIe switch (<code>1022:1500</code> upstream + <code>1002:1501</code> downstream)</td>
+                </tr>
+                <tr>
+                    <td>Why?</td>
+                    <td>Monolithic die, single PCIe interface</td>
+                    <td>Multi-chiplet SoC &mdash; AID0's NBIO routes host PCIe to internal SDMA/HDP/NBIO across multiple dies</td>
+                </tr>
+                <tr>
+                    <td>Extra bridge hops (Factor 1)</td>
+                    <td class="good">0</td>
+                    <td class="bad">+2 (AMD upstream + downstream bridges)</td>
+                </tr>
+                <tr>
+                    <td>BRCM switch host ports (Factor 2)</td>
+                    <td>Single or multi-host</td>
+                    <td class="bad">Multi-host: 2 upstream ports per switch → 2 OS root ports per physical switch</td>
+                </tr>
+                <tr>
+                    <td>Same-partition GPU &harr; NIC distance</td>
+                    <td class="good">~4 hops (PXB)</td>
+                    <td style="color:var(--orange);font-weight:600;">~6 hops (borderline PHB)</td>
+                </tr>
+                <tr>
+                    <td>Cross-partition GPU &harr; NIC distance</td>
+                    <td class="good">Still PXB</td>
+                    <td class="bad">8+ hops (PHB/SYS &mdash; crosses root port boundary)</td>
+                </tr>
+                <tr>
+                    <td>GDR in split-mask mode</td>
+                    <td class="good">Always enabled</td>
+                    <td class="bad">Disabled for cross-partition GPU/NIC pairs</td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+    <!-- SECTION 2: SIDE-BY-SIDE DIAGRAMS -->
+    <section>
+        <h2>2. PCIe Tree Comparison (Side-by-Side)</h2>
+
+        <div class="diagram-grid">
+
+            <!-- H20 Diagram -->
+            <div class="diagram-panel good">
+                <div class="diagram-title good">NVIDIA H20 + Pollara (GDR Works)</div>
+                <div class="tree">
+<span class="connector">  </span><span class="node node-root">CPU Root Port</span><br>
+<span class="connector">  &nbsp;└─</span><span class="node node-brcm">BRCM PEX890xx Upstream</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;├─</span><span class="node node-brcm-down">BRCM Downstream (slot)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;└─</span><span class="node node-gpu-nvidia">H20 GPU dev0</span> <span class="arrow-label">&larr; direct endpoint</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;├─</span><span class="node node-brcm-down">BRCM Downstream (slot)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;└─</span><span class="node node-nic-up">Pollara Upstream</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-nic">Pollara NIC</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-brcm-down">BRCM Downstream (slot)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-brcm">BRCM Sub-switch</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-gpu-nvidia">H20 GPU dev1</span><br>
+                </div>
+                <br>
+                <div style="font-size:13px;">
+                    <strong>Path GPU0 &harr; NIC:</strong><br>
+                    GPU &larr; <span style="color:var(--muted);">BRCM_down</span> &larr; <span style="color:var(--orange);">BRCM_up</span> &rarr; <span style="color:var(--muted);">BRCM_down</span> &rarr; NIC_up &rarr; NIC<br>
+                    <strong>Bridges crossed:</strong> <span class="distance-badge good">4 &mdash; PXB</span>
+                </div>
+            </div>
+
+            <!-- MI300X Diagram -->
+            <div class="diagram-panel bad">
+                <div class="diagram-title bad">AMD MI300X + Pollara (GDR Fails)</div>
+                <div class="tree">
+<span class="connector">  </span><span class="node node-root">CPU Root Port</span><br>
+<span class="connector">  &nbsp;└─</span><span class="node node-brcm">BRCM PEX890xx Upstream</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;├─</span><span class="node node-brcm-down">BRCM Downstream (slot 40)</span><br>
+<div class="highlight-box">
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;└─</span><span class="node node-amd-bridge">AMD Upstream (1022:1500)</span> <span class="arrow-label">&larr; EXTRA</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-amd-bridge">AMD Downstream</span> <span class="arrow-label">&larr; EXTRA</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-gpu">MI300X GPU</span><br>
+</div>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;├─</span><span class="node node-brcm-down">BRCM Downstream (slot 41)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;└─</span><span class="node node-nic-up">Pollara Upstream (1dd8:0008)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-nic">Pollara NIC</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-brcm-down">BRCM Downstream (slot 44)</span><br>
+<span class="connector">  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</span><span class="node node-nvme">NVMe SSD</span><br>
+                </div>
+                <br>
+                <div style="font-size:13px;">
+                    <strong>Path GPU &harr; NIC:</strong><br>
+                    GPU &larr; <span style="color:var(--red);">AMD_down</span> &larr; <span style="color:var(--red);">AMD_up</span> &larr; <span style="color:var(--muted);">BRCM_down</span> &larr; <span style="color:var(--orange);">BRCM_up</span> &rarr; <span style="color:var(--muted);">BRCM_down</span> &rarr; NIC_up &rarr; NIC<br>
+                    <strong>Bridges crossed:</strong> <span class="distance-badge bad">6 &mdash; PHB</span>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="callout danger">
+            <strong>The problem has two parts:</strong>
+            <ol style="margin:8px 0 0 20px;">
+                <li>The MI300X's internal PCIe bridge adds <strong>+2 hops</strong> within a partition (making intra-partition distance borderline at ~6).</li>
+                <li>The PEX89104 <strong>multi-host partitioning</strong> splits the switch across two root ports &mdash;
+                    cross-partition GPU&harr;NIC paths go through the CPU root complex (PHB/SYS distance 8+).</li>
+            </ol>
+            Combined, RCCL sees distance &gt; 5 and <strong>disables GPU Direct RDMA</strong>, falling back to slow CPU-mediated bounce buffers.
+        </div>
+    </section>
+
+    <!-- SECTION 2b: MULTI-HOST SWITCH PARTITIONING -->
+    <section>
+        <h2>2b. Broadcom PEX89104 Multi-Host Partitioning</h2>
+
+        <div class="card orange">
+            <h3>One Physical Switch, Two OS-Visible PCIe Hierarchies</h3>
+            <p>
+                Each physical PEX89104 switch is configured (via switch firmware / MFG EEPROM) with
+                <strong>two upstream (host-facing) ports</strong>, each wired to a different CPU PCIe root port.
+                This is <strong>not PCIe bifurcation</strong> &mdash; it is a Broadcom switch-level feature called
+                <strong>multi-host mode</strong>.
+            </p>
+            <p>
+                Evidence from the Broadcom switch CLI (<code>pciehostview</code>) on smc300x-ccs-aus-gpuf269:
+            </p>
+            <pre>
+PEX89104 pciehostview — ONE physical switch:
+
+ DS Port │ Device          │ Host Port │ Host BDF  │ OS Root Port
+─────────┼─────────────────┼───────────┼───────────┼──────────────
+    0    │ MI300X GPU0     │   <span style="color:var(--green);">80</span>      │ 05:00.0   │ <span style="color:var(--green);">00:01.1</span>
+   16    │ Pollara NIC0    │   <span style="color:var(--green);">80</span>      │ 08:00.0   │ <span style="color:var(--green);">00:01.1</span>
+  128    │ NVMe SSD        │   <span style="color:var(--green);">80</span>      │ 0A:00.0   │ <span style="color:var(--green);">00:01.1</span>
+─────────┼─────────────────┼───────────┼───────────┼──────────────
+   96    │ Pollara NIC1    │   <span style="color:var(--cyan);">32</span>      │ 25:00.0   │ <span style="color:var(--cyan);">20:01.1</span>
+  112    │ MI300X GPU1     │   <span style="color:var(--cyan);">32</span>      │ 29:00.0   │ <span style="color:var(--cyan);">20:01.1</span>
+  132    │ NVMe SSD        │   <span style="color:var(--cyan);">32</span>      │ 2A:00.0   │ <span style="color:var(--cyan);">20:01.1</span></pre>
+        </div>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel" style="border-color: var(--orange);">
+                <div class="diagram-title" style="background: rgba(245,158,11,0.15); color: var(--orange);">What the OS sees: Two separate PCIe trees</div>
+                <pre style="font-size:12px; background:transparent; border:none; color:var(--text);">
+ <span style="color:var(--green);">Root Port 00:01.1</span>                 <span style="color:var(--cyan);">Root Port 20:01.1</span>
+       │                                 │
+ <span style="color:var(--green);">01:00.0 BRCM upstream A</span>         <span style="color:var(--cyan);">21:00.0 BRCM upstream B</span>
+       │                                 │
+  ├─ GPU0                           ├─ NIC1
+  ├─ NIC0                           ├─ GPU1
+  └─ NVMe                           └─ NVMe
+
+  ← OS sees NO connection between A and B →</pre>
+            </div>
+
+            <div class="diagram-panel" style="border-color: var(--purple);">
+                <div class="diagram-title" style="background: rgba(168,85,247,0.15); color: var(--purple);">Physical reality: One PEX89104 switch</div>
+                <pre style="font-size:12px; background:transparent; border:none; color:var(--text);">
+  ┌──────────────────────────────────────┐
+  │       ONE Physical PEX89104          │
+  │                                      │
+  │  <span style="color:var(--green);">Host Port 80</span>       <span style="color:var(--cyan);">Host Port 32</span>     │
+  │  (→ root 00:01.1)  (→ root 20:01.1) │
+  │       │                  │           │
+  │  DS 0:  GPU0       DS 96: NIC1       │
+  │  DS 16: NIC0       DS 112: GPU1      │
+  │  DS 128: NVMe      DS 132: NVMe      │
+  │       │                  │           │
+  │       └── <span style="color:var(--orange);">internal fabric</span> ──┘      │
+  │       (virtual switch link)          │
+  └──────────────────────────────────────┘</pre>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Why Two Host Ports?</h3>
+            <p>This is a <strong>platform design choice by the OEM</strong> (SuperMicro), not a BIOS setting. The reasons:</p>
+            <ul style="margin: 8px 0 12px 24px;">
+                <li><strong>PCIe bandwidth:</strong> A single Gen5 x16 upstream = 64 GB/s. A GPU (x16) + NIC (x16) + NVMe (x4)
+                    would oversubscribe one upstream. Two x16 upstreams provide <strong>128 GB/s</strong> total host bandwidth.</li>
+                <li><strong>NUMA locality:</strong> Each upstream connects to a different CPU root port, which can be wired to
+                    different NUMA nodes for better memory locality.</li>
+                <li><strong>Isolation:</strong> Each partition operates independently &mdash; one side can reset without affecting the other.</li>
+            </ul>
+
+            <h4>Can this be reconfigured to single-host mode?</h4>
+            <p>
+                Technically yes. The PEX89104 supports both modes:
+            </p>
+            <table>
+                <tr>
+                    <th>Mode</th>
+                    <th>Description</th>
+                    <th>Configuration</th>
+                </tr>
+                <tr>
+                    <td><strong>Base Mode</strong> (single-host)</td>
+                    <td>One upstream port, all downstream ports under one PCIe hierarchy</td>
+                    <td>Traditional PCIe fan-out switch</td>
+                </tr>
+                <tr>
+                    <td><strong>Synthetic Mode</strong> (multi-host)</td>
+                    <td>Multiple upstream ports, embedded CPU allocates downstream ports to hosts</td>
+                    <td>Current MI300X platform configuration</td>
+                </tr>
+            </table>
+            <p>
+                However, this is <strong>not a BIOS setting or runtime toggle</strong>. The port-to-host mapping is defined
+                in the switch's <strong>EEPROM / MFG firmware</strong>, programmed by the OEM using Broadcom's SDK tools
+                (e.g., <code>g4Xflash</code>, MFG config tool). Changing it requires:
+            </p>
+            <ul style="margin: 8px 0 12px 24px;">
+                <li>Broadcom SDK access (typically under NDA)</li>
+                <li>Reprogramming the switch EEPROM with a new topology definition</li>
+                <li>Full power cycle for changes to take effect</li>
+            </ul>
+            <div class="callout warn">
+                <strong>Why single-host mode is not the answer:</strong> Switching to single-host would consolidate
+                all devices under one x16 upstream link, creating a <strong>bandwidth bottleneck</strong> (36 lanes of
+                downstream demand on 16 lanes of upstream = 2.25:1 oversubscription). The kernel patch + RCCL fix is
+                the correct solution &mdash; it preserves the multi-host bandwidth and NUMA benefits while making
+                RCCL aware of the true physical topology.
+            </div>
+        </div>
+
+        <div class="callout danger">
+            <strong>The cross-partition problem:</strong> In split-mask mode with 4 NICs serving 8 GPUs,
+            some GPUs must reach a NIC in the <em>other</em> partition. The path crosses root port boundaries:
+            <pre style="margin-top:8px;background:transparent;border:none;color:var(--text);padding:0;">
+GPU0 → NIC0: Both under root 00:01.1 (same partition)    → <span style="color:var(--green);">~6 hops (borderline)</span>
+
+GPU1 → NIC0: GPU1 under 20:01.1, NIC0 under 00:01.1     → <span style="color:var(--red);">8+ hops (CROSS-PARTITION)</span>
+  Path: GPU ← AMD_bridge ← BRCM_up_B →→ CPU →→ BRCM_up_A → NIC
+  RCCL: distance > 5 → <strong style="color:var(--red);">GDR DISABLED</strong></pre>
+        </div>
+    </section>
+
+    <!-- SECTION 3: WHY MI300X HAS THE EXTRA BRIDGE -->
+    <section>
+        <h2>3. Why Does MI300X Have the Extra PCIe Bridge?</h2>
+
+        <div class="card purple">
+            <h3>MI300X is a Multi-Die Package with Internal PCIe Fabric</h3>
+            <p>
+                The AMD MI300X is fundamentally different from a discrete GPU like the NVIDIA H20.
+                It is a <strong>multi-chiplet package</strong> containing:
+            </p>
+            <ul style="margin: 12px 0 12px 24px;">
+                <li><strong>8 XCDs</strong> (Accelerator Complex Dies) &mdash; the actual GPU compute units</li>
+                <li><strong>4 AIDs</strong> (Active Interposer Dies) &mdash; housing memory controllers, Infinity Fabric links, SDMA, HDP, and <strong>NBIO</strong> (North Bridge I/O) blocks. Only <strong>AID0</strong> manages the primary host PCIe interface.</li>
+                <li><strong>128 GB HBM3</strong> memory stacks (192 GB on some SKUs)</li>
+                <li><strong>7 bidirectional XGMI links</strong> at 128 GB/s each for inter-GPU communication</li>
+            </ul>
+        </div>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel" style="border-color: var(--purple);">
+                <div class="diagram-title" style="background: rgba(168,85,247,0.15); color: var(--purple);">NVIDIA H20 &mdash; Monolithic Die</div>
+                <pre style="font-size:12px; background: transparent; border: none; color: var(--text); padding: 8px;">
+  ┌─────────────────────────────┐
+  │        NVIDIA H20 GPU       │
+  │                             │
+  │   ┌─────────┐  ┌────────┐  │
+  │   │ SM cores│  │ HBM    │  │
+  │   │         │  │ memory │  │
+  │   └─────────┘  └────────┘  │
+  │                             │
+  │   ┌──────────────────────┐  │
+  │   │   PCIe Gen5 x16      │  │
+  │   │   (direct endpoint)  │──────► BRCM Switch
+  │   └──────────────────────┘  │
+  │                             │
+  └─────────────────────────────┘
+
+  Single die, single PCIe interface.
+  Appears as a simple endpoint device.</pre>
+            </div>
+
+            <div class="diagram-panel" style="border-color: var(--red);">
+                <div class="diagram-title" style="background: rgba(239,68,68,0.15); color: var(--red);">AMD MI300X &mdash; Multi-Chiplet SoC</div>
+                <pre style="font-size:12px; background: transparent; border: none; color: var(--text); padding: 8px;">
+  ┌───────────────────────────────────────┐
+  │           AMD MI300X Package           │
+  │                                       │
+  │  ┌──────┐┌──────┐┌──────┐┌──────┐    │
+  │  │XCD 0 ││XCD 1 ││XCD 2 ││ ...  │ x8 │
+  │  └──┬───┘└──┬───┘└──┬───┘└──┬───┘    │
+  │     │   Infinity Fabric (IF)   │      │
+  │  ┌──┴───┐┌──┴───┐┌──┴───┐┌──┴───┐    │
+  │  │AID 0 ││AID 1 ││AID 2 ││AID 3 │    │
+  │  │      ││      ││      ││      │    │
+  │  │ SDMA ││ SDMA ││      ││      │    │
+  │  │ HDP  ││ HDP  ││      ││      │    │
+  │  │ NBIO ││      ││      ││      │    │
+  │  └──┬───┘└──────┘└──────┘└──────┘    │
+  │     │                                 │
+  │  Only AID0 manages the host PCIe link │
+  │     │                                 │
+  │  ┌──┴────────────────────────────┐    │
+  │  │  AID0 NBIO → Virtual PCIe    │    │
+  │  │  hierarchy presented to host: │    │
+  │  │                               │    │
+  │  │  1022:1500 Upstream Port      │    │
+  │  │   └─ 1002:1501 Downstream    │─────────► BRCM Switch
+  │  │       └─ 1002:74a1 GPU EP    │    │
+  │  └───────────────────────────────┘    │
+  │                                       │
+  │  + 7x XGMI links to other MI300X     │
+  │  + HBM3 memory stacks per AID        │
+  └───────────────────────────────────────┘
+
+  Multi-chiplet SoC. AID0's NBIO routes host
+  PCIe to internal SDMA/HDP/NBIO across AIDs.</pre>
+            </div>
+        </div>
+
+        <div class="card orange">
+            <h3>Why can't the MI300X connect directly as an endpoint?</h3>
+            <p style="font-size:13px; color:var(--muted); margin-bottom:12px;">
+                Source: AMD Internal Confluence — MI300X PCIe Architecture Documentation
+            </p>
+            <p>
+                The AMD Instinct MI300X presents as a <strong>PCIe switch</strong> (identified by bridge device IDs
+                <code>1022:1500</code> and <code>1002:1501</code>) because it is a <strong>multi-chiplet SoC</strong>
+                that uses an internal virtual PCIe hierarchy to manage its complex I/O subsystem.
+            </p>
+            <h4>1. Internal Chiplet Management</h4>
+            <p>
+                The MI300X is comprised of multiple dies, including <strong>Active Interposer Dies (AID)</strong> and
+                <strong>Accelerated Compute Core Dies (XCD)</strong>. While the GPU contains multiple functional blocks,
+                only <strong>AID0 manages the primary host interface</strong>. The internal "switch" allows the system
+                to route traffic between the external host PCIe bus and the various internal blocks
+                (<strong>SDMA, HDP, and NBIO</strong>) across these chiplets.
+            </p>
+            <h4>2. Virtual PCIe Topology</h4>
+            <p>
+                In a discrete GPU (dGPU) like the MI300X, the "switch" exists <strong>within the GPU package itself</strong>.
+                While the Root Complex is on the motherboard, the GPU presents a <strong>virtual link</strong> where the
+                upstream port and switch downstream port represent internal connectivity to the final GPU endpoint.
+            </p>
+            <h4>3. Discovery and Enumeration</h4>
+            <p>
+                Diagnostic tools and drivers rely on this bridge chain to discover the GPU.
+                The full PCIe device chain is:
+            </p>
+            <pre>
+PCI bridge:              AMD     [<span style="color:var(--red);">1022:1500</span>]   &larr; Top-level upstream bridge (NBIO)
+  └─ PCI bridge:         AMD/ATI [<span style="color:var(--red);">1002:1501</span>]   &larr; Downstream bridge (internal routing)
+       └─ Accelerator:   AMD     [<span style="color:var(--green);">1002:74a1</span>]   &larr; MI300X GPU endpoint ("Aqua Vanjaram")</pre>
+            <h4>4. Address Space &amp; Virtualization</h4>
+            <p>
+                The internal PCIe bridge provides address decode, BAR management, and routing for multiple internal
+                functions (GPU compute, SDMA engines, HDP) exposed as separate PCI functions. It also provides
+                IOMMU integration and ACS (Access Control Services) required for SR-IOV and GPU virtualization (MxGPU).
+            </p>
+        </div>
+
+        <div class="callout">
+            <strong>In short:</strong> The NVIDIA H20 is a discrete GPU with a single PCIe endpoint interface.
+            The AMD MI300X is a multi-chiplet SoC where <strong>AID0's NBIO block</strong> must present as a
+            PCIe switch (<code>1022:1500</code> &rarr; <code>1002:1501</code>) to route host PCIe traffic to
+            internal blocks (SDMA, HDP, NBIO) across multiple chiplet dies. This is an inherent
+            architectural property of the multi-die design — not something that can be bypassed.
+        </div>
+    </section>
+
+    <!-- SECTION 4: ACTUAL pcicrawler OUTPUT -->
+    <section>
+        <h2>4. Actual PCIe Trees (from Live Systems)</h2>
+
+        <div class="card green">
+            <h3>H20 + Pollara (from BD's topo XML: <code>topo_s0f0(ionic + H20).xml</code>)</h3>
+            <p style="font-size:13px; color:var(--muted);">Source: Slack file F0ABKBSRFV3, shared by Weijia Yuan on Jan 29, 2026</p>
+            <pre>
+BRCM PEX890xx (0000:16:00.0, vendor=0x1000, device=0xc030)    &larr; Single BRCM upstream
+  ├── H20 GPU dev0 (0000:18:00.0, vendor=0x10de, device=0x2329)    &larr; <span style="color:var(--green);">DIRECT endpoint under BRCM</span>
+  │     gdr=1, NVLink: 5+4+5+4 links
+  │
+  ├── Pollara Upstream (0000:19:00.0, vendor=0x1dd8, device=0x0008)
+  │     └── Pollara NIC (0000:1b:00.0, vendor=0x1dd8, device=0x1002)
+  │           net: rocep27s0f0, speed=400000, gdr=1
+  │
+  └── BRCM Sub-switch (0000:38:00.0, vendor=0x1000, device=0xc030)
+        └── H20 GPU dev1 (0000:41:00.0, vendor=0x10de, device=0x2329)
+              gdr=1</pre>
+            <p style="margin-top: 8px; font-size: 14px;">
+                <strong>GPU dev0 and NIC are siblings</strong> under the same BRCM upstream port.
+                PCIe distance = <span class="distance-badge good">PXB (&le;5)</span>
+                &rarr; <span class="good">GDR always enabled</span>
+            </p>
+        </div>
+
+        <div class="card red">
+            <h3>MI300X + Pollara (from <code>pcicrawler -t</code> on smc300x-ccs-aus-gpuf269)</h3>
+            <p style="font-size:13px; color:var(--muted);">Source: Live SSH to internal AMD node, Oct 2026. Showing ONE physical PEX89104 switch split across two root ports.</p>
+            <pre>
+<span style="color:var(--green);">── Partition A (Host Port 80) ──────────────────────────────────────</span>
+<span style="color:var(--green);">00:01.1</span> root_port, slot 0, speed 32GT/s, width x16
+ └─ 01:00.0 <span style="color:var(--orange);">BRCM PEX89104 Upstream A</span> (1000:c030)
+      ├─ 02:00.0 BRCM Downstream (slot 40)
+      │    └─ 03:00.0 <span style="color:var(--red);">AMD Upstream (1022:1500)</span>    &larr; MI300X NBIO bridge
+      │         └─ 04:00.0 <span style="color:var(--red);">AMD Downstream (1002:1501)</span>
+      │              └─ 05:00.0 <span style="color:var(--green);">MI300X GPU0</span> (1002:74a1 "Aqua Vanjaram")
+      │
+      ├─ 02:01.0 BRCM Downstream (slot 41)
+      │    └─ 06:00.0 <span style="color:var(--cyan);">Pollara Upstream</span> (1dd8:0008 "DSC3 Salina")
+      │         ├─ 07:00.0 Pollara Downstream
+      │         │    ├─ 08:00.0 TAWK IPC (1dd8:1012)
+      │         │    ├─ 08:00.1 Register/Memory (1dd8:100f)
+      │         │    └─ 08:00.2 PDS Core Mgmt (1dd8:100c)
+      │         └─ 07:01.0 Pollara Downstream
+      │              └─ 09:00.0 <span style="color:var(--cyan);">Pollara NIC0</span> (1dd8:1002)
+      │
+      └─ 02:02.0 BRCM Downstream (slot 44)
+           └─ 0a:00.0 NVMe SSD (1344:51c3)
+
+<span style="color:var(--cyan);">── Partition B (Host Port 32) ──────────────────────────────────────</span>
+<span style="color:var(--cyan);">20:01.1</span> root_port, slot 0, speed 32GT/s, width x16
+ └─ 21:00.0 <span style="color:var(--orange);">BRCM PEX89104 Upstream B</span> (1000:c030)     &larr; <strong>SAME physical switch!</strong>
+      ├─ 22:00.0 BRCM Downstream (slot 42)
+      │    └─ 23:00.0 <span style="color:var(--cyan);">Pollara Upstream</span> (1dd8:0008 "DSC3 Salina")
+      │         ├─ 24:00.0 Pollara Downstream
+      │         │    ├─ 25:00.0 TAWK IPC (1dd8:1012)
+      │         │    ├─ 25:00.1 Register/Memory (1dd8:100f)
+      │         │    └─ 25:00.2 PDS Core Mgmt (1dd8:100c)
+      │         └─ 24:01.0 Pollara Downstream
+      │              └─ 26:00.0 <span style="color:var(--cyan);">Pollara NIC1</span> (1dd8:1002)
+      │
+      └─ 22:01.0 BRCM Downstream (slot 43)
+           └─ 27:00.0 <span style="color:var(--red);">AMD Upstream (1022:1500)</span>    &larr; MI300X NBIO bridge
+                └─ 28:00.0 <span style="color:var(--red);">AMD Downstream (1002:1501)</span>
+                     └─ 29:00.0 <span style="color:var(--green);">MI300X GPU1</span> (1002:74a1 "Aqua Vanjaram")</pre>
+            <p style="margin-top: 8px; font-size: 14px;">
+                The OS sees these as <strong>two separate PCIe hierarchies</strong> under different root ports.
+                GPU0+NIC0 share root <code>00:01.1</code>; NIC1+GPU1 share root <code>20:01.1</code>.
+                In split-mask mode, GPU1 needs to reach NIC0 &mdash; that path crosses root ports.
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>Broadcom Switch Inventory (from <code>g4Xflash --list</code>)</h3>
+            <pre>
+DeviceId/RevId      PCIAddr      Type      Note
+─────────────────────────────────────────────────────
+PEX89104 B0         00:0B:00.0   Switch    Physical Switch 1 (GPU0+NIC0 / NIC1+GPU1)
+PEX89072 B0         00:33:00.0   Switch    <span style="color:var(--orange);">Different model (PEX89072)</span>
+PEX89104 B0         00:6B:00.0   Switch    Physical Switch 3
+PEX89104 B0         00:8B:00.0   Switch    Physical Switch 4
+PEX89104 B0         00:EB:00.0   Switch    Physical Switch 5</pre>
+            <p style="font-size:14px; color:var(--muted);">
+                5 physical BRCM switches (mix of PEX89104 and PEX89072). Each hosts 2 GPU+NIC pairs
+                split across 2 host ports / 2 root ports. The OS sees 10 separate PCIe trees, not 5.
+            </p>
+        </div>
+    </section>
+
+    <!-- SECTION 5: BRIDGE-HOP COUNTING -->
+    <section>
+        <h2>5. Bridge-Hop Counting: Why Distance Matters</h2>
+
+        <div class="card">
+            <h3>NCCL/RCCL PCIe Distance Classification</h3>
+            <p>
+                NCCL counts the number of PCIe bridge hops between two devices to classify their proximity.
+                This determines whether GPU Direct RDMA (GDR) is enabled:
+            </p>
+            <table>
+                <tr>
+                    <th>Classification</th>
+                    <th>Distance</th>
+                    <th>Meaning</th>
+                    <th>GDR</th>
+                </tr>
+                <tr>
+                    <td>LOC</td>
+                    <td>0</td>
+                    <td>Same device</td>
+                    <td class="good">Enabled</td>
+                </tr>
+                <tr>
+                    <td>PIX</td>
+                    <td>1-3</td>
+                    <td>Same PCIe switch complex</td>
+                    <td class="good">Enabled</td>
+                </tr>
+                <tr>
+                    <td>PXB</td>
+                    <td>4-5</td>
+                    <td>Different PCIe bridges, same switch</td>
+                    <td class="good">Enabled (threshold)</td>
+                </tr>
+                <tr>
+                    <td>PHB</td>
+                    <td>6-8</td>
+                    <td>Across PCIe host bridge</td>
+                    <td class="bad">DISABLED (distance &gt; 5)</td>
+                </tr>
+                <tr>
+                    <td>SYS</td>
+                    <td>9+</td>
+                    <td>Across NUMA / CPU socket</td>
+                    <td class="bad">DISABLED</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel good">
+                <div class="diagram-title good">H20: GPU &harr; NIC Path (same partition)</div>
+                <pre style="font-size:12px; background:transparent; border:none; color:var(--text);">
+ H20 GPU ─────────────────────── NIC
+    │                              │
+    ▼                              ▼
+  [GPU endpoint]              [NIC endpoint]
+    │  hop 1                       │  hop 4
+  [BRCM downstream]          [Pollara upstream]
+    │  hop 2                       │  hop 3
+  [BRCM <strong>upstream</strong>]  ◄────────►  [BRCM downstream]
+
+  Total hops: <strong style="color:var(--green);">4 (PXB) → GDR ON</strong></pre>
+            </div>
+
+            <div class="diagram-panel" style="border-color: var(--orange);">
+                <div class="diagram-title" style="background:rgba(245,158,11,0.15);color:var(--orange);">MI300X: GPU0 &harr; NIC0 (SAME partition)</div>
+                <pre style="font-size:12px; background:transparent; border:none; color:var(--text);">
+ MI300X GPU0 ──────────────────── NIC0
+    │                               │
+    ▼   (both under root 00:01.1)   ▼
+  [GPU endpoint]              [NIC endpoint]
+    │  hop 1                       │  hop 6
+  [<span style="color:var(--red);">AMD downstream</span>]           [Pollara upstream]
+    │  hop 2                       │  hop 5
+  [<span style="color:var(--red);">AMD upstream 1022:1500</span>]   [BRCM downstream]
+    │  hop 3                       │  hop 4
+  [BRCM downstream]          [BRCM upstream A]
+         └────────────────────────┘
+
+  Total hops: <strong style="color:var(--orange);">6 (borderline PHB)</strong></pre>
+            </div>
+        </div>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel bad" style="grid-column: 1 / -1;">
+                <div class="diagram-title bad">MI300X: GPU1 &harr; NIC0 (CROSS-PARTITION — the breaking case)</div>
+                <pre style="font-size:12px; background:transparent; border:none; color:var(--text);">
+ MI300X GPU1                                                         NIC0
+ (root 20:01.1)                                                (root 00:01.1)
+    │                                                               │
+    ▼                                                               ▼
+  [GPU endpoint]                                              [NIC endpoint]
+    │  hop 1                                                       │  hop 8
+  [<span style="color:var(--red);">AMD downstream</span>]                                           [Pollara upstream]
+    │  hop 2                                                       │  hop 7
+  [<span style="color:var(--red);">AMD upstream 1022:1500</span>]                                   [BRCM downstream]
+    │  hop 3                                                       │  hop 6
+  [BRCM downstream]                                          [BRCM upstream A]
+    │  hop 4                                                       │  hop 5
+  [BRCM upstream B]  ──── <span style="color:var(--red);">CPU Root Complex</span> ────  [Root Port 00:01.1]
+  [Root Port 20:01.1]     <span style="color:var(--red);">(crosses root port</span>
+                           <span style="color:var(--red);"> boundary!)</span>
+
+  Total hops: <strong style="color:var(--red);">8+ (PHB/SYS) → GDR DISABLED</strong></pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- SECTION 6: RCCL LOG EVIDENCE -->
+    <section>
+        <h2>6. Evidence from RCCL Logs</h2>
+
+        <div class="card red">
+            <h3>Default Topology (GDR disabled for non-local GPU/NIC pairs)</h3>
+            <p style="font-size:13px; color:var(--muted);">From Ankit Gupta's analysis, Jan 21, 2026</p>
+            <pre>
+<span style="color:var(--muted);"># GPU 0 at BDF 0x58000 — distance to each NIC:</span>
+NCCL INFO GPU/0-58000 :GPU/0-58000 (0/LOC)
+  CPU/0-0 (3/PHB)  CPU/0-1 (4/SYS)
+  NET/0-0 (<span style="color:var(--red);">7/PHB</span>)  NET/0-2 (<span style="color:var(--red);">7/PHB</span>)        &larr; distance 7 to NIC 0 and NIC 2
+  NET/0-3 (<span style="color:var(--red);">8/SYS</span>)  NET/0-1 (<span style="color:var(--red);">8/SYS</span>)        &larr; distance 8 to NIC 1 and NIC 3
+
+<span style="color:var(--muted);"># Result: GDR disabled</span>
+NCCL INFO GPU Direct RDMA <span style="color:var(--red);">Disabled</span> for GPU 1 / HCA 2 (<span style="color:var(--red);">distance 8 > 5</span>)
+NCCL INFO GPU Direct RDMA <span style="color:var(--red);">Disabled</span> for GPU 1 / HCA 0 (<span style="color:var(--red);">distance 8 > 5</span>)</pre>
+        </div>
+
+        <div class="card green">
+            <h3>With Modified Topology (GDR re-enabled)</h3>
+            <p style="font-size:13px; color:var(--muted);">After topology modification removing the AMD upstream port from XML</p>
+            <pre>
+<span style="color:var(--muted);"># Same GPU 0 — now sees NIC 2 as PXB (close):</span>
+NCCL INFO GPU/0-58000 :GPU/0-58000 (0/LOC)
+  CPU/0-0 (4/PHB)  CPU/0-1 (5/SYS)
+  NET/0-0 (7/PHB)  NET/0-2 (<span style="color:var(--green);">5/PXB</span>)        &larr; distance 5 to NIC 2 (was 7)
+  NET/0-3 (8/SYS)  NET/0-1 (8/SYS)
+
+<span style="color:var(--muted);"># Result: GDR enabled</span>
+NCCL INFO GPU Direct RDMA <span style="color:var(--green);">Enabled</span> for GPU 1 / HCA 2 (<span style="color:var(--green);">distance 5 <= 5</span>), read 0 mode Default</pre>
+        </div>
+    </section>
+
+    <!-- SECTION 7: THE FIX -->
+    <section>
+        <h2>7. How the Fix Works</h2>
+
+        <div class="card">
+            <h3>Without kernel patch: OS sees two unrelated PCIe trees</h3>
+            <pre style="font-size:12px;">
+OS view — no connection between partitions:
+
+<span style="color:var(--green);">Root 00:01.1</span> → BRCM_upstream_A → GPU0 + NIC0    (same-partition: ~6 hops)
+<span style="color:var(--cyan);">Root 20:01.1</span> → BRCM_upstream_B → NIC1 + GPU1    (same-partition: ~6 hops)
+
+Cross-partition path (GPU1 → NIC0):
+  RCCL sees: different root ports → <span style="color:var(--red);">PHB/SYS distance 8+ → GDR DISABLED</span></pre>
+        </div>
+
+        <div class="card green">
+            <h3>With kernel patch + RCCL fix: Virtual links bridge the partitions</h3>
+            <pre style="font-size:12px;">
+Kernel module "switch_discovery" reads Broadcom VSEC registers and exposes:
+
+  /sys/kernel/pci_switch_link/virtual_switch_links/
+    <span style="color:var(--green);">0000:01:00.0</span> ──── <span style="color:var(--cyan);">0000:21:00.0</span>    (upstream A ↔ upstream B: same physical switch!)
+    <span style="color:var(--green);">0000:41:00.0</span> ──── <span style="color:var(--cyan);">0000:61:00.0</span>    (next switch pair)
+    ...                                (4 bidirectional pairs for 4 physical switches)
+
+RCCL's new topology model (PR #3121) sees:
+  "GPU1 (under 21:00.0) and NIC0 (under 01:00.0) are on the same physical switch"
+  → <span style="color:var(--green);">Treats cross-partition paths as same-switch → enables GDR</span>
+
+Result:
+  GPU 0 → NET/ROCM-IB/0/<span style="color:var(--green);">GDRDMA</span>    (same-partition NIC)
+  GPU 1 → NET/ROCM-IB/0/<span style="color:var(--green);">GDRDMA</span>    (cross-partition, now recognized as same switch)
+  GPU 2 → NET/ROCM-IB/1/<span style="color:var(--green);">GDRDMA</span>
+  ...all 8 GPUs use GDR</pre>
+        </div>
+
+        <div class="callout warn">
+            <strong>Important:</strong> The kernel patch alone is not enough. Without the RCCL fix (PR #3121),
+            the newly visible virtual links cause RCCL to build a <strong>suboptimal communication graph</strong>,
+            dropping global AllReduce from ~194 GB/s to ~90 GB/s. Both patches must be applied together.
+        </div>
+    </section>
+
+    <!-- SECTION 8: SUMMARY -->
+    <section>
+        <h2>8. Summary</h2>
+        <div class="card blue">
+            <table>
+                <tr>
+                    <th>Aspect</th>
+                    <th>NVIDIA H20</th>
+                    <th>AMD MI300X/MI308</th>
+                </tr>
+                <tr>
+                    <td>GPU PCIe architecture</td>
+                    <td>Monolithic die, direct endpoint</td>
+                    <td>Multi-chiplet SoC, AID0 NBIO presents as PCIe switch (<code>1022:1500</code> + <code>1002:1501</code>)</td>
+                </tr>
+                <tr>
+                    <td>PCIe device behind BRCM downstream</td>
+                    <td>GPU endpoint directly</td>
+                    <td>AMD PCIe bridge → downstream → GPU endpoint (+2 hops)</td>
+                </tr>
+                <tr>
+                    <td>BRCM switch host ports</td>
+                    <td>Single or multi-host (less impactful due to fewer hops)</td>
+                    <td>Multi-host: 2 upstream ports per physical switch, 2 root ports</td>
+                </tr>
+                <tr>
+                    <td>Same-partition GPU &harr; NIC distance</td>
+                    <td class="good">~4 (PXB)</td>
+                    <td style="color:var(--orange);font-weight:600;">~6 (borderline PHB)</td>
+                </tr>
+                <tr>
+                    <td>Cross-partition GPU &harr; NIC distance</td>
+                    <td class="good">Still PXB (fewer hops)</td>
+                    <td class="bad">8+ (PHB/SYS — crosses root port boundary)</td>
+                </tr>
+                <tr>
+                    <td>GDR in split-mask mode</td>
+                    <td class="good">Always enabled</td>
+                    <td class="bad">Disabled for cross-partition GPU/NIC pairs</td>
+                </tr>
+                <tr>
+                    <td>Fix required?</td>
+                    <td>None</td>
+                    <td>Kernel patch (virtual switch links) + RCCL PR #3121</td>
+                </tr>
+                <tr>
+                    <td>DP AllReduce performance</td>
+                    <td class="good">~24 GB/s</td>
+                    <td>Before: <span class="bad">~20 GB/s</span> &rarr; After fix: <span class="good">~24 GB/s</span></td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+    <div class="footer">
+        PCIe Topology Comparison &mdash; Supplement to the 8GPU-4NIC RCCL DP Performance Report<br>
+        H20 topology from BD XML file (Slack F0ABKBSRFV3) | MI300X topology from live pcicrawler on smc300x-ccs-aus-gpuf269<br>
+        Generated: October 2026
+    </div>
+</div>
+
+</body>
+</html>

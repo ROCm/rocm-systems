@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RCCL SPLIT_MASK + PCIe Topology Analysis — MI300X 8-GPU / 4-NIC BD Investigation</title>
+    <style>
+        :root {
+            --dark-bg: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #334155;
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --orange: #f59e0b;
+            --blue: #3b82f6;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
+            --border: #334155;
+            --amd-red: #ED1C24;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--dark-bg);
+            color: var(--text);
+            line-height: 1.7;
+        }
+        .header {
+            background: linear-gradient(135deg, #0f172a, #1e3a5f);
+            border-bottom: 3px solid var(--amd-red);
+            padding: 40px 60px;
+        }
+        .header h1 { font-size: 26px; font-weight: 700; }
+        .header .subtitle { color: var(--muted); font-size: 14px; margin-top: 6px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 40px 60px; }
+        h2 {
+            font-size: 22px;
+            border-bottom: 2px solid var(--amd-red);
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+        }
+        h3 { font-size: 17px; color: var(--cyan); margin: 20px 0 10px 0; }
+        h4 { font-size: 15px; color: var(--orange); margin: 16px 0 8px 0; }
+        p { margin-bottom: 12px; }
+        section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card.green { border-left: 4px solid var(--green); }
+        .card.red { border-left: 4px solid var(--red); }
+        .card.blue { border-left: 4px solid var(--blue); }
+        .card.purple { border-left: 4px solid var(--purple); }
+        .card.orange { border-left: 4px solid var(--orange); }
+        .card.cyan { border-left: 4px solid var(--cyan); }
+
+        /* Page/slide separator */
+        .page-break {
+            border-top: 2px dashed var(--accent);
+            margin: 50px 0;
+            position: relative;
+        }
+        .page-break::after {
+            content: attr(data-page);
+            position: absolute;
+            top: -12px;
+            right: 0;
+            background: var(--dark-bg);
+            color: var(--muted);
+            font-size: 12px;
+            padding: 0 8px;
+        }
+
+        /* Diagram styling */
+        .diagram-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 20px 0;
+        }
+        @media (max-width: 900px) {
+            .diagram-grid { grid-template-columns: 1fr; }
+        }
+        .diagram-panel {
+            background: #0f172a;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            position: relative;
+        }
+        .diagram-panel.good { border-color: var(--green); }
+        .diagram-panel.bad { border-color: var(--red); }
+        .diagram-panel.fixed { border-color: var(--green); border-style: dashed; }
+        .diagram-title {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 16px;
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+        .diagram-title.good { background: rgba(34,197,94,0.15); color: var(--green); }
+        .diagram-title.bad { background: rgba(239,68,68,0.15); color: var(--red); }
+        .diagram-title.fixed { background: rgba(34,197,94,0.15); color: var(--green); }
+        .diagram-title.info { background: rgba(59,130,246,0.15); color: var(--blue); }
+
+        .distance-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-left: 8px;
+        }
+        .distance-badge.good { background: var(--green); color: #000; }
+        .distance-badge.bad { background: var(--red); color: #fff; }
+        .distance-badge.warn { background: var(--orange); color: #000; }
+
+        table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+        th, td { padding: 10px 14px; text-align: left; border: 1px solid var(--border); }
+        th { background: var(--accent); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+        td { background: var(--card-bg); }
+        .good { color: var(--green); font-weight: 600; }
+        .bad { color: var(--red); font-weight: 600; }
+        .warn { color: var(--orange); font-weight: 600; }
+
+        code {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        pre {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 12.5px;
+            line-height: 1.6;
+            margin: 12px 0;
+            border: 1px solid #30363d;
+        }
+        .callout {
+            background: rgba(59,130,246,0.1);
+            border: 1px solid rgba(59,130,246,0.3);
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        .callout.warn {
+            background: rgba(245,158,11,0.1);
+            border-color: rgba(245,158,11,0.3);
+        }
+        .callout.danger {
+            background: rgba(239,68,68,0.1);
+            border-color: rgba(239,68,68,0.3);
+        }
+        .callout.success {
+            background: rgba(34,197,94,0.1);
+            border-color: rgba(34,197,94,0.3);
+        }
+        ul, ol { margin: 8px 0 12px 24px; }
+        li { margin-bottom: 4px; }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: var(--muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 40px;
+        }
+        a { color: var(--blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .tag.red { background: rgba(239,68,68,0.2); color: var(--red); }
+        .tag.green { background: rgba(34,197,94,0.2); color: var(--green); }
+        .tag.blue { background: rgba(59,130,246,0.2); color: var(--blue); }
+        .tag.orange { background: rgba(245,158,11,0.2); color: var(--orange); }
+
+        /* TOC styling */
+        .toc {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px 28px;
+            margin-bottom: 30px;
+        }
+        .toc h3 { margin-top: 0; }
+        .toc ol { margin-left: 20px; }
+        .toc li { margin-bottom: 6px; font-size: 14px; }
+        .toc a { color: var(--cyan); }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>RCCL SPLIT_MASK + PCIe Topology Analysis</h1>
+    <div class="subtitle">MI300X 8-GPU / 4-NIC per Node &mdash; BD Customer Investigation</div>
+    <div class="subtitle" style="margin-top:8px;">
+        <span class="tag blue">Platform</span> SMC300x MI300X &nbsp;|&nbsp;
+        <span class="tag orange">Kernel</span> 5.15.0-142-generic &nbsp;|&nbsp;
+        <span class="tag green">Date</span> 2026-10-09
+    </div>
+    <div class="subtitle" style="margin-top:8px;">
+        Related: <a href="pcie-topology-comparison.html" style="color:var(--cyan);">PCIe Topology Comparison (H20 vs MI300X)</a>
+        &nbsp;|&nbsp;
+        <a href="8gpu-4nic-rccl-performance-report.html" style="color:var(--cyan);">8GPU-4NIC RCCL Performance Report</a>
+    </div>
+</div>
+
+<div class="container">
+
+    <!-- TABLE OF CONTENTS -->
+    <div class="toc">
+        <h3>Table of Contents</h3>
+        <ol>
+            <li><a href="#s1">Problem Statement</a></li>
+            <li><a href="#s2">NCCL_TESTS_SPLIT_MASK Mechanics</a></li>
+            <li><a href="#s3">RCCL NIC Selection Logic</a> &mdash; Algorithm, mirrorBits(), 8NIC/4NIC scenarios</li>
+            <li><a href="#s4">RCCL Path Type Computation</a> &mdash; BFS algorithm, GDR threshold</li>
+            <li><a href="#s5">Physical PCIe Topology (SMC300x MI300X)</a> &mdash; Switch mapping, 8NIC vs 4NIC comparison, DSN complementarity</li>
+            <li><a href="#s6">Virtual Switch Link Mechanism</a></li>
+            <li><a href="#s7">Sysfs-Based Inter-Switch Discovery</a></li>
+            <li><a href="#s8">Topology Dumps Collected</a></li>
+            <li><a href="#s9">Test Configuration</a></li>
+            <li><a href="#s10">Key Source Files Reference</a></li>
+            <li><a href="#s11">Open Questions / Next Steps</a></li>
+        </ol>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 1: PROBLEM STATEMENT -->
+    <!-- ============================================================ -->
+    <section id="s1">
+        <h2>1. Problem Statement</h2>
+
+        <div class="card red">
+            <p>
+                ByteDance customer running <strong>data-parallel (DP) workloads</strong> with
+                <code>NCCL_TESTS_SPLIT_MASK=0x7</code> on MI300X nodes (8 GPUs, 4 NICs masked from 8)
+                observes <strong>degraded performance</strong>.
+            </p>
+            <p>
+                <strong>Root cause:</strong> RCCL cannot see inter-switch fabric connections between
+                Broadcom PEX89104 multi-host switch partitions, causing GPU-NIC pairs that cross
+                partition boundaries to be classified as <span class="bad">PATH_PHB (distance 8)</span>
+                instead of <span class="good">PATH_PXB (distance 5)</span>, which
+                <strong>disables GPU Direct RDMA (GDR)</strong>.
+            </p>
+        </div>
+
+        <div class="callout danger">
+            <strong>Impact:</strong> Without GDR, all network traffic for cross-partition GPU-NIC pairs
+            goes through CPU-mediated host memory bounce buffers, severely reducing bandwidth
+            and increasing latency for DP gradient synchronization.
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 2"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 2: SPLIT_MASK MECHANICS -->
+    <!-- ============================================================ -->
+    <section id="s2">
+        <h2>2. NCCL_TESTS_SPLIT_MASK Mechanics</h2>
+
+        <div class="card blue">
+            <h3>Source</h3>
+            <p><code>rccl-tests/src/common.cu</code> lines 2467&ndash;2494</p>
+            <h3>Algorithm</h3>
+            <pre>color = MPI_rank &amp; strtoul(mask_hex, NULL, 16);
+MPI_Comm_split(MPI_COMM_WORLD, color, proc, &amp;mpi_comm);</pre>
+            <p>
+                Each resulting sub-communicator runs the collective independently &mdash;
+                this models isolated DP gradient synchronization per model replica.
+            </p>
+        </div>
+
+        <h3>With mask=0x7, 16 ranks (2 nodes &times; 8 GPUs)</h3>
+        <p>Creates <strong>8 independent NCCL communicators</strong>, each with 2 ranks (1 per node):</p>
+
+        <table>
+            <tr>
+                <th>Group (color)</th>
+                <th>Ranks</th>
+                <th>GPU / node</th>
+                <th>Notes</th>
+            </tr>
+            <tr><td>0</td><td>0, 8</td><td>GPU0</td><td>Simulates DP model-replica 0</td></tr>
+            <tr><td>1</td><td>1, 9</td><td>GPU1</td><td>Simulates DP model-replica 1</td></tr>
+            <tr><td>2</td><td>2, 10</td><td>GPU2</td><td>Simulates DP model-replica 2</td></tr>
+            <tr><td>3</td><td>3, 11</td><td>GPU3</td><td>Simulates DP model-replica 3</td></tr>
+            <tr><td>4</td><td>4, 12</td><td>GPU4</td><td>Simulates DP model-replica 4</td></tr>
+            <tr><td>5</td><td>5, 13</td><td>GPU5</td><td>Simulates DP model-replica 5</td></tr>
+            <tr><td>6</td><td>6, 14</td><td>GPU6</td><td>Simulates DP model-replica 6</td></tr>
+            <tr><td>7</td><td>7, 15</td><td>GPU7</td><td>Simulates DP model-replica 7</td></tr>
+        </table>
+
+        <div class="callout">
+            <strong>Note:</strong> <code>NCCL_TESTS_SPLIT</code> is a newer, more flexible variant supporting
+            <code>AND</code>, <code>OR</code>, <code>MOD</code>, <code>DIV</code> operators
+            (e.g., <code>NCCL_TESTS_SPLIT=%8</code> for modulo-based grouping).
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 3"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 3: NIC SELECTION LOGIC (was section 4) -->
+    <!-- ============================================================ -->
+    <section id="s3">
+        <h2>3. RCCL NIC Selection Logic</h2>
+
+        <h3>3.1 Entry Point</h3>
+        <div class="card">
+            <p><code>src/graph/search.cc:1645</code> &mdash; <code>ncclTopoGetNetDev()</code> determines NIC for each channel:</p>
+            <ul>
+                <li>Graph-based channels use <code>inter[]</code> from graph search</li>
+                <li>P2P channels use <code>ncclTopoGetLocalNet()</code></li>
+            </ul>
+        </div>
+
+        <h3>3.2 Local NIC Selection Algorithm</h3>
+        <p><code>src/graph/topo.cc:2524-2581</code> &mdash; <code>ncclTopoGetLocalNetType()</code>:</p>
+        <pre><span style="color:#6a9955;">// Step 1: Find equidistant NICs (best path type + highest bandwidth)</span>
+ncclTopoGetLocal(system, gpuNode-&gt;gpu.dev, NET, &amp;localRailCount, ...);
+
+<span style="color:#6a9955;">// Step 2: Assign GPU to NIC rail via bit-reversal</span>
+int devIdx = gpuNode-&gt;gpu.dev;
+if (isPow2(localRailCount)) {
+    rail = mirrorBits(devIdx, localRailCount);
+} else {
+    rail = (devIdx * DIVUP(localRailCount, localGpuCount)) % localRailCount;
+}</pre>
+
+        <div class="card blue">
+            <h4>How <code>ncclTopoGetLocal()</code> works <span style="color:var(--muted);font-size:12px;">(topo.cc:2371-2400)</span></h4>
+            <ol>
+                <li>For each available NIC, look up <code>paths[NET][n].type</code> (path type from GPU to NIC n, computed by BFS)</li>
+                <li>Find the <strong>best (lowest) path type</strong> across all NICs</li>
+                <li>Among NICs with that best type, find the <strong>highest bandwidth</strong></li>
+                <li>Return only NICs matching both &rarr; these are the "equidistant" candidates (<code>localRailCount</code>)</li>
+            </ol>
+            <p style="margin-bottom:0;"><strong>Key:</strong> Cross-NUMA NICs have PATH_SYS (9), worse than same-NUMA PATH_PHB (8),
+            so the equidistant set is always confined to same-NUMA NICs.</p>
+        </div>
+
+        <h3>3.3 mirrorBits() &mdash; Rail-Striping Function</h3>
+        <p><code>src/graph/topo.h:407-412</code>:</p>
+        <pre>static int mirrorBits(int val, int pow2) {
+    int mirror = 0;
+    for (int b = 1, mb = (pow2 &gt;&gt; 1); b &lt; pow2; b &lt;&lt;= 1, mb &gt;&gt;= 1)
+        if (val &amp; b) mirror |= mb;
+    return mirror;
+}</pre>
+        <ul>
+            <li><code>mirrorBits(val, 1) = 0</code> always (loop never executes since <code>1 &lt; 1</code> is false)</li>
+            <li><code>mirrorBits(val, 2)</code> = bit 0 of val &rarr; 0 for even GPUs, 1 for odd GPUs</li>
+        </ul>
+    </section>
+
+    <div class="page-break" data-page="Page 3b"></div>
+
+    <!-- SCENARIO A: 8 GPU / 8 NIC -->
+    <section>
+        <h3>3.4 Scenario A: 8 GPUs / 8 NICs (No Split-Mask)</h3>
+        <div class="card green">
+            <p>With all 8 NICs present, each partition has exactly <strong>1 GPU + 1 NIC</strong>.
+            Each GPU has a same-partition NIC reachable via PATH_PXB (PCI switches only, no CPU traversal).</p>
+        </div>
+
+        <table>
+            <tr><th>GPU</th><th>Upstream</th><th>Same-Partition NIC</th><th>Path Type</th><th>localRailCount</th></tr>
+            <tr><td>GPU0</td><td><code>01:00.0</code> (Sw1-A)</td><td>ionic_6</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU1</td><td><code>21:00.0</code> (Sw1-B)</td><td>ionic_7</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU2</td><td><code>41:00.0</code> (Sw3-A)</td><td>ionic_5</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU3</td><td><code>61:00.0</code> (Sw3-B)</td><td>ionic_4</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU4</td><td><code>81:00.0</code> (Sw4-A)</td><td>ionic_2</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU5</td><td><code>a1:00.0</code> (Sw4-B)</td><td>ionic_3</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU6</td><td><code>c1:00.0</code> (Sw5-A)</td><td>ionic_1</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+            <tr><td>GPU7</td><td><code>e1:00.0</code> (Sw5-B)</td><td>ionic_0</td><td class="good">PATH_PXB (5)</td><td>1</td></tr>
+        </table>
+
+        <div class="callout success">
+            <strong>Selection logic:</strong> <code>ncclTopoGetLocal()</code> finds 1 NIC at PATH_PXB (best).
+            All other NICs are PATH_PHB or PATH_SYS. With <code>localRailCount=1</code>,
+            <code>mirrorBits(devIdx, 1) = 0</code> always &rarr; each GPU maps to its single closest NIC.<br><br>
+            <strong>Result:</strong> Perfect 1:1 GPU-to-NIC pairing. All same-partition. All GDR enabled. No contention.
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 3c"></div>
+
+    <!-- SCENARIO B: 8 GPU / 4 NIC WITHOUT FIX -->
+    <section>
+        <h3>3.5 Scenario B: 8 GPUs / 4 NICs (Split-Mask, Without Virtual Switch Links)</h3>
+
+        <div class="card orange">
+            <p>With <code>NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6</code>, the available NICs are:</p>
+            <ul>
+                <li><strong>NUMA 0:</strong> ionic_6 (<code>01:00.0</code>, Sw1-A), ionic_4 (<code>61:00.0</code>, Sw3-B)</li>
+                <li><strong>NUMA 1:</strong> ionic_2 (<code>81:00.0</code>, Sw4-A), ionic_0 (<code>e1:00.0</code>, Sw5-B)</li>
+            </ul>
+            <p style="margin-bottom:0;">Half the GPUs lost their same-partition NIC (ionic_7, ionic_5, ionic_3, ionic_1 were masked).</p>
+        </div>
+
+        <h4>GPUs with same-partition NIC still available &mdash; localRailCount = 1</h4>
+        <table>
+            <tr><th>GPU</th><th>Upstream</th><th>Closest NIC</th><th>Path</th><th>Other same-NUMA NIC</th><th>Its Path</th></tr>
+            <tr><td>GPU0</td><td><code>01:00.0</code> (Sw1-A)</td><td class="good">ionic_6 (Sw1-A)</td><td class="good">PATH_PXB</td><td>ionic_4 (Sw3-B)</td><td>PATH_PHB</td></tr>
+            <tr><td>GPU3</td><td><code>61:00.0</code> (Sw3-B)</td><td class="good">ionic_4 (Sw3-B)</td><td class="good">PATH_PXB</td><td>ionic_6 (Sw1-A)</td><td>PATH_PHB</td></tr>
+            <tr><td>GPU4</td><td><code>81:00.0</code> (Sw4-A)</td><td class="good">ionic_2 (Sw4-A)</td><td class="good">PATH_PXB</td><td>ionic_0 (Sw5-B)</td><td>PATH_PHB</td></tr>
+            <tr><td>GPU7</td><td><code>e1:00.0</code> (Sw5-B)</td><td class="good">ionic_0 (Sw5-B)</td><td class="good">PATH_PXB</td><td>ionic_2 (Sw4-A)</td><td>PATH_PHB</td></tr>
+        </table>
+        <p>&rarr; <code>localRailCount=1</code>, GPU picks its same-partition NIC. GDR enabled.</p>
+
+        <h4>GPUs whose same-partition NIC was masked &mdash; localRailCount = 2</h4>
+        <table>
+            <tr><th>GPU</th><th>Upstream</th><th>Masked NIC</th><th>Same-NUMA NIC A</th><th>Path</th><th>Same-NUMA NIC B</th><th>Path</th></tr>
+            <tr><td>GPU1</td><td><code>21:00.0</code> (Sw1-B)</td><td style="color:var(--muted);">ionic_7</td><td>ionic_6 (Sw1-A)</td><td class="bad">PATH_PHB</td><td>ionic_4 (Sw3-B)</td><td class="bad">PATH_PHB</td></tr>
+            <tr><td>GPU2</td><td><code>41:00.0</code> (Sw3-A)</td><td style="color:var(--muted);">ionic_5</td><td>ionic_6 (Sw1-A)</td><td class="bad">PATH_PHB</td><td>ionic_4 (Sw3-B)</td><td class="bad">PATH_PHB</td></tr>
+            <tr><td>GPU5</td><td><code>a1:00.0</code> (Sw4-B)</td><td style="color:var(--muted);">ionic_3</td><td>ionic_2 (Sw4-A)</td><td class="bad">PATH_PHB</td><td>ionic_0 (Sw5-B)</td><td class="bad">PATH_PHB</td></tr>
+            <tr><td>GPU6</td><td><code>c1:00.0</code> (Sw5-A)</td><td style="color:var(--muted);">ionic_1</td><td>ionic_2 (Sw4-A)</td><td class="bad">PATH_PHB</td><td>ionic_0 (Sw5-B)</td><td class="bad">PATH_PHB</td></tr>
+        </table>
+
+        <div class="callout danger">
+            <strong>Both same-NUMA NICs appear equidistant at PATH_PHB</strong> &mdash;
+            RCCL cannot distinguish the cross-partition same-switch NIC from the cross-switch NIC.
+            <code>mirrorBits()</code> breaks the tie:
+            <pre style="margin:8px 0 0 0; background:transparent; border:none; color:var(--text);">GPU1: mirrorBits(1, 2) = 1 &rarr; rail 1 &rarr; <span class="bad">ionic_4 (Sw3)</span> &mdash; cross-switch!
+GPU2: mirrorBits(2, 2) = 0 &rarr; rail 0 &rarr; <span class="bad">ionic_6 (Sw1)</span> &mdash; cross-switch!
+GPU5: mirrorBits(5, 2) = 1 &rarr; rail 1 &rarr; <span class="bad">ionic_0 (Sw5)</span> &mdash; cross-switch!
+GPU6: mirrorBits(6, 2) = 0 &rarr; rail 0 &rarr; <span class="bad">ionic_2 (Sw4)</span> &mdash; cross-switch!</pre>
+        </div>
+
+        <h4>3.6 Observed NIC Assignment (from RCCL debug logs, 4-NIC config)</h4>
+        <p>All 16 channels per rank used the same NIC (no per-channel striping for 2-rank comms):</p>
+        <table>
+            <tr><th>GPU</th><th>GPU Upstream</th><th>NIC</th><th>NIC Upstream</th><th>Topology</th><th>GDR</th></tr>
+            <tr><td>GPU0</td><td><code>01:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw1-A)</span></td><td>ionic_6</td><td><code>01:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw1-A)</span></td><td class="good">Same-partition</td><td class="good">Enabled</td></tr>
+            <tr><td>GPU1</td><td><code>21:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw1-B)</span></td><td>ionic_4</td><td><code>61:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw3-B)</span></td><td class="bad">Cross-switch</td><td class="bad">Disabled</td></tr>
+            <tr><td>GPU2</td><td><code>41:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw3-A)</span></td><td>ionic_6</td><td><code>01:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw1-A)</span></td><td class="bad">Cross-switch</td><td class="bad">Disabled</td></tr>
+            <tr><td>GPU3</td><td><code>61:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw3-B)</span></td><td>ionic_4</td><td><code>61:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw3-B)</span></td><td class="good">Same-partition</td><td class="good">Enabled</td></tr>
+            <tr><td>GPU4</td><td><code>81:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw4-A)</span></td><td>ionic_2</td><td><code>81:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw4-A)</span></td><td class="good">Same-partition</td><td class="good">Enabled</td></tr>
+            <tr><td>GPU5</td><td><code>a1:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw4-B)</span></td><td>ionic_0</td><td><code>e1:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw5-B)</span></td><td class="bad">Cross-switch</td><td class="bad">Disabled</td></tr>
+            <tr><td>GPU6</td><td><code>c1:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw5-A)</span></td><td>ionic_2</td><td><code>81:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw4-A)</span></td><td class="bad">Cross-switch</td><td class="bad">Disabled</td></tr>
+            <tr><td>GPU7</td><td><code>e1:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw5-B)</span></td><td>ionic_0</td><td><code>e1:00.0</code> <span style="color:var(--muted);font-size:11px;">(Sw5-B)</span></td><td class="good">Same-partition</td><td class="good">Enabled</td></tr>
+        </table>
+    </section>
+
+    <div class="page-break" data-page="Page 3d"></div>
+
+    <!-- SCENARIO C: 8 GPU / 4 NIC WITH FIX -->
+    <section>
+        <h3>3.7 Scenario C: 8 GPUs / 4 NICs (Split-Mask, WITH Virtual Switch Links &mdash; After Fix)</h3>
+
+        <div class="card green">
+            <p>With virtual switch links exposed, RCCL creates PCI&harr;PCI edges between partitions of the
+            same physical switch. The BFS now finds PCI-only paths for cross-partition pairs on the same switch.</p>
+        </div>
+
+        <h4>GPUs whose same-partition NIC was masked &mdash; path types change</h4>
+        <table>
+            <tr><th>GPU</th><th>Upstream</th><th>Same-switch NIC</th><th>New Path</th><th>Other NIC</th><th>Path</th><th>localRailCount</th></tr>
+            <tr><td>GPU1</td><td><code>21:00.0</code> (Sw1-B)</td><td class="good">ionic_6 (Sw1-A)</td><td class="good">PATH_PXB</td><td>ionic_4 (Sw3-B)</td><td>PATH_PHB</td><td><strong>1</strong> &rarr; ionic_6</td></tr>
+            <tr><td>GPU2</td><td><code>41:00.0</code> (Sw3-A)</td><td class="good">ionic_4 (Sw3-B)</td><td class="good">PATH_PXB</td><td>ionic_6 (Sw1-A)</td><td>PATH_PHB</td><td><strong>1</strong> &rarr; ionic_4</td></tr>
+            <tr><td>GPU5</td><td><code>a1:00.0</code> (Sw4-B)</td><td class="good">ionic_2 (Sw4-A)</td><td class="good">PATH_PXB</td><td>ionic_0 (Sw5-B)</td><td>PATH_PHB</td><td><strong>1</strong> &rarr; ionic_2</td></tr>
+            <tr><td>GPU6</td><td><code>c1:00.0</code> (Sw5-A)</td><td class="good">ionic_0 (Sw5-B)</td><td class="good">PATH_PXB</td><td>ionic_2 (Sw4-A)</td><td>PATH_PHB</td><td><strong>1</strong> &rarr; ionic_0</td></tr>
+        </table>
+
+        <div class="callout success">
+            <strong>Result:</strong> Every GPU now picks a NIC on its <strong>own physical switch</strong>
+            (same-partition or cross-partition via internal fabric). <code>localRailCount=1</code> for all GPUs
+            &mdash; no <code>mirrorBits()</code> tie-breaking needed. All 8 GPU-NIC paths are PATH_PXB or better.
+            <strong>GDR enabled for all 8 GPUs.</strong>
+        </div>
+
+        <h4>Before vs After Fix &mdash; NIC Assignment Comparison</h4>
+        <table>
+            <tr><th>GPU</th><th>NIC (Before Fix)</th><th>NIC (After Fix)</th><th>Change</th></tr>
+            <tr><td>GPU0</td><td>ionic_6 (same-partition)</td><td>ionic_6 (same-partition)</td><td style="color:var(--muted);">No change</td></tr>
+            <tr><td>GPU1</td><td class="bad">ionic_4 (Sw3, cross-switch)</td><td class="good">ionic_6 (Sw1, cross-partition)</td><td style="color:var(--cyan);font-weight:600;">Reassigned</td></tr>
+            <tr><td>GPU2</td><td class="bad">ionic_6 (Sw1, cross-switch)</td><td class="good">ionic_4 (Sw3, cross-partition)</td><td style="color:var(--cyan);font-weight:600;">Reassigned</td></tr>
+            <tr><td>GPU3</td><td>ionic_4 (same-partition)</td><td>ionic_4 (same-partition)</td><td style="color:var(--muted);">No change</td></tr>
+            <tr><td>GPU4</td><td>ionic_2 (same-partition)</td><td>ionic_2 (same-partition)</td><td style="color:var(--muted);">No change</td></tr>
+            <tr><td>GPU5</td><td class="bad">ionic_0 (Sw5, cross-switch)</td><td class="good">ionic_2 (Sw4, cross-partition)</td><td style="color:var(--cyan);font-weight:600;">Reassigned</td></tr>
+            <tr><td>GPU6</td><td class="bad">ionic_2 (Sw4, cross-switch)</td><td class="good">ionic_0 (Sw5, cross-partition)</td><td style="color:var(--cyan);font-weight:600;">Reassigned</td></tr>
+            <tr><td>GPU7</td><td>ionic_0 (same-partition)</td><td>ionic_0 (same-partition)</td><td style="color:var(--muted);">No change</td></tr>
+        </table>
+
+        <h4>NIC Load Distribution After Fix</h4>
+        <div class="card cyan">
+            <p>Each NIC serves 2 GPUs (from both partitions of its physical switch):</p>
+            <table>
+                <tr><th>NIC</th><th>GPU A (same-partition)</th><th>GPU B (cross-partition via fabric)</th></tr>
+                <tr><td>ionic_6 (Sw1-A)</td><td>GPU0</td><td>GPU1</td></tr>
+                <tr><td>ionic_4 (Sw3-B)</td><td>GPU3</td><td>GPU2</td></tr>
+                <tr><td>ionic_2 (Sw4-A)</td><td>GPU4</td><td>GPU5</td></tr>
+                <tr><td>ionic_0 (Sw5-B)</td><td>GPU7</td><td>GPU6</td></tr>
+            </table>
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 4"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 4: PATH TYPE COMPUTATION (was section 5) -->
+    <!-- ============================================================ -->
+    <section id="s4">
+        <h2>4. RCCL Path Type Computation</h2>
+
+        <h3>4.1 Path Type Definitions</h3>
+        <p><code>src/include/graph.h</code>:</p>
+        <table>
+            <tr><th>Constant</th><th>Value</th><th>Meaning</th><th>GDR?</th></tr>
+            <tr><td><code>PATH_LOC</code></td><td>0</td><td>Local (self)</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_NVL</code></td><td>1</td><td>NVLink / XGMI direct</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_NVB</code></td><td>2</td><td>NVLink via intermediate GPU</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_C2C</code></td><td>3</td><td>Chip-to-chip</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_PIX</code></td><td>4</td><td>Single PCIe bridge</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_PXB</code></td><td>5</td><td>Multiple PCIe bridges, NO CPU</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_P2C</code></td><td>6</td><td>C2C + PCIe</td><td class="good">Yes</td></tr>
+            <tr><td><code>PATH_PXN</code></td><td>7</td><td>PCI + NVLink proxy</td><td class="good">Yes</td></tr>
+            <tr><td style="background:rgba(239,68,68,0.15);"><code>PATH_PHB</code></td><td style="background:rgba(239,68,68,0.15);">8</td><td style="background:rgba(239,68,68,0.15);">PCIe through CPU/Host Bridge</td><td class="bad">No</td></tr>
+            <tr><td><code>PATH_SYS</code></td><td>9</td><td>Cross-NUMA (QPI/UPI)</td><td class="bad">No</td></tr>
+            <tr><td><code>PATH_NET</code></td><td>10</td><td>Network</td><td class="bad">No</td></tr>
+            <tr><td><code>PATH_DIS</code></td><td>11</td><td>Disconnected</td><td class="bad">No</td></tr>
+        </table>
+        <div class="callout danger">
+            <strong>GDR threshold:</strong> Enabled when path type <strong>&lt; PATH_PHB</strong>
+            (i.e., PATH_PXB = 5 or better). The PHB boundary at value 8 is where GDR gets disabled.
+        </div>
+
+        <h3>4.2 BFS Path Computation Algorithm</h3>
+        <p><code>src/graph/paths.cc</code> &mdash; <code>ncclTopoSetPaths()</code>:</p>
+        <p>Uses breadth-first search from each base node to all reachable nodes. Two critical classification rules:</p>
+        <pre><span style="color:#6a9955;">// Rule 1: PCI switch &rarr; PCI switch traversal = PATH_PXB</span>
+if (node-&gt;type == PCI &amp;&amp; remNode-&gt;type == PCI) newType = PATH_PXB;
+
+<span style="color:#6a9955;">// Rule 2: Any PCI link through CPU = PATH_PHB</span>
+if (link-&gt;type == LINK_PCI &amp;&amp; (node-&gt;type == CPU || link-&gt;remNode-&gt;type == CPU))
+    newType = PATH_PHB;
+
+<span style="color:#6a9955;">// Path type is monotonically increasing (worst segment wins)</span>
+newType = std::max(path-&gt;type, newType);</pre>
+        <p>Path selection prefers: <strong>lower type</strong> &gt; higher bandwidth &gt; fewer hops.</p>
+
+        <h3>4.3 BCM Switch Flattening</h3>
+        <div class="card">
+            <p><code>src/graph/topo.cc</code> &mdash; <code>ncclTopoFlattenBcmSwitches()</code>:</p>
+            <p>
+                RCCL detects Gen4/Gen5 Broadcom switches (device ID pattern <code>0x1000c010...</code> /
+                <code>0x1000c030...</code>) and <strong>flattens their internal 2-level hierarchy</strong>
+                into a single switch node. This reduces hop count for same-partition paths.
+            </p>
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 5"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 5: PHYSICAL PCIe TOPOLOGY (was section 3) -->
+    <!-- ============================================================ -->
+    <section id="s5">
+        <h2>5. Physical PCIe Topology (SMC300x MI300X)</h2>
+
+        <div class="callout">
+            <strong>Why this section follows RCCL NIC Selection Logic:</strong> Understanding the RCCL selection
+            algorithm and its three scenarios (sections 3.4&ndash;3.7) first reveals <em>why</em> the physical PCIe
+            topology matters &mdash; specifically, why the inability to see inter-switch fabric between Broadcom
+            switch partitions causes the 4-NIC degradation. This section provides the hardware evidence &mdash;
+            the physical switch mapping, DSN-based grouping, and 8-NIC vs 4-NIC topology comparison &mdash;
+            that underpins those scenarios and motivates the DSN-based discovery approach as a potential complement
+            to the <code>switch_discovery</code> kernel module.
+        </div>
+
+        <h3>5.1 Broadcom PEX89104 Multi-Host Switch Architecture</h3>
+        <div class="card orange">
+            <p>
+                Each physical PEX89104 presents as <strong>two virtual PCIe switches</strong>
+                (multi-host partitioning), each with its own upstream port connected to a different
+                CPU root port. The OS sees <strong>two independent PCIe hierarchies</strong> per physical switch.
+            </p>
+        </div>
+
+        <h3>5.2 Physical Switch Mapping (via PCIe Device Serial Number)</h3>
+        <p>
+            <strong>Discovery method:</strong> PCIe DSN at extended capability offset <code>0x100</code>.
+            All ports on the same physical switch share an identical DSN. Upstream ports with the
+            <strong>same DSN are partitions of the same physical silicon</strong> &mdash; they share
+            an internal cross-partition fabric.
+        </p>
+
+        <p><strong>Per-partition device mapping</strong> (verified via sysfs symlinks on smc300x-ccs-aus-gpucc5a):</p>
+
+        <table>
+            <tr>
+                <th>Physical Switch</th>
+                <th>DSN</th>
+                <th>Partition</th>
+                <th>Upstream Port</th>
+                <th>NUMA</th>
+                <th>GPU</th>
+                <th>NIC (8-NIC)</th>
+                <th>NIC (4-NIC)</th>
+            </tr>
+            <tr>
+                <td rowspan="2" style="vertical-align:middle;">Switch 1</td>
+                <td rowspan="2" style="vertical-align:middle;"><code>...2e-34-7e-08</code></td>
+                <td>A</td>
+                <td><code>01:00.0</code></td>
+                <td>0</td>
+                <td>GPU0 <span style="color:var(--muted);font-size:12px;">05:00.0</span></td>
+                <td>ionic_6 <span style="color:var(--muted);font-size:12px;">09:00.0</span></td>
+                <td class="good">ionic_6</td>
+            </tr>
+            <tr>
+                <td>B</td>
+                <td><code>21:00.0</code></td>
+                <td>0</td>
+                <td>GPU1 <span style="color:var(--muted);font-size:12px;">29:00.0</span></td>
+                <td>ionic_7 <span style="color:var(--muted);font-size:12px;">26:00.0</span></td>
+                <td style="color:var(--muted);">&mdash; masked</td>
+            </tr>
+            <tr style="background:rgba(100,100,100,0.1);">
+                <td>Switch 2</td>
+                <td><code>...40-69-5c-08</code></td>
+                <td>&mdash;</td>
+                <td><code>2b:00.0</code> (solo)</td>
+                <td>0</td>
+                <td style="color:var(--muted);">&mdash;</td>
+                <td>ionic_9 <span style="color:var(--muted);font-size:12px;">35:00.0</span></td>
+                <td style="color:var(--muted);">&mdash;</td>
+            </tr>
+            <tr>
+                <td rowspan="2" style="vertical-align:middle;">Switch 3</td>
+                <td rowspan="2" style="vertical-align:middle;"><code>...9b-33-f1-08</code></td>
+                <td>A</td>
+                <td><code>41:00.0</code></td>
+                <td>0</td>
+                <td>GPU2 <span style="color:var(--muted);font-size:12px;">49:00.0</span></td>
+                <td>ionic_5 <span style="color:var(--muted);font-size:12px;">46:00.0</span></td>
+                <td style="color:var(--muted);">&mdash; masked</td>
+            </tr>
+            <tr>
+                <td>B</td>
+                <td><code>61:00.0</code></td>
+                <td>0</td>
+                <td>GPU3 <span style="color:var(--muted);font-size:12px;">65:00.0</span></td>
+                <td>ionic_4 <span style="color:var(--muted);font-size:12px;">69:00.0</span></td>
+                <td class="good">ionic_4</td>
+            </tr>
+            <tr>
+                <td rowspan="2" style="vertical-align:middle;">Switch 4</td>
+                <td rowspan="2" style="vertical-align:middle;"><code>...98-b9-88-08</code></td>
+                <td>A</td>
+                <td><code>81:00.0</code></td>
+                <td>1</td>
+                <td>GPU4 <span style="color:var(--muted);font-size:12px;">85:00.0</span></td>
+                <td>ionic_2 <span style="color:var(--muted);font-size:12px;">89:00.0</span></td>
+                <td class="good">ionic_2</td>
+            </tr>
+            <tr>
+                <td>B</td>
+                <td><code>a1:00.0</code></td>
+                <td>1</td>
+                <td>GPU5 <span style="color:var(--muted);font-size:12px;">a9:00.0</span></td>
+                <td>ionic_3 <span style="color:var(--muted);font-size:12px;">a6:00.0</span></td>
+                <td style="color:var(--muted);">&mdash; masked</td>
+            </tr>
+            <tr>
+                <td rowspan="2" style="vertical-align:middle;">Switch 5</td>
+                <td rowspan="2" style="vertical-align:middle;"><code>...a0-0f-93-08</code></td>
+                <td>A</td>
+                <td><code>c1:00.0</code></td>
+                <td>1</td>
+                <td>GPU6 <span style="color:var(--muted);font-size:12px;">c9:00.0</span></td>
+                <td>ionic_1 <span style="color:var(--muted);font-size:12px;">c6:00.0</span></td>
+                <td style="color:var(--muted);">&mdash; masked</td>
+            </tr>
+            <tr>
+                <td>B</td>
+                <td><code>e1:00.0</code></td>
+                <td>1</td>
+                <td>GPU7 <span style="color:var(--muted);font-size:12px;">e5:00.0</span></td>
+                <td>ionic_0 <span style="color:var(--muted);font-size:12px;">e9:00.0</span></td>
+                <td class="good">ionic_0</td>
+            </tr>
+        </table>
+
+        <h3>5.3 8-NIC vs 4-NIC Topology Comparison</h3>
+
+        <p>The per-partition table above shows both NIC columns, but the critical difference is best understood by examining
+        the GPU-to-NIC relationship per physical switch:</p>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel good">
+                <div class="diagram-title good">8-NIC Mode &mdash; All NICs Active</div>
+                <p style="font-size:13px;">Every partition has 1 GPU + 1 NIC &rarr; each GPU has a <strong>same-partition</strong> NIC.
+                Path type: PATH_PXB (5) for all 8 pairs.</p>
+                <table style="font-size:13px;">
+                    <tr><th>Switch</th><th>Partition A</th><th>Partition B</th></tr>
+                    <tr><td>Switch 1</td><td>GPU0 &harr; ionic_6</td><td>GPU1 &harr; ionic_7</td></tr>
+                    <tr><td>Switch 3</td><td>GPU2 &harr; ionic_5</td><td>GPU3 &harr; ionic_4</td></tr>
+                    <tr><td>Switch 4</td><td>GPU4 &harr; ionic_2</td><td>GPU5 &harr; ionic_3</td></tr>
+                    <tr><td>Switch 5</td><td>GPU6 &harr; ionic_1</td><td>GPU7 &harr; ionic_0</td></tr>
+                </table>
+                <p style="font-size:13px; margin-bottom:0;"><span class="good">Result:</span> Perfect 1:1 pairing, all GDR enabled.</p>
+            </div>
+            <div class="diagram-panel bad">
+                <div class="diagram-title bad">4-NIC Mode &mdash; Alternating Partitions Masked</div>
+                <p style="font-size:13px;">One NIC per physical switch survives. Half the GPUs lose their same-partition NIC,
+                creating an <strong>asymmetry</strong>.</p>
+                <table style="font-size:13px;">
+                    <tr><th>Switch</th><th>Part A</th><th>Part B</th><th>NIC Kept</th><th>Gap</th></tr>
+                    <tr><td>Sw1</td><td>GPU0 + ionic_6</td><td>GPU1 <span class="bad">(masked)</span></td><td>ionic_6 (A)</td><td class="bad">GPU1</td></tr>
+                    <tr><td>Sw3</td><td>GPU2 <span class="bad">(masked)</span></td><td>GPU3 + ionic_4</td><td>ionic_4 (B)</td><td class="bad">GPU2</td></tr>
+                    <tr><td>Sw4</td><td>GPU4 + ionic_2</td><td>GPU5 <span class="bad">(masked)</span></td><td>ionic_2 (A)</td><td class="bad">GPU5</td></tr>
+                    <tr><td>Sw5</td><td>GPU6 <span class="bad">(masked)</span></td><td>GPU7 + ionic_0</td><td>ionic_0 (B)</td><td class="bad">GPU6</td></tr>
+                </table>
+                <p style="font-size:13px; margin-bottom:0;"><span class="bad">The gap GPUs</span> must reach a NIC on the <em>other partition</em>
+                of their switch, but without inter-switch-link visibility this path is classified as PATH_PHB.</p>
+            </div>
+        </div>
+
+        <div class="callout warn">
+            <strong>The topology gap is the root cause:</strong> GPU1, GPU2, GPU5, GPU6 each need to reach a NIC on the
+            <strong>other partition</strong> of their physical switch. Without visibility into the internal cross-partition
+            fabric (via <code>switch_discovery</code> or DSN-based inference), these cross-partition paths are
+            indistinguishable from cross-switch paths &mdash; both traverse the CPU and get classified as PATH_PHB.
+            This is the root cause of the NIC mis-assignment shown in section 3.5.
+        </div>
+
+        <h3>5.4 DSN as a Complement to Inter-Switch-Link Discovery</h3>
+
+        <div class="card purple">
+            <p>The Physical Switch Mapping table (5.2) demonstrates that the DSN groups partitions by physical switch &mdash;
+            providing exactly the information RCCL needs to infer which cross-partition paths traverse internal fabric
+            rather than the CPU:</p>
+            <ol>
+                <li><strong>DSN groups establish switch membership:</strong> <code>01:00.0</code> and <code>21:00.0</code>
+                share DSN <code>...2e-34-7e-08</code> &rarr; they are partitions of the same PEX89104 &rarr;
+                cross-partition traffic between them uses internal fabric, not the CPU</li>
+                <li><strong>RCCL could use this to create pcilink edges:</strong> Instead of relying on
+                <code>switch_discovery</code>&rsquo;s sysfs path, RCCL could read DSN directly from PCIe config space
+                (offset <code>0x100</code>), group upstream ports by DSN, and inject pcilink edges between partitions
+                of the same switch</li>
+                <li><strong>Advantage:</strong> No kernel module dependency &mdash; works on any system with
+                Broadcom multi-host switches</li>
+                <li><strong>Limitation:</strong> Requires <code>CAP_SYS_RAWIO</code> (root) to access extended config
+                space (see section 7.1), but RCCL often runs with elevated privileges in HPC/datacenter environments</li>
+            </ol>
+            <p style="margin-bottom:0;">
+                This makes DSN-based discovery a viable <strong>alternative or fallback</strong> when the
+                <code>switch_discovery</code> module is unavailable, subject to privilege constraints.
+            </p>
+        </div>
+
+        <h3>5.5 Management Endpoints</h3>
+        <p>Each physical switch exposes a management endpoint at Port #31 (<code>xx:1f.0</code>) under exactly <strong>one</strong> partition:</p>
+        <table>
+            <tr><th>Mgmt Endpoint</th><th>Parent Upstream</th><th>Physical Switch</th></tr>
+            <tr><td><code>02:1f.0</code></td><td><code>01:00.0</code></td><td>Switch 1</td></tr>
+            <tr><td><code>2c:1f.0</code></td><td><code>2b:00.0</code></td><td>Switch 2</td></tr>
+            <tr><td><code>62:1f.0</code></td><td><code>61:00.0</code></td><td>Switch 3</td></tr>
+            <tr><td><code>82:1f.0</code></td><td><code>81:00.0</code></td><td>Switch 4</td></tr>
+            <tr><td><code>e2:1f.0</code></td><td><code>e1:00.0</code></td><td>Switch 5</td></tr>
+        </table>
+
+        <h3>5.6 MI300X Internal PCIe Bridge</h3>
+        <div class="card">
+            <p>MI300X is a multi-chiplet SoC that presents as a PCIe switch internally:</p>
+            <ul>
+                <li>Upstream bridge: <code>1022:1500</code></li>
+                <li>Downstream bridge: <code>1002:1501</code></li>
+                <li>GPU endpoint: <code>1002:74a1</code></li>
+            </ul>
+            <p>This adds <strong>+2 bridge hops</strong> vs NVIDIA H20 (direct endpoint), contributing to higher PCIe distance values.</p>
+        </div>
+
+        <h3>5.7 GPU-NIC PCIe Distance Matrix</h3>
+        <div class="card red">
+            <p><strong>Without virtual switch link visibility (current state):</strong></p>
+            <table>
+                <tr><th>Scenario</th><th>Hops</th><th>Path Type</th><th>GDR</th></tr>
+                <tr>
+                    <td>Same partition (GPU + NIC under same upstream)</td>
+                    <td>~6</td>
+                    <td class="warn">Borderline PXB/PHB</td>
+                    <td class="good">Enabled</td>
+                </tr>
+                <tr>
+                    <td>Cross partition (different upstream, same physical switch)</td>
+                    <td>8+</td>
+                    <td class="bad">PATH_PHB (8)</td>
+                    <td class="bad">Disabled</td>
+                </tr>
+                <tr>
+                    <td>Cross switch (different physical switch)</td>
+                    <td>8+</td>
+                    <td class="bad">PATH_PHB (8)</td>
+                    <td class="bad">Disabled</td>
+                </tr>
+            </table>
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 6"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 6: VIRTUAL SWITCH LINK MECHANISM -->
+    <!-- ============================================================ -->
+    <section id="s6">
+        <h2>6. Virtual Switch Link Mechanism</h2>
+
+        <h3>6.1 Kernel Module: switch_discovery</h3>
+        <div class="card cyan">
+            <ul>
+                <li>Reads Broadcom VSEC (Vendor-Specific Extended Capability) registers</li>
+                <li>Exposes inter-switch fabric via <code>/sys/kernel/pci_switch_link/virtual_switch_links/</code></li>
+                <li>Refresh trigger: <code>/sys/kernel/pci_switch_link/refresh_switch_toplogy</code></li>
+                <li><span class="tag red">Status on test nodes</span> NOT loaded, sysfs path does NOT exist</li>
+            </ul>
+        </div>
+
+        <h3>6.2 RCCL Integration</h3>
+        <p><code>src/graph/xml.cc</code> lines 778&ndash;794:</p>
+        <pre><span style="color:#6a9955;">// When building XML topology, for BCM switches (vendor 0x1000):</span>
+if (vendor != NULL &amp;&amp; strcmp(vendor, "0x1000") == 0) {
+    ncclOsGetBcmLinks(busId, &amp;nlinks, &amp;peers);
+    <span style="color:#6a9955;">// Adds &lt;pcilink target="peer_busid"/&gt; elements to XML</span>
+}</pre>
+
+        <p><code>src/graph/topo.cc</code> &mdash; <code>ncclTopoRefreshBcmP2pLinks()</code>:</p>
+        <pre><span style="color:#6a9955;">// Trigger sysfs refresh before reading links</span>
+FILE* fp = fopen("/sys/kernel/pci_switch_link/refresh_switch_toplogy", "r");</pre>
+        <p>
+            These <code>&lt;pcilink&gt;</code> elements create <strong>direct PCI&harr;PCI edges</strong>
+            in the topology graph, enabling the BFS to find PCI-only paths between switch partitions.
+        </p>
+
+        <h3>6.3 Impact on Path Computation</h3>
+
+        <div class="diagram-grid">
+            <div class="diagram-panel bad">
+                <div class="diagram-title bad">Without Virtual Switch Links (Current)</div>
+                <pre style="background:transparent; border:none; color:var(--text); font-size:13px;">
+GPU1 &rarr; PCI(<span style="color:var(--cyan);">61:00.0</span>) &rarr; <span style="color:var(--red);">CPU(NUMA0)</span> &rarr; PCI(<span style="color:var(--cyan);">01:00.0</span>) &rarr; ionic_6
+                          &uarr;
+                     <span style="color:var(--red);">PATH_PHB triggered (Rule 2)</span>
+
+Result: <span class="bad">PATH_PHB (8)</span> &rarr; GDR disabled
+        &rarr; host memory bounce buffer</pre>
+            </div>
+            <div class="diagram-panel fixed">
+                <div class="diagram-title fixed">With Virtual Switch Links (After Fix)</div>
+                <pre style="background:transparent; border:none; color:var(--text); font-size:13px;">
+GPU1 &rarr; PCI(<span style="color:var(--cyan);">61:00.0</span>) &rarr; PCI(<span style="color:var(--green);">41:00.0</span>) &rarr; PCI(<span style="color:var(--cyan);">01:00.0</span>) &rarr; ionic_6
+         PCI&rarr;PCI = PXB    PCI&rarr;PCI = PXB   (no CPU!)
+
+Result: <span class="good">PATH_PXB (5)</span> &rarr; GDR enabled
+        &rarr; direct GPU&harr;NIC DMA</pre>
+            </div>
+        </div>
+
+        <h3>6.4 Required Fix Components</h3>
+        <div class="card green">
+            <ol>
+                <li><strong>Kernel:</strong> <code>switch_discovery</code> module loaded, exposing <code>/sys/kernel/pci_switch_link/</code></li>
+                <li><strong>RCCL:</strong> PR #3121 (Wenkai Du) &mdash; reads BCM P2P links and adds pcilink topology edges</li>
+                <li>Both must be deployed <strong>together</strong></li>
+            </ol>
+        </div>
+
+        <h3>6.5 gfx1250 Path Rewriting (related but different arch)</h3>
+        <div class="card">
+            <p>
+                <code>src/graph/paths.cc</code> lines 885&ndash;899 &mdash; <code>rcclRewriteSameDomainNetPaths()</code>:
+            </p>
+            <p>
+                For <strong>gfx1250 GPUs only</strong>, rewrites same-PCI-domain GPU&harr;NIC paths from
+                PATH_PHB &rarr; PATH_PXB. This is a domain-based heuristic workaround,
+                <strong>NOT applicable to MI300X (gfx942)</strong>.
+            </p>
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 7"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 7: SYSFS DISCOVERY -->
+    <!-- ============================================================ -->
+    <section id="s7">
+        <h2>7. Sysfs-Based Inter-Switch Discovery (Without Kernel Module)</h2>
+
+        <h3>7.1 PCIe Device Serial Number (DSN) &mdash; Definitive Method <span class="tag red">Requires Root</span></h3>
+        <div class="card orange">
+            <p>
+                The PCIe extended capability "Device Serial Number" (cap ID <code>0x0003</code> at offset
+                <code>0x100</code>) is present on all PEX890xx ports. All ports on the same physical switch
+                share an identical DSN.
+            </p>
+            <h4>Algorithm</h4>
+            <pre>1. Enumerate PCI devices with vendor=0x1000, device=0xc030
+2. Read PCIe DSN extended capability at offset 0x100
+3. Group by DSN &rarr; each group = one physical switch
+4. Within each group, upstream ports are the partitions</pre>
+        </div>
+
+        <h4>Privilege Limitation</h4>
+        <div class="callout danger">
+            <strong>DSN lives in PCIe extended config space (offset &ge; 0x100)</strong>, which the kernel
+            restricts to processes with <code>CAP_SYS_RAWIO</code> (effectively root).
+        </div>
+
+        <table>
+            <tr><th>Method</th><th>Without sudo</th><th>With sudo</th></tr>
+            <tr>
+                <td><code>lspci -vvs</code></td>
+                <td class="bad">Capabilities: &lt;access denied&gt;</td>
+                <td class="good">Shows DSN correctly</td>
+            </tr>
+            <tr>
+                <td><code>setpci -s ... 0x104.L</code></td>
+                <td class="bad">Returns <code>ffffffff</code> (all-ones)</td>
+                <td class="good">Returns correct DSN bytes</td>
+            </tr>
+            <tr>
+                <td>sysfs <code>config</code> file</td>
+                <td class="bad">Kernel returns only 64 bytes</td>
+                <td class="good">Full 4096 bytes (extended config)</td>
+            </tr>
+            <tr>
+                <td><code>/proc/bus/pci/XX/YY.Z</code></td>
+                <td class="bad">File shows 4096 bytes but read() returns only 64</td>
+                <td class="good">Full 4096 bytes</td>
+            </tr>
+        </table>
+
+        <p style="font-size:13px; color:var(--muted);">
+            Root cause: The kernel enforces a 64-byte read limit on PCIe config space for non-root users.
+            <code>CAP_SYS_RAWIO</code> is in the bounding set but not in the effective set for normal users
+            (<code>Current: =</code> per <code>capsh --print</code>). No sysfs attributes expose the DSN
+            without config space access.
+        </p>
+
+        <h3>7.2 Management Endpoint Parent &mdash; Secondary Method <span class="tag green">No Root Required</span></h3>
+        <div class="card green">
+            <p>
+                Port #31 (<code>xx:1f.0</code>) appears under exactly one upstream partition per physical switch.
+                The sysfs parent path reveals grouping via standard symlink traversal (no privilege needed):
+            </p>
+            <pre>readlink -f /sys/bus/pci/devices/0000:02:1f.0
+&rarr; .../0000:01:00.0/0000:02:1f.0  (parent = 01:00.0, Switch 1)</pre>
+            <p>
+                <strong>Limitation:</strong> This only identifies ONE partition per physical switch
+                (the one hosting Port #31). It cannot pair the two upstream ports of a dual-partition switch.
+            </p>
+        </div>
+
+        <h3>7.3 Methods That Do NOT Work</h3>
+        <table>
+            <tr><th>Method</th><th>Why It Fails</th></tr>
+            <tr><td>IOMMU groups</td><td>Unique per port, not per switch</td></tr>
+            <tr><td>Vendor/device/subsystem IDs</td><td>Identical across all switches</td></tr>
+            <tr><td>NUMA node</td><td>Only distinguishes CPU socket, not individual switches</td></tr>
+            <tr><td>firmware_node / ACPI</td><td>Not present on switch ports</td></tr>
+            <tr><td>Physical slot info</td><td>Empty on these systems</td></tr>
+            <tr><td>BAR resources</td><td>Upstream ports have no BARs</td></tr>
+            <tr><td>Config space via sysfs read()</td><td>Limited to 64 bytes without root</td></tr>
+        </table>
+
+        <h3>7.4 Conclusion</h3>
+        <div class="callout danger">
+            Without root privilege, there is <strong>no reliable unprivileged method</strong> to discover
+            which upstream ports belong to the same physical Broadcom switch. The <code>switch_discovery</code>
+            kernel module remains the intended solution &mdash; it runs in kernel context (full config space access)
+            and exposes results to userspace via <code>/sys/kernel/pci_switch_link/virtual_switch_links/</code>.
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 8"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 8: TOPOLOGY DUMPS -->
+    <!-- ============================================================ -->
+    <section id="s8">
+        <h2>8. Topology Dumps Collected</h2>
+
+        <div class="diagram-grid">
+            <div class="card green">
+                <h3>8.1 &nbsp; 8-GPU / 8-NIC Configuration</h3>
+                <p>File: <code>topo_8gpu_8nic.xml</code></p>
+                <ul>
+                    <li>All 8 GPUs and 8 NICs visible</li>
+                    <li>Each GPU+NIC pair under same BRCM switch partition &rarr; <code>gdr=1</code></li>
+                    <li>NUMA 0: GPUs 0&ndash;3, NUMA 1: GPUs 4&ndash;7</li>
+                </ul>
+            </div>
+            <div class="card red">
+                <h3>8.2 &nbsp; 8-GPU / 4-NIC Configuration (SPLIT_MASK)</h3>
+                <p>File: <code>topo_8gpu_4nic_splitmask.xml</code></p>
+                <ul>
+                    <li>Only 4 NICs visible: ionic_0, ionic_2, ionic_4, ionic_6</li>
+                    <li>Filtered by <code>NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6</code></li>
+                    <li>Shows rank 0's view (1 GPU per communicator per node)</li>
+                    <li><strong>3 of 4 NICs on different switch partitions</strong> &rarr; cross-partition paths</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <div class="page-break" data-page="Page 9"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 9: TEST CONFIGURATION -->
+    <!-- ============================================================ -->
+    <section id="s9">
+        <h2>9. Test Configuration</h2>
+
+        <h3>Environment Variables (BD Experiment Flags)</h3>
+        <pre>NCCL_MAX_NCHANNELS=64
+NCCL_TESTS_SPLIT_MASK=0x7
+NCCL_NCHANNELS_PER_NET_PEER=16
+NCCL_P2P_NET_CHUNKSIZE=262144
+RCCL_P2P_SHIFT_SIZE=0
+NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6   <span style="color:#6a9955;"># 4-NIC filter</span></pre>
+
+        <h3>Scripts</h3>
+        <table>
+            <tr><th>Script</th><th>Purpose</th></tr>
+            <tr><td><code>setup_env.sh</code></td><td>Environment setup (RCCL_HOME, RCCL_TESTS, OMPI paths, node list)</td></tr>
+            <tr><td><code>run-rccl.sh</code></td><td>mpirun wrapper with all RCCL env vars</td></tr>
+        </table>
+
+        <h3>Run Command</h3>
+        <pre>bash run-rccl.sh all_reduce 1G 1G 1 1</pre>
+
+        <h3>Compute Nodes</h3>
+        <table>
+            <tr><th>Node</th><th>Role</th></tr>
+            <tr><td><code>smc300x-ccs-aus-gpucc5a</code></td><td>Node 1 (ranks 0&ndash;7)</td></tr>
+            <tr><td><code>smc300x-ccs-aus-gpuf273</code></td><td>Node 2 (ranks 8&ndash;15)</td></tr>
+        </table>
+    </section>
+
+    <div class="page-break" data-page="Page 10"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 10: SOURCE FILES -->
+    <!-- ============================================================ -->
+    <section id="s10">
+        <h2>10. Key Source Files Reference</h2>
+
+        <table>
+            <tr><th>File</th><th>Key Functions</th><th>Purpose</th></tr>
+            <tr>
+                <td><code>src/include/graph.h</code></td>
+                <td><code>PATH_*</code> defines</td>
+                <td>Path type constants</td>
+            </tr>
+            <tr>
+                <td><code>src/graph/paths.cc</code></td>
+                <td><code>ncclTopoSetPaths()</code>, <code>ncclTopoComputePaths()</code>, <code>rcclRewriteSameDomainNetPaths()</code></td>
+                <td>BFS path computation, GDR/PXN decisions</td>
+            </tr>
+            <tr>
+                <td><code>src/graph/topo.cc</code></td>
+                <td><code>ncclTopoGetLocalNetType()</code>, <code>ncclTopoGetLocal()</code>, <code>ncclTopoFlattenBcmSwitches()</code>, <code>ncclTopoRefreshBcmP2pLinks()</code></td>
+                <td>NIC selection, BCM flattening, virtual link refresh</td>
+            </tr>
+            <tr>
+                <td><code>src/graph/topo.h</code></td>
+                <td><code>mirrorBits()</code></td>
+                <td>GPU-to-rail assignment</td>
+            </tr>
+            <tr>
+                <td><code>src/graph/xml.cc</code></td>
+                <td><code>ncclTopoGetXmlFromSys()</code>, <code>ncclOsGetBcmLinks()</code></td>
+                <td>XML topo building, BCM link reading</td>
+            </tr>
+            <tr>
+                <td><code>src/graph/search.cc</code></td>
+                <td><code>ncclTopoGetNetDev()</code></td>
+                <td>Per-channel NIC assignment</td>
+            </tr>
+            <tr>
+                <td><code>src/init.cc:1928-1935</code></td>
+                <td>Topo dump logic</td>
+                <td><code>NCCL_TOPO_DUMP_FILE</code> handling</td>
+            </tr>
+            <tr>
+                <td><code>rccl-tests/src/common.cu:2467-2494</code></td>
+                <td>SPLIT_MASK parsing</td>
+                <td><code>MPI_Comm_split</code> logic</td>
+            </tr>
+        </table>
+    </section>
+
+    <div class="page-break" data-page="Page 11"></div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 11: OPEN QUESTIONS -->
+    <!-- ============================================================ -->
+    <section id="s11">
+        <h2>11. Open Questions / Next Steps</h2>
+
+        <div class="card blue">
+            <h4>1. Deploy and test with switch_discovery module</h4>
+            <p>
+                Load the kernel module, verify <code>/sys/kernel/pci_switch_link/</code> populates,
+                collect new topo dump showing pcilink edges, re-run all_reduce to confirm GDR enables
+                for cross-partition pairs.
+            </p>
+        </div>
+
+        <div class="card purple">
+            <h4>2. DSN-based userspace alternative</h4>
+            <p>
+                Could RCCL read PCIe DSN directly from config space (offset <code>0x100</code>) to infer
+                physical switch membership without requiring a kernel module? This would be a portable,
+                module-free solution &mdash; but requires <code>CAP_SYS_RAWIO</code> (root).
+            </p>
+        </div>
+
+        <div class="card orange">
+            <h4>3. Performance delta quantification</h4>
+            <p>
+                Compare all_reduce bandwidth with GDR disabled (current PATH_PHB) vs GDR enabled
+                (after fix PATH_PXB) for the cross-partition GPU-NIC pairs.
+            </p>
+        </div>
+
+        <div class="card cyan">
+            <h4>4. NIC-aware split strategy</h4>
+            <p>
+                Explore whether <code>NCCL_TESTS_SPLIT=DIV</code> or <code>MOD</code> can create
+                communicators aligned with NIC topology to avoid cross-partition contention.
+            </p>
+        </div>
+
+        <div class="card">
+            <h4>5. QP sharing interaction</h4>
+            <p>
+                How does <code>RCCL_IB_QP_SHARING_ENABLE</code> interact with split-mask testing
+                (multiple independent comms hitting the same NIC)?
+            </p>
+        </div>
+    </section>
+
+</div>
+
+<div class="footer">
+    RCCL SPLIT_MASK + PCIe Topology Analysis &mdash; MI300X 8-GPU / 4-NIC BD Customer Investigation &mdash; 2026-10-09
+</div>
+
+</body>
+</html>

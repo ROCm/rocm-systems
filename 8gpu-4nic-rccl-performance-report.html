@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>8GPU-4NIC RCCL Data Parallelism Performance Issue — Investigation &amp; Resolution Report</title>
+    <style>
+        :root {
+            --amd-red: #ED1C24;
+            --dark-bg: #1a1a2e;
+            --card-bg: #16213e;
+            --accent: #0f3460;
+            --text: #e8e8e8;
+            --muted: #a0a0b0;
+            --green: #2ecc71;
+            --orange: #f39c12;
+            --red: #e74c3c;
+            --blue: #3498db;
+            --border: #2a2a4a;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--dark-bg);
+            color: var(--text);
+            line-height: 1.7;
+            padding: 0;
+        }
+        .header {
+            background: linear-gradient(135deg, var(--dark-bg), var(--accent));
+            border-bottom: 3px solid var(--amd-red);
+            padding: 40px 60px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .header .subtitle {
+            color: var(--muted);
+            font-size: 15px;
+        }
+        .header .badge {
+            display: inline-block;
+            background: var(--green);
+            color: #000;
+            padding: 3px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 12px;
+            text-transform: uppercase;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 40px 60px;
+        }
+        .toc {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px 32px;
+            margin-bottom: 36px;
+        }
+        .toc h2 {
+            font-size: 16px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .toc ol {
+            padding-left: 20px;
+        }
+        .toc li {
+            margin-bottom: 6px;
+        }
+        .toc a {
+            color: var(--blue);
+            text-decoration: none;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        section {
+            margin-bottom: 40px;
+        }
+        h2 {
+            font-size: 22px;
+            color: var(--text);
+            border-bottom: 2px solid var(--amd-red);
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+        }
+        h3 {
+            font-size: 17px;
+            color: var(--blue);
+            margin: 20px 0 10px 0;
+        }
+        h4 {
+            font-size: 15px;
+            color: var(--orange);
+            margin: 16px 0 8px 0;
+        }
+        p {
+            margin-bottom: 12px;
+            color: var(--text);
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .card.highlight {
+            border-left: 4px solid var(--amd-red);
+        }
+        .card.success {
+            border-left: 4px solid var(--green);
+        }
+        .card.warning {
+            border-left: 4px solid var(--orange);
+        }
+        .card.info {
+            border-left: 4px solid var(--blue);
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin: 16px 0;
+        }
+        .metric {
+            background: var(--accent);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+        .metric .value {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .metric .label {
+            font-size: 12px;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+        .metric.good .value { color: var(--green); }
+        .metric.bad .value { color: var(--red); }
+        .metric.neutral .value { color: var(--blue); }
+        .metric.target .value { color: var(--orange); }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 10px 14px;
+            text-align: left;
+            border: 1px solid var(--border);
+        }
+        th {
+            background: var(--accent);
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        td {
+            background: var(--card-bg);
+        }
+        .good { color: var(--green); font-weight: 600; }
+        .bad { color: var(--red); font-weight: 600; }
+        .warn { color: var(--orange); font-weight: 600; }
+        code {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        pre {
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 12px 0;
+            border: 1px solid #30363d;
+        }
+        ul, ol {
+            margin: 8px 0 16px 24px;
+        }
+        li {
+            margin-bottom: 6px;
+        }
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+            margin: 20px 0;
+        }
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border);
+        }
+        .timeline-item {
+            position: relative;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px 20px;
+        }
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -26px;
+            top: 20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--blue);
+            border: 2px solid var(--dark-bg);
+        }
+        .timeline-item.resolved::before { background: var(--green); }
+        .timeline-item.issue::before { background: var(--red); }
+        .timeline-item.discovery::before { background: var(--orange); }
+        .timeline-date {
+            font-size: 12px;
+            color: var(--muted);
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .timeline-title {
+            font-weight: 600;
+            margin: 4px 0;
+        }
+        .timeline-body {
+            font-size: 14px;
+            color: var(--muted);
+        }
+        .link-list a {
+            color: var(--blue);
+            text-decoration: none;
+            display: block;
+            padding: 6px 0;
+        }
+        .link-list a:hover { text-decoration: underline; }
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        .tag-kernel { background: #5b21b6; color: #e8e8e8; }
+        .tag-rccl { background: #065f46; color: #e8e8e8; }
+        .tag-pcie { background: #92400e; color: #e8e8e8; }
+        .tag-gdr { background: #1e40af; color: #e8e8e8; }
+        .people-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 12px;
+            margin: 12px 0;
+        }
+        .person {
+            background: var(--accent);
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-size: 14px;
+        }
+        .person .name { font-weight: 600; }
+        .person .role { color: var(--muted); font-size: 12px; }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: var(--muted);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 40px;
+        }
+        @media print {
+            body { background: #fff; color: #333; }
+            .header { background: #f5f5f5; border-bottom-color: #ccc; }
+            .card, td { background: #f9f9f9; border-color: #ddd; }
+            pre, code { background: #f4f4f4; color: #333; }
+            h2 { border-bottom-color: #ccc; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>8GPU-4NIC RCCL Data Parallelism (DP) Performance Issue</h1>
+    <div class="subtitle">
+        Investigation &amp; Resolution Report &mdash; Customer: ByteDance (BD) &mdash; Platform: MI308 + Pollara 400 NIC
+    </div>
+    <span class="badge">Resolved</span>
+    <div class="subtitle" style="margin-top: 12px;">
+        Duration: Jan 19, 2026 &ndash; Feb 9, 2026 &nbsp;|&nbsp; Report generated: Oct 6, 2026
+    </div>
+</div>
+
+<div class="container">
+
+    <!-- TABLE OF CONTENTS -->
+    <nav class="toc">
+        <h2>Contents</h2>
+        <ol>
+            <li><a href="#executive-summary">Executive Summary</a></li>
+            <li><a href="#background">Background &amp; Context</a></li>
+            <li><a href="#problem">Problem Statement</a></li>
+            <li><a href="#investigation">Investigation Timeline</a></li>
+            <li><a href="#root-cause">Root Cause Analysis</a></li>
+            <li><a href="#solution">Solution &amp; Fix</a></li>
+            <li><a href="#perf-results">Performance Results (Before &amp; After)</a></li>
+            <li><a href="#deliverables">Deliverables to Customer</a></li>
+            <li><a href="#people">People Involved</a></li>
+            <li><a href="#references">References &amp; Links</a></li>
+        </ol>
+    </nav>
+
+    <!-- 1. EXECUTIVE SUMMARY -->
+    <section id="executive-summary">
+        <h2>1. Executive Summary</h2>
+        <div class="card highlight">
+            <p>
+                ByteDance (BD) reported that their 2-node, 8-GPU (MI308), 4-NIC (Pollara 400) cluster was delivering
+                significantly lower RCCL performance for <strong>Data Parallelism (DP)</strong> workloads compared to
+                their NVIDIA BF3-mini NIC baseline and our internal test results. The DP use case uses
+                <code>NCCL_TESTS_SPLIT_MASK=0x7</code> to bypass XGMI and route all traffic through the AINICs only.
+            </p>
+            <p>
+                The root cause was identified as a <strong>PCIe topology visibility issue</strong>: without the Broadcom PCIe switch
+                inter-switch virtual links being exposed to the OS, RCCL perceived certain GPU&harr;NIC paths as too distant (PHB instead of PXB),
+                causing it to <strong>disable GPU Direct RDMA (GDR)</strong> for those GPU/NIC pairs. This forced traffic through slower CPU-mediated paths.
+            </p>
+            <p>
+                The fix required <strong>two changes</strong>:
+            </p>
+            <ol>
+                <li>A <strong>Linux kernel patch</strong> to enable Broadcom PCIe switch virtual link discovery (with a minor modification to bypass the <code>SECURE_PART</code> check).
+                    <br><span style="font-size:13px;">Patches: <a href="https://lkml.org/lkml/2024/6/12/551" target="_blank" style="color:var(--blue);">LKML Part 1</a> &nbsp;|&nbsp; <a href="https://lkml.org/lkml/2024/6/12/552/" target="_blank" style="color:var(--blue);">LKML Part 2</a></span>
+                </li>
+                <li>A <strong>private RCCL patch</strong> (by Wenkai Du, ROCm team) to correctly handle new topology models when virtual switch links are present.
+                    <br><span style="font-size:13px;">PR: <a href="https://github.com/ROCm/rocm-systems/pull/3121/commits" target="_blank" style="color:var(--blue);">ROCm/rocm-systems PR #3121 — "Add new models when virtual switch links are present"</a></span>
+                </li>
+            </ol>
+            <p style="color: var(--orange); font-weight: 600; font-size: 14px;">
+                Both fixes must be applied together. The kernel patch alone causes a regression in global AllReduce (~194 GB/s &rarr; ~90 GB/s).
+            </p>
+            <p>
+                With both fixes applied, DP AllReduce performance recovered to <strong>~24 GB/s</strong> (target) and global AllReduce
+                maintained <strong>~194 GB/s</strong>, matching expectations.
+            </p>
+        </div>
+
+        <div class="metric-grid">
+            <div class="metric bad">
+                <div class="value">20.2 GB/s</div>
+                <div class="label">BD Pollara (Before Fix) — DP A2A</div>
+            </div>
+            <div class="metric target">
+                <div class="value">24.4 GB/s</div>
+                <div class="label">BD BF3-mini Baseline — DP A2A</div>
+            </div>
+            <div class="metric good">
+                <div class="value">~24 GB/s</div>
+                <div class="label">After Fix — DP AllReduce</div>
+            </div>
+            <div class="metric good">
+                <div class="value">~194 GB/s</div>
+                <div class="label">After Fix — Global AllReduce</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 2. BACKGROUND -->
+    <section id="background">
+        <h2>2. Background &amp; Context</h2>
+        <div class="card info">
+            <h3>What is Data Parallelism (DP) testing?</h3>
+            <p>
+                In a multi-GPU training system, the 8 GPUs within a node are typically connected via XGMI (inter-GPU fabric).
+                For <strong>Data Parallelism</strong> workloads, each GPU independently processes different data shards and
+                only communicates gradients via the <strong>network NICs</strong> (not XGMI). The flag
+                <code>NCCL_TESTS_SPLIT_MASK=0x7</code> simulates this by forcing RCCL to bypass XGMI and route
+                all collective traffic exclusively through the AINICs (Pollara 400 NICs).
+            </p>
+            <p>
+                The target DP performance is <strong>~24 GB/s</strong> for both AllReduce (AR) and AllToAll (A2A), matching
+                numbers achieved by the competing BF3-mini NIC on the same MI308 GPU platform.
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>Test Environment</h3>
+            <table>
+                <tr><th>Component</th><th>Customer (BD)</th><th>Internal (AMD)</th></tr>
+                <tr><td>GPU</td><td>AMD Instinct MI308XHF</td><td>AMD Instinct MI300X</td></tr>
+                <tr><td>NIC</td><td>Pollara 400 (4 per node)</td><td>Pollara 400 (4 per node)</td></tr>
+                <tr><td>Nodes</td><td>2 (16 GPUs total)</td><td>2 (16 GPUs total)</td></tr>
+                <tr><td>CPU</td><td>Intel (BD custom platform)</td><td>AMD (SMC300x nodes)</td></tr>
+                <tr><td>PCIe Switch</td><td>Broadcom PEX890XX</td><td>Broadcom PEX890XX</td></tr>
+                <tr><td>ROCm</td><td>7.2.0</td><td>7.2.0</td></tr>
+                <tr><td>RCCL</td><td>2.27.7 (commit 516ef1b)</td><td>2.27.7 (cherry-pick PR 2078)</td></tr>
+                <tr><td>Reference NIC</td><td>NVIDIA BF3-mini (same platform)</td><td>N/A</td></tr>
+            </table>
+        </div>
+    </section>
+
+    <!-- 3. PROBLEM STATEMENT -->
+    <section id="problem">
+        <h2>3. Problem Statement</h2>
+        <div class="card warning">
+            <h3>Observed Performance Gap</h3>
+            <p>
+                When running RCCL collective tests with <code>NCCL_TESTS_SPLIT_MASK=0x7</code> (DP mode),
+                BD's MI308 + Pollara setup showed significantly lower performance compared to both
+                the BF3-mini reference and AMD internal test results:
+            </p>
+            <table>
+                <tr>
+                    <th>Configuration</th>
+                    <th>DP AllToAll (busbw)</th>
+                    <th>DP AllReduce (busbw)</th>
+                    <th>Status</th>
+                </tr>
+                <tr>
+                    <td>MI308 + BF3-mini (BD)</td>
+                    <td class="good">~24.4 GB/s</td>
+                    <td class="good">~24 GB/s</td>
+                    <td><span class="tag" style="background:var(--green);color:#000;">Baseline</span></td>
+                </tr>
+                <tr>
+                    <td>MI300X + Pollara (AMD Internal)</td>
+                    <td class="good">~23.5 GB/s</td>
+                    <td class="good">~27.5 GB/s</td>
+                    <td><span class="tag" style="background:var(--green);color:#000;">OK</span></td>
+                </tr>
+                <tr>
+                    <td>MI308 + Pollara (BD &mdash; Before Fix)</td>
+                    <td class="bad">~20.2 GB/s</td>
+                    <td class="bad">~20 GB/s</td>
+                    <td><span class="tag" style="background:var(--red);color:#fff;">Degraded</span></td>
+                </tr>
+            </table>
+            <p style="margin-top:12px;">
+                The gap: BD's Pollara was <strong>~17-20% slower</strong> than both the BF3-mini on the same platform
+                and AMD's own internal Pollara results. Standard (non-split-mask) RCCL tests showed normal performance,
+                isolating the issue to the DP / split-mask scenario.
+            </p>
+        </div>
+    </section>
+
+    <!-- 4. INVESTIGATION TIMELINE -->
+    <section id="investigation">
+        <h2>4. Investigation Timeline</h2>
+
+        <div class="timeline">
+
+            <div class="timeline-item issue">
+                <div class="timeline-date">Jan 19, 2026</div>
+                <div class="timeline-title">Issue Reported by BD (Jerry Wei)</div>
+                <div class="timeline-body">
+                    BD requested a 2-node 4-NIC RCCL test with <code>NCCL_TESTS_SPLIT_MASK=0x7</code> to measure DP performance.
+                    AMD internal run showed good numbers (AR ~27.5 GB/s, A2A ~23.5 GB/s) but BD's own run showed only A2A ~20.2 GB/s.
+                    BD noted BF3-mini achieved ~24.4 GB/s A2A on the same platform.
+                    <br><br>
+                    <a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1768796508970389" target="_blank" style="color:var(--blue);">Slack thread &rarr;</a>
+                </div>
+            </div>
+
+            <div class="timeline-item">
+                <div class="timeline-date">Jan 20, 2026</div>
+                <div class="timeline-title">Live Debug Session &mdash; Initial Findings</div>
+                <div class="timeline-body">
+                    Joint debug call identified several data points:
+                    <ul style="margin-top:8px;">
+                        <li>No buffer drops in A2A with or without split-mask</li>
+                        <li>No significant pauses</li>
+                        <li>Port line rate capped at <strong>330 Gbps</strong> (vs 390 Gbps internally)</li>
+                        <li>ASICMON showed <strong>PTD_READS at 127</strong> constantly (internally &lt;110)</li>
+                        <li><strong>35% of reads had latency &gt;1.8&micro;s</strong> (internally only 3%) &mdash; indicating high latency</li>
+                        <li>TX XOFF spikes observed momentarily</li>
+                        <li>Toggling PXN, enabling <code>RCCL_DISABLE_RAIL_TREES=1</code>, disabling DCQCN &mdash; none helped</li>
+                        <li>CPU scaling governor confirmed at "performance" mode</li>
+                    </ul>
+                    <a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1768893034551819" target="_blank" style="color:var(--blue);">Debug summary thread &rarr;</a>
+                </div>
+            </div>
+
+            <div class="timeline-item discovery">
+                <div class="timeline-date">Jan 21, 2026</div>
+                <div class="timeline-title">Root Cause Identified: GDR Disabled Due to PCIe Topology</div>
+                <div class="timeline-body">
+                    <strong>Ankit Gupta</strong> analyzed RCCL subsystem logs and discovered the critical issue:
+                    <ul style="margin-top:8px;">
+                        <li>In the split-mask scenario, GPUs not directly under the same PCIe bridge as their assigned NIC
+                            were discovered with path type <strong>PHB</strong> (distance 8) instead of <strong>PXB</strong> (distance 5).</li>
+                        <li>RCCL's GDR threshold is distance &le;5, so <strong>GDR was being disabled</strong> for these GPU/NIC pairs:
+                            <pre>NCCL INFO GPU Direct RDMA Disabled for GPU 1 / HCA 2 (distance 8 > 5)
+NCCL INFO GPU Direct RDMA Disabled for GPU 1 / HCA 0 (distance 8 > 5)</pre>
+                        </li>
+                        <li>When the PCIe topology was manually modified to show these GPUs as PXB-connected, GDR was enabled and performance recovered.</li>
+                    </ul>
+                    <a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1768922610681859" target="_blank" style="color:var(--blue);">Analysis thread &rarr;</a>
+                </div>
+            </div>
+
+            <div class="timeline-item">
+                <div class="timeline-date">Jan 22, 2026</div>
+                <div class="timeline-title">Hypothesis: PCIe Topology Differs from BF3 Setup</div>
+                <div class="timeline-body">
+                    <strong>Vijay Srinivasan</strong> identified that the PCIe topology with BF3 looks different &mdash;
+                    two factors cause increased PCIe distance on MI300X + Pollara:
+                    <ul style="margin-top:8px;">
+                        <li><strong>Multi-host switch partitioning:</strong> Each physical Broadcom PEX89104 switch is configured
+                            with <strong>two upstream host ports</strong>, each connecting to a different CPU root port.
+                            This splits one physical switch into two OS-visible PCIe hierarchies. GPU0 + NIC0 are under
+                            one root port; GPU1 + NIC1 are under another. The OS has no idea they share a physical switch.</li>
+                        <li><strong>MI300X internal PCIe bridge:</strong> The AMD MI300X GPU presents as a PCIe switch
+                            (<code>1022:1500</code> upstream + <code>1002:1501</code> downstream) rather than a direct endpoint,
+                            adding 2 extra bridge hops within each partition.</li>
+                    </ul>
+                    In split-mask mode with 4 NICs serving 8 GPUs, some GPUs must reach NICs in the <em>other</em>
+                    partition (across root ports), resulting in PHB/SYS distance and GDR being disabled.
+                    <br><br>
+                    Could not reproduce on AMD's internal SMC nodes (AMD CPUs), as the AMD platform's
+                    CPU-RDMA path performed well enough to mask the impact of non-GDR transfers.
+                </div>
+            </div>
+
+            <div class="timeline-item">
+                <div class="timeline-date">Jan 29, 2026</div>
+                <div class="timeline-title">RCCL Team Engaged &mdash; Kernel Patch Identified</div>
+                <div class="timeline-body">
+                    RCCL team confirmed that a <strong>Linux kernel patch</strong> exists to expose the Broadcom PCIe switch
+                    inter-switch virtual links via sysfs. The patch creates a kernel module called <code>switch_discovery</code>.
+                    <br><br>
+                    <strong>Muthu Natarajan</strong> confirmed AMD internal nodes also lacked the virtual link sysfs entries,
+                    but didn't show the performance issue because the AMD CPU platform's PCIe topology still allowed
+                    acceptable CPU-RDMA path performance. BD's Intel platform had worse CPU-RDMA path performance,
+                    making the GDR disablement much more impactful.
+                    <br><br>
+                    BD emphasized they <strong>require all traffic to use GDR</strong> as the only acceptable solution.
+                </div>
+            </div>
+
+            <div class="timeline-item discovery">
+                <div class="timeline-date">Feb 3, 2026</div>
+                <div class="timeline-title">Kernel Patch Applied &mdash; Partial Success + New Issue</div>
+                <div class="timeline-body">
+                    The kernel patch was applied on internal nodes with a modification:
+                    the <code>SECURE_PART</code> check was removed to expose all virtual links.
+                    <br><br>
+                    <strong>Results:</strong>
+                    <ul style="margin-top:8px;">
+                        <li class="good">Split-mask (DP) performance recovered to ~24 GB/s &mdash; GDR enabled for all GPUs</li>
+                        <li class="bad">BUT: Global (non-split-mask) performance dropped to ~90 GB/s (from ~194 GB/s)
+                            due to RCCL building a different, suboptimal communication graph with the new topology</li>
+                    </ul>
+                    Broadcom confirmed:
+                    <ul style="margin-top:8px;">
+                        <li>Bypassing the <code>SECURE_PART</code> check is safe &mdash; only secure parts can run firmware</li>
+                        <li>Running <code>refresh_switch_topology</code> is expected behavior to create the sysfs entries</li>
+                    </ul>
+                    <a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1770084851680859" target="_blank" style="color:var(--blue);">Kernel patch thread &rarr;</a>
+                </div>
+            </div>
+
+            <div class="timeline-item resolved">
+                <div class="timeline-date">Feb 4, 2026</div>
+                <div class="timeline-title">RCCL Fix Obtained &mdash; Full Resolution</div>
+                <div class="timeline-body">
+                    <strong>Ankit Gupta</strong> obtained a private RCCL branch from <strong>Wenkai Du</strong> (RCCL team)
+                    that adds new topology models to handle PCIe virtual switch links correctly.
+                    <br><br>
+                    <strong>Verified results with both kernel patch + RCCL fix:</strong>
+                    <ul style="margin-top:8px;">
+                        <li class="good">With Split-Mask (DP): ~24 GB/s AllReduce</li>
+                        <li class="good">Without Split-Mask (Global): ~194 GB/s AllReduce</li>
+                    </ul>
+                    Both scenarios also verified with just the topology file (without kernel patch) by manually adding virtual-link entries &mdash; same results.
+                </div>
+            </div>
+
+            <div class="timeline-item">
+                <div class="timeline-date">Feb 6, 2026</div>
+                <div class="timeline-title">BD Kernel Patch Adaptation</div>
+                <div class="timeline-body">
+                    <strong>Weijia Yuan</strong> reported that BD's platform needed an additional kernel patch modification:
+                    removing the <code>P2PMASK</code> / <code>INTER_SWITCH_LINK</code> check because their PEX890XX
+                    switch returned different VSEC data (P2PMASK=0x300, VSEC_DATA=0x10460b0).
+                    <pre>// This line also needed to be removed for BD's PEX890XX:
+if (!(P2PMASK(vsec_data) & INTER_SWITCH_LINK))
+    return false;</pre>
+                    <a href="https://amd.enterprise.slack.com/archives/C0AC1E8025T/p1770351219112349" target="_blank" style="color:var(--blue);">BD adaptation thread &rarr;</a>
+                </div>
+            </div>
+
+            <div class="timeline-item resolved">
+                <div class="timeline-date">Feb 9, 2026</div>
+                <div class="timeline-title">Final Verification &mdash; All Numbers Confirmed</div>
+                <div class="timeline-body">
+                    <strong>Muthu Natarajan</strong> verified Wenkai's RCCL diff on top of commit <code>516ef1b</code>
+                    with the kernel patch. All GPU/NIC pairs showed GDRDMA enabled:
+                    <pre>GPU: 0 → NET/ROCM-IB/0/GDRDMA
+GPU: 1 → NET/ROCM-IB/0/GDRDMA
+GPU: 2 → NET/ROCM-IB/1/GDRDMA
+GPU: 3 → NET/ROCM-IB/1/GDRDMA
+GPU: 4 → NET/ROCM-IB/2/GDRDMA
+GPU: 5 → NET/ROCM-IB/2/GDRDMA
+GPU: 6 → NET/ROCM-IB/3/GDRDMA
+GPU: 7 → NET/ROCM-IB/3/GDRDMA</pre>
+                    RCCL diff and instructions shared with BD for final integration.
+                    <br><br>
+                    <a href="https://amd.enterprise.slack.com/archives/C0AC1E8025T/p1770351219112349" target="_blank" style="color:var(--blue);">Verification thread &rarr;</a>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- 5. ROOT CAUSE -->
+    <section id="root-cause">
+        <h2>5. Root Cause Analysis</h2>
+
+        <div class="card highlight">
+            <h3>The Core Issue: Two Combined Factors</h3>
+            <p>
+                Two architectural factors combine to push the GPU&harr;NIC PCIe distance past RCCL's GDR threshold
+                in split-mask (DP) mode:
+            </p>
+            <h4>Factor 1: Broadcom PEX89104 Multi-Host Partitioning</h4>
+            <p>
+                Each physical PEX89104 PCIe Gen5 switch is configured with <strong>two upstream (host-facing) ports</strong>,
+                each connecting to a different CPU PCIe root port. This is a switch firmware-level configuration (MFG/EEPROM)
+                that partitions one physical switch into two independent OS-visible PCIe hierarchies.
+            </p>
+            <p>
+                From the Broadcom switch's own <code>pciehostview</code>:
+            </p>
+            <pre>
+ONE Physical PEX89104 Switch:
+  Host Port 80 (→ CPU root 00:01.1):  DS Port 0 = GPU0,  DS Port 16 = NIC0
+  Host Port 32 (→ CPU root 20:01.1):  DS Port 96 = NIC1, DS Port 112 = GPU1</pre>
+            <p>
+                The OS sees two completely separate PCIe trees &mdash; it has <strong>no way to know</strong> they
+                share a physical switch without the kernel <code>switch_discovery</code> module reading Broadcom's
+                proprietary VSEC (Vendor-Specific Extended Capability) registers.
+            </p>
+            <pre>
+OS view:                                    Physical reality:
+                                            ┌──────────────────────────────┐
+00:01.1 → 01:00.0 (BRCM upstream A)        │   ONE PEX89104 Switch        │
+  ├─ GPU0  (DS Port 0)            ◄─────────│   Host Port 80 (x16)        │
+  └─ NIC0  (DS Port 16)                     │         │                   │
+                                            │   internal fabric            │
+20:01.1 → 21:00.0 (BRCM upstream B)        │         │                   │
+  ├─ NIC1  (DS Port 96)           ◄─────────│   Host Port 32 (x16)        │
+  └─ GPU1  (DS Port 112)                    │                             │
+                                            └──────────────────────────────┘</pre>
+            <p>
+                <strong>Why two host ports?</strong> A single Gen5 x16 upstream provides 64 GB/s. A GPU (x16) + NIC (x16) + NVMe (x4)
+                would oversubscribe one upstream. Two x16 upstreams give 128 GB/s total host bandwidth, and each can be wired
+                to a different NUMA node for locality.
+            </p>
+            <p>
+                <strong>Can this be changed to single-host mode?</strong> Technically yes &mdash; the PEX89104 supports
+                both single-host (base mode) and multi-host (synthetic mode). However, the port-to-host mapping is defined
+                in the switch's <strong>EEPROM/MFG firmware</strong> (programmed by the OEM via Broadcom's SDK tools),
+                not a BIOS setting. Switching to single-host would also create a <strong>bandwidth bottleneck</strong>:
+                36 lanes of downstream devices (GPU x16 + NIC x16 + NVMe x4) on a single x16 upstream link.
+                The kernel patch + RCCL fix is the correct solution &mdash; it preserves the multi-host bandwidth
+                benefits while making RCCL aware of the true physical topology.
+            </p>
+
+            <h4>Factor 2: MI300X Internal PCIe Bridge</h4>
+            <p>
+                The AMD MI300X is a multi-chiplet SoC (8 XCDs + 4 AIDs). It presents as a <strong>PCIe switch</strong>
+                rather than a direct endpoint, because only AID0's NBIO block manages the host PCIe link and must route
+                traffic to internal blocks (SDMA, HDP, NBIO) across multiple chiplet dies:
+            </p>
+            <pre>
+PCI bridge:    AMD     [1022:1500]   ← Top-level upstream bridge (AID0 NBIO)
+  └─ PCI bridge: AMD/ATI [1002:1501]   ← Downstream bridge (internal routing)
+       └─ Accelerator: AMD [1002:74a1]   ← MI300X GPU endpoint ("Aqua Vanjaram")</pre>
+            <p>
+                This adds <strong>+2 bridge hops</strong> between the BRCM downstream port and the actual GPU endpoint.
+            </p>
+        </div>
+
+        <div class="card highlight">
+            <h3>How They Combine to Break GDR</h3>
+            <p>
+                In a 4-NIC split-mask configuration, each NIC must serve 2 GPUs. One GPU is in the <strong>same</strong>
+                switch partition (same root port), the other is in the <strong>other</strong> partition (different root port):
+            </p>
+            <pre>
+GPU0 → NIC0: Both under root 00:01.1 (same partition)
+  Path: GPU ← AMD_down ← AMD_up ← BRCM_down ← BRCM_up → BRCM_down → NIC_up → NIC
+  Bridges: ~6 (borderline PHB, but within same hierarchy)
+
+GPU1 → NIC0: GPU1 under root 20:01.1, NIC0 under root 00:01.1 (CROSS-PARTITION)
+  Path: GPU ← AMD_down ← AMD_up ← BRCM_down ← BRCM_up_B →→ CPU →→ BRCM_up_A → BRCM_down → NIC
+  Bridges: 8+ (PHB/SYS — crosses root port boundary)
+  → RCCL: distance > 5 → <strong>GDR DISABLED</strong></pre>
+            <p>
+                The MI300X's extra bridge hops make the <em>within-partition</em> distance already borderline (~6).
+                The <em>cross-partition</em> case (GPU in one root port hierarchy, NIC in another) is where it
+                truly breaks &mdash; RCCL sees the path going through the CPU root complex.
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>Why BF3-mini Didn't Have This Issue</h3>
+            <p>
+                The NVIDIA H20 GPU (tested with BF3-mini) presents as a <strong>direct PCIe endpoint</strong> &mdash;
+                no internal PCIe bridge. In the H20 topology (from BD's XML):
+            </p>
+            <pre>
+BRCM PEX890xx Upstream
+  ├─ H20 GPU dev0     ← direct endpoint (no AMD bridge)
+  ├─ Pollara NIC      ← sibling under same upstream
+  └─ BRCM sub-switch → H20 GPU dev1</pre>
+            <p>
+                GPU and NIC are direct siblings under the same BRCM upstream port. PCIe distance = <strong>PXB (~4 hops)</strong>
+                &rarr; GDR always enabled. The absence of the +2 AMD bridge hops keeps the distance well within
+                threshold even for cross-partition cases.
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>Why AMD Internal Nodes Didn't Show the Issue</h3>
+            <p>
+                AMD's internal SMC300x test nodes use AMD CPUs (vs BD's Intel CPUs). The AMD CPU platform's
+                memory subsystem delivered better CPU-RDMA path performance even in non-GDR mode, masking the
+                performance impact. BD's Intel platform had:
+            </p>
+            <ul>
+                <li>Higher latency: 35% of reads &gt;1.8&micro;s (vs 3% internally)</li>
+                <li>Higher PTD_READS: constantly at 127 (vs &lt;110 internally)</li>
+                <li>Lower line rate: capped at 330 Gbps (vs 390 Gbps internally)</li>
+                <li>Possible memory speed difference: BD's RAM running at 4400 MT/s vs internal 4800 MT/s</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- 6. SOLUTION -->
+    <section id="solution">
+        <h2>6. Solution &amp; Fix</h2>
+
+        <div class="card success">
+            <h3>Fix 1: Linux Kernel Patch — Broadcom PCIe Switch Virtual Link Discovery</h3>
+            <span class="tag tag-kernel">Kernel</span>
+            <span class="tag tag-pcie">PCIe</span>
+            <p style="margin-top:8px;">
+                Apply the Broadcom <code>switch_discovery</code> kernel module patches from LKML, with two modifications
+                for BD's platform:
+            </p>
+
+            <h4>Patch Sources</h4>
+            <ul class="link-list">
+                <li><a href="https://lkml.org/lkml/2024/6/12/551" target="_blank">https://lkml.org/lkml/2024/6/12/551</a> (Part 1)</li>
+                <li><a href="https://lkml.org/lkml/2024/6/12/552/" target="_blank">https://lkml.org/lkml/2024/6/12/552/</a> (Part 2)</li>
+            </ul>
+
+            <h4>Required Modifications</h4>
+            <p><strong>Modification 1:</strong> Remove the <code>SECURE_PART</code> check (confirmed safe by Broadcom):</p>
+            <pre>// REMOVE this check:
+if (!SECURE_PART(cap_data1))
+    return false;</pre>
+
+            <p><strong>Modification 2:</strong> For BD's PEX890XX specifically, also remove the <code>P2PMASK</code> / <code>INTER_SWITCH_LINK</code> check:</p>
+            <pre>// REMOVE this check (BD's PEX890XX returns P2PMASK=0x300, VSEC_DATA=0x10460b0):
+if (!(P2PMASK(vsec_data) & INTER_SWITCH_LINK))
+    return false;</pre>
+
+            <h4>Post-Patch Steps</h4>
+            <ol>
+                <li>Build kernel with the modified patch and load the <code>switch_discovery</code> module</li>
+                <li>Trigger virtual-link discovery:
+                    <pre>cat /sys/kernel/pci_switch_link/refresh_switch_toplogy</pre>
+                </li>
+                <li>Verify virtual links are visible:
+                    <pre>tree /sys/kernel/pci_switch_link/virtual_switch_links
+
+# Expected output (4 pairs for 4 physical switches × 2 virtual switches each):
+/sys/kernel/pci_switch_link/virtual_switch_links
+├── 0000:01:00.0
+│   └── 0000:21:00.0 -> ../0000:21:00.0
+├── 0000:21:00.0
+│   └── 0000:01:00.0 -> ../0000:01:00.0
+├── 0000:41:00.0
+│   └── 0000:61:00.0 -> ../0000:61:00.0
+... (8 entries total, 4 bidirectional pairs)</pre>
+                </li>
+            </ol>
+        </div>
+
+        <div class="card success">
+            <h3>Fix 2: RCCL Patch — Handle Virtual Switch Links in Topology Models</h3>
+            <span class="tag tag-rccl">RCCL</span>
+            <span class="tag tag-gdr">GDR</span>
+            <p style="margin-top:8px;">
+                A private RCCL branch by <strong>Wenkai Du</strong> adds new communication graph models that correctly
+                handle the 4NIC/8NIC topology when PCIe virtual switch links are present.
+            </p>
+
+            <h4>Pull Request</h4>
+            <ul class="link-list">
+                <li><a href="https://github.com/ROCm/rocm-systems/pull/3121/commits" target="_blank">
+                    ROCm/rocm-systems PR #3121 — "Add new models when virtual switch links are present" by wenkaidu
+                </a></li>
+            </ul>
+
+            <p>
+                The RCCL diff was verified on top of commit <code>516ef1b</code> (RCCL 2.27.7 HEAD).
+                Without this RCCL fix, applying only the kernel patch causes the <em>global</em> (non-split-mask)
+                AllReduce performance to drop from ~194 GB/s to ~90 GB/s because RCCL builds a suboptimal
+                communication graph with the newly visible topology.
+            </p>
+            <p>
+                <strong>Both fixes must be applied together</strong> for correct behavior in all scenarios.
+            </p>
+        </div>
+    </section>
+
+    <!-- 7. PERFORMANCE RESULTS -->
+    <section id="perf-results">
+        <h2>7. Performance Results (Before &amp; After)</h2>
+
+        <div class="card">
+            <h3>AllReduce with Split-Mask (DP Mode) — Large Message Sizes</h3>
+            <table>
+                <tr>
+                    <th>Size</th>
+                    <th>BD Pollara (Before)</th>
+                    <th>BD BF3-mini (Baseline)</th>
+                    <th>After Fix (Internal Verified)</th>
+                </tr>
+                <tr>
+                    <td>1 GB</td>
+                    <td class="bad">—</td>
+                    <td>—</td>
+                    <td class="good">24.23 GB/s</td>
+                </tr>
+                <tr>
+                    <td>2 GB</td>
+                    <td class="bad">—</td>
+                    <td>—</td>
+                    <td class="good">24.16 GB/s</td>
+                </tr>
+                <tr>
+                    <td>4 GB</td>
+                    <td class="bad">—</td>
+                    <td>—</td>
+                    <td class="good">24.22 GB/s</td>
+                </tr>
+                <tr>
+                    <td>8 GB</td>
+                    <td class="bad">—</td>
+                    <td>—</td>
+                    <td class="good">24.31 GB/s</td>
+                </tr>
+                <tr>
+                    <td>16 GB</td>
+                    <td class="bad">—</td>
+                    <td>—</td>
+                    <td class="good">24.32 GB/s</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>AllToAll with Split-Mask (DP Mode) — Peak busbw Comparison</h3>
+            <table>
+                <tr>
+                    <th>Configuration</th>
+                    <th>Peak A2A busbw</th>
+                    <th>vs BF3 Baseline</th>
+                </tr>
+                <tr>
+                    <td>MI308 + BF3-mini (BD baseline)</td>
+                    <td class="good">~24.4 GB/s</td>
+                    <td>—</td>
+                </tr>
+                <tr>
+                    <td>MI308 + Pollara (BD, before fix)</td>
+                    <td class="bad">~20.2 GB/s</td>
+                    <td class="bad">-17%</td>
+                </tr>
+                <tr>
+                    <td>MI300X + Pollara (AMD internal, no issue)</td>
+                    <td>~23.7 GB/s</td>
+                    <td>~97%</td>
+                </tr>
+                <tr>
+                    <td>MI308 + Pollara (after kernel + RCCL fix)</td>
+                    <td class="good">~24 GB/s</td>
+                    <td class="good">~98%</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>Global AllReduce (Non-Split-Mask) — Regression Check</h3>
+            <table>
+                <tr>
+                    <th>Scenario</th>
+                    <th>Peak AR busbw</th>
+                    <th>Status</th>
+                </tr>
+                <tr>
+                    <td>Without kernel patch (baseline)</td>
+                    <td>~194 GB/s</td>
+                    <td><span class="tag" style="background:var(--green);color:#000;">OK</span></td>
+                </tr>
+                <tr>
+                    <td>With kernel patch only (no RCCL fix)</td>
+                    <td class="bad">~90 GB/s</td>
+                    <td><span class="tag" style="background:var(--red);color:#fff;">Regressed</span></td>
+                </tr>
+                <tr>
+                    <td>With kernel patch + RCCL fix</td>
+                    <td class="good">~194 GB/s</td>
+                    <td><span class="tag" style="background:var(--green);color:#000;">OK</span></td>
+                </tr>
+            </table>
+            <p style="margin-top:8px; color: var(--orange); font-weight: 600;">
+                Important: Applying the kernel patch without the RCCL fix causes a severe regression in global AllReduce.
+                Both fixes must be applied together.
+            </p>
+        </div>
+
+        <div class="card">
+            <h3>GDR Status — Before vs After</h3>
+            <table>
+                <tr><th>GPU</th><th>Before Fix</th><th>After Fix</th></tr>
+                <tr><td>GPU 0</td><td class="bad">GDR Disabled (distance 8 > 5)</td><td class="good">NET/ROCM-IB/0/GDRDMA</td></tr>
+                <tr><td>GPU 1</td><td class="bad">GDR Disabled (distance 8 > 5)</td><td class="good">NET/ROCM-IB/0/GDRDMA</td></tr>
+                <tr><td>GPU 2</td><td class="good">GDR Enabled (PXB local)</td><td class="good">NET/ROCM-IB/1/GDRDMA</td></tr>
+                <tr><td>GPU 3</td><td class="good">GDR Enabled (PXB local)</td><td class="good">NET/ROCM-IB/1/GDRDMA</td></tr>
+                <tr><td>GPU 4</td><td class="bad">GDR Disabled (distance 8 > 5)</td><td class="good">NET/ROCM-IB/2/GDRDMA</td></tr>
+                <tr><td>GPU 5</td><td class="bad">GDR Disabled (distance 8 > 5)</td><td class="good">NET/ROCM-IB/2/GDRDMA</td></tr>
+                <tr><td>GPU 6</td><td class="good">GDR Enabled (PXB local)</td><td class="good">NET/ROCM-IB/3/GDRDMA</td></tr>
+                <tr><td>GPU 7</td><td class="good">GDR Enabled (PXB local)</td><td class="good">NET/ROCM-IB/3/GDRDMA</td></tr>
+            </table>
+            <p style="margin-top: 8px; color: var(--muted);">
+                Before the fix, only GPUs directly under the same virtual sub-switch as their NIC had GDR enabled.
+                After the fix, all 8 GPUs use GDRDMA through their paired NICs.
+            </p>
+        </div>
+    </section>
+
+    <!-- 8. DELIVERABLES -->
+    <section id="deliverables">
+        <h2>8. Deliverables to Customer</h2>
+
+        <div class="card">
+            <h3>Items Shared with BD</h3>
+            <ol>
+                <li>
+                    <strong>Kernel patch instructions</strong> — LKML patches + two modifications
+                    (<code>SECURE_PART</code> bypass and <code>P2PMASK</code>/<code>INTER_SWITCH_LINK</code> bypass)
+                    with step-by-step application and verification instructions.
+                </li>
+                <li>
+                    <strong>RCCL diff file</strong> — Wenkai Du's changes applied on top of RCCL commit <code>516ef1b</code>
+                    (shared as a diff file on Feb 9, 2026).
+                </li>
+                <li>
+                    <strong>Broadcom confirmation</strong> — That bypassing <code>SECURE_PART</code> is safe and
+                    <code>refresh_switch_topology</code> is the expected trigger mechanism.
+                </li>
+            </ol>
+        </div>
+
+        <div class="card warning">
+            <h3>Customer Action Required</h3>
+            <ul>
+                <li>BD's internal kernel team needs to rebuild their kernel with the modified patch.</li>
+                <li>The RCCL fix needs to be compiled and deployed alongside the kernel changes.</li>
+                <li>BD to validate final performance numbers on their production platform.</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- 9. PEOPLE -->
+    <section id="people">
+        <h2>9. People Involved</h2>
+
+        <div class="people-grid">
+            <div class="person">
+                <div class="name">Jerry Wei</div>
+                <div class="role">BD Customer Interface — Reported the issue, coordinated with customer</div>
+            </div>
+            <div class="person">
+                <div class="name">Ankit Gupta</div>
+                <div class="role">AMD NIC SW — Root cause analysis, RCCL log analysis, BRCM coordination, RCCL team liaison</div>
+            </div>
+            <div class="person">
+                <div class="name">Muthu Natarajan</div>
+                <div class="role">AMD NIC SW — Debug session lead, kernel patch testing, final verification, ASICMON analysis</div>
+            </div>
+            <div class="person">
+                <div class="name">Vijay Srinivasan</div>
+                <div class="role">AMD NIC SW — PCIe topology analysis</div>
+            </div>
+            <div class="person">
+                <div class="name">Karthikeyan Arumugam</div>
+                <div class="role">AMD NIC SW — RCCL build &amp; integration</div>
+            </div>
+            <div class="person">
+                <div class="name">Swaminathan Venkataraman</div>
+                <div class="role">AMD NIC SW — Management &amp; coordination</div>
+            </div>
+            <div class="person">
+                <div class="name">Weijia Yuan</div>
+                <div class="role">BD Engineering — Customer-side testing, kernel patch adaptation for PEX890XX</div>
+            </div>
+            <div class="person">
+                <div class="name">Wenkai Du</div>
+                <div class="role">AMD RCCL Team — Authored the RCCL fix (PR #3121) for virtual switch link topology models</div>
+            </div>
+            <div class="person">
+                <div class="name">Sunil Kulkarni</div>
+                <div class="role">AMD NIC — Management, BD sync meeting coordination</div>
+            </div>
+            <div class="person">
+                <div class="name">Pirabhu Raman</div>
+                <div class="role">AMD NIC — Management, strategic direction</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 10. REFERENCES -->
+    <section id="references">
+        <h2>10. References &amp; Links</h2>
+
+        <div class="card">
+            <h3>Slack Threads</h3>
+            <table>
+                <tr><th>Thread</th><th>Channel</th><th>Description</th></tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1768796508970389" target="_blank" style="color:var(--blue);">Jan 19 thread</a></td>
+                    <td>#tmp-bd-qual</td>
+                    <td>Original issue report, initial perf numbers, BF3 comparison, debug session summary</td>
+                </tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1768922610681859" target="_blank" style="color:var(--blue);">Jan 20 thread</a></td>
+                    <td>#tmp-bd-qual</td>
+                    <td>Root cause analysis — GDR disabled due to PHB distance, topology investigation</td>
+                </tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL/p1770084851680859" target="_blank" style="color:var(--blue);">Feb 3 thread</a></td>
+                    <td>#tmp-bd-qual</td>
+                    <td>Kernel patch steps, BRCM confirmation, RCCL fix verification, final perf numbers</td>
+                </tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0AC1E8025T/p1770351219112349" target="_blank" style="color:var(--blue);">Feb 6 thread</a></td>
+                    <td>#tmp-bytedance-eagle-netbula</td>
+                    <td>BD kernel patch adaptation (P2PMASK issue), RCCL diff shared, final verification</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>Code &amp; Patches</h3>
+            <table>
+                <tr><th>Item</th><th>Link / Reference</th></tr>
+                <tr>
+                    <td>Kernel Patch (LKML) — Part 1</td>
+                    <td><a href="https://lkml.org/lkml/2024/6/12/551" target="_blank" style="color:var(--blue);">https://lkml.org/lkml/2024/6/12/551</a></td>
+                </tr>
+                <tr>
+                    <td>Kernel Patch (LKML) — Part 2</td>
+                    <td><a href="https://lkml.org/lkml/2024/6/12/552/" target="_blank" style="color:var(--blue);">https://lkml.org/lkml/2024/6/12/552/</a></td>
+                </tr>
+                <tr>
+                    <td>RCCL Fix PR</td>
+                    <td><a href="https://github.com/ROCm/rocm-systems/pull/3121/commits" target="_blank" style="color:var(--blue);">ROCm/rocm-systems PR #3121</a> — "Add new models when virtual switch links are present" by wenkaidu</td>
+                </tr>
+                <tr>
+                    <td>RCCL Base Commit</td>
+                    <td><code>516ef1b</code> (RCCL 2.27.7 HEAD, ROCm 7.2)</td>
+                </tr>
+                <tr>
+                    <td>Verified RCCL Diff</td>
+                    <td>Shared as file attachment in Slack (Feb 9, 2026) — 21.3 KB diff</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>Slack Channels</h3>
+            <table>
+                <tr><th>Channel</th><th>Purpose</th></tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0A697QH7DL" target="_blank" style="color:var(--blue);">#tmp-bd-qual</a></td>
+                    <td>ByteDance qualification tracking — primary channel for this investigation</td>
+                </tr>
+                <tr>
+                    <td><a href="https://amd.enterprise.slack.com/archives/C0AC1E8025T" target="_blank" style="color:var(--blue);">#tmp-bytedance-eagle-netbula</a></td>
+                    <td>ByteDance Eagle / Netbula program — customer-facing coordination</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="card">
+            <h3>Key Environment Variables for DP Testing</h3>
+            <pre>NCCL_TESTS_SPLIT_MASK=0x7          # Force traffic through AINICs only (bypass XGMI)
+RCCL_AINIC_ROCE=1                  # Enable AINIC RoCE mode
+NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6  # Select 4 NICs (odd ports)
+NCCL_IB_QPS_PER_CONNECTION=1
+NCCL_IB_TC=96
+NCCL_IB_FIFO_TC=184
+NCCL_NCHANNELS_PER_NET_PEER=16
+NCCL_MAX_NCHANNELS=64
+NCCL_PXN_DISABLE=0
+NCCL_IB_PCI_RELAXED_ORDERING=1
+NCCL_GDR_FLUSH_DISABLE=1
+RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0
+NCCL_IGNORE_CPU_AFFINITY=1
+IONIC_LOCKFREE=all
+NCCL_P2P_NET_CHUNKSIZE=262144
+RCCL_P2P_SHIFT_SIZE=0
+RCCL_DISABLE_RAIL_TREES=1
+HSA_NO_SCRATCH_RECLAIM=1</pre>
+        </div>
+    </section>
+
+    <div class="footer">
+        Report compiled from Slack channel discussions (#tmp-bd-qual, #tmp-bytedance-eagle-netbula)
+        <br>
+        Generated: October 6, 2026 &nbsp;|&nbsp; AMD Pensando NIC Team
+    </div>
+
+</div>
+
+</body>
+</html>
