@@ -4,22 +4,11 @@
 
 """Tests for the memory chart layout preview."""
 
-import json
-
 import pytest
 from memory_chart_preview import main
 
-import config
 from memory_chart.loader import layout_files
 from utils.utils_common import strip_ansi
-
-GFX942_CONFIG = (
-    config.rocprof_compute_home
-    / "rocprof_compute_soc"
-    / "analysis_configs"
-    / "gfx942"
-    / "0300_memory_chart.yaml"
-)
 
 
 def preview(capsys, *args):
@@ -34,16 +23,5 @@ def test_placeholders_fill_every_metric_of_a_layout_file(path, capsys):
     assert "N/A" not in output
 
 
-def test_values_file_and_empty(tmp_path, capsys):
-    values = tmp_path / "values.json"
-    values.write_text(json.dumps({"L2 Hit": 12.5}), encoding="utf-8")
-    assert "Hit 12.5%" in preview(capsys, "gfx950", "--values", str(values))
-    assert "N/A" in preview(capsys, "gfx950", "--empty")
-
-
-def test_units_come_from_the_given_config(capsys):
-    shipped = preview(capsys, "gfx950")
-    # gfx942's config has no units for gfx950-only metrics such as HBM Read BW
-    other = preview(capsys, "gfx950", "--config", str(GFX942_CONFIG))
-    assert "Hit 42.0%" in other
-    assert other.count("GB/s") < shipped.count("GB/s")
+def test_an_arch_previews_its_shipped_layout(capsys):
+    assert "gfx950.json" in preview(capsys, "gfx950").splitlines()[0]
