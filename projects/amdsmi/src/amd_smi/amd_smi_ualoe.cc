@@ -23,8 +23,10 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <unordered_map>
+#include <vector>
 
 /**
  * @brief Complete telemetry ID to string mapping using unordered_map for O(1) lookup
@@ -874,4 +876,208 @@ amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray
   }
 
   return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+// Convert POSIX timespec to the BCD-encoded timestamp UEFI CPER records use.
+static void timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
+  static constexpr auto to_bcd = [](int v) -> uint8_t {
+    return static_cast<uint8_t>(((v / 10) << 4) | (v % 10));
+  };
+
+  struct tm utc;
+  gmtime_r(&ts->tv_sec, &utc);
+
+  out->seconds = to_bcd(utc.tm_sec);
+  out->minutes = to_bcd(utc.tm_min);
+  out->hours = to_bcd(utc.tm_hour);
+  out->day = to_bcd(utc.tm_mday);
+  out->month = to_bcd(utc.tm_mon + 1);
+
+  int year = utc.tm_year + 1900;
+  out->year = to_bcd(year % 100);
+  out->century = to_bcd(year / 100);
+  out->flag = 0;
+}
+
+// Synthesize a full amdsmi_cper_hdr_t from a UALoE ualoe_cper_hdr_t
+static void synthesize_amdsmi_cper_header(const ualoe_cper_hdr_t* ualoe_hdr, uint32_t payload_size,
+                                          amdsmi_cper_hdr_t* amdsmi_hdr) {
+  memset(amdsmi_hdr, 0, sizeof(*amdsmi_hdr));
+
+  memcpy(amdsmi_hdr->signature, "CPER", 4);
+  amdsmi_hdr->revision = 0x0100;  // CPER v1.0
+  amdsmi_hdr->signature_end = 0xFFFFFFFF;
+  amdsmi_hdr->sec_cnt = 1;
+
+  // The UALoE and amdsmi severity enumerators share their values.
+  amdsmi_hdr->error_severity = static_cast<amdsmi_cper_sev_t>(ualoe_hdr->severity);
+
+  // No platform_id or partition_id is synthesized, so only the timestamp is valid.
+  amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
+
+  amdsmi_hdr->record_length = static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + payload_size);
+  timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp);
+
+  // creator_id and notify_type are 16-byte fields; the memset above zero-pads them.
+  memcpy(amdsmi_hdr->creator_id, "IFoE", 4);
+  static const unsigned char ifoe_guid[16] = AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID;
+  memcpy(amdsmi_hdr->notify_type.b, ifoe_guid, 16);
+}
+
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor) {
+  if (processor_handle == nullptr || cper_data == nullptr || buf_size == nullptr ||
+      cper_hdrs == nullptr || entry_count == nullptr || cursor == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  constexpr uint64_t kMaxUaloeEntries = 4096;
+  if (*entry_count == 0 || *entry_count > kMaxUaloeEntries) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &device);
+  if (status != AMDSMI_STATUS_SUCCESS || device == nullptr) {
+    return status;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const size_t max_ualoe_entries = static_cast<size_t>(*entry_count);
+
+  // The library advances *cursor past every record it packs into our intermediate
+  // buffer, but each 24-byte ualoe header grows to a 128-byte amdsmi_cper_hdr_t in
+  // the caller's buffer. Reserve that per-record growth so the library can only
+  // return records that still fit after expansion; the rest stay behind the cursor
+  // for the next paged call instead of being silently dropped.
+  constexpr uint64_t kAmdsmiHdrExpansion = sizeof(amdsmi_cper_hdr_t) - sizeof(ualoe_cper_hdr_t);
+  const uint64_t expansion_headroom =
+      static_cast<uint64_t>(max_ualoe_entries) * kAmdsmiHdrExpansion;
+  if (*buf_size <= expansion_headroom) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+  constexpr uint64_t kMaxUaloeBufSize = 1048576;  // 1 MB cap on the intermediate buffer
+  const size_t ualoe_buf_size =
+      static_cast<size_t>(std::min<uint64_t>(*buf_size - expansion_headroom, kMaxUaloeBufSize));
+  std::vector<char> ualoe_buf(ualoe_buf_size);
+  std::vector<ualoe_cper_hdr_t*> ualoe_hdrs(max_ualoe_entries);
+
+  uint64_t ualoe_buf_size_var = ualoe_buf_size;
+  uint64_t ualoe_entry_count = max_ualoe_entries;
+
+  // UALoE defines only severity bits 0-2; map the "all" guard onto them.
+  uint32_t ualoe_severity_mask = severity_mask;
+  if (severity_mask == (1U << AMDSMI_CPER_SEV_NUM)) {
+    ualoe_severity_mask = (1U << AMDSMI_CPER_SEV_NUM) - 1U;
+  }
+
+  int ret = ualoe_get_ifoe_cper_entries(ualoe_handle, ualoe_severity_mask, ualoe_buf.data(),
+                                        &ualoe_buf_size_var, ualoe_hdrs.data(), &ualoe_entry_count,
+                                        cursor);
+
+  if (ret != 0 && ret != ENOBUFS) {
+    if (ret == ENOSPC) {
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    }
+    return convert_errno_to_amdsmi_status(ret);
+  }
+
+  // Clamp ualoe_buf_size_var to prevent OOB read
+  if (ualoe_buf_size_var > ualoe_buf_size) {
+    ualoe_buf_size_var = ualoe_buf_size;
+  }
+
+  // Clamp the returned count to the ualoe_hdrs capacity: a library that reports
+  // more entries than requested would otherwise drive an OOB read on ualoe_hdrs[i].
+  ualoe_entry_count = std::min<uint64_t>(ualoe_entry_count, max_ualoe_entries);
+
+  uint64_t amdsmi_offset = 0;
+  uint64_t transformed_entries = 0;
+  bool entries_dropped = false;
+
+  for (uint64_t i = 0; i < ualoe_entry_count; i++) {
+    const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
+    if (ualoe_hdr == nullptr) {
+      entries_dropped = true;
+      break;
+    }
+
+    // Validate the header lies within ualoe_buf before dereferencing record_length.
+    // Cross-object pointer subtraction is UB, and a header below the buffer start
+    // would wrap to a huge offset that slips past a naive "+ sizeof()" check, so
+    // compare as uintptr_t with the subtraction kept on the size side to avoid both
+    // underflow and overflow.
+    const auto ualoe_buf_begin = reinterpret_cast<uintptr_t>(ualoe_buf.data());
+    const auto ualoe_hdr_addr = reinterpret_cast<uintptr_t>(ualoe_hdr);
+    if ((ualoe_buf_size_var < sizeof(ualoe_cper_hdr_t)) || (ualoe_hdr_addr < ualoe_buf_begin) ||
+        ((ualoe_hdr_addr - ualoe_buf_begin) > (ualoe_buf_size_var - sizeof(ualoe_cper_hdr_t)))) {
+      entries_dropped = true;
+      break;
+    }
+    const size_t ualoe_offset = static_cast<size_t>(ualoe_hdr_addr - ualoe_buf_begin);
+
+    if (ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
+      entries_dropped = true;
+      break;
+    }
+
+    const uint32_t ualoe_payload_size =
+        static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
+    const uint32_t amdsmi_record_length =
+        static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size);
+
+    if (ualoe_hdr->record_length > ualoe_buf_size_var - ualoe_offset) {
+      entries_dropped = true;
+      break;
+    }
+
+    if (amdsmi_offset + amdsmi_record_length > *buf_size) {
+      entries_dropped = true;
+      break;
+    }
+
+    if (transformed_entries >= max_ualoe_entries) {
+      entries_dropped = true;
+      break;
+    }
+
+    amdsmi_cper_hdr_t* amdsmi_hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(cper_data + amdsmi_offset);
+    synthesize_amdsmi_cper_header(ualoe_hdr, ualoe_payload_size, amdsmi_hdr);
+
+    const char* ualoe_payload = reinterpret_cast<const char*>(ualoe_hdr) + sizeof(ualoe_cper_hdr_t);
+    memcpy(cper_data + amdsmi_offset + sizeof(amdsmi_cper_hdr_t), ualoe_payload,
+           ualoe_payload_size);
+
+    cper_hdrs[transformed_entries] = amdsmi_hdr;
+    transformed_entries++;
+    amdsmi_offset += amdsmi_record_length;
+  }
+
+  *buf_size = amdsmi_offset;
+  *entry_count = transformed_entries;
+
+  if (transformed_entries == 0 && ualoe_entry_count > 0) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  if (entries_dropped) {
+    if (transformed_entries > 0) {
+      return AMDSMI_STATUS_MORE_DATA;
+    }
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  if (ret == ENOBUFS) {
+    return AMDSMI_STATUS_MORE_DATA;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
 }
