@@ -631,6 +631,11 @@ def format_time(seconds: float) -> str:
     return ", ".join(parts[:-1]) + f" and {parts[-1]}"
 
 
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences."""
+    return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
+
+
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
     config_arch = canonical_config_arch(arch) or arch
     filename = (

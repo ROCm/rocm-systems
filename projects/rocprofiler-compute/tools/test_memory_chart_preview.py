@@ -11,7 +11,7 @@ from memory_chart_preview import main
 
 import config
 from memory_chart.loader import layout_files
-from memory_chart.mem_chart import strip_ansi
+from utils.utils_common import strip_ansi
 
 GFX942_CONFIG = (
     config.rocprof_compute_home

@@ -8,10 +8,10 @@ import subprocess
 
 import pytest
 
-from memory_chart.mem_chart import strip_ansi
 from utils.specs import (
     generate_machine_specs,
 )
+from utils.utils_common import strip_ansi
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {

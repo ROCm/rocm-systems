@@ -20,7 +20,6 @@ Vertical rules, which keep every arrow beside the box it belongs to:
 - Centred arrows sit in the middle of the grid interior [1, H - 1).
 """
 
-import re
 import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
@@ -97,11 +96,6 @@ def plot_mem_chart(
     if layout is None:
         raise ValueError(f"No memory chart layout for {gpu_arch!r}")
     return MemChart(layout, metric_dict, units, membw).render(chart_title)
-
-
-def strip_ansi(text: str) -> str:
-    """Remove ANSI escape sequences."""
-    return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
 def format_mem_chart_heading(normal_unit: str, *, panel_id: int) -> str:
