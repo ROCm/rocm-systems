@@ -23,6 +23,10 @@
 #include <gtest/gtest.h>
 
 #include "comm.h"
+#include "fakes/ras_net_fakes.h"
+#include "fakes/ras_client_support_fakes.h"
+#include "fakes/ras_message_fakes.h"
+#include "fakes/ras_message_test_support.h"
 #include "fakes/ras_registry_test_support.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
@@ -442,6 +446,20 @@ uint64_t g_clockNano = 100 * CLOCK_UNITS_PER_SEC;
 void ResetWholeFileSeams() {
   ResetRasFakes();
   ResetRasParamFakes();
+  ResetRasNetFakes();
+  ResetRasClientSupportFakes();
+  ResetRasMessageFakes();
+  g_rasConnFind = [](const union ncclSocketAddress*) { return g_connFindResult; };
+  g_rasConnDisconnect = [](const union ncclSocketAddress* addr) {
+    ++g_connDisconnectCalls;
+    if (addr) g_disconnectedAddr = *addr;
+  };
+  g_rasClientsNotifyEvent = [](rasEventGroup group, const struct rasEventNotification* event) {
+    ++g_clientsNotifyCalls;
+    g_lastEventGroup = group;
+    g_lastEventPeerAddr = event ? event->peerAddr : nullptr;
+  };
+
   g_socketInitResult = ncclSuccess;
   g_socketListenResult = ncclSuccess;
   g_socketPairCreateResult = ncclSuccess;
@@ -655,7 +673,6 @@ ncclResult_t rasMsgHandleCollResp(struct rasMsg* msg, struct rasSocket* sock) {
   return g_dispatchResult;
 }
 
-rasConnection* rasConnFind(const union ncclSocketAddress*) { return g_connFindResult; }
 ncclResult_t getNewConnEntry(struct rasConnection** conn) {
   if (g_newConnResult == ncclSuccess) *conn = &g_newConn;
   return g_newConnResult;
@@ -669,11 +686,7 @@ int ncclSocketsCompare(const void* left, const void* right) {
   g_socketCompareRight = right;
   return g_socketCompareResult;
 }
-void rasClientsNotifyEvent(rasEventGroup group, const struct rasEventNotification* event) {
-  ++g_clientsNotifyCalls;
-  g_lastEventGroup = group;
-  g_lastEventPeerAddr = event ? event->peerAddr : nullptr;
-}
+
 int rasPeerFind(const union ncclSocketAddress*) { return g_peerFindResult; }
 ncclResult_t rasLinkConnUpdate(struct rasLink* link, struct rasConnection* conn, int peerIdx) {
   ++g_linkUpdateCalls;
@@ -690,10 +703,7 @@ ncclResult_t rasConnSendPeersUpdate(struct rasConnection* conn, const struct ras
   return ncclSuccess;
 }
 bool rasPeerIsDead(const union ncclSocketAddress*) { return g_peerDead; }
-void rasConnDisconnect(const union ncclSocketAddress* addr) {
-  ++g_connDisconnectCalls;
-  if (addr) g_disconnectedAddr = *addr;
-}
+
 ncclResult_t rasPeerDeclareDead(const union ncclSocketAddress* addr) {
   ++g_peerDeclareDeadCalls;
   if (addr) g_declaredDeadAddr = *addr;
@@ -702,24 +712,15 @@ ncclResult_t rasPeerDeclareDead(const union ncclSocketAddress* addr) {
 
 namespace {
 
-struct OwnedMsg {
-  rasMsg* ptr = nullptr;
-  explicit OwnedMsg(size_t len) { EXPECT_EQ(ncclSuccess, rasMsgAlloc(&ptr, len)); }
-  ~OwnedMsg() { rasMsgFree(ptr); }
-  rasMsg* release() {
-    rasMsg* out = ptr;
-    ptr = nullptr;
-    return out;
-  }
-};
+using ras_test::OwnedMsg;
 
 void EnqueueMessage(rasConnection* conn, rasSocket* sock, rasSocketStatus status, rasMsgType type, int pfd = -1) {
   sock->status = status;
   if (pfd >= 0) sock->pfd = pfd;
   conn->sock = sock;
-  OwnedMsg owned(rasMsgLength(type));
-  ASSERT_NE(nullptr, owned.ptr);
-  owned.ptr->type = type;
+  OwnedMsg owned(rasMsgLength(type), rasMsgAlloc, rasMsgFree);
+  ASSERT_NE(nullptr, owned.get());
+  owned.get()->type = type;
   rasConnEnqueueMsg(conn, owned.release(), rasMsgLength(type));
 }
 
@@ -1014,9 +1015,9 @@ TEST_F(RasMicrotest, ConnInitExistingConnectionWithoutSocketUsesIncomingSocket) 
   rasSocket incoming{};
   incoming.pfd = 0;
   rasMsg msg = MakeConnInitMsg();
-  OwnedMsg queued(rasMsgLength(RAS_MSG_KEEPALIVE));
-  ASSERT_NE(nullptr, queued.ptr);
-  queued.ptr->type = RAS_MSG_KEEPALIVE;
+  OwnedMsg queued(rasMsgLength(RAS_MSG_KEEPALIVE), rasMsgAlloc, rasMsgFree);
+  ASSERT_NE(nullptr, queued.get());
+  queued.get()->type = RAS_MSG_KEEPALIVE;
   rasConnEnqueueMsg(&existing, queued.release(), rasMsgLength(RAS_MSG_KEEPALIVE));
   ASSERT_EQ(ncclSuccess, rasMsgHandle(&msg, &incoming));
   EXPECT_EQ(&incoming, existing.sock);
@@ -1286,12 +1287,12 @@ TEST_F(RasMicrotest, ConnEnqueueBackInitializesMetadataAndArmsReadySocket) {
 
 TEST_F(RasMicrotest, ConnEnqueueFrontPrecedesExistingMessage) {
   rasConnection conn{};
-  OwnedMsg first(rasMsgLength(RAS_MSG_KEEPALIVE));
-  OwnedMsg second(rasMsgLength(RAS_MSG_CONNINIT));
-  ASSERT_NE(nullptr, first.ptr);
-  ASSERT_NE(nullptr, second.ptr);
-  first.ptr->type = RAS_MSG_KEEPALIVE;
-  second.ptr->type = RAS_MSG_CONNINIT;
+  OwnedMsg first(rasMsgLength(RAS_MSG_KEEPALIVE), rasMsgAlloc, rasMsgFree);
+  OwnedMsg second(rasMsgLength(RAS_MSG_CONNINIT), rasMsgAlloc, rasMsgFree);
+  ASSERT_NE(nullptr, first.get());
+  ASSERT_NE(nullptr, second.get());
+  first.get()->type = RAS_MSG_KEEPALIVE;
+  second.get()->type = RAS_MSG_CONNINIT;
   rasMsg* firstRaw = first.release();
   rasMsg* secondRaw = second.release();
   rasConnEnqueueMsg(&conn, firstRaw, rasMsgLength(RAS_MSG_KEEPALIVE), false);

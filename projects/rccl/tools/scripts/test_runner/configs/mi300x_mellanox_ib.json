@@ -4144,7 +4144,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
           "timeout": 600
         },
         {
@@ -4195,6 +4195,15 @@
           "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
           "env_variables": {
             "NCCL_GIN_PROXY_NTHREADS": "4"
+          }
+        },
+        {
+          "name": "GIN_QpCount_StaysAtOne",
+          "description": "GIN proxy IB links stay at one QP per device while collective links follow NCCL_IB_QPS_PER_CONNECTION and P2P links follow RCCL_IB_QPS_PER_P2P",
+          "test_filter": "GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "env_variables": {
+            "NCCL_IB_QPS_PER_CONNECTION": "4",
+            "RCCL_IB_QPS_PER_P2P": "2"
           }
         }
       ]

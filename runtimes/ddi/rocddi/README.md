@@ -9,22 +9,77 @@ ownership. GPU execution, PCI attachment, and operating-system handles enter
 through separate capabilities and platform modules.
 
 This crate belongs to the four-package `runtimes` Cargo workspace. The runtime
-components are early-access and outside the repository default installation. The `rocddi` crate is an `rlib`. It installs
-no headers, exports no C symbols, and promises no stable Rust ABI.
+components are early-access and outside the repository default installation.
+The `rocddi` crate is an `rlib`. It installs no headers, exports no C symbols,
+and promises no stable Rust ABI.
 
-The only native implementation is the Linux KFD/DRM GPU backend on x86-64
+The only platform implementation is the Linux KFD/DRM GPU driver on x86-64
 and AArch64. Public topology and memory records keep Linux and GPU fields in
-kind- or platform-specific modules. Private driver traits separate provider,
-host allocation, general allocation, virtual memory, GPU queue, and GPU
-profiling services. The common provider session and host and device
-allocation owners accept a fake CPU provider in tests. Those tests cover
-discovery, activation, foreign endpoints, allocation, busy teardown, and
-failed cleanup without KFD, DRM, or PCI. Fake GPU queue and detached
-virtual-memory providers check foreign-session rejection, mapping occupancy,
-cleanup retry, and the order in which native owners and providers are dropped.
-The public `Session` selects the native backend for the build target. Both C
-frontends route Linux interop through platform modules. Another OS needs its
-own backend and frontend adapters.
+kind- or platform-specific modules. The private `Driver` trait covers
+discovery, activation, context policy, metadata allocation, and shutdown. Its
+associated device-state type retains each activated endpoint's dependencies.
+`GpuDriver` is the complete GPU backend interface. It requires allocation and
+virtual-memory operations, creates both direct and kernel-mediated queues, and
+provides GPU presentation, cache control, timing, traps, and stream monitoring.
+`AllocationOperations` and `VirtualMemoryOperations` describe mechanisms that
+can also be implemented by a non-GPU driver. A created queue implements either
+`UserQueueResource` or `KernelQueueResource`; these resource contracts define
+distinct progress and teardown rules but do not represent additional drivers.
+`AddressSpaceInfo` and `CachedInfo` expose the immutable values needed by
+generic resource owners.
+Host-only storage uses the selected host OS services. CPU cache maintenance is
+qualified by `cpu_cache.rs`. Neither acquires a GPU driver context.
+
+A public `Session` is the caller's logical scope for endpoint identity,
+activation, driver context lifetime, and shutdown. It can discover and activate
+several devices; construction activates none. The AMDF and HSA frontends each
+use a `Session` as their rocddi root. A session owns a set of independently
+identified driver instances under one requested context lifetime. The
+current Linux constructor installs a KFD driver instance. Each activated
+device retains only its owning driver instance and state. Session activation
+rejects an endpoint from another driver instance, and shutdown requires every
+device and resource owner to release its driver instance first. Clones share
+the driver set.
+A session may share KFD files and VMs according to the chosen policy.
+`DriverContextLifetime::Process` permits a shared process-owned KFD context
+and retained VM bindings. `DriverContextLifetime::Session` requires
+the driver to release its context and bindings at session shutdown.
+
+The private `DriverInstance` enum stores shared references to concrete driver
+implementations. `DeviceDriverState` pairs one such reference with the state
+acquired for a single activated endpoint. One driver instance can activate
+several devices. `Endpoint::driver_instance` carries the numeric identity that
+routes a passive snapshot to its owning driver instance.
+
+The driver registry routes endpoint activation by the instance identity in
+each passive record. With multiple drivers, enumeration stages their records
+and rejects duplicate endpoint IDs before delivering any record. Opening an ID
+first finds its owning driver and rejects a collision. A driver discovery
+failure leaves the caller with no partial enumeration. Shutdown checks every
+driver instance for live owners before closing any driver; a failed close can be
+retried without repeating drivers that already closed successfully. Activated
+devices from different drivers never share an address domain.
+
+The common driver and generic allocation owners are exercised with a fake CPU
+driver in tests. Those tests cover discovery, activation, foreign endpoints,
+allocation, and failed cleanup without KFD, DRM, or PCI. Linux host-storage
+tests cover both context lifetime policies and retryable unmapping. The
+concrete `Session` tests check routing across two non-GPU drivers, endpoint ID
+collisions, and coordinated shutdown retry. A fake direct-queue resource and a
+detached virtual-memory driver check foreign-session rejection, mapping
+occupancy, cleanup retry, and the order in which native owners and drivers are
+dropped.
+
+The common `Driver` trait imposes no GPU operations on non-GPU drivers. A new
+implementation adds a `DriverInstance` and `DeviceDriverState` variant and is
+installed by the session constructor. A GPU implementation satisfies
+`GpuDriver`; another device family implements only the shared resource
+contracts whose semantics it provides. Generic resource owners retain their
+concrete driver and cleanup state. Public allocation, virtual-memory, and
+queue types contain private concrete-owner variants, so their Rust signatures
+do not contain KFD types. Linux descriptor, IPC, SVM, and event-page interop
+requires a KFD resource and checks that ownership before using KFD or DRM.
+Both C frontends route Linux interop through platform modules.
 
 ## Architecture
 
@@ -54,26 +109,74 @@ depend on the other.
 
 The core source is organized by ownership domain:
 
-- `session.rs` owns the root session lifetime and cross-device coordination;
+- `session.rs` owns the public session, routes endpoint identities across its
+  installed drivers, selects the installed driver for a multi-device virtual
+  address reservation, and coordinates shutdown. Each driver retains the
+  selected context lifetime policy;
 - `topology/` owns passive endpoint metadata. `EndpointKind` separates CPU,
   GPU, NPU, and future endpoint kinds; PCI attachment is optional, while
   `topology::platform::linux` carries KFD and DRM identities and procfs/sysfs
   host facts needed by Linux compatibility frontends;
-- `device.rs` owns explicitly activated endpoint state, core lifecycle checks,
-  and kind-neutral introspection. `gpu/` is the checked GPU capability view and
-  exposes GPU queues and profiling, with KFD events below `gpu::event::linux`;
-- `memory/` owns provider-generic allocation, address-reservation, and
-  mapping owners. `memory::interop::linux` contains DMA-BUF, KFD IPC, KFD
-  SVM, and AIS file-transfer contracts used with Linux APIs and other
-  processes;
-- `driver/` is the private downward-facing platform contract, with the current
-  Linux KFD and DRM implementation under `driver/builtin/linux_kfd/`. Linux
-  memory and event interop have separate driver contracts so future platform
-  backends do not need to implement file-descriptor or KFD event operations.
+- `device.rs` owns explicitly activated endpoint state and kind-neutral
+  introspection. `device/event.rs` owns driver-independent subscriptions and
+  event records. `device/gpu.rs` defines the checked `GpuDevice` view; its
+  `device/gpu/` children own copy, queue, profiling, and GPU event services.
+  Cloned devices share family-specific service state, including the GPU copy
+  pool. Linux KFD signal events live under `device/gpu/event/linux.rs` and are
+  exposed through `device::gpu::event::linux`;
+- `memory.rs` and `memory/` own driver-generic allocation,
+  address-reservation, and mapping owners. A virtual-address reservation
+  verifies that every device uses the selected driver, intersects their
+  address apertures, and allocates mapping records before asking that driver
+  to reserve the native range. `memory::interop::linux` contains DMA-BUF,
+  KFD IPC, KFD SVM, and AIS file-transfer contracts used with Linux APIs and
+  other processes;
+- `driver.rs` defines the private driver and resource interfaces;
+  `driver/instance.rs` owns installed-driver and activated-device routing, while
+  `driver/resources.rs` pairs concrete drivers with allocation, virtual-memory,
+  and queue owners. Validation and retryable cleanup stay in the generic owner
+  modules. The Linux KFD and DRM implementation lives in
+  `driver/linux_kfd.rs` and `driver/linux_kfd/`. Its `operations.rs` implements
+  the shared driver contracts; `interop.rs` provides KFD and DRM sharing
+  operations. KFD and DRM owners remain with that driver;
+- `os.rs` selects host allocation and page-size discovery.
+  Owned files use `std::fs::File` directly. `os/linux.rs` and `os/linux/` own
+  Linux host services used by the KFD driver. `file.rs` owns raw descriptor
+  transfer, positioned I/O, and DMA-BUF file identity. `memory.rs` owns page
+  discovery, host allocation, and the fork marker page; `memory/reservation.rs`
+  owns Linux virtual address reservations and file mappings.
+  `process_identity.rs` publishes and checks the marker to reject owners
+  inherited across `fork`, and `os/linux.rs` translates I/O failures. Linux
+  positioned file I/O uses `std::os::unix::fs::FileExt`. Another OS
+  implementation supplies host allocation and page-size operations without
+  exposing its native handle to the core.
+  Host allocation reports a numeric extent and retains failed cleanup for
+  retry; `memory.rs` constructs the public information record. The core
+  host-memory API uses these services without activating a device.
+  `topology::platform::linux` remains public endpoint metadata for runtime
+  frontends; it does not own host services;
+- `cpu_cache.rs` qualifies the host CPU cache-line recipe and runs cache
+  maintenance without an OS handle. The memory API and GPU queue setup use
+  this shared CPU service.
+
+Each activated KFD process connection owns one hardware-exception event and
+one memory-exception event. Device checks and `device::event` subscriptions use a
+single serialized observer for both events. After copying a native payload, the
+observer rearms its manual-reset event so later faults and resets can be
+reported. The DDI keeps unread records in a bounded buffer and retains the
+latest record of each exception kind for later subscribers. Each subscription
+has an independent cursor. If a subscriber falls behind enough to fill the
+buffer, native polling pauses until it reads or drops its backlog. A
+subscription retains the native event owner until it is dropped; the session
+releases that owner after all devices and subscriptions are gone. Hardware
+exceptions that report lost
+memory latch connection-wide `DeviceLost` for operations. Memory faults and
+hardware exceptions without lost memory remain notifications. Polling never
+invokes a frontend callback while holding the native observation lock.
 
 The [safety boundary and resource state guide](docs/safety.md) records the
 native reachability rules shared by the core and both adapters.
-Owned and caller-owned host pages use `HostCachePolicy` to select the GPU
+Owned and caller-owned host pages use `HostMappingPolicy` to select the GPU
 mapping. In the primary KFD context, coarse USERPTR omits the coherent flag;
 fine adds it, extended also adds extended coherency, and uncached adds the
 uncached flag while retaining coherent access. The caller keeps registered
@@ -86,7 +189,7 @@ page type. Other GPU targets reject extended registration in a secondary
 context. Owned host pages use `System` backing there.
 
 A topology endpoint is passive metadata. It is not an activated `Device` and
-does not authorize native execution or memory operations. The current backend
+does not authorize native execution or memory operations. The Linux KFD driver
 publishes only GPU endpoints, but GPU geometry and queue capabilities live in
 the `Gpu` endpoint-kind payload instead of being mandatory universal fields.
 Likewise, Linux identities and sharing mechanisms stay in Linux-specific
@@ -124,8 +227,9 @@ of device-to-device, host-to-device, and device-to-host linear copies. It stages
 each host operand when that entry runs and retires each packet before starting
 the next entry. Any operation failure makes the sequence terminal. rocddi
 queries the DRM DMA IP ring mask for an activated GFX1201 device.
-`GpuCopySequence::begin_on_sdma_ring` binds its command context to one
-advertised DRM ring; submission and completion waits use that same ring.
+`GpuCopySequence::begin_on_sdma_engine` binds its command context to one
+advertised logical SDMA engine; submission and completion waits use that same
+engine. The platform driver maps the logical index to its submission target.
 The default copy path uses ring zero. The same native owner encodes OSS5 linear
 and constant-fill packets with system cache control, splits large transfers
 into bounded packets, and reuses command backing only
@@ -158,7 +262,7 @@ the byte count is unknown and rocddi preserves the native errno without
 replaying the operation. Linux storage and PCI P2P capability determine whether
 KFD can execute a particular transfer.
 For CPU-visible storage, `ais_host_transfer` uses positioned host I/O through
-the same Linux interop provider. It reports a known copied-byte prefix and
+the same Linux interop driver. It reports a known copied-byte prefix and
 errno on failure, including short reads at end of file. The frontend owns
 public pointer validation and HSA status translation for both routes.
 
@@ -174,7 +278,7 @@ ambiguous CREATE or DESTROY outcomes. Producers own packet encoding, ring
 space, publication order, and completion waits.
 
 An AQL request can set `global_work_sync` when the GPU advertises GWS. The
-Linux backend allocates GWS on the native queue before exposing its transport.
+The Linux KFD driver allocates GWS on the queue before exposing its transport.
 KFD permits one GWS queue per process and device, so a frontend that serves
 multiple cooperative callers must share that queue. A failed GWS allocation
 destroys the unpublished queue before releasing its ring and control backing;
@@ -182,7 +286,7 @@ an uncertain cleanup retains those owners through process teardown.
 
 The `ring_memory` field on `QueueParameters::Aql` and
 `QueueParameters::SdmaByEngine` selects a system ring or a host-visible local
-ring. The Linux backend admits local placement on GFX1201 when public VRAM
+ring. The Linux KFD driver admits local placement on GFX1201 when public VRAM
 can hold the page-rounded ring. It maps that VRAM into the process, requests
 uncached GPU pages with execute permission, and owns the mapping through
 native queue teardown. Producers using the host mapping must publish complete
@@ -215,7 +319,7 @@ unwinds, `abandon_unpublished_with_dependencies` retains both the queue and
 external owners. Uncertain resources remain retained until process teardown
 unless a future recovery mechanism proves release.
 
-Scripted KFD tests in `src/driver/builtin/linux_kfd/tests/queue.rs` inject
+Scripted KFD tests in `src/driver/linux_kfd/tests/queue.rs` inject
 CREATE EFAULT and rollback DESTROY failures; a creation-closure panic covers
 an unwind. The tests verify that uncertain KFD outcomes retain native backing
 and the external owner, an unwind retains the external owner, certain failure
