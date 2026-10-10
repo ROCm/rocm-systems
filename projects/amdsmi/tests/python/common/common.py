@@ -1262,6 +1262,8 @@ class Common:
             # Set bad gpu: None is rejected by the isinstance check in amdsmi_interface.py,
             # raising AmdSmiParameterException(INVAL). Platform-agnostic and unambiguous.
             self.bad_gpu = None
+            # Same sentinel for CPU/CPU-core APIs; named separately so CPU tests read clearly.
+            self.bad_cpu = None
 
             self.virt_mode = []
             self.asic_info = []
@@ -1312,7 +1314,7 @@ class Common:
                 else:
                     print(msg)
                 if isinstance(data, dict) or isinstance(data, list):
-                    print(json.dumps(data, sort_keys=False, indent=4), flush=True)
+                    print(json.dumps(data, sort_keys=False, indent=4, default=str), flush=True)
                 else:
                     print(data)
         return
@@ -1659,12 +1661,12 @@ class Common:
             raise unittest.SkipTest(msg)
         return
 
-    def _build_call_msg(self, func_name, i, j, params):
+    def _build_call_msg(self, func_name, i, j, params, label="gpu"):
         msg = f"\t### {func_name}("
         if i is not None:
-            msg += f"gpu={i}"
+            msg += f"{label}={i}"
         if j is not None:
-            msg += f", gpu={j}"
+            msg += f", {label}={j}"
         for param_name, param_value in params.items():
             if isinstance(param_value, list):
                 msg += f", {param_name}={{value}}"
@@ -1782,6 +1784,111 @@ class Common:
         if raise_exception:
             raise raise_exception
         return
+
+    def _cpu_socket_handles(self):
+        """CPU socket handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def _cpu_core_handles(self):
+        """CPU core handles, or [] when the library was initialized without CPUs."""
+        try:
+            return amdsmi.amdsmi_get_cpucore_handles()
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            return []
+
+    def _skip_cpu_if_unsupported(self, handles):
+        """Skip the calling CPU test when the host CPU cannot be exercised.
+
+        Two cases are treated as "CPU not supported":
+          * no CPU handles were enumerated (library initialized without CPUs), and
+          * the CPU/platform does not implement the HSMP mailbox (e.g. STX APUs),
+            probed with the lightweight amdsmi_get_cpu_hsmp_proto_ver() query. A
+            driver node may exist while the platform still rejects HSMP messages,
+            so an actual probe is more reliable than checking for /dev/hsmp.
+        """
+        if not handles:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        sockets = self._cpu_socket_handles()
+        if not sockets:
+            msg = "\tNo CPU processors found; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+        try:
+            amdsmi.amdsmi_get_cpu_hsmp_proto_ver(sockets[0])
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+            msg = "\tCPU does not support the HSMP/ESMI interface; skipping CPU-specific test"
+            self.print(msg)
+            raise unittest.SkipTest(msg)
+
+    def skip_without_cpu(self):
+        """CPU socket handles, skipping the calling test when the CPU is unsupported.
+
+        For CPU tests that iterate handles inline (rather than through
+        Test_API_Per_CPU) but still need to skip cleanly on CPU-less or
+        HSMP-unsupported hosts.
+        """
+        handles = self._cpu_socket_handles()
+        self._skip_cpu_if_unsupported(handles)
+        return handles
+
+    def skip_without_cpu_core(self):
+        """CPU core handles, skipping the calling test when the CPU is unsupported.
+
+        Core-handle counterpart to skip_without_cpu() for inline-iterating tests.
+        """
+        handles = self._cpu_core_handles()
+        self._skip_cpu_if_unsupported(handles)
+        return handles
+
+    def _Test_API_Per_Handles(self, handles, label, **kwargs):
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator)
+        del params[func_name]
+
+        self._skip_cpu_if_unsupported(handles)
+
+        raise_exception = None
+        for i in range(len(handles) + 1):
+            cond = self.PASS
+            if i < len(handles):
+                handle = handles[i]
+            else:
+                handle = self.bad_cpu
+                i = "invalid"
+                cond = self.FAIL
+
+            msg = self._build_call_msg(func_name, i, None, params, label=label)
+            try:
+                data = func(handle, *[value for value in params.values()])
+                self.print(msg, data)
+                self.check_ret("", "", cond)
+            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                if self.check_ret(msg, e, cond):
+                    raise_exception = e
+            self.print("")
+        if raise_exception:
+            raise raise_exception
+        return
+
+    def Test_API_Per_CPU(self, **kwargs):
+        """Tests an API against every CPU socket handle and one invalid handle.
+
+        Skips the calling test when the library was initialized without CPUs.
+        """
+        return self._Test_API_Per_Handles(self._cpu_socket_handles(), "cpu", **kwargs)
+
+    def Test_API_Per_CPU_Core(self, **kwargs):
+        """Tests an API against every CPU-core handle and one invalid handle.
+
+        Skips the calling test when the library was initialized without CPUs.
+        """
+        return self._Test_API_Per_Handles(self._cpu_core_handles(), "core", **kwargs)
 
     def Test_Per_GPU_With_One_Enum(self, **kwargs):
         """
