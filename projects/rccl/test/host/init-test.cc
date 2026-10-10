@@ -2137,6 +2137,114 @@ TEST_F(InitMicrotest, CommFree_AfterCommAlloc_ReturnsSuccessAndFrees) {
   EXPECT_EQ(1, abortRef);
 }
 
+// ncclDdaCommSetupRequested is the predicate ncclCommInitRankFunc uses before
+// it allocates DDA scratch. initTransportsRank cannot finish on the host, so
+// these tests call the predicate. commFree is the teardown site that a host
+// binary can actually run.
+#ifdef ENABLE_DDA
+TEST_F(InitMicrotest, DdaSetupRequested_FollowsGeometry) {
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ncclCommInitRankAsyncJob job{};
+  comm->nNodes = 1;
+  comm->nRanks = 8;
+  EXPECT_TRUE(ncclDdaCommSetupRequested(&job, comm));
+
+  comm->nRanks = 4;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+  comm->nRanks = 8;
+  comm->nNodes = 2;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+
+  comm->nNodes = 1;
+  job.isGrow = true;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+  job.isGrow = false;
+  job.parent = comm;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+  job.parent = nullptr;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(nullptr, comm));
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, nullptr));
+
+  ScopedHook fabric(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  comm->nRanks = 2;
+  comm->nNodes = 4;
+  EXPECT_TRUE(ncclDdaCommSetupRequested(&job, comm));
+  EXPECT_EQ(1, fabric.calls);
+  free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_DdaIpcPath_CallsIpcFiniOnly) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return false; });
+  ScopedHook ipcFini(g_ncclDdaIpcCommFini, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook fabricFini(g_ncclDdaFabricCommFini, [](ncclComm*) { return ncclSuccess; });
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(1, fabricPath.calls);
+  EXPECT_EQ(1, ipcFini.calls);
+  EXPECT_EQ(0, fabricFini.calls);
+}
+
+TEST_F(InitMicrotest, CommFree_DdaFabricPath_CallsFabricFiniOnly) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  ScopedHook ipcFini(g_ncclDdaIpcCommFini, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook fabricFini(g_ncclDdaFabricCommFini, [](ncclComm*) { return ncclSuccess; });
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(1, fabricPath.calls);
+  EXPECT_EQ(0, ipcFini.calls);
+  EXPECT_EQ(1, fabricFini.calls);
+}
+#else
+TEST_F(InitMicrotest, DdaSetupRequested_Disabled_AlwaysFalse) {
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ncclCommInitRankAsyncJob job{};
+  comm->nNodes = 1;
+  comm->nRanks = 8;
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+  ScopedHook fabric(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  EXPECT_FALSE(ncclDdaCommSetupRequested(&job, comm));
+  EXPECT_EQ(0, fabric.calls);
+  free(comm);
+}
+
+TEST_F(InitMicrotest, CommFree_DdaDisabled_DoesNotCallFini) {
+  InstallCommAllocSuccess();
+  ncclComm* comm = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclCalloc(&comm, 1));
+  ASSERT_EQ(ncclSuccess, commAlloc(comm, /*parent=*/nullptr, /*ndev=*/8, /*rank=*/0));
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  comm->abortFlag = &abortFlag;
+  comm->abortFlagRefCount = &abortRef;
+
+  ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  ScopedHook ipcFini(g_ncclDdaIpcCommFini, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook fabricFini(g_ncclDdaFabricCommFini, [](ncclComm*) { return ncclSuccess; });
+  EXPECT_EQ(ncclSuccess, commFree(comm));
+  EXPECT_EQ(0, fabricPath.calls);
+  EXPECT_EQ(0, ipcFini.calls);
+  EXPECT_EQ(0, fabricFini.calls);
+}
+#endif
+
 // See the comment at the ncclProfilerThreadDestroy call site in src/init.cc.
 TEST_F(InitMicrotest, CommFree_StopsProfilerThreadBeforeFreeingTheBuffersItPolls) {
   InstallCommAllocSuccess();

@@ -83,9 +83,12 @@
 
 #include "latency_profiler/CollTrace.h"
 #include "latency_profiler/CollTraceFunc.h"
+#ifdef ENABLE_DDA
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/dda_targets.h"
+#endif
 #if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
 #endif
@@ -578,11 +581,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->collNetHeads);
   free(comm->clique.ranks);
 
+#ifdef ENABLE_DDA
   if (ncclDdaUseFabricPath(comm)) {
     NCCLCHECK(ncclDdaFabricCommFini(comm));
   } else {
     NCCLCHECK(ncclDdaIpcCommFini(comm));
   }
+#endif
 
   if (comm->bootstrap) NCCLCHECK(bootstrapClose(comm->bootstrap));
 
@@ -2983,6 +2988,24 @@ static ncclResult_t getParentRanks(int parentRanks, int parentRank, int* exclude
   return ncclSuccess;
 }
 
+// Decision for the DDA setup call below. Host tests call this directly:
+// initTransportsRank cannot finish without a GPU, so the call site itself is
+// not reachable from a host binary. With ENABLE_DDA unset this is false and
+// the call site is compiled out, so a disabled build never needs the setup
+// symbols.
+static bool ncclDdaCommSetupRequested(const struct ncclCommInitRankAsyncJob* job, struct ncclComm* comm) {
+#if !defined(ENABLE_DDA)
+  (void)job;
+  (void)comm;
+  return false;
+#else
+  if (job == nullptr || comm == nullptr || job->parent != nullptr || job->isGrow) return false;
+  if (!ncclDdaCompiledForArch(comm->archName)) return false;
+  if (ncclDdaUseFabricPath(comm)) return true;
+  return comm->nNodes == 1 && comm->nRanks == 8;
+#endif
+}
+
 static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   struct ncclCommInitRankAsyncJob* job = (struct ncclCommInitRankAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -3202,13 +3225,15 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
-  if (!job->parent && !job->isGrow) {
+#ifdef ENABLE_DDA
+  if (ncclDdaCommSetupRequested(job, comm)) {
     if (ncclDdaUseFabricPath(comm)) {
       NCCLCHECKGOTO(ncclDdaFabricCommInit(comm), res, fail);
-    } else if (comm->nNodes == 1 && comm->nRanks == 8) {
+    } else {
       NCCLCHECKGOTO(ncclDdaIpcCommInit(comm), res, fail);
     }
   }
+#endif
   // update communicator state
   COMPILER_ATOMIC_STORE(&comm->initState, ncclSuccess, std::memory_order_release);
 

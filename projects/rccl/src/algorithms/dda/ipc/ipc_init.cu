@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/dda_targets.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
 #include <cuda_runtime.h>
@@ -45,7 +46,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
   const bool ddaArchSupported =
-    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+    comm->archName != nullptr && ncclDdaCompiledForArch(comm->archName) &&
+    (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
   if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
       comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
