@@ -169,15 +169,6 @@ struct pair_state
     {
         uint64_t start_ticks = 0;  // GPU ticks from the dispatch_start record
         uint64_t seen_at_ns  = 0;  // host clock when recorded, for aging
-        // Number of outstanding STARTs sharing this raw key (>1 once a duplicate
-        // arrives). `ambiguous` latches when a second outstanding START appears:
-        // the raw key (doorbell_off, dispatch_id) carries no window, so a
-        // recycled doorbell or a low-32 wrap makes it impossible to say which
-        // dispatch an EOP belongs to. Once ambiguous, every EOP on the key is
-        // dropped at this layer until `outstanding` drains to 0 or the key ages
-        // out -- never forwarded as start-unknown (the hub cannot refuse it).
-        uint32_t outstanding = 0;
-        bool     ambiguous   = false;
     };
     // dispatch_start records awaiting their matching eop, keyed by
     // (doorbell_off << 32 | dispatch_id).
@@ -190,7 +181,6 @@ struct pair_state
     uint64_t starts_seen        = 0;
     uint64_t eops_seen          = 0;
     uint64_t starts_overwritten = 0;  // a second START arrived on a retained key
-    uint64_t ambiguous_pairs    = 0;  // EOPs dropped because their raw key was ambiguous
     uint64_t equal_tick_drops   = 0;  // EOP tick == retained START tick (fail-closed)
     uint64_t stale_eop_drops    = 0;  // EOP tick < retained START tick (belongs earlier)
     uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
@@ -205,13 +195,13 @@ struct pair_state
     // reader; the default stands for a unit test that never sets it.
     size_t max_pending_starts = 2'000'000;
 
-    // Drop the single oldest retained START, counting its outstanding STARTs as
-    // lost (each is a dispatch that will now complete start-unknown -- coverage
-    // loss, not a wrong record). RESIDUAL, accepted: this is an O(live) scan, paid
-    // on every insert while the map sits AT the cap. Reaching the cap already means
-    // EOPs are being lost at a rate no sane workload produces, and the alternative
-    // there is memory exhaustion; a cheap victim lookup would need a second index
-    // ordered by seen_at_ns, the same secondary-index work D9 deferred.
+    // Drop the single oldest retained START, counting it as lost (the dispatch
+    // will now complete start-unknown -- coverage loss, not a wrong record).
+    // RESIDUAL, accepted: this is an O(live) scan, paid on every insert while the
+    // map sits AT the cap. Reaching the cap already means EOPs are being lost at a
+    // rate no sane workload produces, and the alternative there is memory
+    // exhaustion; a cheap victim lookup would need a second index ordered by
+    // seen_at_ns, the same secondary-index work D9 deferred.
     void evict_oldest_start()
     {
         auto _oldest = pending_starts.end();
@@ -220,7 +210,7 @@ struct pair_state
                it->second.seen_at_ns < _oldest->second.seen_at_ns)
                 _oldest = it;
         if(_oldest == pending_starts.end()) return;
-        starts_cap_evicted += _oldest->second.outstanding;
+        ++starts_cap_evicted;
         pending_starts.erase(_oldest);
     }
 
@@ -238,10 +228,7 @@ struct pair_state
         {
             if(now_ns > it->second.seen_at_ns && now_ns - it->second.seen_at_ns > max_age_ns)
             {
-                // A single key can hold more than one outstanding START (a recycled
-                // doorbell latched it ambiguous); each is a stranded START, so the
-                // telemetry counts outstanding, not one per key.
-                removed += it->second.outstanding;
+                ++removed;
                 it = pending_starts.erase(it);
             }
             else
@@ -343,7 +330,7 @@ pair_records(const copied_record* records,
     // HWS remap copied a record from. Only THIS batch's records are ordered; the
     // retained cross-batch pending_starts map is the state the pass runs against
     // and is never re-fed into the work list (re-appending it would push a second
-    // START transition on every retained key and latch ambiguous spuriously).
+    // START transition on every retained key).
     struct work_item
     {
         uint64_t tick;         // start_ticks for a START, end_ticks for an EOP
@@ -387,23 +374,20 @@ pair_records(const copied_record* records,
             ++state.starts_seen;
             // Hard size cap. Only an insert that GROWS the map can breach it, so a
             // recurring key is exempt -- evicting there could pick the very key
-            // about to be touched and silently reset its `ambiguous` latch. The
-            // size test short-circuits, so the normal path pays no extra lookup.
+            // about to be refreshed. The size test short-circuits, so the normal
+            // path pays no extra lookup.
             if(state.pending_starts.size() >= state.max_pending_starts &&
                state.pending_starts.find(key) == state.pending_starts.end())
                 state.evict_oldest_start();
-            // dispatch_id is only low-32, so a raw key can recur. A second
-            // outstanding START on one key makes it AMBIGUOUS: keep the first
-            // START's ticks and age unchanged (so an unpairable key still ages out
-            // -- refreshing seen_at_ns would make it permanent) and count another
-            // outstanding. try_emplace, not [], so the first START's fields survive.
-            auto [it, ins] = state.pending_starts.try_emplace(
-                key, pair_state::pending_start{ts, now_ns, 1, false});
+            // A second START on a live key is the same dispatch processed again: CP
+            // flushes its ADCQ on a queue switch and replays the dispatch, so the
+            // newest START is the one that reached the shader engines.
+            auto [it, ins] =
+                state.pending_starts.try_emplace(key, pair_state::pending_start{ts, now_ns});
             if(!ins)
             {
                 ++state.starts_overwritten;
-                it->second.ambiguous = true;
-                ++it->second.outstanding;
+                it->second = pair_state::pending_start{ts, now_ns};
             }
             continue;
         }
@@ -422,25 +406,16 @@ pair_records(const copied_record* records,
             out.start_known  = false;
             on_record(out);
         }
-        else if(it->second.ambiguous)
-        {
-            // (2) ambiguous -- cannot say which dispatch this EOP belongs to.
-            // Drop HERE: forwarding it start-unknown would let the hub complete the
-            // wrong dispatch. The key stays unpairable until every outstanding
-            // START is consumed.
-            ++state.ambiguous_pairs;
-            if(--it->second.outstanding == 0) state.pending_starts.erase(it);
-        }
         else if(ts == it->second.start_ticks)
         {
-            // (3) equal tick -- no HW contract that start_ticks < end_ticks for a
-            // real pair, so fail closed: drop rather than form a zero/ambiguous pair.
+            // (2) equal tick -- no HW contract that start_ticks < end_ticks for a
+            // real pair, so fail closed: drop rather than form a zero-length pair.
             ++state.equal_tick_drops;
-            if(--it->second.outstanding == 0) state.pending_starts.erase(it);
+            state.pending_starts.erase(it);
         }
         else if(ts < it->second.start_ticks)
         {
-            // (4) stale EOP -- it predates the outstanding START, so it belongs to
+            // (3) stale EOP -- it predates the outstanding START, so it belongs to
             // an earlier dispatch whose START was lost. Drop the EOP and leave the
             // retained START untouched; consuming it would strand the EOP that
             // really belongs to it.
@@ -448,7 +423,7 @@ pair_records(const copied_record* records,
         }
         else
         {
-            // (5) outstanding==1, !ambiguous, t > start_ticks -- pair and erase.
+            // (4) t > start_ticks -- pair and erase.
             auto out         = drained_record{};
             out.doorbell_off = rec.doorbell_off;
             out.dispatch_id  = rec.dispatch_id;
