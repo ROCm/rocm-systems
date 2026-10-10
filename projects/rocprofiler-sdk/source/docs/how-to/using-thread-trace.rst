@@ -284,6 +284,187 @@ The ``setup_kernel`` and ``cleanup_kernel`` dispatches will be excluded because 
 
 For more details on ``--selected-regions``, ``roctxProfilerPause``, and ``roctxProfilerResume``, see :ref:`using-rocprofiler-sdk-roctx`.
 
+.. _debugger-triggered-att:
+
+CPU breakpoint triggers (prototype)
+==================================
+
+``rocprofv3-att-gdb`` starts an application under ROCgdb and uses CPU breakpoints
+to start and stop ATT. Pass the same ATT and output parameters you normally use
+with rocprofv3. The launcher automatically enables ATT selected regions, loads
+ROCTx and the prototype helper into the application, and configures the debugger.
+The application does not need ROCTx calls or a ROCTx link dependency.
+
+For a start and end breakpoint:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start begin_iteration --stop end_iteration \
+        --att-shader-engine-mask 0x3 --att-buffer-size 16777216 \
+        -d traces -- ./application arg1
+
+The application runs automatically when ``--start`` is supplied. The start
+breakpoint is removed before requesting trace start, so it does not keep trapping
+during capture. The end breakpoint is enabled only when the start hits and is
+removed when capture stops. Functions, quoted C++ names, and ``file.cpp:line``
+locations use normal GDB breakpoint syntax. Build with debug information for
+source locations and ensure the desired functions have not been inlined away.
+
+To skip warmup iterations, add ``--skip N``. For example, ignore the first 100
+start-breakpoint hits and activate capture on hit 101:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start begin_iteration --skip 100 --stop end_iteration \
+        -d traces -- ./application
+
+The count applies to hits of the start breakpoint across application threads
+and all its resolved locations. It selects dispatch 101 only when that location
+executes once per desired dispatch; it does not count global GPU dispatch IDs.
+The end breakpoint remains disabled throughout warmup. Ignored hits can still
+trap in the debugger during warmup, but make no profiler calls. The start
+breakpoint is removed before trace activation. If the application exits before
+the selected hit, the capture is reported as incomplete.
+
+For a particular GPU kernel, a CPU launch source line or host wrapper is the
+most reliable trigger in this prototype. Compiled HIP code may expose a CPU
+launch stub that can also be used:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start '__device_stub__my_kernel(float*)' \
+        --skip 100 --stop end_iteration -d traces -- ./application
+
+Use the actual host-stub symbol and signature from your application, for example
+by inspecting ``nm -C ./application``. The launch must call that stub: optimized
+HIP code can inline the call even when the symbol exists. This path was tested
+with inlining disabled and is not a general kernel-name selector for optimized,
+JIT, or graph launches. ROCgdb also supports GPU kernel-entry breakpoints, but
+those require the future GPU-breakpoint support described below; their hits can
+occur per wave rather than once per dispatch. rocprofv3's
+``--kernel-include-regex`` does not select a debugger trigger in this selected-region
+ATT mode. Choosing a kernel-specific start trigger does not restrict capture to
+that kernel; other GPU work in the selected region can also be traced.
+
+For a timed stop:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start begin_iteration --timeout 50ms \
+        -d traces -- ./application
+
+To capture one loop round trip, use the same source line or function for both
+triggers:
+
+.. code-block:: bash
+
+    rocprofv3-att-gdb --start application.cpp:120 --stop application.cpp:120 \
+        --skip 100 -d traces -- ./application
+
+The start fires on hit 101. The stop fires on the next visit to that location,
+after GDB resumes past the current breakpoint instruction. Hits count across
+threads, so the next visit can come from another thread.
+
+The source line after ``hipDeviceSynchronize()`` does not guarantee a stop after
+synchronization. Optimization can split, move, or merge instructions, and GDB
+has no general source-line-exit breakpoint. For a specific compiled call, inspect
+``disassemble /s FUNCTION`` and prepare an instruction breakpoint at its
+normal-return continuation before capture starts. Verify that the selected
+execution path reaches it after the intended call. Use a source-line breakpoint
+only when its resolved locations have been verified in that binary; recheck
+after recompilation. The prototype does not resolve stop-after-call locations
+automatically. Entering the synchronize function and then using ``finish`` would
+introduce an additional stop during the trace.
+
+Durations accept ``us``, ``ms``, and ``s``. You can supply both ``--stop`` and
+``--timeout``; the first stop wins. A sleeping application-side worker handles
+the one-shot timeout without interrupting an arbitrary application thread to
+inject a profiler call. The interval begins after ``roctxProfilerResume(0)``
+returns and the debugger finishes continuing the triggering thread. The debugger
+then tells the helper to arm the timer for the full duration. Profiler setup,
+debugger continuation, and notification delivery can extend the trace; they do
+not consume the requested interval. When a shared user breakpoint holds the
+triggering thread, the timer waits for manual continuation. Later user stops
+do not pause or restart the timer.
+
+CPU scheduling and GPU command submission can delay the stop, so a timeout is
+not an exact GPU-duration guarantee. A short interval can still end before a
+kernel launches. An end breakpoint or explicit cancellation can stop earlier.
+
+A one-shot watchdog in the debugger reports an error if stopping has not
+completed within 10 seconds after the deadline. It adds no periodic checks in
+the application.
+
+To choose locations interactively, omit ``--start``:
+
+.. code-block:: text
+
+    $ rocprofv3-att-gdb -d traces -- ./application
+    (gdb) att arm --start begin_iteration --stop end_iteration
+    (gdb) run
+    (gdb) att status
+
+``att arm`` also accepts ``--skip N``, for example
+``att arm --start begin_iteration --skip 100 --stop end_iteration``.
+``att status`` shows ``skip_remaining`` while the start breakpoint is armed.
+
+You can start the application before choosing the capture locations. Launch
+without ``--start`` or ``--batch``, run, then press Ctrl+C when ready:
+
+.. code-block:: text
+
+    $ rocprofv3-att-gdb -d traces -- ./application
+    (gdb) run
+    ... press Ctrl+C ...
+    (gdb) att arm --start begin_iteration --stop end_iteration
+    (gdb) continue
+
+The prototype uses non-stop mode: Ctrl+C stops the selected thread, and
+``continue`` resumes it. Other threads, including the profiler worker, can keep
+running. ``att arm`` creates the capture breakpoints; capture starts on the
+next selected start hit. If you add ``--skip N``, it counts hits after arming,
+excluding iterations that already ran. This workflow requires launching with
+the profiler/helper as above. Profiler injection into an independently started
+process remains part of the planned attach support.
+If an early loader stop delays the helper's startup, connection attempts resume
+on continuation or at the selected start hit.
+
+``att cancel`` removes an armed trigger or stops an active capture. After a
+capture finishes, ``att arm`` can set up another capture. Unrelated user
+breakpoints remain installed; if a user breakpoint also stopped the triggering
+thread, the extension leaves that thread stopped for the user to continue.
+The same applies if you manually continue during a pending control call and
+the thread reaches a new user breakpoint or signal stop before the call returns.
+Use ``help att`` for the available commands.
+
+For automation, add ``--batch`` with ``--start`` and a stop condition. The
+launcher exits after the application, returning nonzero for an incomplete
+capture, a control failure, or an application error. Without ``--batch``, ROCgdb
+stays open for inspection. This option does not select dispatch batches or end
+the application when capture stops. ``--rocgdb PATH`` and
+``--rocprofv3 PATH`` select installations explicitly. ``--command 'GDB COMMAND'``
+can be repeated to configure the debugger before the application runs.
+
+Raw ``.att`` data is flushed when the stop call completes. Normal rocprofv3
+decoding and final output generation complete when the application exits.
+Look for ``[att] ACTIVE`` and ``[att] DONE`` in the debugger output, followed by
+the usual files in your selected output directory.
+
+This first pass supports a single launched process and CPU breakpoints on Linux.
+Select the start after normal GPU initialization and loading of the intended
+kernel code objects, typically after a warm-up iteration. It preserves the
+normal ATT resource mode; it does not allocate resources on every visible GPU.
+Other application threads and submitted GPU work can continue while the trigger
+is being handled. Existing waves are not made visible through a preemption
+cycle in this prototype. Application ROCTx Pause/Resume calls share its control
+state and can interfere with captures. Coordinated CPU/GPU holds, independent
+production controls, GPU breakpoints, and rocprofv3 attachment are follow-up work.
+
+The helper adds no periodic polling, dispatch interception, or buffer scanning
+during capture. Breakpoint and start/stop handling still affect the boundaries;
+this prototype does not establish cycle-identical execution to an unattached
+application.
+
 .. _output-files:
 
 rocprofv3 output files
