@@ -1785,6 +1785,15 @@ _SMEM_NARROW_LOAD_MAP = {
 }
 
 
+# Simulated scalar atomics: name -> (operation, elem_size).
+_SMEM_ATOMIC_MAP: dict[str, tuple[str, int]] = {
+    'S_ATOMIC_DEC': ('dec', 4),
+    'S_ATOMIC_DEC_X2': ('dec', 8),
+    'S_ATOMIC_INC': ('inc', 4),
+    'S_ATOMIC_INC_X2': ('inc', 8),
+}
+
+
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
     upper = name.upper()
@@ -1811,7 +1820,12 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if upper in _SMEM_ATOMIC_MAP:
+        operation, elem_size = _SMEM_ATOMIC_MAP[upper]
+        return InstructionSemantics(
+            name, 'smem_atomic', operation=operation, elem_size=elem_size, num_elems=1
+        )
+    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
         return InstructionSemantics(name, 'nop')
 
