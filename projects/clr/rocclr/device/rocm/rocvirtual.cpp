@@ -1477,8 +1477,28 @@ AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
 
   const uint64_t barrier_bit_slot_before_reservation =
       largest_aql_barrier_bit_slot_->load(std::memory_order_acquire);
-  const uint64_t start_slot = Hsa::queue_add_write_index_screlease(gpu_queue_, packet_count);
-  return {start_slot, packet_count, barrier_bit_slot_before_reservation};
+
+  // The packet processor derives "packets available" from the ring slot difference, so a
+  // write index that leads the read index by a full ring looks exactly like an empty queue
+  // and it stops for good.  Never publish more than queueSize - 2 slots ahead of the
+  // consumer: WaitForQueueSlot(index, queueMask) already permits that much and no more.
+  const uint32_t queueSize = gpu_queue_->size;
+  for (;;) {
+    const uint64_t read_dispatch_id = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+    const uint64_t write_dispatch_id = Hsa::queue_load_write_index_scacquire(gpu_queue_);
+    const uint64_t inflight = (write_dispatch_id >= read_dispatch_id)
+                                  ? std::min<uint64_t>(write_dispatch_id - read_dispatch_id,
+                                                       queueSize)
+                                  : queueSize;
+    if (inflight + 1 >= queueSize) {
+      amd::Os::yield();
+      continue;
+    }
+    const size_t free_slots = queueSize - inflight - 1;
+    const size_t count = std::min(packet_count, free_slots);
+    const uint64_t start_slot = Hsa::queue_add_write_index_screlease(gpu_queue_, count);
+    return {start_slot, count, barrier_bit_slot_before_reservation};
+  }
 }
 
 // ================================================================================================
@@ -1802,23 +1822,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
 
   const bool use_movdir64b = use_movdir64b_;
-  // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
-  // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
-  // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
-  // the yield never fires.
-  AqlSlotReservation reservation = ReserveAqlSlots(numPackets);
-  const uint64_t startIndex = reservation.start_slot;
-  if (firstHeaderRequestedBarrier) {
-    OptimizeStreamOrderingBarrier(firstHeader, reservation);
-  }
-
-  CompleteAqlSubmission(reservation);
-  setFenceDirty(true);
 
   // Update cached fence state from the last packet's release scope.
   // Clear fence dirty if the last packet has system-scope release, matching
   // the single-dispatch path in dispatchGenericAqlPacket (set dirty on reserve,
   // then conditionally clear if system scope).
+  setFenceDirty(true);
   auto expected_fence_state =
       extractAqlBits(lastHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                      HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
@@ -1826,6 +1835,138 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     setFenceDirty(false);
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
+
+  // Submit the whole batch one packet at a time, then run the shared submission tail.
+  // Each packet is fully written and doorbelled before the next slot is reserved, so the
+  // producer pointer never leads the consumer by more than one slot and the ring can never
+  // present the empty-queue illusion that stalls the packet processor.  |lead_slot| and
+  // |lead_count| carry a block reservation already made for the leading packets; pass 0
+  // for both when there is none.
+  auto submitPerPacket = [&](uint64_t lead_slot, size_t lead_count,
+                             uint64_t lead_barrier_snapshot) {
+    uint64_t last_slot = 0;
+    for (size_t i = 0; i < numPackets; ++i) {
+      AqlSlotReservation slot_reservation;
+      if (lead_count > 0) {
+        // Slots already owned by the block reservation that preceded this call.
+        slot_reservation = AqlSlotReservation{lead_slot, 1, lead_barrier_snapshot};
+        ++lead_slot;
+        --lead_count;
+      } else {
+        slot_reservation = ReserveAqlSlots(1);
+      }
+      last_slot = slot_reservation.start_slot;
+
+      uint16_t hdr = (i == 0) ? firstHeader
+                              : (i == numPackets - 1
+                                     ? lastHeader
+                                     : static_cast<uint16_t>(validFullHeaders[i]));
+      uint16_t rest = (i == 0) ? firstSetup : static_cast<uint16_t>(validFullHeaders[i] >> 16);
+      if (i == 0 && firstHeaderRequestedBarrier) {
+        OptimizeStreamOrderingBarrier(hdr, slot_reservation);
+      }
+      RecordAqlPacketHeader(slot_reservation, 0, hdr);
+      CompleteAqlSubmission(slot_reservation);
+
+      // Make sure the slot is free for usage
+      WaitForQueueSlot(last_slot, sw_queue_size);
+
+      const uint64_t slot = last_slot & queueMask;
+      auto* aql_loc =
+          reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queueBase + slot * kPacketSize);
+      const auto* src = reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(
+          flatPacketData.data() + i * kPacketSize);
+      if (use_movdir64b) {
+        // One atomic 64B store publishes body, signal and valid header together, so the
+        // slot's stale INVALID header keeps the packet invisible until the store lands.
+        alignas(64) hsa_kernel_dispatch_packet_t stg;
+        std::memcpy(&stg, src, kPacketSize);
+        *reinterpret_cast<uint32_t*>(&stg) = hdr | (static_cast<uint32_t>(rest) << 16);
+        amd::movdir64b_copy64(queueBase + slot * kPacketSize, &stg);
+      } else {
+        // Body first with the header left invalid, then the real header as a release
+        // store: the packet only becomes visible to the CP once the header is armed.
+        amd::nontemporalCopyAQL(aql_loc, src);
+        if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
+          writeMetadataPacketToRing(
+              static_cast<uint8_t*>(metadata_preloader_.GetQueueBase()) + slot * kMetaPktSize,
+              flatMetadataData->data() + i * kMetaPktSize, false);
+        }
+        amd::nontemporalStoreFence();
+        packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), hdr, rest);
+      }
+      ringQueueDoorbell(last_slot);
+    }
+
+    SetStateFlag(kHasPendingDispatch);
+    auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
+        queueBase + (last_slot & queueMask) * kPacketSize);
+    // Skip the pending dispatch only when both conditions are met: a completion
+    // signal tracks the last packet and the fence is already clean (system scope).
+    if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
+      ClearStateFlag(kHasPendingDispatch);
+    }
+    TrackQueueProgress(*finalLastSlot, last_slot, pre_patched);
+  };
+
+  // A batch with more packets than the ring has slots cannot be reserved in one wptr bump:
+  // publishing more than a full ring ahead of the consumer makes the packet processor read
+  // the masked slot difference as an empty queue, after which it stops for good because the
+  // write index is never advanced again.  Submit per packet instead.  Profiling, an
+  // attached completion signal and a blocking wait all need the batch path's signal
+  // patching, which the per-packet loop does not replicate, so those keep the batch path.
+  const bool needs_batch_signal_path = timestamp_ != nullptr || attach_signal || blocking;
+  const bool oversized_batch = (numPackets + 1 >= queueSize);
+  if (oversized_batch && !needs_batch_signal_path) {
+    submitPerPacket(0, 0, 0);
+    profilingEnd();
+    return true;
+  }
+
+  if (!oversized_batch) {
+    // The batch path addresses every packet from startIndex, so it needs all N slots in
+    // one bump.  ReserveAqlSlots caps the reservation at the free ring space; wait here
+    // until the ring can supply the whole batch so it cannot come back short.
+    for (;;) {
+      const uint64_t read_dispatch_id = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      const uint64_t write_dispatch_id = Hsa::queue_load_write_index_scacquire(gpu_queue_);
+      const uint64_t inflight = (write_dispatch_id >= read_dispatch_id)
+                                    ? std::min<uint64_t>(write_dispatch_id - read_dispatch_id,
+                                                         queueSize)
+                                    : queueSize;
+      if (inflight + numPackets < queueSize) {
+        break;
+      }
+      amd::Os::yield();
+    }
+  }
+
+  // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
+  // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
+  // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
+  // the yield never fires.
+  AqlSlotReservation reservation = ReserveAqlSlots(numPackets);
+  if (reservation.packet_count != numPackets) {
+    // Reachable only when another thread reserved between the wait above and here, or for
+    // an oversized batch that needs signal patching.  Submit what this reservation owns
+    // one packet at a time rather than write past the slots it owns.
+    if (needs_batch_signal_path) {
+      LogPrintfError("AQL batch of %zu packets cannot be reserved on a queue of %u slots",
+                     numPackets, queueSize);
+      profilingEnd();
+      return false;
+    }
+    submitPerPacket(reservation.start_slot, reservation.packet_count,
+                    reservation.barrier_bit_slot_before_reservation);
+    profilingEnd();
+    return true;
+  }
+  const uint64_t startIndex = reservation.start_slot;
+  if (firstHeaderRequestedBarrier) {
+    OptimizeStreamOrderingBarrier(firstHeader, reservation);
+  }
+
+  CompleteAqlSubmission(reservation);
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
