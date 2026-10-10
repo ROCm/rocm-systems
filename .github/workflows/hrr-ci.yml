@@ -454,7 +454,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             ninja-build pkg-config libnuma-dev libelf-dev libdrm-dev \
             libgl1-mesa-dev libglx-dev mesa-common-dev \
-            libclang-rt-18-dev ccache
+            libclang-rt-18-dev ccache xxd
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -500,6 +500,23 @@ jobs:
       - name: Zero ccache statistics
         run: ccache --zero-stats
 
+      # CLR is built against this tree's ROCr, never the SDK's: CLR and ROCr
+      # change together in this repo, and the nightly's ROCr lags (a CLR that
+      # calls a new hsa_amd_* API does not compile against its headers).
+      # find_package(hsa-runtime64) finds this install first via
+      # CMAKE_PREFIX_PATH below. The SDK still supplies the compiler, comgr
+      # and device libraries.
+      - name: Build ROCr from this tree
+        run: |
+          cmake -S projects/rocr-runtime -B build/rocr -GNinja -Wno-dev \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            "-DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/build/rocr-install"
+          cmake --build build/rocr -j
+          cmake --install build/rocr
+
       # -DHIP_HRR_CAPTURE_ENABLED is what compiles capture into amdhip64
       # (hip_capture.cpp); the tree has no CMake option for it. CI always sets
       # it, so capture is always on in the build under test.
@@ -508,9 +525,9 @@ jobs:
           cmake -S projects/clr -B build/clr -GNinja -Wno-dev \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED \
+            "-DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED -I${GITHUB_WORKSPACE}/build/rocr-install/include -I${GITHUB_WORKSPACE}/build/rocr-install/include/hsa" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            "-DCMAKE_PREFIX_PATH=${GITHUB_WORKSPACE}/build/rocr-install;${ROCM_SDK}" \
             -DROCM_PATH="${ROCM_SDK}" \
             -DHIP_COMMON_DIR="${GITHUB_WORKSPACE}/projects/hip" \
             -DHIP_PLATFORM=amd \
@@ -592,6 +609,7 @@ jobs:
           path: |
             build/hrr
             build/clr/hipamd/lib
+            build/rocr-install/lib
           retention-days: 3
 
   # ---------------------------------------------------------------------------
@@ -976,11 +994,11 @@ jobs:
           python3 -c "import yaml" || python3 -m pip install --no-cache-dir PyYAML==6.0.1
           # hipamd/lib holds the amdhip64 carrying the capture shims and must
           # precede the SDK, which ships a plain build under the same soname.
-          # No ROCr preload here: CLR was built against the SDK's ROCr, so the
-          # two agree and there is no in-tree runtime to substitute.
+          # rocr-install/lib is the ROCr built from this tree, which hipamd/lib's
+          # amdhip64 was compiled against; it must precede the SDK's ROCr.
           # Keep the runner's existing path: setup-python puts libpython there,
           # and replacing it makes python3 fail to start on some GPU machines.
-          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           # A labelled runner with no visible device is an infrastructure miss.
           # Skip the suite and leave a skipped result so the check stays green.
           # Exit 1 is "confirmed no device". Any other probe failure (broken
