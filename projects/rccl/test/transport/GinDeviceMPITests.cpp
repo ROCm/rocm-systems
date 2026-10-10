@@ -1664,7 +1664,7 @@ TEST_F(GinMPIDeviceTests, PutBurst_LocalCounter) {
     putBurstLocalCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
         srcWin, dstWin, kPutBytes, kPuts, kCntIdx, kPeer, devComm);
   }
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/60));
 
   MPI_Barrier(MPI_COMM_WORLD);
 }
