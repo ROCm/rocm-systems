@@ -423,8 +423,23 @@ class CodeGenerator:
         'ds_read_tr_b6': 'local',
         # Internal variant selected by the ds_barrier_arrive generator.
         'ds_barrier_arrive_async': 'async_local',
+        # Only the instructions in _IMAGE_MEMORY_INSTRUCTIONS issue these.
+        'image_load': 'vmem_load',
+        'image_store': 'vmem_store',
     }
     _MEMORY_CLASSES = frozenset(_MEMORY_ISSUE_KINDS) - {'ds_barrier_arrive_async'}
+
+    # Image instructions whose generated bodies issue a memory access. Every
+    # other image instruction keeps its stub, which must not claim a pipeline.
+    _IMAGE_MEMORY_INSTRUCTIONS = frozenset(
+        {('cdna2', 'IMAGE_LOAD'), ('cdna2', 'IMAGE_STORE')}
+    )
+
+    def _issues_image_memory(self, name: str) -> bool:
+        return (
+            self.isa_spec.arch_name,
+            name.upper(),
+        ) in self._IMAGE_MEMORY_INSTRUCTIONS
 
     # Shared scalar execution uses these encoding values without including one
     # ISA's generated operand enums. Validate the corresponding OPR_SSRC
@@ -7892,6 +7907,35 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
+        if cls in ('image_load', 'image_store') and self._issues_image_memory(
+            inst.name
+        ):
+            is_load = cls == 'image_load'
+            data_base = self._vgpr_base_expr('vdata')
+            L.append(
+                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            )
+            L.append(f'  d->is_load = {"true" if is_load else "false"};')
+            L.append('  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);')
+            self._append_wait_counter_type(L, sem)
+            if is_load:
+                L.append(f'  d->dst_reg_base = {data_base};')
+            L.append(
+                '  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, '
+                'inst_.vaddr, inst_.dmask, inst_.a16, inst_.d16, inst_.lwe)'
+                '.failed()) {'
+            )
+            L.append(
+                '    wf.report_instruction_execution_error('
+                'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+            )
+            L.append('    return;')
+            L.append('  }')
+            if not is_load:
+                L.append(f'  amdgpu::capture_buffer_format_store(wf, *d, {data_base});')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
             # Full image addressing (texture coordinates, dimensions) not yet implemented.
@@ -12391,7 +12435,14 @@ class CodeGenerator:
                                     f'amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), {bit}) : 0xf);'
                                 )
 
-                    if _mem_sem and _mem_sem.semantic_class in self._MEMORY_CLASSES:
+                    if (
+                        _mem_sem
+                        and _mem_sem.semantic_class in self._MEMORY_CLASSES
+                        and (
+                            not _mem_sem.semantic_class.startswith('image_')
+                            or self._issues_image_memory(inst.name)
+                        )
+                    ):
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
                         )
@@ -13703,6 +13754,20 @@ class CodeGenerator:
                 if any(i.name.upper() == 'IMAGE_GET_RESINFO' for i in all_insts):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
+                    )
+                if any(self._issues_image_memory(i.name) for i in all_insts):
+                    cpp_includes.extend(
+                        [
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h',
+                                False,
+                            ),
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h',
+                                False,
+                            ),
+                            ('memory', True),
+                        ]
                     )
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
