@@ -22,6 +22,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -61,6 +62,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 // a global instance of std::mutex to protect data passed during threads
@@ -283,7 +285,12 @@ amdsmi_status_t rsmi_switch_wrapper(F&& f, amdsmi_processor_handle processor_han
 }
 #endif  // BRCM_NIC
 
+// Serializes init and shut_down so one thread at a time sets up or tears down the
+// system, and the reference count matches the calls.
+static std::mutex g_init_shut_down_mutex;
+
 amdsmi_status_t amdsmi_init(uint64_t flags) {
+  std::lock_guard<std::mutex> lock(g_init_shut_down_mutex);
   if (amd::smi::amdsmi_library_initialized()) {
     amd::smi::amdsmi_library_init_ref_acquire();
     return AMDSMI_STATUS_SUCCESS;
@@ -296,6 +303,7 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
 }
 
 amdsmi_status_t amdsmi_shut_down() {
+  std::lock_guard<std::mutex> lock(g_init_shut_down_mutex);
   if (!amd::smi::amdsmi_library_init_ref_release()) {
     return AMDSMI_STATUS_SUCCESS;
   }
@@ -716,7 +724,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   try {
     // Navigate to the board directory from the DRM device path
     fs::path board_dir = drm_device_path / "board";
-    fs::path npm_status = board_dir / "npm_status";
+    fs::path npm_status = amd::smi::resolve_npm_dir(board_dir) / "npm_status";
 
     // Check if board directory and npm_status exist
     if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
@@ -1750,6 +1758,25 @@ static_assert(offsetof(amdsmi_npm_info_t, current_node_power) ==
                   offsetof(rsmi_npm_info_t, current_node_power),
               "current_node_power offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
 
+// amdsmi_npm_balancing_mode_t and rsmi_npm_balancing_mode_t are static_cast
+// between each other; keep their enumerator values identical so that cast
+// stays correct if either enum changes.
+static_assert(
+    static_cast<int>(AMDSMI_NPM_BALANCING_MODE_INVALID) ==
+        static_cast<int>(RSMI_NPM_BALANCING_MODE_INVALID),
+    "AMDSMI_NPM_BALANCING_MODE_INVALID value mismatch with RSMI_NPM_BALANCING_MODE_INVALID");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_POWER_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_POWER_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_MAX) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_MAX),
+              "AMDSMI_NPM_BALANCING_MODE_MAX value mismatch with RSMI_NPM_BALANCING_MODE_MAX");
+
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* npm_info) {
   AMDSMI_CHECK_INIT();
 
@@ -1798,6 +1825,85 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_npm_balancing_mode_t rsmi_mode;
+  rsmi_status_t rstatus =
+      rsmi_dev_npm_balancing_mode_get(0, reinterpret_cast<uintptr_t>(node_handle), &rsmi_mode);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *mode = static_cast<amdsmi_npm_balancing_mode_t>(rsmi_mode);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  if (mode != AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_status_t rstatus = rsmi_dev_npm_balancing_mode_set(
+      0, reinterpret_cast<uintptr_t>(node_handle), static_cast<rsmi_npm_balancing_mode_t>(mode));
+  return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
 amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit) {
   AMDSMI_CHECK_INIT();
 
@@ -1831,6 +1937,47 @@ amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t li
   rsmi_status_t rstatus =
       rsmi_dev_npm_limit_set(0, reinterpret_cast<uintptr_t>(node_handle), limit);
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || supported_modes == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  uint64_t bitmask = 0;
+  rsmi_status_t rstatus = rsmi_dev_npm_supported_balancing_modes_get(
+      0, reinterpret_cast<uintptr_t>(node_handle), &bitmask);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *supported_modes = static_cast<amdsmi_bit_field_t>(bitmask);
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,

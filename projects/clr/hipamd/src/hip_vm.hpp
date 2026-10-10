@@ -31,6 +31,13 @@ class GenericAllocation : public amd::RuntimeObject {
   GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop)
       : phys_mem_ref_(phys_mem_ref), size_(size), properties_(prop) {}
   ~GenericAllocation() {
+    if (size_ == 0) {
+      if (amd::MemObjMap::FindMemObj(phys_mem_ref_.getSvmPtr()) == &phys_mem_ref_) {
+        amd::MemObjMap::RemoveMemObj(phys_mem_ref_.getSvmPtr());
+      }
+      phys_mem_ref_.release();
+      return;
+    }
     // Host-backed allocations (Host / HostNuma / HostNumaCurrent) are allocated on
     // host_context; only Device allocations live on a per-device context indexed by
     // location.id (which is a NUMA node id, not a device index, for host-NUMA).

@@ -380,22 +380,35 @@ WriteInterceptor(const void* packets,
 
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
-    // None of counter collection, thread trace, PC sampling or SPM registers a queue-controller
-    // callback any more, so none of them counts toward get_notifiers(); detect them explicitly
-    // so a run that uses only one of them still enters the interceptor.
+    // SPM no longer registers a queue-controller callback, so it does not count toward
+    // get_notifiers(); detect it explicitly so an SPM-only run still enters the interceptor.
+    // Scoped to this queue's agent: a context restricted via set_agents() must leave queues on
+    // the other agents on the fast path instead of paying interception and losing batching for
+    // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool spm_active =
+        spm::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
+
+    // Thread trace no longer registers a queue-controller callback, so it does not count toward
+    // get_notifiers(); detect it explicitly so an ATT-only run still enters the interceptor.
     //
-    // Each check is scoped to this queue's agent: a context restricted via set_agents(), a
-    // tracer configured per agent, and a PC sampling service configured per agent must leave
-    // queues on the other agents on the fast path instead of paying interception and losing
-    // batching for dispatches the corresponding enter hook would filter out anyway.
-    const auto* rocp_agent          = CHECK_NOTNULL(queue.get_agent().get_rocp_agent());
-    const bool  counters_active     = counters::is_active_on_agent(rocp_agent->id);
-    const bool  thread_trace_active = thread_trace::is_active_on_agent(rocp_agent->id);
-    const bool  pc_sampling_active  = pc_sampling::is_configured_on_agent(rocp_agent->id);
-    const bool  spm_active          = spm::is_active_on_agent(rocp_agent->id);
-    const bool  no_real_consumers =
-        (queue.get_notifiers() == 0 && !counters_active && !thread_trace_active &&
-         !pc_sampling_active && !spm_active &&
+    // Scoped to this queue's agent: a tracer is configured per agent, so queues on agents it was
+    // never configured for must stay on the fast path instead of paying interception and losing
+    // batching for dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool thread_trace_active =
+        thread_trace::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
+
+    // Counter collection no longer registers a queue-controller callback, so it does not count
+    // toward get_notifiers(); detect it explicitly so a counters-only run still enters the
+    // interceptor.
+    //
+    // Scoped to this queue's agent: a context restricted via set_agents() must leave queues on
+    // the other agents on the fast path instead of paying interception and losing batching for
+    // dispatches that kernel_dispatch_phase_enter_hook() would filter out anyway.
+    const bool counters_active =
+        counters::is_active_on_agent(CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id);
+    const bool no_real_consumers =
+        (queue.get_notifiers() == 0 && !counters_active && !spm_active && !thread_trace_active &&
+         !pc_sampling::is_configured_on_agent(queue.get_agent().get_rocp_agent()->id) &&
          context::get_active_contexts(full_packet_instrumentation_context_filter).empty());
 
     // Unlike a service with a per-agent predicate, neither replay service can leave queues on other
@@ -1210,9 +1223,12 @@ WriteInterceptor(const void* packets,
         }
     });
 
-    // Counter collection, thread trace and SPM require per-packet mode; none of them
-    // participates in the registry above.
-    if(counters_active || thread_trace_active || spm_active) should_batch_packets = false;
+    // SPM requires per-packet mode; it no longer participates in the registry above.
+    if(spm_active) should_batch_packets = false;
+    // Counter collection requires per-packet mode; it no longer participates in the registry.
+    if(counters_active) should_batch_packets = false;
+    // Thread trace requires per-packet mode; it no longer participates in the registry above.
+    if(thread_trace_active) should_batch_packets = false;
 
     if(should_batch_packets)
     {
@@ -1291,7 +1307,8 @@ Queue::Queue(const AgentCache&  agent,
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
@@ -1352,7 +1369,8 @@ Queue::Queue(
 {
     if(!context::get_registered_contexts([](const context::context* ctx) {
             return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_thread_trace || ctx->device_thread_trace);
+                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
+                    ctx->device_thread_trace);
         }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);

@@ -313,8 +313,8 @@ get_contexts_mutex()
 }
 
 bool
-dispatch_counter_collection_service::intersects(
-    const dispatch_counter_collection_service& rhs) const
+spm_dispatch_counter_collection_service::intersects(
+    const spm_dispatch_counter_collection_service& rhs) const
 {
     if(agents.empty() || rhs.agents.empty()) return true;
     const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
@@ -327,8 +327,8 @@ dispatch_counter_collection_service::intersects(
 }
 
 bool
-spm_dispatch_counter_collection_service::intersects(
-    const spm_dispatch_counter_collection_service& rhs) const
+dispatch_counter_collection_service::intersects(
+    const dispatch_counter_collection_service& rhs) const
 {
     if(agents.empty() || rhs.agents.empty()) return true;
     const auto& small = (agents.size() < rhs.agents.size()) ? agents : rhs.agents;
@@ -554,19 +554,19 @@ start_context(rocprofiler_context_id_t context_id)
                 // still conflicts with any other counter-collection context.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
+            else if(cfg->dispatch_spm && itr->dispatch_spm &&
+                    cfg->dispatch_spm->intersects(*itr->dispatch_spm))
+            {
+                // Two SPM dispatch contexts can run concurrently as long as they target disjoint
+                // sets of GPU agents. A context with no agent restriction claims every agent.
+                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+            }
             else if(cfg->dispatch_thread_trace && itr->dispatch_thread_trace &&
                     cfg->dispatch_thread_trace->intersects(*itr->dispatch_thread_trace))
             {
                 // Two dispatch ATT contexts can run concurrently as long as they target disjoint
                 // sets of GPU agents. Overlapping agent sets would cross-talk in
                 // post_kernel_call.
-                return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
-            }
-            else if(cfg->dispatch_spm && itr->dispatch_spm &&
-                    cfg->dispatch_spm->intersects(*itr->dispatch_spm))
-            {
-                // Two SPM dispatch contexts can run concurrently as long as they target disjoint
-                // sets of GPU agents. A context with no agent restriction claims every agent.
                 return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
             }
         }
@@ -654,6 +654,7 @@ start_context(rocprofiler_context_id_t context_id)
     _release_pending();
 
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
+    if(cfg->device_spm) status = rocprofiler::SPM::spm_start_agent_ctx(cfg);
 
     return status;
 }
@@ -758,6 +759,10 @@ stop_context(rocprofiler_context_id_t idx)
     if(_expected->device_counter_collection)
     {
         rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
+    }
+    if(_expected->device_spm)
+    {
+        rocprofiler::SPM::spm_stop_agent_ctx(_expected);
     }
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0

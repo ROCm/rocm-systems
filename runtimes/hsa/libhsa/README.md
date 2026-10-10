@@ -16,8 +16,15 @@ KFD activation, memory, queue, event, and cleanup mechanisms.
 
 One process-global registry owns the active runtime and its reference count.
 Final shutdown removes the runtime from that registry before stopping workers
-and releasing native state. Blocking native work and user callbacks must remain
-outside global registry locks.
+and releasing driver resources. Blocking driver calls and user callbacks must
+remain outside global registry locks.
+
+The first runtime generation that attempts GPU activation uses
+`DriverContextLifetime::Process` and may leave the primary KFD context and its
+VM bindings alive after shutdown. Later generations use
+`DriverContextLifetime::Session`, which selects a secondary KFD context when
+supported and releases it at shutdown. An activation attempt counts even if
+it fails, because KFD may already have retained a primary VM binding.
 
 `hsa_amd_queue_create` accepts compute and SDMA descriptors. Compute queues
 use the rocddi AQL control layout; their public header aliases the native
@@ -68,7 +75,12 @@ the queue error arrives later. System event callbacks run after a bounded wait
 for queue identification. Handlers can query per-queue fault status, address,
 and reason; memory faults do not invoke queue error callbacks when a system
 event handler is registered. Without one, the queue error callback receives
-the fault status.
+the fault status. The same system-event worker also delivers GPU hardware
+exceptions with the AMD extension's reset cause and agent identity. The DDI
+retains native exception records, so a system handler registered after a
+device operation observed an exception receives that record. HSA handlers run
+outside the DDI and runtime locks; an unhandled memory fault or hardware
+exception terminates the process.
 
 On Linux, the workspace-root shared package builds
 `libhsa-runtime64.so.1` with `ROCR_1` default versions on its public HSA

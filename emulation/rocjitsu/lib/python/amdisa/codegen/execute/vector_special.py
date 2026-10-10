@@ -165,8 +165,8 @@ def gen_vector_movrel(
             '? static_cast<uint64_t>(*rel_src_base) + wf.m0() : UINT64_MAX;'
         )
         L.append(
-            f'  bool rel_src_valid = rel_src_base && wf.m0() <= 1023u && '
-            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), '
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append(
             f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
@@ -204,12 +204,12 @@ def gen_vector_movrel(
             '? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;'
         )
         L.append(
-            f'  bool rel_src_valid = rel_src_base && rel_src_offset <= 1023u && '
-            f'rel_src_index + {src[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, '
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append(
-            f'  bool rel_dst_valid = rel_dst_base && rel_dst_offset <= 1023u && '
-            f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+            f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, '
+            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
         )
         L.append('  if (!rel_dst_valid) return;')
         L.append(
@@ -239,8 +239,8 @@ def gen_vector_movrel(
         '? static_cast<uint64_t>(*rel_dst_base) + wf.m0() : UINT64_MAX;'
     )
     L.append(
-        f'  bool rel_dst_valid = rel_dst_base && wf.m0() <= 1023u && '
-        f'rel_dst_index + {dst[0]}.vgpr_count() <= wf.vgpr_alloc().count;'
+        f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), '
+        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
     )
     L.append('  if (!rel_dst_valid) return;')
     L.append(
@@ -319,8 +319,8 @@ def gen_vector_swaprel(
         '  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;',
         '  uint64_t rel_src_index = rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;',
         '  uint64_t rel_dst_index = rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;',
-        f'  if (!rel_src_base || rel_src_index + {s}.vgpr_count() > wf.vgpr_alloc().count) return;',
-        f'  if (!rel_dst_base || rel_dst_index + {d}.vgpr_count() > wf.vgpr_alloc().count) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count)) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count)) return;',
         f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
         f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
         '  uint64_t exec = wf.exec();',
@@ -1014,7 +1014,7 @@ def _gen_division_result(
     mode = 'f16_f64' if is_f64 else 'f32'
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
-        L.append('  const uint64_t vcc = wf.vcc_mask(exec);')
+        L.append('  const uint64_t vcc = wf.vcc_mask();')
     elif is_vop3:
         L.append(
             f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'
@@ -1272,12 +1272,10 @@ def gen_vector_permlane(
         L.append(f'        ? amdgpu::RegisterAccess(wf).read_scalar({src[1]})')
         L.append(f'        : amdgpu::RegisterAccess(wf).read_scalar({src[2]});')
         L.append('    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;')
-    if cross:
-        L.append('    uint32_t row_base = lane & ~0x1Fu;')
-        L.append('    uint32_t half = (lane ^ 0x10u) & 0x10u;')
-        L.append('    uint32_t src_lane = row_base | half | sel;')
-    else:
-        L.append('    uint32_t src_lane = (lane & ~0xFu) | sel;')
+    kind = 'X16' if cross else 'Perm16'
+    L.append(
+        f'    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::{kind}, lane, sel, 16, wf.wf_size());'
+    )
     L.append('    if (src_lane >= wf.wf_size()) continue;')
     L.append('    bool src_active = (exec & (1ULL << src_lane)) != 0;')
     L.append('    if (!src_active && !fi) {')
@@ -1301,7 +1299,9 @@ def gen_vector_permlane64(dst: list[str], src: list[str]) -> str:
     L.append(f'    snap[i] = amdgpu::RegisterAccess(wf).read_lane({src[0]}, i);')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append('    uint32_t partner = lane ^ 32;')
+    L.append(
+        '    uint32_t partner = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm64, lane, 0, 0, wf.wf_size());'
+    )
     L.append('    if (partner < wf.wf_size())')
     L.append(
         f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, snap[partner]);'
@@ -1324,28 +1324,18 @@ def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -
         f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[2]});'
     )
     L.append(
-        '  if (lane_group_width == 0 || (lane_group_width & (lane_group_width - 1)) != 0)'
+        '  if (exec && inst_.src2 < 256 && '
+        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))'
     )
-    L.append('    lane_group_width = wf.wf_size();')
-    L.append('  lane_group_width = std::min(lane_group_width, wf.wf_size());')
+    L.append(
+        '    wf.report_undefined_behavior("permlane group width is not a power of two");'
+    )
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append('    uint32_t group_base = (lane / lane_group_width) * lane_group_width;')
-    if op == 'bcast':
-        L.append('    uint32_t src_offset = selector % lane_group_width;')
-    elif op == 'down':
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append('    uint32_t src_offset = offset + selector;')
-    elif op == 'up':
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append(
-            '    uint32_t src_offset = (selector <= offset) ? (offset - selector) : lane_group_width;'
-        )
-    else:
-        L.append('    uint32_t offset = lane - group_base;')
-        L.append('    uint32_t src_offset = offset ^ selector;')
-    L.append('    uint32_t src_lane = group_base + src_offset;')
-    L.append('    if (src_offset >= lane_group_width || src_lane >= wf.wf_size()) {')
+    L.append(
+        f'    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::{op.title()}, lane, selector, lane_group_width, wf.wf_size());'
+    )
+    L.append('    if (src_lane >= wf.wf_size()) {')
     L.append(f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, 0);')
     L.append('      continue;')
     L.append('    }')

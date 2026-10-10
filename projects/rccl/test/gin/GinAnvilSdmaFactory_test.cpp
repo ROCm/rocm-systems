@@ -13,6 +13,8 @@
 
 #include "gin/gin_anvil_sdma_factory.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
@@ -29,30 +31,9 @@ uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
+using RcclUnitTesting::ScopedEnv;
+
 namespace {
-
-class ScopedEnv {
- public:
-  ScopedEnv(const char* name, const char* value) : name_(name) {
-    if (const char* prev = getenv(name)) {
-      had_ = true;
-      prev_ = prev;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnv() {
-    if (had_) {
-      setenv(name_, prev_.c_str(), 1);
-    } else {
-      unsetenv(name_);
-    }
-  }
-
- private:
-  const char* name_;
-  std::string prev_;
-  bool had_{false};
-};
 
 int mockAllgatherFail(void*, void*, size_t) { return -1; }
 
