@@ -13,7 +13,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
-* Added instruction and scalar data cache utilization, latency, and stall rate, GL1 request latency, and scalar data cache bandwidth to the gfx1250 Memory Chart.
+* Added metrics to the gfx1250 Memory Chart:
+  * Instruction cache utilization, latency, and stall rate.
+  * Scalar data cache utilization, latency, stall rate, and bandwidth.
+  * GL1 request latency.
 
 ### Changed
 
@@ -45,7 +48,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
-* Fixed the Memory Chart tables printing without their titles or panel heading when the chart is not drawn, such as when comparing several workloads.
+* Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
 
 ### Upcoming changes
 
