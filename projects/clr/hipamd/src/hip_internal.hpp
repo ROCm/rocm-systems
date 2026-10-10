@@ -497,8 +497,24 @@ namespace hip {
       return detached_.load(std::memory_order_acquire);
     }
 
+    // --- Null-stream fence memo ---
+
+    /// True when this stream's last null-stream fence already waits on HW
+    /// signal \p signal, so a new fence on it would add no ordering.
+    bool IsFencedOn(void* signal) const;
+
+    /// Records that this stream's last null-stream fence waits on \p signal.
+    /// Call only after that fence has been enqueued.
+    void SetFencedOn(void* signal);
+
   private:
     ~Stream();
+
+    //! HW signal this stream's last null-stream fence waits on. RETAINED: the
+    //! signal tracker never re-arms a signal with outside references, so while
+    //! held, a match means the same completion, not a recycled signal.
+    void* null_fence_signal_ = nullptr;
+    mutable std::mutex null_fence_lock_;
 
     /// Generate ID for stream capture unique over the lifetime of the process
     static uint64_t GenerateCaptureID() {
