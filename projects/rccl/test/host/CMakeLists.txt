@@ -936,11 +936,25 @@ endif()
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
 # ---------------------------------------------------------------------------
+# In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
+set(_MICRO_CE_BATCH_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
+    set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
+  endif()
+endif()
 rccl_add_micro_binary(rccl-UnitTestsMicroCe
   SOURCES ${TEST_MICRO_CE_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    ${_MICRO_CE_BATCH_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
     CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
