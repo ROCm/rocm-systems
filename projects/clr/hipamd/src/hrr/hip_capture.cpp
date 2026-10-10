@@ -129,8 +129,9 @@ const char* hip_capture_output_dir() {
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
 // destination is logged so a kernel pointer arg can be matched to the copy that
-// filled it. Routed through the CLR flags registry (flags.hpp) like every other
-// HRR flag, so it is discoverable and honors AMD_LOG_LEVEL log routing.
+// filled it. It is a debug() flag in flags.hpp: a release (NDEBUG) build cannot
+// set it, because the dumps put a second copy of the workload's kernel arguments in
+// the log, where log collection picks them up.
 static bool hrr_dbg_args_enabled() {
   return HIP_HRR_DEBUG_ARGS;
 }
@@ -2626,19 +2627,6 @@ void hip_capture_init() {
       return;
     }
 
-    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-    // level to LOG_INFO (never lower an already-higher level) so enabling
-    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
-    // went through raw fprintf(stderr).
-    if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
-      AMD_LOG_LEVEL = amd::LOG_INFO;
-      LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
-                    "to %d (LOG_INFO) so argument traces are visible",
-                    static_cast<int>(amd::LOG_INFO));
-    }
-
     // Snapshot the fully-initialized dispatch table and install runtime shims here
     // only (see comment above — no static-init capture hook).
     if (!g_installed) {
@@ -2654,6 +2642,31 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
+
+    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+    // level to LOG_INFO (never lower an already-higher level) so enabling
+    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces. Say so on stderr
+    // whatever the log level, since the traces carry argument bytes. This runs
+    // only once the writer is open, so a refused open claims nothing.
+    if (hrr_dbg_args_enabled()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
+              "host-to-device copy destinations are also written to the log\n");
+      if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
+    }
+#if !defined(DEBUG)
+    // A release runtime cannot read the flag, so tell whoever set it why no
+    // traces appear rather than leave them looking.
+    else {
+      const std::string dbg = amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS");
+      if (!dbg.empty() && dbg != "0")
+        fprintf(stderr,
+                "[HRR capture] HIP_HRR_DEBUG_ARGS ignored: only a Debug build of the "
+                "HIP runtime reads it\n");
+    }
+#endif
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

@@ -38,8 +38,9 @@
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
-# address-shaped lost pointer becomes null. Contains its own hidden
-# [.][hrr-direct] workload.
+# address-shaped lost pointer becomes null. It also checks that capture logs
+# argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
+# own hidden [.][hrr-direct] workload.
 #
 # hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
 # its hidden [.][hrr-direct] workload registers valid and altered bundle
@@ -158,6 +159,13 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   else()
     set(HRR_RAW_TRACE_EXE "")
   endif()
+endif()
+
+# CLR reads its debug() flags, HIP_HRR_DEBUG_ARGS among them, only in a build
+# without NDEBUG (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
+if(HRR_TEST_CLR_DEBUG_FLAGS)
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)
 endif()
 
 target_compile_definitions(hrr-integration-tests PRIVATE
