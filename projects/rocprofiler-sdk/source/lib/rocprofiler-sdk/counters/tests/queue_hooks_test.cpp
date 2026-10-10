@@ -329,8 +329,16 @@ TEST(counters_queue_hooks, stop_context_in_flight_completion_routes_via_hook_pat
     {
         const size_t dispatch_id = expected.dispatch_id + i;
         auto         user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
-        auto         ret_pkt     = rocprofiler::counters::queue_cb(
-            ctx_p, cb_info, fq, pkt, expected.kernel_id, dispatch_id, &user_data, {}, &corr_id);
+        auto         ret_pkt     = rocprofiler::counters::queue_cb(ctx_p,
+                                                       cb_info,
+                                                       fq,
+                                                       pkt,
+                                                       expected.kernel_id,
+                                                       dispatch_id,
+                                                       &user_data,
+                                                       {},
+                                                       &corr_id,
+                                                       /*locally_enabled=*/true);
         ASSERT_TRUE(ret_pkt.packet) << "queue_cb produced no instrumentation for dispatch " << i;
         in_flight.emplace_back(std::move(ret_pkt.packet));
         dispatch_ids.emplace_back(dispatch_id);

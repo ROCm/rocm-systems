@@ -485,7 +485,8 @@ TEST(spm_core, check_callbacks)
                                                     expected.dispatch_id,
                                                     &user_data,
                                                     extern_ids,
-                                                    &corr_id);
+                                                    &corr_id,
+                                                    /*locally_enabled=*/true);
                 auto _sess           = hsa::queue_info_session_t{.queue = fq};
                 _sess.correlation_id = &corr_id;
 
@@ -1115,7 +1116,8 @@ TEST(spm_queue_hooks, stop_context_in_flight_completion_routes_via_hook_path)
                                                 expected.dispatch_id,
                                                 &user_data,
                                                 {},
-                                                &corr_id);
+                                                &corr_id,
+                                                /*locally_enabled=*/true);
             if(!ret_pkt.packet)
             {
                 ROCPROFILER_CALL(rocprofiler_spm_destroy_counter_config(expected.id),

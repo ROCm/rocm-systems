@@ -44,7 +44,8 @@ queue_cb(const context::context*                                  ctx,
          rocprofiler_dispatch_id_t                                dispatch_id,
          rocprofiler_user_data_t*                                 user_data,
          const hsa::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-         const context::correlation_id*                           correlation_id);
+         const context::correlation_id*                           correlation_id,
+         bool                                                     locally_enabled);
 
 void
 completed_cb(const context::context*                       ctx,
