@@ -50,9 +50,16 @@ Approach 2 has a direct precedent — AINIC already runs `disable_acs.sh` (privi
 
 ---
 
-**UPDATE: Experimental Validation Complete (2026-10-10)**
+**UPDATE: Experimental Validation Complete (2026-10-10, corrected 2026-10-10)**
 
 We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The fix consists of two components:
+
+> **Correction note**: Earlier results were generated from experiments with a typo in
+> `run-rccl.sh` (`${BD_EXPERIMENT_FLAG}` missing trailing `S`) that caused
+> `NCCL_MAX_NCHANNELS=16` to not be applied. The data below is from corrected
+> experiments with `NCCL_MAX_NCHANNELS=16` properly set. With the channel cap
+> applied, before/after produce identical saturated throughput — the previously
+> reported +13% before-fix advantage was entirely a typo artifact.
 
 **1. DSN Mapper Script (`rccl_dsn_mapper.sh`)**
 - Reads PCIe Device Serial Number (DSN) from Broadcom PEX89104 upstream ports via `setpci`
@@ -82,13 +89,13 @@ We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The f
 │ 6    │ c9:00.0  │ PHB, GDR OFF, 2 NICs * │ PXB, GDR ON,  1 NIC  ✓   │
 │ 7    │ e5:00.0  │ PXB, GDR ON,  1 NIC    │ PXB, GDR ON,  1 NIC      │
 └──────┴──────────┴─────────────────────────┴───────────────────────────┘
-* = alternating dual-NIC, no GDRDMA, 32 channels, 65 proxy connections
-✓ = fixed — now single NIC, GDRDMA, 16 channels, 33 proxy connections
+* = dual-NIC, no GDRDMA, 16 channels (8/NIC), 33 proxy connections
+✓ = fixed — single NIC, GDRDMA, 16 channels, 33 proxy connections
 ```
 
 **GDR Coverage**: 50% (4/8) → **100% (8/8)**
 
-**Results: Transport Comparison**
+**Results: Transport Comparison** (with NCCL_MAX_NCHANNELS=16)
 
 ```
 ┌─────────────────┬──────────────────────────────┬──────────────────────────────┐
@@ -96,35 +103,40 @@ We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The f
 ├─────────────────┼──────────────────────────────┼──────────────────────────────┤
 │ GDR ON          │ 4 of 8 GPUs (50%)            │ 8 of 8 GPUs (100%)          │
 │ NICs per rank   │ 1 (GDR-ON), 2 (GDR-OFF)     │ 1 (uniform)                 │
-│ Channels        │ 16 (GDR-ON), 32 (GDR-OFF)   │ 16 (uniform)                │
-│ Proxy conns     │ 33 (GDR-ON), 65 (GDR-OFF)   │ 33 (uniform)                │
+│ Channels        │ 16 (all ranks)               │ 16 (all ranks)              │
+│ Proxy conns     │ 33 (all ranks)               │ 33 (all ranks)              │
 │ Transport       │ GDRDMA / plain NET mix       │ GDRDMA (all channels)       │
+│ NIC ch distrib  │ 16/NIC (GDR-ON), 8/NIC (OFF)│ 16/NIC (uniform)            │
 └─────────────────┴──────────────────────────────┴──────────────────────────────┘
 ```
 
-**Results: RCCL busBw Comparison (out-of-place, GB/s)**
+**Results: RCCL busBw Comparison (out-of-place, GB/s, NCCL_MAX_NCHANNELS=16)**
 
 ```
-┌───────────┬──────────────────────────┬──────────────────────────┬──────────┐
-│ Msg Size  │ Before: AR / A2A         │ After: AR / A2A          │ Delta    │
-├───────────┼──────────────────────────┼──────────────────────────┼──────────┤
-│ 64M       │ 14.47 / 7.62            │ 18.26 / 11.00            │ +26/+44% │
-│ 128M      │ 21.12 / 17.67           │ 23.36 / 16.26            │ +11/−8%  │
-│ 256M      │ 22.00 / 22.55           │ 23.71 / 22.57            │  +8/0%   │
-│ 512M      │ 22.57 / 23.14           │ 24.05 / 23.22            │  +7/0%   │
-│ 1G        │ 23.10 / 23.35           │ 24.19 / 23.43            │  +5/0%   │
-│ 2G        │ 26.68 / 23.51           │ 24.23 / 23.54            │  −9/0%   │
-│ 4G        │ 24.75 / 23.57           │ 24.32 / 23.62            │  −2/0%   │
-│ 8G        │ 24.55 / 23.60           │ 24.35 / 23.66            │  −1/0%   │
-│ 16G       │ 24.74 / 23.59           │ 24.39 / 23.66            │  −1/0%   │
-└───────────┴──────────────────────────┴──────────────────────────┴──────────┘
+┌───────────┬──────────────────────────┬──────────────────────────┬───────────┐
+│ Msg Size  │ Before: AR / A2A         │ After: AR / A2A          │ Delta     │
+├───────────┼──────────────────────────┼──────────────────────────┼───────────┤
+│ 1M        │  9.37 /  8.41           │ 13.49 /  8.87            │ +44/+5%   │
+│ 4M        │  9.99 / 16.23           │ 16.25 / 14.07            │ +63/−13%  │
+│ 8M        │ 11.05 / 19.36           │ 18.44 / 17.56            │ +67/−9%   │
+│ 64M       │ 19.84 / 23.49           │ 16.64 / 22.47            │ −16/−4%   │
+│ 128M      │ 24.54 / 23.52           │ 23.90 / 22.75            │  −3/−3%   │
+│ 256M      │ 24.47 / 23.82           │ 24.02 / 22.87            │  −2/−4%   │
+│ 512M      │ 24.47 / 23.93           │ 24.11 / 23.11            │  −1/−3%   │
+│ 1G        │ 24.46 / 23.81           │ 24.30 / 23.14            │  −1/−3%   │
+│ 2G        │ 24.46 / 23.58           │ 24.33 / 23.21            │   0/−2%   │
+│ 4G        │ 24.46 / 23.47           │ 24.35 / 23.27            │   0/−1%   │
+│ 8G        │ 24.46 / 23.62           │ 24.40 / 23.30            │   0/−1%   │
+│ 16G       │ 24.47 / 23.62           │ 24.39 / 23.30            │   0/−1%   │
+└───────────┴──────────────────────────┴──────────────────────────┴───────────┘
 ```
 
 **Performance Analysis**:
-- **all_reduce mid-range (64M–256M)**: +8% to +26% improvement — uniform GDRDMA eliminates CPU bounce overhead at these sizes
-- **all_reduce saturated (1G+)**: ~24.2 GB/s uniform profile. The before-fix 2G "peak" of 26.68 GB/s was an artifact of GDR-OFF ranks using dual-rail (2 NICs, 32 channels) which inflated throughput at that specific size despite CPU bounce overhead
-- **alltoall**: Comparable at saturated sizes (~23.5 GB/s); +44% improvement at 64M mid-range
-- **Primary win is architectural correctness**: uniform GDR, uniform NIC assignment, halved proxy connections, elimination of mixed-transport asymmetry
+- **all_reduce mid-range (1M–8M)**: +44% to +67% improvement — uniform GDRDMA eliminates CPU bounce latency at these sizes
+- **all_reduce saturated (1G+)**: ~24.4 GB/s both before and after — identical throughput when channel cap is properly applied
+- **all_reduce 16M–64M anomaly**: Before-fix ~20 GB/s vs after-fix ~16 GB/s in the LL128→Simple protocol transition region; mixed GDR-ON/GDR-OFF transport handles this transition differently
+- **alltoall**: Small before-fix advantage (~3% at saturated sizes, 23.62 vs 23.30 GB/s) — host-bounced paths may reduce PCIe switch contention in point-to-point patterns
+- **Primary win is architectural correctness**: uniform GDR, uniform NIC assignment, uniform transport, simplified tuning
 
 **Deployment Path**
 
@@ -137,6 +149,7 @@ We implemented and validated Approach 2 end-to-end on the SMC300x cluster. The f
 - Analysis spec: `split_mask_pcie_topo_analysis_spec.md` (section 9 has full validation details)
 - DSN mapper: `rccl_dsn_mapper.sh`
 - RCCL patch: `projects/rccl/src/os/linux.cc` (`ncclOsGetBcmLinks()`)
+- NCCL_MAX_NCHANNELS=16 report: `test-experiments/nccl_max_nchannels_16_report.md`
 - Before-fix evidence: `test-experiments/before-inter-link-visibility/`
 - After-fix evidence: `test-experiments/after-inter-link-visibility/`
 
