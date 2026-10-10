@@ -1223,6 +1223,9 @@ if (ENABLE_ROCSHMEM_GIN)
     add_custom_target(copy_rocshmem_sdma_sources DEPENDS ${_GIN_SDMA_OUTPUTS})
     add_dependencies(copy_rocshmem_headers copy_rocshmem_sdma_sources)
     target_sources(rccl PRIVATE "${_GIN_SDMA_DIR}/anvil.cpp")
+    # Apps that link librocshmem.a carry their own anvil.cpp. Keep this copy private even when
+    # librccl exports its symbols, or both copies destroy the same globals at exit.
+    set_source_files_properties("${_GIN_SDMA_DIR}/anvil.cpp" PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
     # src/gin/ so host log.hpp wins over the device shim for anvil.cpp.
     target_include_directories(rccl BEFORE PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/gin")
 

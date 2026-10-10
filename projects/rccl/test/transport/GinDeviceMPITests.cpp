@@ -182,7 +182,7 @@ std::string barrierFenceBackendSkipReason() {
          std::to_string(t) + ")";
 }
 
-// rocSHMEM GDA traps in ncclGinApi_Get, ncclGinApi_FlushAsync and ncclGinApi_Wait.
+// rocSHMEM GDA traps in ncclGinApi_Get.
 std::string getBackendSkipReason() {
   if (requestedGinType() == NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA)
     return "GIN get is not supported by rocSHMEM-GDA (NCCL_GIN_TYPE=" +
@@ -193,16 +193,21 @@ std::string getBackendSkipReason() {
 // The GIN-SDMA alltoall exists only on the SDMA backend.
 // BarrierFence uses kBytes=4096 to exercise the SDMA queue; a raised
 // NCCL_GIN_ANVIL_SDMA_THRESHOLD sends the traffic down the IPC fallback instead.
-std::string sdmaBarrierFenceEnvSkipReason() {
-  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
-  constexpr size_t kBarrierFenceBytes = 4096;
+// Puts at or below this size take the IPC path instead of the SDMA queue.
+size_t sdmaThresholdBytes() {
   size_t threshold = NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
   if (const char* e = std::getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD"); e && e[0] && *e != '-') {
     char* end = nullptr;
     unsigned long long v = std::strtoull(e, &end, 10);
     if (end != e && *end == '\0') threshold = static_cast<size_t>(v);
   }
-  if (threshold >= kBarrierFenceBytes)
+  return threshold;
+}
+
+std::string sdmaBarrierFenceEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  constexpr size_t kBarrierFenceBytes = 4096;
+  if (sdmaThresholdBytes() >= kBarrierFenceBytes)
     return "BarrierFence tests assume NCCL_GIN_ANVIL_SDMA_THRESHOLD is below 4096 bytes";
   return "";
 }
@@ -314,6 +319,15 @@ enum class BarrierFenceOperation : int {
 enum class GetCompletion : int {
   Flush,
   FlushAsyncWait,
+};
+
+enum class DeviceTimeoutCase : int {
+  WaitSignal,
+  WaitSignalVA,
+  WaitCounter,
+  Flush,
+  FlushAsyncWait,
+  CApi,
 };
 
 }  // namespace
@@ -557,6 +571,7 @@ class GinMPIDeviceTests : public MPITestBase {
     return {};
   }
   void runGetVisibility(GetCompletion completion, int nBlocks, int nChunks, const std::vector<size_t>& chunkSizes);
+  void runDeviceTimeout(DeviceTimeoutCase timeoutCase);
 };
 
 // Context-aware producer/consumer for Put_BasicAndOffsets: one block per GIN
@@ -7309,6 +7324,422 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   runPutWaitRoundTrip(child, getActiveStream());
+}
+
+// ---------------------------------------------------------------------------
+// Device-side timeouts on flush, wait, waitSignal and waitCounter, plus their C
+// entry points. Every timeout is forced by construction rather than by timing:
+// a wait asks for a value nobody sends, and flush or wait check a bulk put with
+// a zero budget, which no backend can drain in a single poll.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Far above the default Anvil SDMA threshold and still in flight right after the put.
+constexpr size_t kTimeoutBulkBytes  = size_t(256) << 20;
+constexpr size_t kTimeoutSmallBytes = 4096;
+constexpr size_t kTimeoutVaSigOff   = 8;
+constexpr ncclGinSignal_t  kTimeoutSigIdx = 0;
+constexpr ncclGinCounter_t kTimeoutCntIdx = 0;
+constexpr int kTimeoutDrainSec = 60;
+constexpr size_t kTimeoutResultSlots = 4 * kGinKernelThreads + 1;
+
+std::string clock64WrapReason() {
+  int dev = 0;
+  hipDeviceProp_t prop{};
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) return "";
+  if (std::strncmp(prop.gcnArchName, "gfx11", 5) == 0)
+    return "gfx11 lowers clock64() to a 20-bit counter, so device timeouts can fire early";
+  return "";
+}
+
+std::string sdmaBulkThresholdReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return "";
+  if (sdmaThresholdBytes() >= kTimeoutBulkBytes)
+    return "Timeout tests need NCCL_GIN_ANVIL_SDMA_THRESHOLD below the 256 MiB bulk put";
+  return "";
+}
+
+// clock64() budgets of about 10 ms and 10 s.
+struct TimeoutBudgets {
+  uint64_t shortCycles;
+  uint64_t longCycles;
+};
+
+TimeoutBudgets timeoutBudgets() {
+  int dev = 0;
+  int clockKhz = 0;
+  (void)hipGetDevice(&dev);
+  (void)hipDeviceGetAttribute(&clockKhz, hipDeviceAttributeClockRate, dev);
+  const uint64_t cyclesPerMs = static_cast<uint64_t>(std::max(clockKhz, 1));
+  return {10 * cyclesPerMs, 10000 * cyclesPerMs};
+}
+
+// A hung kernel cannot be cancelled, so abort the job before the scope guards free what it uses.
+hipError_t drainTimeoutStream(hipStream_t stream) {
+  const hipError_t status = syncStreamWithinTimeout(stream, kTimeoutDrainSec);
+  if (status == hipErrorNotReady) {
+    fprintf(stderr, "GIN timeout test: stream did not drain within %d s, aborting\n", kTimeoutDrainSec);
+    fflush(stderr);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+    std::abort();
+  }
+  return status;
+}
+
+uint8_t timeoutFillByte(int rank) { return static_cast<uint8_t>(0x5A + rank); }
+
+}  // namespace
+
+__global__ void timeoutWaitSignalBeforeKernel(uint64_t shortCycles, int* results, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  ncclResult_t unmet = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
+  if (threadIdx.x == 0) results[0] = unmet;
+}
+
+__global__ void timeoutWaitSignalAfterKernel(int peer, uint64_t longCycles, int* results,
+                                             struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  if (threadIdx.x == 0) gin.signal(ncclTeamWorld(devComm), peer, ncclGin_WeakSignalInc{kTimeoutSigIdx});
+  ncclResult_t met = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  ncclResult_t metZero = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, 0);
+  ncclResult_t unmetZero = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 2, 64, ord, 0);
+  gin.flush(ncclCoopCta());
+  if (threadIdx.x == 0) {
+    results[1] = met;
+    results[2] = metZero;
+    results[3] = unmetZero;
+  }
+}
+
+__global__ void timeoutWaitSignalVaBeforeKernel(ncclWindow_t sigWin, uint64_t shortCycles, int* results,
+                                                struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  ncclResult_t unmet = gin.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
+  ncclResult_t unmetZero = gin.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, 0);
+  if (threadIdx.x == 0) {
+    results[0] = unmet;
+    results[1] = unmetZero;
+  }
+}
+
+__global__ void timeoutWaitSignalVaAfterKernel(ncclWindow_t sigWin, int peer, uint64_t longCycles, int* results,
+                                               struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  if (threadIdx.x == 0) {
+    gin.signal(ncclTeamWorld(devComm), peer, ncclGin_WeakVASignalInc{sigWin, kTimeoutVaSigOff});
+  }
+  ncclResult_t met = gin.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, longCycles);
+  ncclResult_t metZero = gin.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, 0);
+  ncclResult_t unmetZero = gin.waitSignal(ncclCoopCta(), sigWin, kTimeoutVaSigOff, 2, 64, ord, 0);
+  gin.flush(ncclCoopCta());
+  if (threadIdx.x == 0) {
+    results[2] = met;
+    results[3] = metZero;
+    results[4] = unmetZero;
+  }
+}
+
+__global__ void timeoutWaitCounterKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, int peer, uint64_t shortCycles,
+                                         uint64_t longCycles, int* results, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  ncclResult_t beforePut = gin.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
+  if (threadIdx.x == 0) {
+    gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, ncclGin_None{},
+            ncclGin_WeakCounterInc{kTimeoutCntIdx});
+  }
+  ncclResult_t met = gin.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
+  ncclResult_t metZero = gin.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, 0);
+  ncclResult_t unmet = gin.waitCounter(ncclCoopCta(), kTimeoutCntIdx, 2, 56, ord, shortCycles);
+  gin.flush(ncclCoopCta());
+  if (threadIdx.x == 0) {
+    results[0] = beforePut;
+    results[1] = met;
+    results[2] = metZero;
+    results[3] = unmet;
+  }
+}
+
+// Thread t flushes peers t, t + blockDim.x and so on, so only the thread owning the peer queue
+// sees the bulk put outstanding.
+__global__ void timeoutFlushKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, int peer, uint64_t longCycles,
+                                   int* results, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  const auto ord = cuda::memory_order_acquire;
+  const int n = blockDim.x;
+  const int t = threadIdx.x;
+  results[t] = gin.flush(ncclCoopCta(), ord, ncclGin_None{}, 0);
+  if (t == 0) gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes);
+  results[n + t] = gin.flush(ncclCoopCta(), ord, ncclGin_None{}, 0);
+  results[2 * n + t] = gin.flush(ncclCoopCta(), ord, ncclGin_None{}, 0);
+  results[3 * n + t] = gin.flush(ncclCoopCta(), ord, ncclGin_None{}, longCycles);
+  if (t == 0) gin.signal(ncclTeamWorld(devComm), peer, ncclGin_WeakSignalInc{kTimeoutSigIdx});
+  ncclResult_t peerDone = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  gin.flush(ncclCoopCta());
+  if (t == 0) results[4 * n] = peerDone;
+}
+
+// Every lane holds its own request for the same peer, so all lanes must report the same result.
+__global__ void timeoutFlushAsyncWaitKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, int peer, uint64_t longCycles,
+                                            int* results, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclTeam team = ncclTeamWorld(devComm);
+  const auto ord = cuda::memory_order_acquire;
+  const int n = blockDim.x;
+  const int t = threadIdx.x;
+  if (t == 0) gin.put(team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes);
+  __syncthreads();
+  ncclGinRequest_t request;
+  gin.flushAsync(team, peer, &request);
+  results[t] = gin.wait(request, ncclCoopThread(), ncclGin_None{}, ord, 0);
+  results[n + t] = gin.wait(request, ncclCoopThread(), ncclGin_None{}, ord, longCycles);
+  results[2 * n + t] = gin.wait(request, ncclCoopThread(), ncclGin_None{}, ord, 0);
+  if (t == 0) gin.signal(team, peer, ncclGin_WeakSignalInc{kTimeoutSigIdx});
+  ncclResult_t peerDone = gin.waitSignal(ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  gin.flush(ncclCoopCta());
+  if (t == 0) results[3 * n] = peerDone;
+}
+
+__global__ void timeoutCApiBeforeKernel(ncclWindow_t srcWin, ncclWindow_t dstWin, ncclWindow_t sigWin, int peer,
+                                        uint64_t shortCycles, uint64_t longCycles, int* results,
+                                        struct ncclDevComm devComm) {
+  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  ncclTeam team = ncclTeamWorld(devComm);
+  const auto ord = cuda::memory_order_acquire;
+  const auto given = cuda::thread_scope_thread;
+  const auto required = cuda::thread_scope_device;
+  const int t = threadIdx.x;
+  ncclResult_t sigUnmet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, shortCycles);
+  ncclResult_t vaUnmet =
+    ncclGinWaitSignalTimeoutVA(&net, ncclCoopCta(), sigWin, kTimeoutVaSigOff, 1, 64, ord, shortCycles);
+  ncclResult_t cntUnmet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, shortCycles);
+  if (t == 0) {
+    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutBulkBytes, false, 0, ncclGinSignalInc, 0, false, 0,
+               ncclCoopThread(), false, nullptr, given, required);
+  }
+  ncclResult_t flushUnmet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, 0);
+  ncclGinRequest_t request;
+  ncclGinFlushAsync(&net, team, peer, &request, ncclCoopThread(), ncclGinOptFlagsDefault, false, nullptr);
+  ncclResult_t waitUnmet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, 0);
+  ncclResult_t waitMet = ncclGinWaitTimeout(&net, &request, ncclCoopThread(), false, nullptr, ord, longCycles);
+  ncclResult_t flushMet = ncclGinFlushTimeout(&net, ncclCoopCta(), ord, false, nullptr, longCycles);
+  if (t == 0) {
+    ncclGinPut(&net, team, peer, dstWin, 0, srcWin, 0, kTimeoutSmallBytes, false, 0, ncclGinSignalInc, 0, true,
+               kTimeoutCntIdx, ncclCoopThread(), false, nullptr, given, required);
+  }
+  ncclResult_t cntMet = ncclGinWaitCounterTimeout(&net, ncclCoopCta(), kTimeoutCntIdx, 1, 56, ord, longCycles);
+  ncclGinFlush(&net, ncclCoopCta(), ord);
+  if (t == 0) {
+    results[0] = sigUnmet;
+    results[1] = vaUnmet;
+    results[2] = cntUnmet;
+    results[4] = waitUnmet;
+    results[5] = waitMet;
+    results[7] = cntMet;
+  }
+  // Flush results are per thread, and only the thread owning the peer queue saw the bulk put.
+  if (t == peer) {
+    results[3] = flushUnmet;
+    results[6] = flushMet;
+  }
+}
+
+__global__ void timeoutCApiAfterKernel(int peer, uint64_t longCycles, int* results, struct ncclDevComm devComm) {
+  ncclGin_C net(devComm, NCCL_GIN_BACKEND_MASK_ALL, /*contextIndex=*/0);
+  const auto ord = cuda::memory_order_acquire;
+  if (threadIdx.x == 0) {
+    ncclGinSignal(&net, ncclTeamWorld(devComm), peer, true, kTimeoutSigIdx, ncclGinSignalInc, 0, ncclCoopThread(),
+                  false, nullptr, cuda::thread_scope_thread, cuda::thread_scope_device);
+  }
+  ncclResult_t sigMet = ncclGinWaitSignalTimeout(&net, ncclCoopCta(), kTimeoutSigIdx, 1, 64, ord, longCycles);
+  ncclGinFlush(&net, ncclCoopCta(), ord);
+  if (threadIdx.x == 0) results[8] = sigMet;
+}
+
+__global__ void timeoutPayloadMismatchKernel(const uint8_t* buf, size_t bytes, uint8_t expected,
+                                             unsigned long long* mismatches) {
+  unsigned long long local = 0;
+  for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < bytes; i += (size_t)gridDim.x * blockDim.x) {
+    local += buf[i] != expected;
+  }
+  if (local != 0) atomicAdd(mismatches, local);
+}
+
+// Both ranks run the same kernels against each other, so every result is checked on both.
+void GinMPIDeviceTests::runDeviceTimeout(DeviceTimeoutCase timeoutCase) {
+  const bool bulk = timeoutCase == DeviceTimeoutCase::Flush || timeoutCase == DeviceTimeoutCase::FlushAsyncWait ||
+                    timeoutCase == DeviceTimeoutCase::CApi;
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = clock64WrapReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = bulk ? sdmaBulkThresholdReason() : std::string(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+  const int peer = 1 - rank;
+
+  const size_t bufBytes = bulk ? kTimeoutBulkBytes : kTimeoutSmallBytes;
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  void* dSig = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, bufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, bufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSig, kTimeoutSmallBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+    if (dSig) (void)ncclMemFree(dSig);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr, sigWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dSrc, bufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dDst, bufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSig, kTimeoutSmallBytes, &sigWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+    if (sigWin) (void)ncclCommWindowDeregister(comm, sigWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount  = 1;
+  reqs.ginCounterCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  int* dResults = nullptr;
+  unsigned long long* dMismatches = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dResults, kTimeoutResultSlots * sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dMismatches, sizeof(unsigned long long)));
+  auto resultCleanup = makeScopeGuard([&]() {
+    if (dResults) (void)hipFree(dResults);
+    if (dMismatches) (void)hipFree(dMismatches);
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dResults, 0xFF, kTimeoutResultSlots * sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dMismatches, 0, sizeof(unsigned long long)));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dSrc, timeoutFillByte(rank), bufBytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, bufBytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dSig, 0, kTimeoutSmallBytes));
+
+  const TimeoutBudgets budgets = timeoutBudgets();
+  const int n = kGinKernelThreads;
+  std::vector<int> expected;
+  MPI_Barrier(MPI_COMM_WORLD);
+  switch (timeoutCase) {
+  case DeviceTimeoutCase::WaitSignal:
+    // Before any signal, then met with a long and a zero budget, then unmet with a zero budget.
+    expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
+    timeoutWaitSignalBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(budgets.shortCycles, dResults, devComm);
+    ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+    timeoutWaitSignalAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::WaitSignalVA:
+    // Unmet with a short and a zero budget. Only proxy sends VA signals, so only it checks the met cases.
+    expected = {ncclTimeout, ncclTimeout};
+    timeoutWaitSignalVaBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, budgets.shortCycles, dResults, devComm);
+    if (vaSignalTestSkipReason().empty()) {
+      expected.insert(expected.end(), {ncclSuccess, ncclSuccess, ncclTimeout});
+      ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+      MPI_Barrier(MPI_COMM_WORLD);
+      timeoutWaitSignalVaAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(sigWin, peer, budgets.longCycles, dResults,
+                                                                        devComm);
+    }
+    break;
+  case DeviceTimeoutCase::WaitCounter:
+    // Before any put, then met with a long and a zero budget, then more completions than were issued.
+    expected = {ncclTimeout, ncclSuccess, ncclSuccess, ncclTimeout};
+    timeoutWaitCounterKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.shortCycles,
+                                                                budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::Flush:
+    // Per thread: idle, bulk in flight twice, then a long budget. The last slot is the peer handshake.
+    expected.assign(4 * n + 1, ncclSuccess);
+    expected[n + peer] = ncclTimeout;
+    expected[2 * n + peer] = ncclTimeout;
+    timeoutFlushKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles, dResults, devComm);
+    break;
+  case DeviceTimeoutCase::FlushAsyncWait:
+    // Per lane: bulk in flight, a long budget, then a zero budget once complete. The last slot is the handshake.
+    expected.assign(3 * n + 1, ncclSuccess);
+    std::fill_n(expected.begin(), n, ncclTimeout);
+    timeoutFlushAsyncWaitKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, peer, budgets.longCycles, dResults,
+                                                                   devComm);
+    break;
+  case DeviceTimeoutCase::CApi:
+    // waitSignal, waitSignal VA, waitCounter, flush and wait unmet, then wait, flush, waitCounter, waitSignal met.
+    expected = {ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout, ncclTimeout,
+                ncclSuccess, ncclSuccess, ncclSuccess, ncclSuccess};
+    timeoutCApiBeforeKernel<<<kGinKernelBlocks, n, 0, stream>>>(srcWin, dstWin, sigWin, peer, budgets.shortCycles,
+                                                               budgets.longCycles, dResults, devComm);
+    ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+    MPI_Barrier(MPI_COMM_WORLD);
+    timeoutCApiAfterKernel<<<kGinKernelBlocks, n, 0, stream>>>(peer, budgets.longCycles, dResults, devComm);
+    break;
+  }
+  ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+
+  std::vector<int> results(expected.size(), -1);
+  ASSERT_MPI_EQ(hipSuccess,
+                hipMemcpy(results.data(), dResults, results.size() * sizeof(int), hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < expected.size(); ++i) {
+    SCOPED_TRACE(::testing::Message() << "result slot " << i << ": expected "
+                                      << ncclGetErrorString(static_cast<ncclResult_t>(expected[i])) << ", got "
+                                      << ncclGetErrorString(static_cast<ncclResult_t>(results[i])));
+    ASSERT_MPI_EQ(expected[i], results[i]);
+  }
+
+  if (bulk) {
+    timeoutPayloadMismatchKernel<<<256, 256, 0, stream>>>(static_cast<const uint8_t*>(dDst), bufBytes,
+                                                           timeoutFillByte(peer), dMismatches);
+    ASSERT_MPI_EQ(hipSuccess, drainTimeoutStream(stream));
+    unsigned long long mismatches = ~0ULL;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&mismatches, dMismatches, sizeof(mismatches), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(0ULL, mismatches);
+  }
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_WaitSignal) {
+  runDeviceTimeout(DeviceTimeoutCase::WaitSignal);
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_WaitSignalVA) {
+  runDeviceTimeout(DeviceTimeoutCase::WaitSignalVA);
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_WaitCounter) {
+  runDeviceTimeout(DeviceTimeoutCase::WaitCounter);
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_Flush) {
+  runDeviceTimeout(DeviceTimeoutCase::Flush);
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_FlushAsyncWait) {
+  runDeviceTimeout(DeviceTimeoutCase::FlushAsyncWait);
+}
+
+TEST_F(GinMPIDeviceTests, Timeout_CApi) {
+  runDeviceTimeout(DeviceTimeoutCase::CApi);
 }
 
 #endif  // MPI_TESTS_ENABLED

@@ -48,8 +48,14 @@ __device__ __forceinline__ bool sdmaStubRecord(SdmaStubOp op, void* dst, void* s
   return true;
 }
 
+// quietTarget() returns writeIndex. isFlushed() reports busy for busyPolls polls, then checks whether the
+// read index, readLag behind writeIndex, has reached the target. A zeroed handle has nothing in flight.
 struct SdmaQueueDeviceHandle {
   int tag;
+  unsigned long long writeIndex;
+  unsigned long long readLag;
+  unsigned long long busyPolls;
+  unsigned long long polls;
 };
 
 struct SdmaQueueSingleProducerDeviceHandle {
@@ -84,6 +90,20 @@ __device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
   (void)handle;
   sdmaStubRecord(kSdmaStubQuiet, nullptr, nullptr, 0, nullptr);
   atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+}
+
+__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+  return handle.writeIndex;
+}
+
+__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+  atomicAdd(&g_sdmaStubQuietCount, 1ULL);
+  ++handle.polls;
+  if (handle.busyPolls != 0) {
+    --handle.busyPolls;
+    return false;
+  }
+  return handle.writeIndex - handle.readLag >= upToIndex;
 }
 
 }  // namespace sdma_anvil

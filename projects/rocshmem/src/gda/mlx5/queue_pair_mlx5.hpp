@@ -102,6 +102,10 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
+  __device__ __forceinline__ uint64_t quiet_target_single();
+
+  __device__ __noinline__ bool try_quiet_until_single(uint64_t target);
+
 private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
   static __device__ __forceinline__ void amdgcn_s_wakeup() {
@@ -333,6 +337,33 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
+}
+
+__device__ __forceinline__ uint64_t QueuePairMLX5::quiet_target_single() {
+  return __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+}
+
+// Only reads queue state, so lanes sharing a queue pair can call it.
+__device__ inline __noinline__ bool QueuePairMLX5::try_quiet_until_single(uint64_t target) {
+  if (target == 0) {
+    return true;
+  }
+
+  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cq.buf->wqe_counter),
+                                                      __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
+  uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+  if (opcode == MLX5_CQE_INVALID) {
+    return false;
+  }
+
+  __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
+  uint16_t completed = endian::from_be(be_wqe_counter) + 1;
+
+  // Read after the CQE so completed never runs ahead of sq_post
+  uint64_t sq_post = __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
+  uint16_t in_flight = static_cast<uint16_t>(sq_post) - completed;
+
+  return in_flight <= sq_post - target;
 }
 
 // precondition: called with all active lanes using different QPs
