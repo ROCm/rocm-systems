@@ -50,6 +50,54 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# RasDiagnosticsTests.cpp (rccl-UnitTests) classifies report lines by kRasFailureMarkers;
+# each marker must stay both in that list and in every source file that emits it (comma-separated).
+set(_rccl_ras_tests "${CMAKE_CURRENT_LIST_DIR}/../RasDiagnosticsTests.cpp")
+set(_rccl_ras_markers
+  "ras/diagnostics_checks_common.cc|diagnostics incomplete"
+  "ras/diagnostics_env.cc,ras/diagnostics_gpu.cc|mismatch across"
+  "ras/diagnostics_env.cc|differ across ranks"
+  "ras/diagnostics_env.cc|comparison may be"
+  "ras/diagnostics_gpu.cc|uncorrected volatile errors on rank(s)"
+  "ras/diagnostics_gpu.cc|at or above threshold"
+  "ras/diagnostics_gpu.cc|inactive link(s)")
+foreach(_entry IN LISTS _rccl_ras_markers)
+  string(REPLACE "|" ";" _ras_pair "${_entry}")
+  list(GET _ras_pair 0 _ras_sources)
+  list(GET _ras_pair 1 _marker)
+  string(REPLACE "," ";" _ras_files "${_ras_sources}")
+  foreach(_ras_cc IN LISTS _ras_files)
+    rccl_assert_source_line("${_rccl_src_root}/${_ras_cc}" "${_marker}" "the RAS markers in test/RasDiagnosticsTests.cpp")
+  endforeach()
+  rccl_assert_source_line("${_rccl_ras_tests}" "\"${_marker}\"," "the report lines it marks in src/${_ras_sources}")
+endforeach()
+# The check labels, the report header and the skip line it parses the report by. src emits each as the start of a
+# literal; a check label may be passed on without its ": ".
+set(_rccl_ras_labels
+  "ras/diagnostics_gpu.cc|GPU inventory: "
+  "ras/diagnostics_gpu.cc|CUDA driver version: "
+  "ras/diagnostics_gpu.cc|ECC: "
+  "ras/diagnostics_env.cc|NCCL environment: "
+  "ras/ras.cc|NCCL DIAG === RAS Diagnostics ==="
+  "ras/ras.cc|NCCL DIAG INFO RAS diagnostics skipped: NCCL_RAS_ENABLE=0")
+foreach(_entry IN LISTS _rccl_ras_labels)
+  string(REPLACE "|" ";" _ras_pair "${_entry}")
+  list(GET _ras_pair 0 _ras_cc)
+  list(GET _ras_pair 1 _label)
+  string(REGEX REPLACE ": $" "" _src_label "${_label}")
+  rccl_assert_source_line("${_rccl_src_root}/${_ras_cc}" "\"${_src_label}"
+    "the RAS labels in test/RasDiagnosticsTests.cpp")
+  rccl_assert_source_line("${_rccl_ras_tests}" "= \"${_label}\"" "the report lines it labels in src/${_ras_cc}")
+endforeach()
+unset(_rccl_ras_tests)
+unset(_rccl_ras_markers)
+unset(_rccl_ras_labels)
+unset(_src_label)
+unset(_ras_pair)
+unset(_ras_sources)
+unset(_ras_files)
+unset(_ras_cc)
+unset(_marker)
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
