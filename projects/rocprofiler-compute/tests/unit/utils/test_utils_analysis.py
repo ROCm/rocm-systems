@@ -14,14 +14,71 @@ import pytest
 
 import utils.utils_analysis as utils_analysis
 from utils.utils_analysis import (
+    COUNTER_RESULTS_COLUMNS,
     CallTreeNode,
     KernelStats,
     NodeRollup,
+    assign_native_ids,
     build_call_trees,
     build_operator_summary,
+    find_native_artifacts,
+    join_native_counters,
     parse_top_level_location,
     rollup_node_stats,
 )
+
+ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols")
+
+
+def native_counters(*rows):
+    """Native counter rows as (dispatch_id, counter_name, counter_value)."""
+    return pd.DataFrame([
+        {
+            "dispatch_id": dispatch_id,
+            "counter_name": counter_name,
+            "counter_value": counter_value,
+        }
+        for dispatch_id, counter_name, counter_value in rows
+    ])
+
+
+def native_dispatches(*dispatch_ids, kernel_id=7, start=1000):
+    # The correlation id is offset so a test cannot mistake it for the
+    # dispatch id.
+    return pd.DataFrame([
+        {
+            "dispatch_id": dispatch_id,
+            "gpu_id": 2,
+            "kernel_id": kernel_id,
+            "grid_size": 1048576,
+            "workgroup_size": 256,
+            "lds_per_workgroup": 0,
+            "scratch_per_workitem": 0,
+            "start_timestamp": start + dispatch_id,
+            "end_timestamp": start + dispatch_id + 500,
+            "correlation_id": dispatch_id + 500,
+        }
+        for dispatch_id in dispatch_ids
+    ])
+
+
+def native_symbols(kernel_id=7):
+    return pd.DataFrame([
+        {
+            "kernel_id": kernel_id,
+            "kernel_name": "vecCopy(double*, int)",
+            "kernel_short_name": "vecCopy",
+            "arch_vgpr": 4,
+            "accum_vgpr": 4,
+            "sgpr": 16,
+        }
+    ])
+
+
+def touch_native_process(workload_dir, fbase, pid, kinds):
+    for kind in kinds:
+        (workload_dir / f"{kind}_{fbase}_{pid}.csv.gz").touch()
+
 
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
@@ -2692,3 +2749,125 @@ def test_undersampled_kernel_nullified_against_perfmon_file_count(
     # Timestamps and kernel name preserved for Top Stats.
     assert result["Start_Timestamp"].iloc[0] == 1000
     assert result["Kernel_Name"].iloc[0] == "kernel_a"
+
+
+# =============================================================================
+# TESTS FOR NATIVE COUNTER ARTIFACTS
+# =============================================================================
+
+
+def test_find_native_artifacts_sorts_by_counter_set_then_pid(tmp_path):
+    touch_native_process(tmp_path, "pmc_perf_0", 200, ALL_NATIVE_KINDS)
+    touch_native_process(tmp_path, "pmc_perf_0", 100, ALL_NATIVE_KINDS)
+    touch_native_process(tmp_path, "pmc_perf_1", 300, ALL_NATIVE_KINDS)
+
+    artifacts = find_native_artifacts(tmp_path)
+
+    assert [(a.fbase, a.pid) for a in artifacts] == [
+        ("pmc_perf_0", 100),
+        ("pmc_perf_0", 200),
+        ("pmc_perf_1", 300),
+    ]
+
+
+def test_find_native_artifacts_ignores_the_rocpd_csvs(tmp_path, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(utils_analysis, "console_warning", warnings.append)
+    (tmp_path / "results_pmc_perf_0.csv.gz").touch()
+    (tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz").touch()
+
+    assert find_native_artifacts(tmp_path) == []
+    assert warnings == []
+
+
+def test_find_native_artifacts_skips_an_incomplete_set(tmp_path, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(utils_analysis, "console_warning", warnings.append)
+    touch_native_process(tmp_path, "pmc_perf_0", 100, ("counters",))
+
+    assert find_native_artifacts(tmp_path) == []
+    assert len(warnings) == 1
+    assert "dispatch" in warnings[0]
+
+
+def test_join_native_counters_takes_dispatch_and_symbol_columns():
+    row = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10)),
+        native_dispatches(1),
+        native_symbols(),
+        pid=100,
+    ).iloc[0]
+
+    assert row["Correlation_Id"] == 501
+    assert row["Grid_Size"] == 1048576
+    assert row["Kernel_Name"] == "vecCopy(double*, int)"
+    assert row["Arch_VGPR"] == 4
+    assert row["SGPR"] == 16
+    assert row["Start_Timestamp"] == 1001
+    assert row["GUID"] == 100
+
+
+def test_join_native_counters_drops_a_counter_without_a_dispatch():
+    joined = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10), (2, "SQ_WAVES", 20)),
+        native_dispatches(1),
+        native_symbols(),
+        pid=100,
+    )
+
+    assert joined["Counter_Value"].tolist() == [10]
+
+
+def test_join_native_counters_drops_a_dispatch_without_a_symbol():
+    joined = join_native_counters(
+        native_counters((1, "SQ_WAVES", 10)),
+        native_dispatches(1, kernel_id=9),
+        native_symbols(kernel_id=7),
+        pid=100,
+    )
+
+    assert joined.empty
+
+
+def test_assign_native_ids_numbers_dispatches_across_processes():
+    # Both processes number their own dispatches from 1.
+    counter_set = pd.concat(
+        [
+            join_native_counters(
+                native_counters((1, "SQ_WAVES", 10)),
+                native_dispatches(1, start=start),
+                native_symbols(),
+                pid=pid,
+            )
+            for pid, start in ((100, 1000), (200, 5000))
+        ],
+        ignore_index=True,
+    )
+
+    numbered = assign_native_ids(counter_set)
+
+    assert numbered["Dispatch_ID"].tolist() == [1, 2]
+    # Same kernel in both processes, so one kernel id.
+    assert numbered["Kernel_ID"].tolist() == [0, 0]
+    assert numbered.columns.tolist() == COUNTER_RESULTS_COLUMNS
+
+
+def test_assign_native_ids_numbers_dispatches_in_launch_order():
+    # Rows arrive in completion order, and dispatch ids restart in each process.
+    counter_set = pd.concat(
+        [
+            join_native_counters(
+                native_counters((dispatch_id, "SQ_WAVES", pid + dispatch_id)),
+                native_dispatches(dispatch_id, start=pid * 10),
+                native_symbols(),
+                pid=pid,
+            )
+            for pid, dispatch_id in ((200, 1), (100, 2), (100, 1), (200, 2))
+        ],
+        ignore_index=True,
+    )
+
+    numbered = assign_native_ids(counter_set)
+
+    assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
+    assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]

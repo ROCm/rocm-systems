@@ -135,6 +135,8 @@ void MockSdkWrapper::configure_callback_tracing_service(rocprofiler_context_id_t
                                                         rocprofiler_callback_tracing_cb_t callback,
                                                         void* callback_args)
 {
+    m_callback_tracing_service_info.push_back(
+        callback_tracing_service_info{kind, {operations, operations + operations_count}, callback_args});
 }
 
 void MockSdkWrapper::start_context(rocprofiler_context_id_t context_id)
@@ -215,6 +217,11 @@ const std::vector<MockSdkWrapper::dispatch_counting_service_info>&
     MockSdkWrapper::get_dispatch_counting_service_info() const
 {
     return m_dispatch_counting_service_info;
+}
+
+const std::vector<MockSdkWrapper::callback_tracing_service_info>& MockSdkWrapper::get_callback_tracing_service_info() const
+{
+    return m_callback_tracing_service_info;
 }
 
 const std::vector<MockSdkWrapper::create_counter_config_info>& MockSdkWrapper::get_create_counter_config_info() const
