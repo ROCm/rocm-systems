@@ -637,3 +637,6 @@ deviceLib:
   Unit_coop_memcpy_async_GlobalToGlobal:
     <<: *level_default
     tags: [cooperative, ops]
+  Unit_coop_memcpy_async_ByteOffsets:
+    <<: *level_2
+    tags: [cooperative, ops]

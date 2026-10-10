@@ -52,7 +52,8 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
       bytes_left -= 8;
       c_src += 8;
       c_dst += 8;
-    } else if (bytes_left >= 4) {
+    } else {
+      // No B8: it may not preserve the rest of the LDS dword. Callers pass whole dwords.
       if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b32))
         __builtin_amdgcn_global_load_async_to_lds_b32(
             (__attribute__((address_space(1))) int*)c_src,
@@ -60,15 +61,42 @@ __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict
       bytes_left -= 4;
       c_src += 4;
       c_dst += 4;
-    } else {
-      if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b8))
-        __builtin_amdgcn_global_load_async_to_lds_b8(
-            (__attribute__((address_space(1))) char*)c_src,
-            (__attribute__((address_space(3))) char*)c_dst, 0 /* offset */, 0 /* cache policy */);
-      bytes_left--;
-      c_src++;
-      c_dst++;
     }
+  }
+}
+
+// Only whole, dword-aligned LDS dwords go async; the sub-dword head and tail use byte stores.
+template <class TyGroup, typename TyElem>
+__CG_STATIC_QUALIFIER__ void dispatch_async_memcpy_global_to_lds(const TyGroup& group,
+                                                                 TyElem* __restrict__ dst,
+                                                                 const TyElem* __restrict__ src,
+                                                                 const size_t count) {
+  unsigned char* c_dst = (unsigned char*)dst;
+  const unsigned char* c_src = (const unsigned char*)src;
+  // Bytes before the first dword-aligned LDS address.
+  size_t head = (4 - ((size_t)c_dst & 3)) & 3;
+  if (head > count) head = count;
+  // Whole dwords after the head; the rest is the tail.
+  const size_t dwords = (count - head) / 4;
+  const size_t group_size = group.size();
+  const size_t rank = group.thread_rank();
+
+  // Each thread copies an equal contiguous run of dwords.
+  const size_t dwords_per_thread = dwords / group_size;
+  if (dwords_per_thread > 0) {
+    accelerated_memcpy_global_to_lds(c_dst + head, c_src + head, dwords_per_thread * 4 * rank,
+                                     dwords_per_thread * 4);
+  }
+  // Leftover dwords go one per thread starting at rank 0.
+  const size_t dwords_spread = dwords_per_thread * group_size;
+  if (rank < dwords - dwords_spread) {
+    accelerated_memcpy_global_to_lds(c_dst + head, c_src + head, (dwords_spread + rank) * 4, 4);
+  }
+
+  // Rank 0 copies head and tail with byte stores, which keep the rest of the dword intact.
+  if (rank == 0) {
+    for (size_t i = 0; i < head; i++) c_dst[i] = c_src[i];
+    for (size_t i = head + dwords * 4; i < count; i++) c_dst[i] = c_src[i];
   }
 }
 
@@ -135,6 +163,12 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
   bool dst_is_shared =
       __builtin_amdgcn_is_shared((const __attribute__((address_space(0))) void*)dst);
 
+  // Global->LDS must not split LDS dwords across threads.
+  if (!src_is_shared && dst_is_shared) {
+    details::dispatch_async_memcpy_global_to_lds(group, dst, src, count);
+    return;
+  }
+
   // We have total size in bytes: count
   // Total count of threads: group.size()
   // Each thread will have to do count / group.size() bytes copy in lockstep
@@ -142,9 +176,6 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
   size_t bytes_per_thread = count / group_size;
   if (src_is_shared && !dst_is_shared && bytes_per_thread > 0) {
     details::accelerated_memcpy_lds_to_global(dst, src, bytes_per_thread * group.thread_rank(),
-                                              bytes_per_thread);
-  } else if (!src_is_shared && dst_is_shared && bytes_per_thread > 0) {
-    details::accelerated_memcpy_global_to_lds(dst, src, bytes_per_thread * group.thread_rank(),
                                               bytes_per_thread);
   }
 
@@ -155,8 +186,6 @@ __CG_STATIC_QUALIFIER__ void dispatch_async_memcpy(const TyGroup& group, TyElem*
   if (group.thread_rank() == 0 && count > bytes_copied) {
     if (src_is_shared && !dst_is_shared) {
       details::accelerated_memcpy_lds_to_global(dst, src, bytes_copied, count - bytes_copied);
-    } else if (!src_is_shared && dst_is_shared) {
-      details::accelerated_memcpy_global_to_lds(dst, src, bytes_copied, count - bytes_copied);
     }
   }
 
