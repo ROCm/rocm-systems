@@ -669,10 +669,14 @@ process_t::update_agents ()
           const architecture_t *architecture
             = architecture_t::find (arch_name);
 
+          /* HACK: Force unsupported GPU to reproduce AIROCGDB-665.  */
+          architecture = nullptr;
+          const std::string hacked_arch = "gfx000";
+
           if (architecture == nullptr)
-            warning ("os_agent_id %d (`%s'): architecture %s not supported.",
-                     agent_info.os_agent_id, agent_info.name.c_str (),
-                     arch_name.c_str ());
+            fatal_error ("os_agent_id %d (`%s'): architecture %s not supported.",
+                         agent_info.os_agent_id, agent_info.name.c_str (),
+                         hacked_arch.c_str ());
 
           if (prev_agent_count != 0)
             fatal_error ("gpu hot pluging is not supported");
