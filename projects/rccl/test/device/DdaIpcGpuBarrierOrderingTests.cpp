@@ -4,34 +4,22 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Cross-GPU message-passing tests for the DDA IPC barrier fences in
-// algorithms/dda/ipc/ipc_gpu_barrier.h. Eight GPUs in one process, peer access over XGMI.
-//
-//   MailboxPull_*  sender stores a payload in its own buffer, setFlagWithMemFence; receiver
-//                  waitFlagWithMemFence then loads the payload over XGMI. One lane per block.
-//   MailboxPush_*  same, but the sender stores the payload into the receiver's buffer.
-//   FlatSync_*     the DDA flat IPC shape: write own slice, syncOnSameBlockIdx<true, true>,
-//                  read all peer slices, syncOnSameBlockIdx<true, false>.
-//
-// What each arm detects on gfx942 (OCI, 8x MI300X):
-//   *_Uncached  uses the production scratch allocation. Detects a relaxed waitFlagWithMemFence
-//               (stale vL1 hits without buffer_inv sc0 sc1). Cannot detect a relaxed
-//               setFlagWithMemFence: uncached stores leave nothing in L2 for buffer_wbl2 to flush.
-//   *_Coarse    cached payload. Detects both halves of the release/acquire pair.
+// 8-GPU litmus for ipc_gpu_barrier.h fences; rounds repeat inside one kernel so kernel boundaries cannot hide them.
 
 #include <hip/hip_runtime.h>
 
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <string>
 #include <type_traits>
 #include <vector>
 
 #include "gtest/gtest.h"
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "../common/TestChecks.hpp"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
 namespace RcclUnitTesting {
@@ -44,9 +32,11 @@ using dda::common::IpcGpuBarrier;
 constexpr int kRanks = 8;
 constexpr int kBlocks = 64;
 constexpr int kMpWords = 16;
+constexpr int kMpIters = 100000;
+constexpr int kFlatIters = 20000;
+constexpr int kFlatSlice = 256;
 
-// DeviceMailbox and IpcGpuBarrier have no host constructor usable without a bootstrap, so the
-// test builds them bitwise from these mirrors; the static_asserts fail the build if the layout drifts.
+// No host constructor works without a bootstrap, so build the objects bitwise; a layout change breaks the build.
 struct MailboxImage {
   int nBlocks;
   uint32_t* flags;
@@ -83,8 +73,7 @@ __device__ __forceinline__ uint32_t payloadValue(int rank, int iter, int block, 
          (static_cast<uint32_t>(block) << 12) ^ static_cast<uint32_t>(idx);
 }
 
-// Block b of rank r sends to rank r+1 and receives from rank r-1 (mod 8). An ack mailbox stops the
-// sender from overwriting the payload before the receiver has read it.
+// Block b sends to rank self+1 and receives from self-1; the ack mailbox keeps the sender from overwriting unread data.
 template <bool kPush>
 __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackMb, uint32_t* const* bufs, int self,
                                       int iters, unsigned long long* bad) {
@@ -120,6 +109,7 @@ __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackM
   }
 }
 
+// The DDA flat IPC shape: write own slice, barrier, read every peer slice, release-only barrier.
 __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int iters, int slice,
                          unsigned long long* bad) {
   const int b = blockIdx.x;
@@ -142,7 +132,7 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
       }
     }
     bar.syncOnSameBlockIdx<true, false>();
-    // Production ends the kernel here; the boundary orders the next write after the flag waits.
+    // Stands in for the kernel end that follows <true, false> in production.
     __syncthreads();
   }
   if (mismatches != 0) {
@@ -150,8 +140,16 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
   }
 }
 
-enum class Alloc { kUncached, kCoarse };
-enum class Shape { kPull, kPush, kFlat };
+// Uncached is the production scratch; Coarse (cached) is the only allocation where a relaxed release is observable.
+enum class Alloc {
+  kUncached,
+  kCoarse
+};
+enum class Shape {
+  kPull,
+  kPush,
+  kFlat
+};
 
 bool haveEightPeerGpus() {
   int n = 0;
@@ -169,20 +167,25 @@ bool haveEightPeerGpus() {
   return true;
 }
 
+// Gate in the parent only: a skipped isolated child is scored as a pass.
+bool shouldSkip() {
+  return std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) == nullptr && !haveEightPeerGpus();
+}
+
 void* allocZeroed(size_t bytes, Alloc alloc) {
   void* p = nullptr;
   if (alloc == Alloc::kUncached) {
-    EXPECT_EQ(hipExtMallocWithFlags(&p, bytes, hipDeviceMallocUncached), hipSuccess);
+    HIP_EXPECT(hipExtMallocWithFlags(&p, bytes, hipDeviceMallocUncached));
   } else {
-    EXPECT_EQ(hipMalloc(&p, bytes), hipSuccess);
+    HIP_EXPECT(hipMalloc(&p, bytes));
   }
-  EXPECT_EQ(hipMemset(p, 0, bytes), hipSuccess);
+  HIP_EXPECT(hipMemset(p, 0, bytes));
   return p;
 }
 
 void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   for (int i = 0; i < kRanks; ++i) {
-    ASSERT_EQ(hipSetDevice(i), hipSuccess);
+    HIP_CHECK(hipSetDevice(i));
     for (int j = 0; j < kRanks; ++j) {
       if (i != j) {
         hipError_t e = hipDeviceEnablePeerAccess(j, 0);
@@ -199,9 +202,9 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   std::vector<DeviceMailbox> dataMb(kRanks);
   std::vector<DeviceMailbox> ackMb(kRanks);
   for (int r = 0; r < kRanks; ++r) {
-    ASSERT_EQ(hipSetDevice(r), hipSuccess);
+    HIP_CHECK(hipSetDevice(r));
     bufs[r] = static_cast<uint32_t*>(allocZeroed(payloadBytes, alloc));
-    // Mailboxes always use the production allocation (DeviceBuffer: uncached).
+    // Mailbox flags always use the production DeviceBuffer allocation.
     void* d = allocZeroed(flagBytes, Alloc::kUncached);
     void* a = allocZeroed(flagBytes, Alloc::kUncached);
     allocations.insert(allocations.end(), {bufs[r], d, a});
@@ -215,22 +218,21 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   std::vector<unsigned long long*> dBad(kRanks);
   std::vector<hipStream_t> streams(kRanks);
   for (int r = 0; r < kRanks; ++r) {
-    ASSERT_EQ(hipSetDevice(r), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dBufs[r], kRanks * sizeof(uint32_t*)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dBufs[r], bufs.data(), kRanks * sizeof(uint32_t*), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dData[r], kRanks * sizeof(DeviceMailbox)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dData[r], dataMb.data(), kRanks * sizeof(DeviceMailbox), hipMemcpyHostToDevice),
-              hipSuccess);
-    ASSERT_EQ(hipMalloc(&dAck[r], kRanks * sizeof(DeviceMailbox)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(dAck[r], ackMb.data(), kRanks * sizeof(DeviceMailbox), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMalloc(&dBad[r], sizeof(unsigned long long)), hipSuccess);
-    ASSERT_EQ(hipMemset(dBad[r], 0, sizeof(unsigned long long)), hipSuccess);
-    ASSERT_EQ(hipStreamCreateWithFlags(&streams[r], hipStreamNonBlocking), hipSuccess);
+    HIP_CHECK(hipSetDevice(r));
+    HIP_CHECK(hipMalloc(&dBufs[r], kRanks * sizeof(uint32_t*)));
+    HIP_CHECK(hipMemcpy(dBufs[r], bufs.data(), kRanks * sizeof(uint32_t*), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dData[r], kRanks * sizeof(DeviceMailbox)));
+    HIP_CHECK(hipMemcpy(dData[r], dataMb.data(), kRanks * sizeof(DeviceMailbox), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dAck[r], kRanks * sizeof(DeviceMailbox)));
+    HIP_CHECK(hipMemcpy(dAck[r], ackMb.data(), kRanks * sizeof(DeviceMailbox), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMalloc(&dBad[r], sizeof(unsigned long long)));
+    HIP_CHECK(hipMemset(dBad[r], 0, sizeof(unsigned long long)));
+    HIP_CHECK(hipStreamCreateWithFlags(&streams[r], hipStreamNonBlocking));
   }
 
-  // All eight kernels spin on each other, so they are launched before any is synchronized.
+  // All eight kernels spin on each other, so every launch precedes the first synchronize.
   for (int r = 0; r < kRanks; ++r) {
-    ASSERT_EQ(hipSetDevice(r), hipSuccess);
+    HIP_CHECK(hipSetDevice(r));
     if (shape == Shape::kFlat) {
       hipLaunchKernelGGL(flatSync, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r, iters,
                          slice, dBad[r]);
@@ -241,78 +243,78 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
       hipLaunchKernelGGL(mailboxMessagePassing<true>, dim3(kBlocks), dim3(64), 0, streams[r], dData[r], dAck[r],
                          dBufs[r], r, iters, dBad[r]);
     }
-    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    HIP_CHECK(hipGetLastError());
   }
 
   unsigned long long totalBad = 0;
   for (int r = 0; r < kRanks; ++r) {
-    ASSERT_EQ(hipSetDevice(r), hipSuccess);
-    ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+    HIP_CHECK(hipSetDevice(r));
+    HIP_CHECK(hipStreamSynchronize(streams[r]));
     unsigned long long bad = 0;
-    ASSERT_EQ(hipMemcpy(&bad, dBad[r], sizeof(bad), hipMemcpyDeviceToHost), hipSuccess);
+    HIP_CHECK(hipMemcpy(&bad, dBad[r], sizeof(bad), hipMemcpyDeviceToHost));
     totalBad += bad;
   }
   EXPECT_EQ(totalBad, 0ull) << "receivers observed payload words older than the flag they acquired";
 
   for (int r = 0; r < kRanks; ++r) {
-    ASSERT_EQ(hipSetDevice(r), hipSuccess);
-    EXPECT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
-    EXPECT_EQ(hipFree(dBufs[r]), hipSuccess);
-    EXPECT_EQ(hipFree(dData[r]), hipSuccess);
-    EXPECT_EQ(hipFree(dAck[r]), hipSuccess);
-    EXPECT_EQ(hipFree(dBad[r]), hipSuccess);
+    HIP_CHECK(hipSetDevice(r));
+    HIP_EXPECT(hipStreamDestroy(streams[r]));
+    HIP_EXPECT(hipFree(dBufs[r]));
+    HIP_EXPECT(hipFree(dData[r]));
+    HIP_EXPECT(hipFree(dAck[r]));
+    HIP_EXPECT(hipFree(dBad[r]));
   }
   for (void* p : allocations) {
-    EXPECT_EQ(hipFree(p), hipSuccess);
+    HIP_EXPECT(hipFree(p));
   }
 }
 
-ProcessIsolatedTestRunner::TestConfig makeConfig(const char* name, Shape shape, Alloc alloc, int iters,
-                                                 int slice = 0) {
+ProcessIsolatedTestRunner::TestConfig makeConfig(const char* name, Shape shape, Alloc alloc, int iters, int slice = 0) {
   return ProcessIsolatedTestRunner::TestConfig(name, [=]() { runOrderingTest(shape, alloc, iters, slice); })
     .withTimeout(std::chrono::seconds(300))
     .withNumGpus(kRanks);
 }
 
-constexpr int kMpIters = 100000;
-constexpr int kFlatIters = 20000;
-constexpr int kFlatSlice = 256;
+constexpr const char* kSkipReason = "needs 8 GPUs with full peer access";
 
 } // namespace
 
 TEST(DdaIpcGpuBarrierOrdering, MailboxPull_Uncached) {
-  if (!haveEightPeerGpus()) {
-    GTEST_SKIP() << "needs 8 GPUs with full peer access";
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
   }
-  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.MailboxPull_Uncached", Shape::kPull, Alloc::kUncached, kMpIters));
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.MailboxPull_Uncached", Shape::kPull, Alloc::kUncached,
+                                kMpIters));
 }
 
 TEST(DdaIpcGpuBarrierOrdering, MailboxPull_Coarse) {
-  if (!haveEightPeerGpus()) {
-    GTEST_SKIP() << "needs 8 GPUs with full peer access";
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
   }
   RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.MailboxPull_Coarse", Shape::kPull, Alloc::kCoarse, kMpIters));
 }
 
 TEST(DdaIpcGpuBarrierOrdering, MailboxPush_Coarse) {
-  if (!haveEightPeerGpus()) {
-    GTEST_SKIP() << "needs 8 GPUs with full peer access";
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
   }
   RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.MailboxPush_Coarse", Shape::kPush, Alloc::kCoarse, kMpIters));
 }
 
 TEST(DdaIpcGpuBarrierOrdering, FlatSync_Uncached) {
-  if (!haveEightPeerGpus()) {
-    GTEST_SKIP() << "needs 8 GPUs with full peer access";
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
   }
-  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatSync_Uncached", Shape::kFlat, Alloc::kUncached, kFlatIters, kFlatSlice));
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatSync_Uncached", Shape::kFlat, Alloc::kUncached,
+                                kFlatIters, kFlatSlice));
 }
 
 TEST(DdaIpcGpuBarrierOrdering, FlatSync_Coarse) {
-  if (!haveEightPeerGpus()) {
-    GTEST_SKIP() << "needs 8 GPUs with full peer access";
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
   }
-  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatSync_Coarse", Shape::kFlat, Alloc::kCoarse, kFlatIters, kFlatSlice));
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatSync_Coarse", Shape::kFlat, Alloc::kCoarse, kFlatIters,
+                                kFlatSlice));
 }
 
 } // namespace RcclUnitTesting

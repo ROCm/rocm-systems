@@ -90,7 +90,7 @@ TEST(DdaCollCommon, getGridAndBlockDims_HalfPrecision)
     EXPECT_LE(gridBlock.second.x, 512u);
 }
 
-// vecElementAdd<T>(uint4, uint4) adds a[k] to b[k] for every element k in memory order, bit-exact with a host reference.
+// vecElementAdd<T> adds a[k] + b[k] per element in memory order, bit-exact with a host reference.
 
 namespace {
 
@@ -121,9 +121,13 @@ float BitsToFloat(uint32_t u) {
   return f;
 }
 
-bool IsHalfNan(uint16_t u) { return (u & 0x7C00u) == 0x7C00u && (u & 0x03FFu) != 0; }
+bool IsHalfNan(uint16_t u) {
+  return (u & 0x7C00u) == 0x7C00u && (u & 0x03FFu) != 0;
+}
 
-bool IsBf16Nan(uint16_t u) { return (u & 0x7F80u) == 0x7F80u && (u & 0x007Fu) != 0; }
+bool IsBf16Nan(uint16_t u) {
+  return (u & 0x7F80u) == 0x7F80u && (u & 0x007Fu) != 0;
+}
 
 // fp32 sum rounded once to fp16; double rounding through fp32 is exact for fp16 since 24 >= 2 * 11 + 2.
 uint16_t HalfAddRef(uint16_t a, uint16_t b) {
@@ -159,10 +163,10 @@ std::vector<E> PseudoRandomBits(size_t n, uint32_t seed) {
   return v;
 }
 
-}  // namespace
+} // namespace
 
 class DdaVecElementAdd : public DeviceTestBase {
- protected:
+protected:
   // Runs vecElementAdd<T> over element arrays a and b viewed as uint4, padding the tail with zeros.
   template <typename T, typename E>
   std::vector<E> Run(const std::vector<E>& a, const std::vector<E>& b) {
@@ -200,18 +204,17 @@ class DdaVecElementAdd : public DeviceTestBase {
     }
     const std::vector<E> out = Run<T>(a, b);
     for (size_t i = 0; i < cases.size(); ++i) {
-      EXPECT_EQ(out[i], cases[i].expected) << std::hex << "element " << std::dec << i << " a=0x" << std::hex
-                                           << +cases[i].a << " b=0x" << +cases[i].b;
+      EXPECT_EQ(out[i], cases[i].expected)
+        << std::hex << "element " << std::dec << i << " a=0x" << std::hex << +cases[i].a << " b=0x" << +cases[i].b;
     }
   }
 };
 
 TEST_F(DdaVecElementAdd, FloatCraftedLanes) {
   const float kInf = std::numeric_limits<float>::infinity();
-  const std::vector<std::pair<float, float>> in = {
-    {1.0f, 2.0f}, {0.0f, -0.0f}, {-0.0f, -0.0f}, {kInf, 1.0f}, {1e30f, -1e30f}, {0.5f, 0.25f}, {-3.0f, 1.0f},
-    {16777216.0f, 1.0f},  // tie at 2^24 rounds to even
-  };
+  // The last pair is the 2^24 + 1 tie, which rounds to even.
+  const std::vector<std::pair<float, float>> in = {{1.0f, 2.0f},    {0.0f, -0.0f}, {-0.0f, -0.0f}, {kInf, 1.0f},
+                                                   {1e30f, -1e30f}, {0.5f, 0.25f}, {-3.0f, 1.0f},  {16777216.0f, 1.0f}};
   const std::vector<float> expected = {3.0f, 0.0f, -0.0f, kInf, 0.0f, 0.75f, -2.0f, 16777216.0f};
   std::vector<VecAddCase<uint32_t>> cases;
   for (size_t i = 0; i < in.size(); ++i) {
