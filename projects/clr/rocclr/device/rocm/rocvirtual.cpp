@@ -5062,14 +5062,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       dispatchPacketExt.cluster_size_y = sizes.dimensions() > 1 ? sizes.cluster()[1] : 1;
       dispatchPacketExt.cluster_size_z = sizes.dimensions() > 2 ? sizes.cluster()[2] : 1;
 
-      // Already validated in HIP Launch Params that newGlobalSize is perfectly divisible by local
-      // and it is divisible by cluster size.
+      // Round up both divisions to support OpenCL 2.0 non-uniform workgroups where
+      // newGlobalSize may not be a multiple of local or cluster size.
       dispatchPacketExt.cluster_count_x = sizes.dimensions() > 0
-                                          ? (newGlobalSize[0] / local[0] / sizes.cluster()[0]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[0], (uint32_t)local[0]), (uint32_t)sizes.cluster()[0]) : 1;
       dispatchPacketExt.cluster_count_y = sizes.dimensions() > 1
-                                          ? (newGlobalSize[1] / local[1] / sizes.cluster()[1]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[1], (uint32_t)local[1]), (uint32_t)sizes.cluster()[1]) : 1;
       dispatchPacketExt.cluster_count_z = sizes.dimensions() > 2
-                                          ? (newGlobalSize[2] / local[2] / sizes.cluster()[2]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[2], (uint32_t)local[2]), (uint32_t)sizes.cluster()[2]) : 1;
 
     } else {
       dispatchPacket.grid_size_x = sizes.dimensions() > 0 ? newGlobalSize[0] : 1;
