@@ -86,7 +86,7 @@ using backtrace_operation_map_t =
 struct client_data
 {
     static constexpr size_t num_buffers  = 1;
-    static constexpr size_t num_contexts = 3;
+    static constexpr size_t num_contexts = 1;
 
     using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
     using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
@@ -96,9 +96,7 @@ struct client_data
 
     rocprofiler_client_id_t*           client_id                 = nullptr;
     rocprofiler_client_finalize_t      client_fini               = nullptr;
-    rocprofiler_context_id_t           primary_ctx               = { 0 };
     rocprofiler_context_id_t           counter_ctx               = { 0 };
-    rocprofiler_context_id_t           control_ctx               = { 0 };
     rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
     std::vector<tool_agent>            cpu_agents;
     std::vector<tool_agent>            gpu_agents;
@@ -115,7 +113,6 @@ struct client_data
     void                      set_agents();
     context_id_vec_t          get_all_contexts() const;
     context_id_vec_t          get_main_contexts() const;
-    rocprofiler_context_id_t  get_control_context() const;
     buffer_id_vec_t           get_buffers() const;
     const rocprofsys_agent_t* get_agent(rocprofiler_agent_id_t _id) const;
     const tool_agent*         get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
@@ -126,22 +123,15 @@ struct client_data
 inline client_data::context_id_vec_t
 client_data::get_all_contexts() const
 {
-    return context_id_vec_t{ primary_ctx, counter_ctx, control_ctx };
+    return context_id_vec_t{ counter_ctx };
 }
 
 inline client_data::context_id_vec_t
 client_data::get_main_contexts() const
 {
     return context_id_vec_t{
-        primary_ctx,
         counter_ctx,
     };
-}
-
-inline rocprofiler_context_id_t
-client_data::get_control_context() const
-{
-    return control_ctx;
 }
 
 inline client_data::buffer_id_vec_t

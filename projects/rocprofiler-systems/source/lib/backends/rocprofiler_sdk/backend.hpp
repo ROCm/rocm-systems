@@ -139,8 +139,28 @@ struct backend
         Wrapper::CALLBACK_TRACING_CODE_OBJECT;
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_MARKER_CORE_API =
         Wrapper::CALLBACK_TRACING_MARKER_CORE_API;
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_MARKER_CONTROL_API =
+        Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API;
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
+
+    // ─── Marker (roctx) payload and operation constants ──────────────────────────
+    using marker_payload_t = Wrapper::marker_payload_t;
+
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxMarkA =
+        Wrapper::MARKER_CORE_API_ID_roctxMarkA;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePushA =
+        Wrapper::MARKER_CORE_API_ID_roctxRangePushA;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePop =
+        Wrapper::MARKER_CORE_API_ID_roctxRangePop;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStartA =
+        Wrapper::MARKER_CORE_API_ID_roctxRangeStartA;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStop =
+        Wrapper::MARKER_CORE_API_ID_roctxRangeStop;
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerPause =
+        Wrapper::MARKER_CONTROL_API_ID_roctxProfilerPause;
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerResume =
+        Wrapper::MARKER_CONTROL_API_ID_roctxProfilerResume;
 
     // ─── RCCL / NCCL types and constants ─────────────────────────────────────────
     using rccl_api_data    = Wrapper::rccl_api_data;

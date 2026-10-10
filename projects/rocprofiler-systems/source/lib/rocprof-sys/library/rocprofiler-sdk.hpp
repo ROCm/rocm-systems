@@ -45,7 +45,7 @@ void
 set_session(std::shared_ptr<control::session> sess);
 
 void
-create_roctx_client();
+create_roctx_trigger();
 
 void
 reset_sdk_session_guards();

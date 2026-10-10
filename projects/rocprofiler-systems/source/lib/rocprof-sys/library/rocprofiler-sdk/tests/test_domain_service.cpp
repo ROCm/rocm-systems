@@ -52,6 +52,7 @@ using ::testing::StrictMock;
 // registry<>, exercises.
 using domains::test_support::agent_t;
 using domains::test_support::externals;
+using domains::test_support::externals_with_roctx_config;
 using domains::test_support::g_buffer_table;
 using domains::test_support::g_callback_table;
 using domains::test_support::g_externals_mock;
@@ -62,7 +63,8 @@ using domains::test_support::gmock_metadata_registry;
 using domains::test_support::gmock_sdk_backend;
 using domains::test_support::mock_sdk;
 
-using sut_t = domain_service<mock_sdk, externals>;
+using sut_t       = domain_service<mock_sdk, externals>;
+using roctx_sut_t = domain_service<mock_sdk, externals_with_roctx_config>;
 
 constexpr std::size_t k_unsupported_domain_value = 999;
 
@@ -121,6 +123,7 @@ protected:
 
     // configure() always finishes by subscribing code_object, with every operation, on
     // its own always-on context.
+    template <typename Externals = externals>
     void expect_code_object_domain_configured()
     {
         expect_create_context(k_code_object_context);
@@ -128,7 +131,7 @@ protected:
             k_code_object_context,
             static_cast<mock_sdk::callback_tracing_kind_t>(
                 mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-            domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
+            domains::callback::k_code_object<mock_sdk, Externals>.on_record, {});
         expect_start_context(k_code_object_context);
     }
 
@@ -191,6 +194,90 @@ private:
     // Both the main and the code_object context come from create_context(); the
     // sequence hands out context ids in the order the expectations are declared.
     Sequence m_create_context_sequence;
+
+protected:
+    void expect_roctx_enabled(bool pause_resume_enabled)
+    {
+        EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(true));
+        EXPECT_CALL(*g_externals_mock, get_roctx_pause_resume_enabled())
+            .WillOnce(Return(pause_resume_enabled));
+    }
+
+    void expect_roctx_core_configured(const mock_sdk::context_id_t& context)
+    {
+        expect_configure_callback(
+            context,
+            static_cast<mock_sdk::callback_tracing_kind_t>(
+                mock_sdk::CALLBACK_TRACING_MARKER_CORE_API),
+            domains::callback::roctx::k_core_api<mock_sdk, externals_with_roctx_config>.on_record,
+            {});
+        EXPECT_CALL(*g_metadata_registry_mock,
+                    add_string(Eq(externals::rocm_marker_api_category_name)))
+            .Times(1);
+    }
+
+    void expect_roctx_control_configured(const mock_sdk::context_id_t& context)
+    {
+        expect_configure_callback(
+            context,
+            static_cast<mock_sdk::callback_tracing_kind_t>(
+                mock_sdk::CALLBACK_TRACING_MARKER_CONTROL_API),
+            domains::callback::roctx::k_control_api<mock_sdk, externals_with_roctx_config>.on_record,
+            { mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerPause,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerResume });
+    }
+
+    // Configures roctx (core domain only) on @p roctx_context, which configure() starts.
+    void configure_roctx_core_only(roctx_sut_t&                  service,
+                                   const mock_sdk::context_id_t& roctx_context)
+    {
+        expect_roctx_enabled(false);
+        expect_code_object_domain_configured<externals_with_roctx_config>();
+        expect_create_context(roctx_context);
+        expect_roctx_core_configured(roctx_context);
+        expect_start_context(roctx_context);
+
+        service.configure(std::vector<domain_selection>{});
+    }
+
+    // The SDK must report hip_runtime_api before the service is constructed: the
+    // constructor snapshots the supported domains.
+    static void report_main_context_domain()
+    {
+        g_callback_table = mock_sdk::tracing_names_t{
+            .entries = { { .name       = "hip_runtime_api",
+                           .operations = {},
+                           .value      = mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API } }
+        };
+    }
+
+    // Selects hip_runtime_api (main context) and enables roctx (core only), so the
+    // service owns the main, always-on code_object and roctx contexts.
+    void configure_main_and_roctx(roctx_sut_t&                  service,
+                                  const mock_sdk::context_id_t& main_context,
+                                  const mock_sdk::context_id_t& roctx_context)
+    {
+        expect_roctx_enabled(false);
+        {
+            const InSequence seq;
+            expect_create_context(main_context);
+            expect_code_object_domain_configured<externals_with_roctx_config>();
+            expect_create_context(roctx_context);
+        }
+        expect_configure_callback(
+            main_context,
+            static_cast<mock_sdk::callback_tracing_kind_t>(
+                mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API),
+            domains::callback::hip::k_runtime_api<mock_sdk, externals_with_roctx_config>.on_record,
+            {});
+        expect_roctx_core_configured(roctx_context);
+        expect_start_context(roctx_context);
+
+        service.configure(std::vector<domain_selection>{
+            domain_selection{ .name       = "hip_runtime_api",
+                              .group      = std::nullopt,
+                              .operations = std::nullopt } });
+    }
 };
 
 TEST_F(domain_service_test,
@@ -748,6 +835,88 @@ TEST_F(domain_service_test,
     service.finalize();
 
     EXPECT_TRUE(pending_standard_callbacks.empty());
+}
+
+// ─── roctx marker domains ───────────────────────────────────────────────────────
+
+TEST_F(domain_service_test, configure_creates_no_roctx_context_when_roctx_disabled)
+{
+    roctx_sut_t service;
+
+    EXPECT_CALL(*g_externals_mock, is_roctx_enabled()).WillOnce(Return(false));
+    expect_code_object_domain_configured<externals_with_roctx_config>();
+
+    service.configure(std::vector<domain_selection>{});
+}
+
+TEST_F(domain_service_test,
+       configure_creates_roctx_context_with_core_domain_only_without_pause_resume)
+{
+    roctx_sut_t service;
+
+    const mock_sdk::context_id_t roctx_context{ 7 };
+
+    configure_roctx_core_only(service, roctx_context);
+}
+
+TEST_F(domain_service_test,
+       configure_adds_control_domain_with_pause_resume_operations_on_same_roctx_context)
+{
+    roctx_sut_t service;
+
+    const mock_sdk::context_id_t roctx_context{ 8 };
+
+    expect_roctx_enabled(true);
+    expect_code_object_domain_configured<externals_with_roctx_config>();
+    expect_create_context(roctx_context);
+    expect_roctx_core_configured(roctx_context);
+    expect_roctx_control_configured(roctx_context);
+    expect_start_context(roctx_context);
+
+    service.configure(std::vector<domain_selection>{});
+}
+
+TEST_F(domain_service_test, roctx_context_is_separate_from_the_main_context)
+{
+    report_main_context_domain();
+    roctx_sut_t service;
+
+    const mock_sdk::context_id_t main_context{ 1 };
+    const mock_sdk::context_id_t roctx_context{ 2 };
+
+    configure_main_and_roctx(service, main_context, roctx_context);
+}
+
+TEST_F(domain_service_test, pause_stops_only_the_main_context_not_the_roctx_context)
+{
+    report_main_context_domain();
+    roctx_sut_t service;
+
+    const mock_sdk::context_id_t main_context{ 1 };
+    const mock_sdk::context_id_t roctx_context{ 2 };
+    configure_main_and_roctx(service, main_context, roctx_context);
+
+    EXPECT_CALL(*g_mock, context_is_valid(Eq(main_context))).WillOnce(Return(true));
+    EXPECT_CALL(*g_mock, context_is_active(Eq(main_context))).WillOnce(Return(true));
+    EXPECT_CALL(*g_mock, stop_context(Eq(main_context))).Times(1);
+
+    service.pause();
+}
+
+TEST_F(domain_service_test, start_starts_only_the_main_context_not_the_roctx_context)
+{
+    report_main_context_domain();
+    roctx_sut_t service;
+
+    const mock_sdk::context_id_t main_context{ 1 };
+    const mock_sdk::context_id_t roctx_context{ 2 };
+    configure_main_and_roctx(service, main_context, roctx_context);
+
+    EXPECT_CALL(*g_mock, context_is_valid(Eq(main_context))).WillOnce(Return(true));
+    EXPECT_CALL(*g_mock, context_is_active(Eq(main_context))).WillOnce(Return(false));
+    expect_start_context(main_context);
+
+    service.start();
 }
 
 }  // namespace

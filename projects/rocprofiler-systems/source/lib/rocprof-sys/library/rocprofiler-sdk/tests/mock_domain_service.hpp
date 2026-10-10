@@ -71,7 +71,14 @@ using callback_phase_t = int;
 
 struct correlation_id_t
 {
+    struct external_t
+    {
+        void*         ptr   = nullptr;
+        std::uint64_t value = 0;
+    };
+
     std::uint64_t internal = 0;
+    external_t    external{};
 };
 
 struct callback_tracing_record_t
@@ -321,6 +328,34 @@ struct scratch_memory_record_t
     correlation_id_t correlation_id{};
 };
 
+// Mirrors the shape of rocprofiler_callback_tracing_marker_api_data_t: each roctx call
+// exposes only the argument members the real API has for it.
+struct marker_payload_t
+{
+    struct message_args_t
+    {
+        const char* message = nullptr;
+    };
+    struct range_stop_args_t
+    {
+        std::uint64_t id = 0;
+    };
+    struct args_t
+    {
+        message_args_t    roctxMarkA;
+        message_args_t    roctxRangePushA;
+        message_args_t    roctxRangeStartA;
+        range_stop_args_t roctxRangeStop;
+    };
+    struct retval_t
+    {
+        std::uint64_t roctx_range_id_t_retval = 0;
+    };
+
+    args_t   args;
+    retval_t retval;
+};
+
 // Satisfies policies::domain_service::backend's requirement that
 // get_{buffer,callback}_tracing_names() return a std::ranges::range of entries exposing
 // name/operations/value. Kept as a plain (non-gmock) value: on_kfd_*<...> calls
@@ -356,6 +391,9 @@ struct gmock_sdk_backend
 {
     MOCK_METHOD(void, create_context, (context_id_t * context));
     MOCK_METHOD(void, start_context, (context_id_t context));
+    MOCK_METHOD(void, stop_context, (context_id_t context));
+    MOCK_METHOD(bool, context_is_valid, (context_id_t context));
+    MOCK_METHOD(bool, context_is_active, (context_id_t context));
     // NOLINTNEXTLINE(readability-function-size)
     MOCK_METHOD(void, create_buffer,
                 (context_id_t context, std::size_t buffer_size,
@@ -467,6 +505,15 @@ struct mock_sdk
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH   = 32;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY       = 33;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION = 34;
+    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CORE_API               = 14;
+    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CONTROL_API            = 15;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxMarkA               = 1;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePushA          = 2;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePop            = 3;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStartA         = 4;
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStop           = 5;
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerPause    = 1;
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerResume   = 2;
     // NOLINTEND(readability-identifier-naming)
 
     using kfd_event_dropped_record      = test_support::kfd_event_dropped_record;
@@ -484,6 +531,7 @@ struct mock_sdk
     using code_object_load_data_t       = test_support::code_object_load_data_t;
     using code_object_kernel_symbol_register_data_t =
         test_support::code_object_kernel_symbol_register_data_t;
+    using marker_payload_t = test_support::marker_payload_t;
 
     // ─── Members required by domains::callback::k_rccl ──────────────────────────────
     using nccl_data_type_t = int;
@@ -663,6 +711,15 @@ struct mock_sdk
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
+    static void stop_context(context_id_t context) { g_mock->stop_context(context); }
+    static bool context_is_valid(context_id_t context)
+    {
+        return g_mock->context_is_valid(context);
+    }
+    static bool context_is_active(context_id_t context)
+    {
+        return g_mock->context_is_active(context);
+    }
 
     // NOLINTNEXTLINE(readability-function-size)
     static void create_buffer(context_id_t context, std::size_t buffer_size,
@@ -885,9 +942,36 @@ struct gmock_externals
     MOCK_METHOD(std::optional<int>, get_backtrace_data, (bool are_operations_available));
     MOCK_METHOD(std::int32_t, get_pid, ());
     MOCK_METHOD(std::int32_t, get_ppid, ());
+
+    // Members used by the marker (roctx) domains.
+    MOCK_METHOD(bool, is_roctx_enabled, ());
+    MOCK_METHOD(bool, get_roctx_pause_resume_enabled, ());
+    MOCK_METHOD(std::uint64_t, intern_string, (std::string_view text));
+    MOCK_METHOD(const char*, lookup_string, (std::uint64_t id));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_externals>> g_externals_mock;
+
+// The roctx trigger and control session the marker callbacks reach through
+// Externals::get_roctx_trigger()/get_session(); leaving a mock unset models "not
+// created".
+struct gmock_roctx_trigger
+{
+    MOCK_METHOD(void, on_range_start, (std::uint64_t range_id, std::string_view message));
+    MOCK_METHOD(void, on_range_stop, (std::uint64_t range_id));
+    MOCK_METHOD(void, on_pause, ());
+    MOCK_METHOD(void, on_resume, ());
+    MOCK_METHOD(bool, should_write_markers, (), (const));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_roctx_trigger>> g_roctx_trigger_mock;
+
+struct gmock_session
+{
+    MOCK_METHOD(bool, is_active_without, (std::string_view trigger_name), (const));
+};
+
+inline std::unique_ptr<::testing::StrictMock<gmock_session>> g_session_mock;
 
 // Hoisted to namespace scope (rather than nested in `externals`) so
 // gmock_metadata_registry and gmock_buffer_storage below can reference them in
@@ -1341,6 +1425,43 @@ struct externals
     static std::int32_t get_pid() { return 0; }
     static std::int32_t get_ppid() { return 0; }
 
+    // ─── Members required by domains::callback::k_marker_{core,control}_api ────────
+    struct rocm_marker_api_category
+    {};
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_marker_api_category_name = "rocm_marker_api";
+    static constexpr std::string_view roctx_trigger_name            = "roctx";
+
+    using string_id_t = std::uint64_t;
+
+    struct session_t
+    {
+        [[nodiscard]] bool is_active_without(std::string_view /*trigger_name*/) const
+        {
+            return true;
+        }
+    };
+
+    struct roctx_trigger_t
+    {
+        void on_range_start(std::uint64_t /*range_id*/, const char* /*message*/) {}
+        void on_range_stop(std::uint64_t /*range_id*/) {}
+        void on_pause() {}
+        void on_resume() {}
+
+        [[nodiscard]] bool should_write_markers() const { return true; }
+    };
+
+    static bool is_roctx_enabled() { return false; }
+    static bool get_roctx_pause_resume_enabled() { return false; }
+
+    static session_t*       get_session() noexcept { return nullptr; }
+    static roctx_trigger_t* get_roctx_trigger() noexcept { return nullptr; }
+
+    static string_id_t intern_string(const char* /*text*/) { return 0; }
+    static const char* lookup_string(string_id_t /*id*/) { return nullptr; }
+
     static constexpr std::string_view k_pmc_value_type_absolute = "ABS";
 
     static constexpr std::string_view k_kfd_event_dropped_events_category_name =
@@ -1688,6 +1809,71 @@ struct externals_with_tracing : externals
 
     static std::int32_t get_pid() { return g_externals_mock->get_pid(); }
     static std::int32_t get_ppid() { return g_externals_mock->get_ppid(); }
+};
+
+// Externals stand-in for the marker (roctx) domain tests: everything the marker
+// callbacks touch is routed to g_externals_mock / g_roctx_trigger_mock /
+// g_session_mock (timemory, pid/ppid and the metadata/buffer sinks are inherited from
+// externals_with_tracing / externals).
+struct externals_with_marker : externals_with_tracing
+{
+    struct session_t
+    {
+        [[nodiscard]] bool is_active_without(std::string_view trigger_name) const
+        {
+            return g_session_mock->is_active_without(trigger_name);
+        }
+    };
+
+    struct roctx_trigger_t
+    {
+        void on_range_start(std::uint64_t range_id, const char* message) const
+        {
+            g_roctx_trigger_mock->on_range_start(range_id, message);
+        }
+        void on_range_stop(std::uint64_t range_id) const
+        {
+            g_roctx_trigger_mock->on_range_stop(range_id);
+        }
+        void               on_pause() const { g_roctx_trigger_mock->on_pause(); }
+        void               on_resume() const { g_roctx_trigger_mock->on_resume(); }
+        [[nodiscard]] bool should_write_markers() const
+        {
+            return g_roctx_trigger_mock->should_write_markers();
+        }
+    };
+
+    static session_t* get_session() noexcept
+    {
+        static session_t s_session;
+        return g_session_mock ? &s_session : nullptr;
+    }
+
+    static roctx_trigger_t* get_roctx_trigger() noexcept
+    {
+        static roctx_trigger_t s_trigger;
+        return g_roctx_trigger_mock ? &s_trigger : nullptr;
+    }
+
+    static string_id_t intern_string(const char* text)
+    {
+        return g_externals_mock->intern_string(text);
+    }
+    static const char* lookup_string(string_id_t id)
+    {
+        return g_externals_mock->lookup_string(id);
+    }
+};
+
+// Externals stand-in for domain_service tests that exercise the roctx gating: only the
+// two switches domain_service reads are routed to g_externals_mock.
+struct externals_with_roctx_config : externals
+{
+    static bool is_roctx_enabled() { return g_externals_mock->is_roctx_enabled(); }
+    static bool get_roctx_pause_resume_enabled()
+    {
+        return g_externals_mock->get_roctx_pause_resume_enabled();
+    }
 };
 
 // Drives a hip/hsa callback domain's k_domain.on_record() through one ENTER phase and
