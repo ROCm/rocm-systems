@@ -1651,14 +1651,18 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtomicCmpswapSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
+  dst_operands_[0] = &sdata_return;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2019,14 +2023,19 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtomicCmpswapX2Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
+  dst_operands_[0] = &sdata_return;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 1;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
