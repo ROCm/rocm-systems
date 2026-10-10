@@ -1840,6 +1840,19 @@ void ncclDevCommDump(struct ncclDevComm* devComm) {
   printf(" GIN World Barrier signal0 %d\n", devComm->worldGinBarrier.signal0);
 }
 
+// The devComm's ginContextCount is nGinContexts rounded up to the ginCommCount of
+// whichever backend ncclGinDevCommSetup picks, and per-context resource regions
+// are indexed by it. Size for the worst case over every active backend: rounding
+// to the widest ginCommCount alone is not enough (ROUNDUP(4, 4) < ROUNDUP(4, 3)).
+static int devrGinContextsTotal(const struct ncclGinState* ginState, int nGinContexts) {
+  int total = nGinContexts;
+  for (int b = 0; b < ginState->numActiveBackends; b++) {
+    int ginCommCount = std::max(ginState->backends[b].ginCommCount, 1);
+    total = std::max(total, ROUNDUP(nGinContexts, ginCommCount));
+  }
+  return total;
+}
+
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
                                         struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion) {
   ncclResult_t ret = ncclSuccess;
@@ -2076,21 +2089,13 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
       rr = rr->next;
     }
     bufSizeTotal = alignUp(bufSizeTotal, 128);
+    nGinContextsTotal =
+      devr->ginEnabled ? devrGinContextsTotal(&comm->sharedRes->ginState, nGinContexts) : nGinContexts;
     ginSignalShadowsOffset = bufSizeTotal;
-    bufSizeTotal += nGinContexts * ginSignalTotal * sizeof(uint64_t); // include signal shadows
+    bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t); // include signal shadows
     ginAnvilNetSignalsOffset = bufSizeTotal;
     if (devr->ginEnabled && ginSignalTotal > 0) {
-      // 2.31 moved ginCommCount into per-backend state; round up to the widest
-      // active backend so every backend's signal shadows stay in range.
-      struct ncclGinState* gs = &comm->sharedRes->ginState;
-      int ginCommCount = 1;
-      for (int b = 0; b < gs->numActiveBackends; b++) {
-        if (gs->backends[b].ginCommCount > ginCommCount) ginCommCount = gs->backends[b].ginCommCount;
-      }
-      nGinContextsTotal = ROUNDUP(nGinContexts, ginCommCount);
       bufSizeTotal += (size_t)nGinContextsTotal * ginSignalTotal * sizeof(uint64_t);
-    } else {
-      nGinContextsTotal = nGinContexts;
     }
     bufSizeTotal = alignUp(bufSizeTotal, devr->granularity);
   }

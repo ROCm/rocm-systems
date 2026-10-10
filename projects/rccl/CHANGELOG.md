@@ -45,6 +45,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed tuner plugins receiving uninitialized cost-model constants.
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
+* Fixed GIN signal shadows being sized for the requested context count instead of the rounded-up `ginContextCount`, which let the last contexts write past the shadow region when the GIN connection count does not divide the requested context count.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
