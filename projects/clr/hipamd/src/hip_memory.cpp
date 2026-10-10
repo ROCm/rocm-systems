@@ -1231,9 +1231,14 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder, const cl_channe
     }
   }
 
-  if (!image->create(nullptr)) {
+  amd::Memory::ErrorCode errorCode = amd::Memory::kErrorNone;
+  if (!image->create(nullptr, false, false, false, &errorCode)) {
     LogPrintfError("Cannot create image: 0x%x", image);
-    status = hipErrorOutOfMemory;
+    if (errorCode == amd::Memory::kErrorImagePitchUnsupported) {
+      status = hipErrorNotSupported;
+    } else {
+      status = hipErrorOutOfMemory;
+    }
     delete image;
     return nullptr;
   }

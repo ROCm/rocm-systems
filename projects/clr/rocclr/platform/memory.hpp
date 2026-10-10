@@ -151,6 +151,13 @@ class Memory : public amd::RuntimeObject {
       kHandleFabric    = 0x8
   };
 
+  //! Backend-neutral error code the device layer reports to HIP via an
+  //! out-param on the create path (not stored on UserData).
+  enum ErrorCode : uint32_t {
+    kErrorNone                  = 0,  //!< No device-create failure recorded (default).
+    kErrorImagePitchUnsupported = 1,  //!< Image row pitch rejected by the backend.
+  };
+
   struct UserData {
     int deviceId = 0;  //!< Device ID memory is allocated on
     int locationType =
@@ -315,11 +322,13 @@ class Memory : public amd::RuntimeObject {
   virtual bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
                       bool sysMemAlloc = false,  //!< Allocate device memory in system memory
                       bool skipAlloc = false,    //!< Skip device memory allocation
-                      bool forceAlloc = false    //!< Force device memory allocation
+                      bool forceAlloc = false,   //!< Force device memory allocation
+                      ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Allocates device (cache) memory for a specific device
-  bool addDeviceMemory(const Device* dev  //!< Device object
+  bool addDeviceMemory(const Device* dev,  //!< Device object
+                       ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Replaces device (cache) memory for a specific device
@@ -329,7 +338,8 @@ class Memory : public amd::RuntimeObject {
 
   //! Find the section for the given device. Return NULL if not found.
   device::Memory* getDeviceMemory(const Device& dev,  //!< Device object
-                                  bool alloc = true   //!< Allocates memory
+                                  bool alloc = true,  //!< Allocates memory
+                                  ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! Get origianl device memory
@@ -471,7 +481,8 @@ class Buffer : public Memory {
   bool create(void* initFrom = NULL,     //!< Pointer to the initialization data
               bool sysMemAlloc = false,  //!< Allocate device memory in system memory
               bool skipAlloc = false,    //!< Skip device memory allocation
-              bool forceAlloc = false    //!< Force device memory allocation
+              bool forceAlloc = false,   //!< Force device memory allocation
+              ErrorCode* errorCode = nullptr  //!< Backend device-create error code
   );
 
   //! static_cast to Buffer with sanity check

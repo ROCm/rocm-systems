@@ -50,7 +50,7 @@ class Memory : public device::Memory {
                        size_t* rowPitch, size_t* slicePitch) override;
 
   // Create device memory according to OpenCL memory flag.
-  virtual bool create(bool local_alloc = false) = 0;
+  virtual bool create(bool local_alloc, amd::Memory::ErrorCode* errorCode) = 0;
 
   // Pins system memory associated with this memory object.
   bool pinSystemMemory(void* hostPtr,  // System memory address
@@ -216,7 +216,7 @@ class Buffer : public roc::Memory {
   virtual ~Buffer();
 
   // Create device memory according to OpenCL memory flag.
-  virtual bool create(bool local_alloc = false);
+  virtual bool create(bool local_alloc, amd::Memory::ErrorCode* errorCode);
 
   virtual bool ExportHandle(void* handle) const final;
 
@@ -253,10 +253,10 @@ class Image : public roc::Memory {
   virtual ~Image();
 
   //! Create device memory according to OpenCL memory flag.
-  virtual bool create(bool local_alloc = false);
+  virtual bool create(bool local_alloc, amd::Memory::ErrorCode* errorCode);
 
   //! Create an image view
-  bool createView(const Memory& parent);
+  bool createView(const Memory& parent, amd::Memory::ErrorCode* errorCode);
 
   //! Gets a pointer to a region of host-visible memory for use as the target
   //! of an indirect map for a given memory object
