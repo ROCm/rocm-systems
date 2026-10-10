@@ -1540,10 +1540,12 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
-  // Helper struct for memory object lookup results
+  //!< Helper struct for memory object lookup results.
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
+    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
+                        //!< not cacheable. Otherwise it should be non-zero for global ranges
   };
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
