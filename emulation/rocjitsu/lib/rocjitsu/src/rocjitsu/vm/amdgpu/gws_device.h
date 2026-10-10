@@ -74,14 +74,23 @@ class Wavefront;
 ///    consumes a credit or parks until any wave of the process signals. Credits
 ///    and the generation are consumed/observed by the waiter's own CU.
 ///  * Deadlock-escape (@ref step_maintenance): a parked GWS wave is released only
-///    when every non-halted wave of its process -- across all CUs -- is provably
-///    unable to signal (blocked in GWS_WAIT or at an s_barrier). This is a
-///    genuine-deadlock backstop (the step budget must terminate); it never fires
-///    while any wave of the process can still run and signal. Quiescence is
-///    process-scoped (another dispatch of the same process may still signal) and
-///    race-free: each CU publishes a snapshot of its own signalable-wave count,
-///    and escape requires every currently-active CU to have published in the
-///    current park epoch, so a runnable producer on another CU is never missed.
+///    when every non-halted *resident* wave of its process -- across all CUs --
+///    is provably unable to signal (blocked in GWS_WAIT or at an s_barrier). This
+///    is a genuine-deadlock backstop (the step budget must terminate); it never
+///    fires while any resident wave of the process can still run and signal.
+///    Quiescence is process-scoped (another dispatch of the same process may
+///    still signal) and race-free: each CU publishes a snapshot of its own
+///    signalable-wave count, and escape requires every currently-active CU to
+///    have republished at the current snapshot version (@ref summary_epoch_), so
+///    a runnable producer on another CU is never missed. The version advances on
+///    every event that may introduce a signaler -- a wave parking (0 -> positive),
+///    a wave waking, or new resident work arriving (@ref add_resident) -- so a
+///    stale zero-runnable summary cannot survive workgroup turnover (a parked
+///    wave replaced by a runnable producer) or a producer dispatched alongside a
+///    parked wave. The guarantee covers only waves that are *resident* when the
+///    scan runs: queued-but-undispatched workgroups and future dispatches are not
+///    scanned, but each becomes resident through @ref add_resident, which
+///    advances the version and so blocks escape until the new work is accounted.
 ///    Recovery policy: abandoning a wait is not a silent state change. The
 ///    backstop *invalidates* each resource it abandons (counter/credits cleared,
 ///    disarmed, generation bumped) via @ref invalidate_resource, so a later
@@ -187,14 +196,19 @@ private:
   std::unordered_map<uint32_t, uint32_t> parked_;
   /// Total parked waves across all processes; lock-free fast-path gate.
   std::atomic<uint32_t> parked_total_{0};
-  /// Park epoch, bumped when parked_total_ transitions 0 -> positive, so stale
-  /// cross-epoch snapshots cannot drive an escape decision.
-  uint64_t park_epoch_ = 0;
+  /// Monotonic version for the per-CU quiescence snapshots below. Bumped whenever
+  /// a potential signaler may have appeared -- a 0 -> positive parked transition,
+  /// a wave waking (wake_wave), or new resident work (add_resident). escape_ready
+  /// trusts a CU's published summary only if it was refreshed at the current
+  /// version, which closes the workgroup-turnover gap: a parked wave replaced by
+  /// (or joined by) a runnable producer advances the version, so a peer's earlier
+  /// zero-runnable summary cannot survive to drive a false escape.
+  uint64_t summary_epoch_ = 0;
   /// Per-CU published count of signalable (can-still-run) waves, per process,
   /// refreshed each step by the owning CU. Absent/stale CUs block escape.
   std::unordered_map<ComputeUnitCore *, std::unordered_map<uint32_t, uint32_t>> cu_runnable_;
-  /// Park epoch at which each CU last published its snapshot.
-  std::unordered_map<ComputeUnitCore *, uint64_t> cu_epoch_;
+  /// summary_epoch_ at which each CU last published its snapshot.
+  std::unordered_map<ComputeUnitCore *, uint64_t> cu_summary_epoch_;
 };
 
 } // namespace amdgpu

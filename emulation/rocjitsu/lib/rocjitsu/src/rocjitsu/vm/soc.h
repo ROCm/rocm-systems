@@ -238,6 +238,12 @@ public:
   amdgpu::MesEngine &mes_engine() { return mes_engine_; }
   const amdgpu::MesEngine &mes_engine() const { return mes_engine_; }
 
+  /// @brief Return the device-global GWS store shared by every CU of every XCD.
+  /// @details GWS resources are device-global (one small register set per GPU),
+  /// and under XCD fan-out a single dispatch scatters its workgroups across XCDs,
+  /// so the whole SoC shares one store rather than one per XCD (see GwsDevice).
+  const std::shared_ptr<amdgpu::GwsDevice> &gws_device() const { return gws_device_; }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -263,6 +269,8 @@ private:
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();
+  /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
+  void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
@@ -276,6 +284,8 @@ private:
   std::shared_ptr<amdgpu::DeviceCacheCoherence> cache_coherence_ =
       std::make_shared<amdgpu::DeviceCacheCoherence>();
   amdgpu::GpuVm gpu_vm_;
+  /// Device-global GWS store shared by every CU of every XCD (see gws_device()).
+  std::shared_ptr<amdgpu::GwsDevice> gws_device_ = std::make_shared<amdgpu::GwsDevice>();
   std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
   amdgpu::AddressSpaceHandle internal_address_space_;
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;

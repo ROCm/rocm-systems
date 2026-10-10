@@ -68,7 +68,16 @@ public:
   /// assembles the XCD's children.
   void wire_gws_to_cus();
 
-  /// @brief Return this XCD's shared device-global GWS store.
+  /// @brief Adopt an externally owned device-global GWS store (SoC scope).
+  /// @details GWS resources are device-global, and under XCD fan-out a single
+  /// dispatch scatters its workgroups across XCDs (see GwsDevice), so a multi-XCD
+  /// device must share one store across every XCD -- not one per XCD. The owning
+  /// SoC injects its store here, replacing this XCD's standalone default, and the
+  /// XCD rewires every CU to it. A standalone XCD (no SoC) keeps its own default.
+  /// Idempotent; must be called after the shader engines and their CUs attach.
+  void adopt_gws_store(std::shared_ptr<GwsDevice> store);
+
+  /// @brief Return the device-global GWS store this XCD's CUs share.
   const std::shared_ptr<GwsDevice> &gws_device() const { return gws_device_; }
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
@@ -128,6 +137,8 @@ private:
   simdojo::ExecMode exec_mode_;
   std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
   /// Device-global GWS store shared by every CU of this XCD (see wire_gws_to_cus).
+  /// A standalone default; an owning SoC replaces it with one device-wide store
+  /// shared across all XCDs via adopt_gws_store (GWS is device-global).
   std::shared_ptr<GwsDevice> gws_device_ = std::make_shared<GwsDevice>();
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
