@@ -51,6 +51,8 @@ TEAM_FCOLLECT_DEF_GEN(unsigned short, ushort)
 TEAM_FCOLLECT_DEF_GEN(unsigned int, uint)
 TEAM_FCOLLECT_DEF_GEN(unsigned long, ulong)
 TEAM_FCOLLECT_DEF_GEN(unsigned long long, ulonglong)
+TEAM_FCOLLECT_DEF_GEN(__half, half)
+TEAM_FCOLLECT_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -112,6 +114,12 @@ TeamFcollectTester<T1>::TeamFcollectTester(TesterArguments args)
                 std::is_same<T1, unsigned char>::value) {
     for (int i = 0; i < total_elems; ++i) {
       source_buf[i] = static_cast<T1>('a' + my_pe);
+    }
+  }
+  else if constexpr (std::is_same<T1, __half>::value ||
+                     std::is_same<T1, __hip_bfloat16>::value) {
+    for (int i = 0; i < total_elems; ++i) {
+      source_buf[i] = static_cast<T1>(3.14f + my_pe);
     }
   }
   else if constexpr (std::is_floating_point<T1>::value) {
@@ -206,6 +214,10 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
               std::is_same<T1, unsigned char>::value) {
           expected = static_cast<T1>('a' + pe);
         }
+        else if constexpr (std::is_same<T1, __half>::value ||
+                           std::is_same<T1, __hip_bfloat16>::value) {
+          expected = static_cast<T1>(3.14f + pe);
+        }
         else if constexpr (std::is_floating_point<T1>::value) {
           expected = static_cast<T1>(3.14 + pe);
         }
@@ -214,8 +226,14 @@ void TeamFcollectTester<T1>::verifyResults(size_t size) {
         }
         if (dest_buf[idx] != expected) {
           std::cerr << "Data validation error at idx " << idx << std::endl;
-          std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-          << ", Expected " << expected << std::endl;
+          if constexpr (std::is_same<T1, __half>::value ||
+                        std::is_same<T1, __hip_bfloat16>::value) {
+            std::cerr << "PE " << my_pe << " Got " << static_cast<float>(dest_buf[idx])
+            << ", Expected " << static_cast<float>(expected) << std::endl;
+          } else {
+            std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
+            << ", Expected " << expected << std::endl;
+          }
           exit(-1);
         }
       }
