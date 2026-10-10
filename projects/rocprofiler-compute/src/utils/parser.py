@@ -282,24 +282,13 @@ def _build_metric_table_df(
 
 @demarcate
 def apply_filters(
-    workload: schema.Workload, dir_path: str, is_gui: bool, debug: bool
+    workload: schema.Workload, dir_path: str, debug: bool
 ) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
 
-    # TODO: error out properly if filters out of bound
-    filtered_df = workload.raw_pmc
-
-    # Apply GPU ID filter
-    if workload.filter_gpu_ids:
-        filtered_df = filtered_df.loc[
-            filtered_df["GPU_ID"]
-            .astype(str)
-            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
-        ]
-        if filtered_df.empty:
-            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+    filtered_df = _apply_gpu_filter(workload)
 
     # Apply kernel filter
     # NB:
@@ -323,46 +312,30 @@ def apply_filters(
 
 
 def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
-    """Apply kernel ID or name filters."""
-    if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
-        # Handle integer kernel IDs
-        kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
-        if kernel_top_dataframe is None:
-            console_error(
-                "Kernel top stats table not loaded. "
-                "Ensure create_df_kernel_top_stats() "
-                "is called before applying kernel filters."
-            )
-
-        validate_kernel_filter_ids(
-            workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
-        )
-
-        # Extract kernel names and mark selected kernels with "*"
-        # TODO: fix it for unaligned comparison
-        selected_kernels = []
-        kernel_top_dataframe["Selected"] = ""
-
-        for kernel_id in workload.filter_kernel_ids:
-            selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-            kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
-
-        if selected_kernels:
-            df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
-
-    elif all(isinstance(kernel_id, str) for kernel_id in workload.filter_kernel_ids):
-        # Handle string kernel names
-        cleaned_dataframe = df["Kernel_Name"].apply(
-            lambda kernel_name: (
-                kernel_name.strip() if isinstance(kernel_name, str) else kernel_name
-            )
-        )
-        df = df.loc[cleaned_dataframe.isin(workload.filter_kernel_ids)]
-    else:
+    """Apply kernel ID filters, marking the selected rows in the top stats table."""
+    kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+    if kernel_top_dataframe is None:
         console_error(
-            "analyze",
-            "Mixing kernel indices and string filters is not currently supported",
+            "Kernel top stats table not loaded. "
+            "Ensure create_df_kernel_top_stats() "
+            "is called before applying kernel filters."
         )
+
+    validate_kernel_filter_ids(
+        workload.filter_kernel_ids, len(kernel_top_dataframe["Kernel_Name"])
+    )
+
+    # Extract kernel names and mark selected kernels with "*"
+    # TODO: fix it for unaligned comparison
+    selected_kernels = []
+    kernel_top_dataframe["Selected"] = ""
+
+    for kernel_id in workload.filter_kernel_ids:
+        selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
+        kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
+
+    if selected_kernels:
+        df = df.loc[df["Kernel_Name"].isin(selected_kernels)]
 
     return df
 
@@ -406,6 +379,23 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         df = df[df["Dispatch_ID"].astype(int).isin(selected_dispatches)]
 
     return df
+
+
+def _apply_gpu_filter(workload: schema.Workload) -> pd.DataFrame:
+    """Apply the requested GPU IDs before other row filters."""
+    # TODO: error out properly if filters out of bound
+    filtered_df = workload.raw_pmc
+
+    if workload.filter_gpu_ids:
+        filtered_df = filtered_df.loc[
+            filtered_df["GPU_ID"]
+            .astype(str)
+            .isin(normalize_filter_to_str_list(workload.filter_gpu_ids))
+        ]
+        if filtered_df.empty:
+            console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
+
+    return filtered_df
 
 
 def _build_pc_sampling_partial_frame(
@@ -637,8 +627,8 @@ def nullify_unevaluated_metric_values(
     table cells still contain raw formula strings produced by
     ``build_metric_value_string``.  This helper walks every
     ``metric_table`` in *workload* and sets each ``SUPPORTED_FIELD``
-    column to ``"N/A"`` so that downstream display code (``tty``,
-    ``webui``, ``tui``) can safely format the values.
+    column to ``"N/A"`` so that downstream display code can safely
+    format the values.
     """
     for df_id, df_type in workload.dfs_type.items():
         if df_type != "metric_table":
@@ -714,7 +704,6 @@ def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
 def load_table_data(
     workload: schema.Workload,
     dir_path: str,
-    is_gui: bool,
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
     skip_kernel_top: bool = False,
@@ -734,7 +723,7 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, dir_path, is_gui, args.debug),
+        apply_filters(workload, dir_path, args.debug),
         args.debug,
     )
 

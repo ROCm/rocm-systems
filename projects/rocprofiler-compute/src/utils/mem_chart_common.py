@@ -16,15 +16,16 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from utils.utils_analysis import format_bw_human_readable
-
 CachePanelRow = Union[
     tuple[str, Any, str, str],
     tuple[str, Any, str, str, bool],
 ]
 
+# Compute Units panel width, shared by every architecture's chart
+CU_PANEL_W = 22
+
 COLORS = {
-    "kernel": "green",
+    "cu": "green",
     "block": "blue",
     "tcp": "cyan",
     "lds": "magenta",
@@ -36,6 +37,8 @@ COLORS = {
     "hit": "yellow",
     "stall": "indian_red",
     "bw": "bright_cyan",
+    # Terminal default foreground, for rows outside the legend
+    "neutral": "default",
 }
 
 _LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (
@@ -52,7 +55,12 @@ _STALL_ENTRY: tuple[str, str, str] = ("█", "Stall", "stall")
 def format_value(
     value: Union[int, float, str, None], unit: str = "", precision: int = 1
 ) -> str:
-    """Format a metric value with unit. Returns 'N/A' for None/NaN/invalid."""
+    """Format a metric value with unit. Returns 'N/A' for None/NaN/invalid.
+
+    Bandwidth units (Bytes/s, GB/s) are always rendered as fixed GB/s
+    with 3 decimal places for easy comparison across cache levels, so
+    *precision* applies only to other units.
+    """
     if value is None:
         return "N/A"
     try:
@@ -61,8 +69,10 @@ def format_value(
         return "N/A"
     if math.isnan(numeric):
         return "N/A"
-    if unit in ("GB/s", "Bytes/s"):
-        return format_bw_human_readable(value, unit, precision)
+    if unit == "GB/s":
+        return f"{numeric:.3f} GB/s"
+    if unit == "Bytes/s":
+        return f"{numeric / 1e9:.3f} GB/s"
     if unit == "%":
         return f"{numeric:.{precision}f}%"
     return f"{numeric:.{precision}f}{unit}"
@@ -93,9 +103,10 @@ def metric_line(
     value: Any,  # noqa: ANN401
     unit: str = "%",
     color: str = "bright_green",
+    precision: int = 1,
 ) -> str:
     """Rich markup line: 'label value_with_unit' in *color*."""
-    return f"{label} {colored(format_value(value, unit), color)}"
+    return f"{label} {colored(format_value(value, unit, precision), color)}"
 
 
 def progress_bar(percent: Optional[float], width: int = 10) -> str:
@@ -231,16 +242,59 @@ def build_arch_notes(
 # ---------------------------------------------------------------------------
 
 
-def build_kernel_panel(
+def build_cu_stats(metric_dict: dict[str, Any], scope: str = "CU") -> list[tuple]:
+    """Compute Units / WGPs panel stats from the memory chart YAML metrics.
+
+    *scope*: "CU" on gfx9, "WGP" on gfx115x and gfx1250.
+    """
+    lds_bytes = safe_float(metric_dict.get("LDS Allocation"))
+    lds_alloc_kb = lds_bytes / 1024 if lds_bytes is not None else None
+    return [
+        ("Wave Occ", metric_dict.get("Wavefront Occupancy"), "%"),
+        ("vGPRs", metric_dict.get("VGPR"), ""),
+        ("sGPRs", metric_dict.get("SGPR"), ""),
+        ("Scratch/Wave", metric_dict.get("Scratch Allocation"), " KB", 3),
+        ("LDS Alloc", lds_alloc_kb, " KB"),
+        (f"Workgroups/{scope}", metric_dict.get("Workgroups"), ""),
+    ]
+
+
+def build_cu_panel(
     height: int,
     padding_lines: int = 13,
+    stats: Optional[list] = None,
+    title: str = "Compute Units",
 ) -> Panel:
-    """Build the Kernel (shader core) panel used by both gfx9 and gfx11."""
+    """Build the Compute Units panel.
+
+    *stats*: list of (label, value, unit[, precision]) tuples to display;
+    precision defaults to 1 decimal place.
+    Falls back to decorative placeholder text when omitted.
+    *title*: panel title; RDNA-style charts pass "WGPs".
+    """
+    if stats:
+        # Borders and padding leave CU_PANEL_W - 4 columns for text
+        text_width = CU_PANEL_W - 4
+        lines: list[str] = []
+        for label, value, unit, *rest in stats:
+            precision = rest[0] if rest else 1
+            rendered = format_value(value, unit, precision)
+            if len(label) + 1 + len(rendered) > text_width:
+                lines.append(label)
+                lines.append(colored(rendered, "bright_green"))
+            else:
+                lines.append(metric_line(label, value, unit, precision=precision))
+        content = "\n".join(lines)
+    else:
+        content = (
+            "\n" * padding_lines + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]"
+        )
+    color = COLORS["cu"]
     return Panel(
-        "\n" * padding_lines + "[dim]Shader Core[/dim]\n[dim]Wave Execution[/dim]",
-        title=(f"[bold {COLORS['kernel']}]Kernel[/bold {COLORS['kernel']}]"),
-        border_style=COLORS["kernel"],
-        width=14,
+        content,
+        title=f"[bold {color}]{title}[/bold {color}]",
+        border_style=color,
+        width=CU_PANEL_W,
         height=height,
     )
 

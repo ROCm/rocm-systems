@@ -132,7 +132,6 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         path=[["/tmp/test"]],
         verbose=0,
         time_unit="ns",
-        random_port=False,
         torch_operator=None,
         triton_operator=None,
         ml_api_operator=None,
