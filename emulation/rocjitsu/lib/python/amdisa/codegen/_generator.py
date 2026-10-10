@@ -2208,7 +2208,7 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMaxF32', 'VopdMaxNumF32'),
+                    ('VopdMaxF32',),
                     '''
                     {
                       float result = std::fmax(std::bit_cast<float>(src0),
@@ -2218,12 +2218,30 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMinF32', 'VopdMinNumF32'),
+                    ('VopdMaxNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinF32',),
                     '''
                     {
                       float result = std::fmin(std::bit_cast<float>(src0),
                                                std::bit_cast<float>(src1));
                       return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
@@ -6634,7 +6652,7 @@ class CodeGenerator:
                 )
                 is_true16_vop3 = true16_vop3_info.enabled
                 if is_true16_vop3:
-                    lctx.vector_preamble.append(
+                    lctx.body_preamble.append(
                         '  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);'
                     )
                     vop3_opsel = 'opsel'
@@ -6761,9 +6779,9 @@ class CodeGenerator:
                         for i in range(3)
                     )
                     src_mods = ''.join(
-                        f'    if (inst_.abs & (1u << {i})) src{i}_value = std::fabs(src{i}_value);\n'
-                        f'    if (inst_.neg & (1u << {i})) src{i}_value = -src{i}_value;\n'
+                        line + '\n'
                         for i in range(3)
+                        for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                     )
                     return (
                         '  uint64_t exec = wf.exec();\n'
@@ -6788,11 +6806,10 @@ class CodeGenerator:
                     src_mods = ''
                     finish = ''
                     if is_vop3:
-                        src_mods = (
-                            '    if (inst_.abs & 1u) src0_value = std::fabs(src0_value);\n'
-                            '    if (inst_.abs & 2u) src1_value = std::fabs(src1_value);\n'
-                            '    if (inst_.neg & 1u) src0_value = -src0_value;\n'
-                            '    if (inst_.neg & 2u) src1_value = -src1_value;\n'
+                        src_mods = ''.join(
+                            line + '\n'
+                            for i in range(2)
+                            for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                         )
                         finish = (
                             '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'
