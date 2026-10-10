@@ -1261,7 +1261,7 @@ NetworkDirect reuses this variable as the QP count per physical adapter in a con
 
 Values accepted
 ^^^^^^^^^^^^^^^
-Number between 1 and 128, default is 1.
+Number between 1 and 128, default is 1. With the ``IB`` network transport, GIN connections (the proxy bootstrap ring and the per-context proxy links) use one queue pair per device and do not follow this variable. Collective and point-to-point IB connections do.
 
 NCCL_IB_SPLIT_DATA_ON_QPS
 -------------------------
