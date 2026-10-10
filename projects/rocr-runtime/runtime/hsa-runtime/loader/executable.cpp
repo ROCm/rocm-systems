@@ -277,6 +277,23 @@ void Loader::Destroy(Loader *loader)
   r_debug_tail() = nullptr;
 }
 
+// Code objects v2+ load as one segment spanning every PT_LOAD.
+static uint64_t LoadSizeV2(const code::AmdHsaCode* c) {
+  const code::Segment* last = c->DataSegment(c->DataSegmentCount() - 1);
+  return last->vaddr() + last->memSize();
+}
+
+hsa_status_t Loader::CodeObjectLoadSize(const void* code_object, size_t size, size_t* load_size) {
+  code::AmdHsaCode code;
+  uint32_t major, minor;
+  if (!code.InitAsBuffer(code_object, size) || !code.GetCodeObjectVersion(&major, &minor) ||
+      major < 2 || code.Machine() != ELF::EM_AMDGPU || !code.DataSegmentCount()) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+  *load_size = LoadSizeV2(&code);
+  return HSA_STATUS_SUCCESS;
+}
+
 Executable* AmdHsaCodeLoader::CreateExecutable(
   hsa_profile_t profile, const char *options, hsa_default_float_rounding_mode_t default_float_rounding_mode)
 {
@@ -1270,17 +1287,15 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   const std::string &uri,
   hsa_loaded_code_object_t *loaded_code_object)
 {
-  return LoadCodeObject(agent, code_object, 0, options, uri, loaded_code_object);
+  return LoadCodeObject(agent, code_object, 0, options, uri, loaded_code_object,
+                        /*load_address=*/nullptr, /*load_limit=*/0);
 }
 
-hsa_status_t ExecutableImpl::LoadCodeObject(
-  hsa_agent_t agent,
-  hsa_code_object_t code_object,
-  size_t code_object_size,
-  const char *options,
-  const std::string &uri,
-  hsa_loaded_code_object_t *loaded_code_object)
-{
+hsa_status_t ExecutableImpl::LoadCodeObject(hsa_agent_t agent, hsa_code_object_t code_object,
+                                            size_t code_object_size, const char* options,
+                                            const std::string& uri,
+                                            hsa_loaded_code_object_t* loaded_code_object,
+                                            void* load_address, size_t load_limit) {
   WriterLockGuard<ReaderWriterLock> writer_lock(rw_lock_);
   if (HSA_EXECUTABLE_STATE_FROZEN == state_) {
     logger_ << "LoaderError: executable is already frozen\n";
@@ -1427,7 +1442,7 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   objects.push_back(std::make_shared<LoadedCodeObjectImpl>(this, agent, code->ElfData(), code->ElfSize()));
   loaded_code_objects.push_back(std::static_pointer_cast<LoadedCodeObjectImpl>(objects.back()));
 
-  status = LoadSegments(agent, code.get(), majorVersion);
+  status = LoadSegments(agent, code.get(), majorVersion, load_address, load_limit);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   for (size_t i = 0; i < code->SymbolCount(); ++i) {
@@ -1470,13 +1485,15 @@ hsa_status_t ExecutableImpl::LoadCodeObject(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent,
-                                          const code::AmdHsaCode *c,
-                                          uint32_t majorVersion) {
+hsa_status_t ExecutableImpl::LoadSegments(hsa_agent_t agent, const code::AmdHsaCode* c,
+                                          uint32_t majorVersion, void* load_address,
+                                          size_t load_limit) {
+  // V1 segments are allocated separately and cannot share one base address.
+  if (majorVersion < 2 && load_address) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   if (majorVersion < 2)
     return LoadSegmentsV1(agent, c);
   else
-    return LoadSegmentsV2(agent, c);
+    return LoadSegmentsV2(agent, c, load_address, load_limit);
 }
 
 hsa_status_t ExecutableImpl::LoadSegmentsV1(hsa_agent_t agent,
@@ -1490,19 +1507,26 @@ hsa_status_t ExecutableImpl::LoadSegmentsV1(hsa_agent_t agent,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
-                                            const code::AmdHsaCode *c) {
+hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent, const code::AmdHsaCode* c,
+                                            void* load_address, size_t load_limit) {
   assert(c->Machine() == ELF::EM_AMDGPU && "Program code objects are not supported");
 
   if (!c->DataSegmentCount()) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
 
   uint64_t vaddr = c->DataSegment(0)->vaddr();
-  uint64_t size = c->DataSegment(c->DataSegmentCount() - 1)->vaddr() +
-                  c->DataSegment(c->DataSegmentCount() - 1)->memSize();
+  uint64_t size = LoadSizeV2(c);
 
-  void *ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size,
-      AMD_ISA_ALIGN_BYTES, true);
-  if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  void* ptr = nullptr;
+  if (load_address) {
+    if (size > load_limit) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    hsa_status_t status =
+        context_->SegmentAllocAt(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size, load_address, &ptr);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  } else {
+    ptr = context_->SegmentAlloc(AMDGPU_HSA_SEGMENT_CODE_AGENT, agent, size, AMD_ISA_ALIGN_BYTES,
+                                 true);
+    if (!ptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   std::shared_ptr<Segment> load_segment = std::make_shared<Segment>(this, agent, AMDGPU_HSA_SEGMENT_CODE_AGENT,
       ptr, size, vaddr, c->DataSegment(0)->offset());

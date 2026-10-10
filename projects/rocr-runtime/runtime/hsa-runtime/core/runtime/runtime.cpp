@@ -4488,6 +4488,29 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t Runtime::CheckExecutableMapping(const void* va, size_t size, hsa_agent_t agent) {
+  if (!va || size == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = mapped_handle_map_.upper_bound(va);
+  if (it == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  --it;
+
+  const auto* base = reinterpret_cast<const uint8_t*>(it->first);
+  const auto* req = reinterpret_cast<const uint8_t*>(va);
+  if (req < base) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const size_t offset = static_cast<size_t>(req - base);
+  if (offset > it->second.size || size > it->second.size - offset)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  core::Agent* agent_obj = core::Agent::Convert(agent);
+  if (!agent_obj || !agent_obj->IsValid()) return HSA_STATUS_ERROR_INVALID_AGENT;
+  auto access = it->second.allowed_agents.find(agent_obj);
+  if (access == it->second.allowed_agents.end() ||
+      (access->second.permissions & HSA_ACCESS_PERMISSION_EX) == 0)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
                                        hsa_amd_vmem_alloc_handle_t memoryOnlyHandle,
                                        uint64_t flags) {
