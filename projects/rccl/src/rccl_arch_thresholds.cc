@@ -181,7 +181,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ddaVmmMaxGraph = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMin    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .ceNonRegMax = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
-  .ceRegMax    = {0, 0, 0, 0, 256ULL*1024*1024, 0, 0, 0, 0},
+  .ceRegMax    = {0, 0, 0, kThreshUnlimited, 256ULL*1024*1024, 0, 0, 0, 0},
   .symMaxR2 = {
     kThreshUnlimited,     // [0] Broadcast      -- not used
     kThreshUnlimited,     // [1] Reduce          -- not used

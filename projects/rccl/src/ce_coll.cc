@@ -43,6 +43,7 @@ ncclResult_t ncclCeLaunchPersistentReduce(const void* in, void* out, int nRanks,
 RCCL_PARAM(CeMultiStreams, "CE_MULTI_STREAMS", 0);
 RCCL_PARAM(CeBatchAsyncEnable, "CE_BATCH_ASYNC_ENABLE", -2);
 RCCL_PARAM(CeCoopLaunch, "CE_COOP_LAUNCH", 0);
+RCCL_PARAM_DECLARE(CeReduceScatter);
 
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 // Runtime detection: does the running driver actually implement hipMemcpyBatchAsync?
@@ -476,6 +477,7 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
     case ncclFuncScatter:
     case ncclFuncGather:
     case ncclFuncAllReduce:
+    case ncclFuncReduceScatter:
       return true;
     default:
       return false;
@@ -3219,7 +3221,7 @@ ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   size_t ceARTmpBufSize = 0;
 
   if (comm->ceColl.ceARTmpBuf != nullptr) return ncclSuccess;
-  if (!rcclParamCeAllReduce()) return ncclSuccess;
+  if (!rcclParamCeAllReduce() && !rcclParamCeReduceScatter()) return ncclSuccess;
 
   maxChunkBytes = comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks;
   ceARTmpBufSize = alignUp(NUM_SLOTS * comm->nRanks * maxChunkBytes, 16);
@@ -3382,7 +3384,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           waits[r].waitValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
     // Batched doorbell: all peers' + local slot signals stream memop.
     const size_t dstSlotOffsetBytes = (size_t)slot * slotStrideBytes + (size_t)comm->rank * slotChunkBytes;
@@ -3411,7 +3413,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           writes[r].writeValue.address = basePeerSignalAddr[r];
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0), ret, fail);
     }
     if (totalSteps == 1) {
       NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
@@ -3439,7 +3441,7 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
           waits[r].waitValue.address = (uint32_t*)peerSig;
         }
       }
-      CUCHECK(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0));
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
     }
   }
   if (fastPath) {
@@ -3489,6 +3491,204 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
     // Phase 5 (slow path only): Local Copy — move assembled result from
     // tmpBuf to user recvbuff.
     CUDACHECKGOTO(cudaMemcpyAsync(recvbuff, tmpBuf, totalBytes, cudaMemcpyDeviceToDevice, ceStream), ret, fail);
+  }
+
+  if (totalSteps > 1) {
+    CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, ceStream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(stream, ceColl->synceEvent, 0), ret, fail);
+  }
+exit:
+  ncclCeFreeBatchOpsParams(&batchOpsParams);
+  return ret;
+fail:
+  goto exit;
+}
+
+ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                 ncclDataType_t datatype, ncclRedOp_t op, cudaStream_t stream,
+                                 struct ncclDevrWindow* recvWin, struct ncclCeCollArgs* profilerArgs) {
+  ncclResult_t ret = ncclSuccess;
+  NCCLCHECK(ncclCeEnsureAllReduceStaging(comm));
+  if (comm->ceColl.ceARTmpBuf == nullptr) {
+    WARN("CE ReduceScatter staging is not available");
+    return ncclInvalidUsage;
+  }
+
+  const size_t eltSize = ncclTypeSize(datatype);
+  const size_t totalBytes = count * eltSize * (size_t)comm->nRanks;
+  const size_t shardElems = count;
+  const size_t shardBytes = shardElems * eltSize;
+  const size_t NUM_SLOTS = NCCL_CE_NUM_SLOTS;
+  // Match the window ncclCeEnsureAllReduceStaging sized from ceArStagingBytes.
+  // ncclCeAllReduceMaxChunkBytes() is the compile-time default and overruns the
+  // window when RCCL_CE_AR_STAGING_BYTES is smaller.
+  const size_t slotChunkBytes =
+      ncclCeAllReduceSlotChunkBytes(comm->ceColl.ceArStagingBytes / (size_t)comm->nRanks);
+  if (shardElems == 0 || slotChunkBytes < eltSize) {
+    WARN("CE ReduceScatter: no valid chunk layout (count=%zu eltSize=%zu nRanks=%d)", count, eltSize, comm->nRanks);
+    return ncclInvalidArgument;
+  }
+  const size_t chunkBytes =
+    (shardBytes <= slotChunkBytes) ? shardBytes : ncclCeAllReduceChooseChunkBytes(shardBytes, slotChunkBytes);
+  size_t baseChunkElems = chunkBytes / eltSize;
+  size_t slotChunkElems = slotChunkBytes / eltSize;
+  size_t chunksPerShard = shardElems / baseChunkElems;
+  size_t tailChunkElems = shardElems % baseChunkElems;
+  if (tailChunkElems != 0) {
+    chunksPerShard++;
+  }
+  size_t totalSteps = chunksPerShard;
+  // ceARTmpBuf slots are spaced by slotChunkBytes (<= maxChunkBytes at init);
+  // see the layout helpers in ce_coll.h for the offsets derived from it.
+  int startCh = (int)chunksPerShard - (int)NUM_SLOTS;
+  std::vector<uint32_t*> basePeerSignalAddr(comm->nRanks);
+  INFO(NCCL_COLL,
+       "CE ReduceScatter: rank %d totalBytes %zu chunkBytes=%zu baseChunkElems=%zu tailChunkElems=%zu "
+       "chunksPerShard=%zu",
+       comm->rank, totalBytes, chunkBytes, baseChunkElems, tailChunkElems, chunksPerShard);
+  std::vector<hipStreamBatchMemOpParams> waits(comm->nRanks);
+  std::vector<hipStreamBatchMemOpParams> writes(comm->nRanks);
+  for (int r = 0; r < comm->nRanks; r++) {
+    waits[r] = {};
+    waits[r].operation = CU_STREAM_MEM_OP_WAIT_VALUE_32;
+    waits[r].waitValue.value = 0;
+    waits[r].waitValue.flags = CU_STREAM_WAIT_VALUE_EQ;
+
+    writes[r] = {};
+    writes[r].operation = CU_STREAM_MEM_OP_WRITE_VALUE_32;
+    writes[r].writeValue.value = 1;
+    writes[r].writeValue.flags = CU_STREAM_WRITE_VALUE_DEFAULT;
+  }
+
+  struct ncclCeColl* ceColl = &comm->ceColl;
+  uint8_t* tmpBuf = ceColl->ceARTmpBuf;
+  uint8_t* outShard = (uint8_t*)recvbuff;
+  uint32_t* signalBuffer = ceColl->signalBuffer;
+  void* peerSig = nullptr;
+  size_t mySlotOffset = 0;
+
+  struct ncclCeBatchOpsParams batchOpsParams = {};
+  struct ncclCeCollArgs collArgs = {};
+  const int coopLaunch = rcclParamCeCoopLaunch();
+  collArgs.func = ncclFuncReduceScatter;
+  collArgs.datatype = datatype;
+  collArgs.redOp = op;
+  collArgs.nElts = count;
+  collArgs.eltSize = eltSize;
+  collArgs.sendBuff = (uint8_t*)sendbuff;
+  collArgs.recvBuff = (uint8_t*)recvbuff;
+  collArgs.recvWin = recvWin;
+  if (profilerArgs) {
+    collArgs.collApiEventHandle = profilerArgs->collApiEventHandle;
+    collArgs.ceCollProfHandle = profilerArgs->ceCollProfHandle;
+  }
+  cudaStream_t ceStream;
+  if (totalSteps > 1) {
+    ceStream = ceColl->scatterStream;
+  } else {
+    ceStream = stream;
+  }
+
+  NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
+
+  if (totalSteps > 1) {
+    // Pipelined path uses stream for the reduce kernel and scatterStream for scatter.
+    // Synchronize them here so scatterStream does not start until prior work on the caller
+    // stream has finished (pairs with the synceEvent at exit).
+    CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, stream), ret, fail);
+    CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
+  }
+  NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
+
+  if (totalSteps > 1) {
+    CUDACHECKGOTO(cudaMemsetAsync(ceColl->d_barrierSync, 0, 2 * sizeof(uint32_t), stream), ret, fail);
+    NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
+                                               chunksPerShard, slotChunkElems, signalBuffer, totalSteps,
+                                               ceColl->d_barrierSync, datatype, op, stream, coopLaunch),
+                  ret, fail);
+  }
+
+  for (int ch = 0; ch < chunksPerShard; ch++) {
+    INFO(NCCL_COLL, "CE ReduceScatter: scatter rank %d totalBytes=%zu chunkBytes=%zu ch %d", comm->rank, totalBytes,
+         chunkBytes, ch);
+    const int slot = (int)(ch % NUM_SLOTS);
+    const bool isTail = (ch == chunksPerShard - 1) && (tailChunkElems > 0);
+    const size_t currentChunkBytes = isTail ? tailChunkElems * eltSize : chunkBytes;
+    const size_t mySignalIndex = ncclCeReduceScatterSignalIndex(slot, comm->rank, comm->nRanks);
+    if (totalSteps > 1) {
+      mySlotOffset = mySignalIndex * sizeof(uint32_t);
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r != comm->rank) {
+          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, mySlotOffset, r, &peerSig), ret, fail);
+          basePeerSignalAddr[r] = (uint32_t*)peerSig;
+        }
+      }
+    }
+    if (ch >= NUM_SLOTS) {
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r == comm->rank) {
+          waits[r].waitValue.address = &signalBuffer[mySignalIndex];
+        } else {
+          waits[r].waitValue.address = basePeerSignalAddr[r];
+        }
+      }
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
+    }
+    const size_t dstSlotOffsetBytes =
+      ncclCeReduceScatterDstSlotOffsetBytes(slot, comm->rank, comm->nRanks, slotChunkBytes);
+    batchOpsParams.numOps = 0;
+    for (int r = 0; r < comm->nRanks; r++) {
+      void* dstPtr;
+      const uint8_t* srcShard =
+        (const uint8_t*)sendbuff + ncclCeReduceScatterSrcOffsetBytes(r, shardBytes, ch, chunkBytes);
+      if (r == comm->rank) {
+        dstPtr = tmpBuf + dstSlotOffsetBytes;
+      } else {
+        NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->ceARTmpWin, dstSlotOffsetBytes, r, &dstPtr), ret, fail);
+      }
+      batchOpsParams.srcs[batchOpsParams.numOps] = (void*)srcShard;
+      batchOpsParams.dsts[batchOpsParams.numOps] = dstPtr;
+      batchOpsParams.sizes[batchOpsParams.numOps] = currentChunkBytes;
+      batchOpsParams.numOps++;
+    }
+    NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, ceStream, &collArgs), ret, fail);
+    if (totalSteps > 1) {
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r == comm->rank) {
+          writes[r].writeValue.address = &signalBuffer[mySignalIndex];
+        } else {
+          writes[r].writeValue.address = basePeerSignalAddr[r];
+        }
+      }
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, writes.data(), 0), ret, fail);
+    }
+    if (totalSteps == 1) {
+      NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
+      NCCLCHECKGOTO(ncclCeLaunchPersistentReduce(tmpBuf, outShard, comm->nRanks, baseChunkElems, tailChunkElems,
+                                                 chunksPerShard, slotChunkElems, signalBuffer, totalSteps,
+                                                 ceColl->d_barrierSync, datatype, op, ceStream, coopLaunch),
+                    ret, fail);
+    }
+  }
+  if (totalSteps > 1) {
+    if (startCh < 0) {
+      startCh = 0;
+    }
+    for (int chunkIndex = startCh; chunkIndex < (int)chunksPerShard; chunkIndex++) {
+      const int drainSlot = chunkIndex % NUM_SLOTS;
+      const size_t drainSignalIndex = ncclCeReduceScatterSignalIndex(drainSlot, comm->rank, comm->nRanks);
+      const size_t slotOffset = drainSignalIndex * sizeof(uint32_t);
+      for (int r = 0; r < comm->nRanks; r++) {
+        if (r == comm->rank) {
+          waits[r].waitValue.address = &signalBuffer[drainSignalIndex];
+        } else {
+          NCCLCHECKGOTO(ncclDevrGetLsaRankPtr(comm, ceColl->signalWin, slotOffset, r, &peerSig), ret, fail);
+          waits[r].waitValue.address = (uint32_t*)peerSig;
+        }
+      }
+      CUCHECKGOTO(hipStreamBatchMemOp(ceStream, comm->nRanks, waits.data(), 0), ret, fail);
+    }
+    NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   }
 
   if (totalSteps > 1) {
@@ -3558,7 +3758,18 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       // (AG written directly into user recvbuff, no final D2D copy).
       NCCLCHECKGOTO(ncclCeAllReduce(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
                                     stream, args->recvWin, args),
-                    ret, fail);
+                  ret, fail);
+      break;
+    case ncclFuncReduceScatter:
+      NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
+      if (comm->ceColl.ceARTmpBuf == NULL) {
+        WARN("CE ReduceScatter invoked without staging buffer");
+        ret = ncclInvalidUsage;
+        break;
+      }
+      NCCLCHECKGOTO(ncclCeReduceScatter(comm, args->sendBuff, args->recvBuff, args->nElts, args->datatype, args->redOp,
+                                        stream, args->recvWin, args),
+                      ret, fail);
       break;
     default:
       ret = ncclInvalidUsage;
