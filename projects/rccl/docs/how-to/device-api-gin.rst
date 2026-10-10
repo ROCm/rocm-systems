@@ -195,6 +195,26 @@ Do not issue a strong action from a device communicator created with
 deprecated. Their strength is selected globally by
 ``ginStrongSignalsRequired``; new code should use an explicit type.
 
+Stream capture when GIN setup fails
+====================================
+
+``ncclDevCommCreate`` switches the calling thread to relaxed stream-capture
+mode while it builds the device communicator. GIN connection setup, window
+registration, and the resource-window allocation are not part of a captured
+graph, so they run outside capture. When the call returns, RCCL puts the
+thread back in the capture mode the application had set.
+
+That restore also runs when GIN setup fails. Upstream NCCL 2.31.2 fixed a
+path where ``ncclGinDevCommSetup`` returned immediately and left the thread
+in relaxed mode (NVIDIA NCCL PR 2229). RCCL uses the same cleanup path: a
+failed ``ncclDevCommCreate`` that requested GIN does not leave the thread's
+HIP stream-capture mode changed.
+
+Check the ``ncclResult_t`` from ``ncclDevCommCreate``. On failure the device
+communicator was not created. Do not try to undo the capture mode yourself,
+and do not assume the thread is still in relaxed mode. Later graph capture
+on that thread uses the mode the application set before the create call.
+
 Use world-team barriers and timeouts
 ====================================
 

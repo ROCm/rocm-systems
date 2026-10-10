@@ -5507,8 +5507,8 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 // This suite covers its GIN request validation, which runs before any resource
 // is touched and rejects combinations the communicator cannot serve.
 //
-// The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// The body past that gate builds the whole devcomm. The capture-mode test
+// below is the one exception: it reaches ncclGinDevCommSetup and stops there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -5532,6 +5532,18 @@ protected:
     comm = commStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    // idivRcp32(cftMcSize) runs before GIN setup. A zero size is a divide by zero.
+    comm->devrState.cftMcSize = 1;
+    comm->devrState.granularity = 4096;
+  }
+
+  void TearDown() override {
+    while (comm->devrState.teamHead != nullptr) {
+      struct ncclDevrTeam* team = comm->devrState.teamHead;
+      comm->devrState.teamHead = team->next;
+      free(team);
+    }
+    NcclVersionCompatTest::TearDown();
   }
 
   ncclResult_t Create() {
@@ -5579,6 +5591,36 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// NCCL 2.31.2 (PR #2229): ncclDevrCommCreateInternal switches the thread to
+// relaxed stream-capture mode before GIN setup. A failure in
+// ncclGinDevCommSetup must take the shared fail path, which exchanges the
+// mode back. Returning directly from the setup call leaves the thread relaxed
+// and later graph capture on that thread sees the wrong mode.
+TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  reqs.ginSignalCount = 0;  // skip the sharedRes ginState walk
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  hipStreamCaptureMode threadMode = hipStreamCaptureModeGlobal;
+  ScopedHook exchange(g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* mode) {
+    if (mode == nullptr) return hipErrorInvalidValue;
+    hipStreamCaptureMode previous = threadMode;
+    threadMode = *mode;
+    *mode = previous;
+    return hipSuccess;
+  });
+  ScopedHook ginSetup(g_ncclGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t) {
+                        return ncclInternalError;
+                      });
+
+  EXPECT_EQ(Create(), ncclInternalError);
+  EXPECT_EQ(ginSetup.calls, 1);
+  // Once to enter relaxed mode, once on the fail label to put the caller's mode back.
+  EXPECT_EQ(exchange.calls, 2);
+  EXPECT_EQ(threadMode, hipStreamCaptureModeGlobal);
 }
 
 
