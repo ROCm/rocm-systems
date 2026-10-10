@@ -43,6 +43,7 @@
 #endif
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -62,15 +63,11 @@ static bool envCtaPolicyIsZero()
     return policy != NCCL_CONFIG_UNDEF_INT && (policy & NCCL_CTA_POLICY_ZERO) != 0;
 }
 
-// CAST jobs set NCCL_NET=IB-CAST (or ib-cast). Classic IB must not take this arm.
-static bool envNetIsIbCast()
+// Reads the plugin the comm actually loaded, so NCCL_NET aliases and the unset default resolve correctly.
+static bool commNetIsIbCast(ncclComm_t comm)
 {
-    const char* net = std::getenv("NCCL_NET");
-    if (net == nullptr || net[0] == '\0') return false;
-    std::string s(net);
-    for (char& c : s)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s == "IB-CAST";
+    const auto* c = reinterpret_cast<const struct ncclComm*>(comm);
+    return c != nullptr && c->ncclNet != nullptr && std::strcmp(c->ncclNet->name, "IB-CAST") == 0;
 }
 
 // Env / driver gates are process-wide, so a rank-local skip is safe. Alloc
@@ -1322,7 +1319,7 @@ protected:
  *   recvbuff = [N * kSegmentSize,  2N * kSegmentSize)  covers last  N segments
  *
  * The collective operates on four segments per half, while ncclCommRegister
- * covers the complete eight-segment allocation. Under NCCL_NET=IB-CAST the
+ * covers the complete eight-segment allocation. When the comm loads IB-CAST the
  * CAST register arm must set NET_REG_COMPLETE; skip would stay green if
  * IbCastRegMrDmaBufMultiSeg were reverted. Classic IB skips unless some rank
  * set NET_REG_COMPLETE. The all-peer flag and the count of 8 are cache writes
@@ -1393,9 +1390,13 @@ TEST_F(UBR_MultiSegment, Generic)
     // ncclCommRegister must publish a cache entry for the multi-segment buffer.
     ASSERT_MPI_NE(reg, nullptr);
     const bool netRegistered = (reg->state & NET_REG_COMPLETE) != 0;
-    if (envNetIsIbCast()) {
+    if (commNetIsIbCast(getActiveCommunicator())) {
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
         ASSERT_TRUE(MPIHelpers::allRanksTrue(netRegistered))
             << "CAST netIbCast register arm did not set NET_REG_COMPLETE";
+#else
+        GTEST_SKIP() << "Multi-segment NET registration is compiled out without NCCL_CUMEM_DMABUF_EXPORT_GATE";
+#endif
     } else {
         const std::string why = mpiCoordinatedSkipReason(
             !MPIHelpers::anyRankTrue(netRegistered),

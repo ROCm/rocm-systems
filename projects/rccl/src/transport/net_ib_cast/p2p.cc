@@ -193,11 +193,11 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
       uint64_t rVA[NCCL_IB_MAX_SEGMENTS], rOff[NCCL_IB_MAX_SEGMENTS + 1];
       int nRemote;
       uint64_t remoteReqOff = 0;
+      uint64_t starts[NCCL_IB_MAX_SEGMENTS];
+      uint32_t rkeys[NCCL_IB_MAX_SEGMENTS];
       bool remoteMulti = ibCastCtsRemoteMultiSeg(comm, slot, r);
       if (remoteMulti) {
         uint32_t remoteSegments = side[r].nSegments;
-        uint64_t starts[NCCL_IB_MAX_SEGMENTS];
-        uint32_t rkeys[NCCL_IB_MAX_SEGMENTS];
         const uint32_t nCopy =
           (remoteSegments >= 1 && remoteSegments <= NCCL_IB_MAX_SEGMENTS && remDevIdx >= 0 &&
            remDevIdx < NCCL_IB_MAX_DEVS_PER_NIC)
@@ -217,8 +217,8 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           rVA[s] = starts[s];
           rOff[s] = starts[s] - starts[0];
         }
-        if (remoteBase < side[r].segStart[0]) return ncclInternalError;
-        remoteReqOff = remoteBase - side[r].segStart[0];
+        if (remoteBase < starts[0]) return ncclInternalError;
+        remoteReqOff = remoteBase - starts[0];
         uint64_t remoteReqEnd = remoteReqOff + ctsFifoSize(slots, r);
         if (remoteReqEnd < remoteReqOff) return ncclInternalError;
         while (nRemote > 1 && rOff[nRemote - 1] >= remoteReqEnd) nRemote--;
@@ -242,7 +242,7 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
         if (remoteMulti) {
           int s = ncclIbSegmentForZeroLengthOffset(nRemote, rOff, remoteReqOff + sendOffsets[r]);
           if (s < 0) return ncclInternalError;
-          wr->wr.rdma.rkey = side[r].segRkeys[s][remDevIdx];
+          wr->wr.rdma.rkey = rkeys[s];
         } else {
           wr->wr.rdma.rkey = ctsFifoRkey(slots, r, remDevIdx);
         }
@@ -274,8 +274,7 @@ static ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm, int sl
           wr->send_flags = 0;
           wr->wr_id = wr_id;
           wr->wr.rdma.remote_addr = slices[k].remoteAddr;
-          wr->wr.rdma.rkey =
-            remoteMulti ? side[r].segRkeys[slices[k].remoteSeg][remDevIdx] : ctsFifoRkey(slots, r, remDevIdx);
+          wr->wr.rdma.rkey = remoteMulti ? rkeys[slices[k].remoteSeg] : ctsFifoRkey(slots, r, remDevIdx);
           sge->addr = slices[k].localAddr;
           sge->length = slices[k].len;
           sge->lkey = (mh && mh->nSegments > 1) ? mh->segMrs[slices[k].localSeg][devIndex]->lkey :
@@ -920,7 +919,10 @@ isendFail:
     for (int i = 0; i < failNqps; i++) {
       ncclIbQp* qp = NULL;
       int qpIndex = -1;
-      if (IbCastCommBaseGetQpForRequest(&comm->base, failStart, i, &qp, &qpIndex) != ncclSuccess || qp == NULL) continue;
+      if (IbCastCommBaseGetQpForRequest(&comm->base, failStart, i, &qp, &qpIndex) != ncclSuccess ||
+          qp == NULL) {
+        continue;
+      }
       if (!fr->send.sentData[qpIndex] && fr->events[qp->devIndex] > 0) fr->events[qp->devIndex]--;
     }
   }
@@ -1200,11 +1202,6 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   struct ncclIbSendFifoCtsInline* localElemInline = (struct ncclIbSendFifoCtsInline*)localElem;
   for (int i = 0; i < n; i++) {
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandles[i];
-    if (mhandleWrapper == NULL) {
-      WARN("NET/IB: irecv[%d] has a NULL mhandle", i);
-      res = ncclInternalError;
-      goto err;
-    }
     uint32_t ctsIdx = (uint32_t)(comm->base.fifoHead + 1);
     if (IbCastAinicCtsInlineData) {
       localElemInline[i].addr = (uint64_t)data[i];
@@ -1234,11 +1231,6 @@ ncclResult_t IbCastIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
         for (int s = 0; s < mhandleWrapper->nSegments; s++) {
           sideElem[i].segStart[s] = (uint64_t)mhandleWrapper->segStart[s];
           for (int j = 0; j < comm->base.vProps.ndevs; j++) {
-            if (mhandleWrapper->segMrs[s][j] == NULL) {
-              WARN("NET/IB: irecv[%d] missing MR for segment %d device %d", i, s, j);
-              res = ncclInternalError;
-              goto err;
-            }
             sideElem[i].segRkeys[s][j] = mhandleWrapper->segMrs[s][j]->rkey;
           }
         }
@@ -1399,8 +1391,8 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
             req, req->base, wrId);
       TIME_START(4);
       struct ibv_send_wr* bad_wr = NULL;
-      INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx nWrs=%d",
-           __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wrId, nFlushWrs);
+      INFO(NCCL_NET, "NET/IB: %s: posting flush dev=%d qpn=%u wr_id=0x%lx",
+           __func__, i, comm->devs[i].gpuFlush.qp.qp->qp_num, wrId);
       iflushRet = wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &flushWrs[0], &bad_wr);
       TIME_STOP(4);
       if (iflushRet != ncclSuccess) {

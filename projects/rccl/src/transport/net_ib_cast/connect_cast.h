@@ -140,6 +140,15 @@ static_assert(offsetof(struct ncclIbConnectionMetadata, devName) ==
                   sizeof(((struct ncclIbConnectionMetadata*)0)->devs),
               "CAST connection metadata must keep devName at its legacy offset");
 
+extern int64_t ncclParamMultiSegmentRegister();
+// NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
+static inline bool IbCastAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
+
+// Multi-segment iflush posts one RDMA_READ per recv per segment.
+static inline int IbCastFlushQpSendDepth() {
+  return NET_IB_MAX_REQUESTS + (IbCastAdvertiseMultiSeg() ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
+}
+
 // Initialize QP sharing fields to defaults (sharing disabled)
 static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
   attr->isQpSharingEnabled = false;
