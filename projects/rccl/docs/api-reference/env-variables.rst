@@ -275,6 +275,60 @@ collected in the following table.
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
 
+    * - | ``NCCL_ENQUEUE_REARCH_ENABLE``
+        | Routes collective enqueue through the unified cost model path instead of
+          the legacy selector. Experimental: RCCL's per-architecture tuning constants
+          are not wired into the unified path yet, so enabling it changes which
+          algorithm and protocol are selected. Not recommended for production.
+          See :ref:`rccl-cost-model`.
+      - | ``0``: Use the legacy selector (default).
+        | ``1``: Use the unified cost model path.
+
+    * - | ``NCCL_PAT_ENABLE``
+        | Controls the PAT algorithm for AllGather and ReduceScatter. RCCL defaults
+          this to ``0``, whereas upstream NCCL defaults it to ``2``. PAT is therefore
+          not a candidate in RCCL unless requested explicitly, with one exception:
+          selection also honors ``comm->forcePatEnable``, which RCCL sets at init on
+          the inter-node communicator of hierarchical collectives whenever this
+          variable is not explicitly ``0`` and AINIC is not in use. On that
+          communicator PAT is a candidate with this variable unset.
+      - | ``0``: Disabled (default in RCCL).
+        | ``1``: Enabled.
+        | ``2``: Automatic (upstream NCCL default); enabled only when the topology
+          and transport prerequisites are met.
+
+    * - | ``NCCL_LL128_C2C``
+        | Widens the LL128 eligibility check to PXN-class inter-node connections on
+          devices with compute capability 90 or above. When disabled, LL128 is
+          restricted to PXB and below so that no C2C link is used by LL128. This
+          gates the unified cost model only. RCCL's default legacy selector does not
+          read it: the AMD branch of ``ncclTopoTuneModel`` gates LL128 on the GPU
+          architecture, ``topo->ll128Enabled``, ``PATH_PXB`` and ``PATH_NVL``, and
+          ``ncclParamLl128C2c`` is consulted only in the non-HIP branch. Setting this
+          variable does not widen default-path LL128 eligibility on AMD Instinct
+          accelerators.
+      - | ``1``: Allow LL128 up to ``PATH_PXN`` (default).
+        | ``0``: Restrict LL128 to ``PATH_PXB``.
+
+    * - | ``RCCL_SYM_MODEL``
+        | Selects among RCCL's symmetric-kernel tuning parameter sets. Values outside
+          the valid range fall back to ``0`` with an ``NCCL_DEBUG_SUBSYS=ENV`` message.
+      - | Non-negative integer index into the available tuning models.
+        | Default: ``0``.
+
+    * - | ``NCCL_SYM_CTAS``
+        | Forces a fixed CTA (block) count for symmetric kernels instead of letting
+          the cost model choose the launch geometry.
+      - | Positive integer CTA count.
+        | Default: ``0`` (unset; the cost model chooses).
+
+    * - | ``NCCL_SYM_KERNEL``
+        | Selects a specific symmetric kernel by name, using the ``ncclSymKernelStr``
+          names such as ``AllReduce_AGxLL_R`` or ``AllGather_TmaST``. Accepts the same
+          ``func:list;...`` per-collective prefix syntax as ``NCCL_ALGO``.
+      - | Symmetric kernel name string, optionally scoped per collective.
+        | Default: unset (the cost model chooses).
+
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
           size), that can select hierarchical AllGather, so that small startup

@@ -2944,6 +2944,9 @@ static void initCollCostTable(float** collCostTable) {
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
+// Narrowing the table here does not bind the whole pipeline: getAlgoInfo's arch windows and
+// rcclUpdateCollectiveProtocol (rccl_wrap.cc) rewrite the choice after this returns, a tuner plugin may
+// refill a blanked cell, and a CE/DDA backend is picked in rcclSelect*() before the task exists.
 static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                         int collNetSupport, int nvlsSupport, int numPipeOps, int userAlgoInput,
                                         float** collCostTable) {
@@ -2958,6 +2961,17 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
     table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0;
     return ncclSuccess;
   }
+
+  // Per-call algSelection mask. A registry mask bit IS its tuning id, so a general row sits at
+  // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
+  // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
+  // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
+  uint64_t effAlgMask = comm->tuningContext.forced[info->func] ? 0 : info->algMask;
+  uint64_t generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // Naming a row per call is as explicit as naming it in NCCL_ALGO or NCCL_PROTO, so it lifts the
+  // same heuristic gates those env vars lift. Otherwise one selection string succeeds at 1 MiB and
+  // fails at 4 MiB, or works only on an all-XGMI node.
+  auto algNamed = [&](int a, int p) { return ((generalMask >> (a * NCCL_NUM_PROTOCOLS + p)) & 1) != 0; };
 
   for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
     if ((a == NCCL_ALGO_COLLNET_DIRECT || a == NCCL_ALGO_COLLNET_CHAIN) && collNetSupport != 1) continue;
@@ -2974,7 +2988,7 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
         (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv))
       continue;
     if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
-      if (!userAlgoInput) {
+      if (!userAlgoInput && !algNamed(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE)) {
         int nNodes = comm->nNodes;
         bool inRange = false;
         if (nNodes <= 4) {
@@ -2997,7 +3011,8 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       userProtoInputCached = true;
     }
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput) {
+      if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL) && !userProtoInput &&
+          !algNamed(a, p)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         continue;
       }
@@ -3007,6 +3022,32 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
       if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
         if (a == NCCL_ALGO_RING && comm->nRanks > 8) {
           table[a][p] *= 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
+        }
+      }
+    }
+  }
+
+  // Apply the filter. A symmetric-only selection ("SYMK_LL") names no general row; leave the table
+  // as the fallback the symmetric scheduler declines to.
+  if (generalMask != 0) {
+    // Decide before blanking. `>= 0.0`, not `!= IGNORE`: the fp8 relegation above scales a -1.0
+    // sentinel cell to -1024.0, and topoGetAlgoInfo's argmin accepts only a non-negative time.
+    bool anyLeft = false;
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+        if (algNamed(a, p) && table[a][p] >= 0.0) anyLeft = true;
+      }
+    }
+    // Every named row is ineligible here (NVLS_SIMPLE without NVLS). nccl.h.in makes that an error
+    // by default; with force off the contract is automatic selection, so leave the table alone.
+    if (!anyLeft && info->forceAlgSelection) {
+      WARN("algSelection names only general algorithm(s) that are unavailable for %s", ncclFuncToString(info->func));
+      return ncclInvalidArgument;
+    }
+    if (anyLeft) {
+      for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+        for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+          if (!algNamed(a, p)) table[a][p] = NCCL_ALGO_PROTO_IGNORE;
         }
       }
     }
