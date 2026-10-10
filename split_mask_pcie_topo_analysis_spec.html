@@ -241,10 +241,7 @@
             <li><a href="#s5">RCCL NIC Selection Logic</a> &mdash; Algorithm, mirrorBits(), 8NIC/4NIC scenarios</li>
             <li><a href="#s6">Physical PCIe Topology (SMC300x MI300X)</a> &mdash; Switch mapping, 8NIC vs 4NIC comparison, DSN complementarity</li>
             <li><a href="#s7">Sysfs-Based Inter-Switch Discovery</a></li>
-            <li><a href="#s8">Topology Dumps Collected</a></li>
-            <li><a href="#s9">Test Configuration</a></li>
-            <li><a href="#s10">Key Source Files Reference</a></li>
-            <li><a href="#s11">Open Questions / Next Steps</a></li>
+            <li><a href="#s8">Open Questions / Next Steps</a></li>
         </ol>
     </div>
 
@@ -1090,128 +1087,15 @@ Result: <span class="bad">PATH_PHB (8)</span> &rarr; GDR disabled
     <div class="page-break" data-page="Page 8"></div>
 
     <!-- ============================================================ -->
-    <!-- SECTION 8: TOPOLOGY DUMPS -->
+    <!-- SECTION 8: OPEN QUESTIONS -->
     <!-- ============================================================ -->
     <section id="s8">
-        <h2>8. Topology Dumps Collected</h2>
+        <h2>8. Open Questions / Next Steps</h2>
 
-        <div class="diagram-grid">
-            <div class="card green">
-                <h3>8.1 &nbsp; 8-GPU / 8-NIC Configuration</h3>
-                <p>File: <code>topo_8gpu_8nic.xml</code></p>
-                <ul>
-                    <li>All 8 GPUs and 8 NICs visible</li>
-                    <li>Each GPU+NIC pair under same BRCM switch partition &rarr; <code>gdr=1</code></li>
-                    <li>NUMA 0: GPUs 0&ndash;3, NUMA 1: GPUs 4&ndash;7</li>
-                </ul>
-            </div>
-            <div class="card red">
-                <h3>8.2 &nbsp; 8-GPU / 4-NIC Configuration (SPLIT_MASK)</h3>
-                <p>File: <code>topo_8gpu_4nic_splitmask.xml</code></p>
-                <ul>
-                    <li>Only 4 NICs visible: ionic_0, ionic_2, ionic_4, ionic_6</li>
-                    <li>Filtered by <code>NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6</code></li>
-                    <li>Shows rank 0's view (1 GPU per communicator per node)</li>
-                    <li><strong>3 of 4 NICs on different switch partitions</strong> &rarr; cross-partition paths</li>
-                </ul>
-            </div>
+        <div class="callout">
+            <strong>Note:</strong> Topology dumps, test configuration, and source file references have been moved to
+            <a href="split_mask_experiment_notes.md">split_mask_experiment_notes.md</a>.
         </div>
-    </section>
-
-    <div class="page-break" data-page="Page 9"></div>
-
-    <!-- ============================================================ -->
-    <!-- SECTION 9: TEST CONFIGURATION -->
-    <!-- ============================================================ -->
-    <section id="s9">
-        <h2>9. Test Configuration</h2>
-
-        <h3>Environment Variables (BD Experiment Flags)</h3>
-        <pre>NCCL_MAX_NCHANNELS=64
-NCCL_TESTS_SPLIT_MASK=0x7
-NCCL_NCHANNELS_PER_NET_PEER=16
-NCCL_P2P_NET_CHUNKSIZE=262144
-RCCL_P2P_SHIFT_SIZE=0
-NCCL_IB_HCA=ionic_0,ionic_2,ionic_4,ionic_6   <span style="color:#6a9955;"># 4-NIC filter</span></pre>
-
-        <h3>Scripts</h3>
-        <table>
-            <tr><th>Script</th><th>Purpose</th></tr>
-            <tr><td><code>setup_env.sh</code></td><td>Environment setup (RCCL_HOME, RCCL_TESTS, OMPI paths, node list)</td></tr>
-            <tr><td><code>run-rccl.sh</code></td><td>mpirun wrapper with all RCCL env vars</td></tr>
-        </table>
-
-        <h3>Run Command</h3>
-        <pre>bash run-rccl.sh all_reduce 1G 1G 1 1</pre>
-
-        <h3>Compute Nodes</h3>
-        <table>
-            <tr><th>Node</th><th>Role</th></tr>
-            <tr><td><code>smc300x-ccs-aus-gpucc5a</code></td><td>Node 1 (ranks 0&ndash;7)</td></tr>
-            <tr><td><code>smc300x-ccs-aus-gpuf273</code></td><td>Node 2 (ranks 8&ndash;15)</td></tr>
-        </table>
-    </section>
-
-    <div class="page-break" data-page="Page 10"></div>
-
-    <!-- ============================================================ -->
-    <!-- SECTION 10: SOURCE FILES -->
-    <!-- ============================================================ -->
-    <section id="s10">
-        <h2>10. Key Source Files Reference</h2>
-
-        <table>
-            <tr><th>File</th><th>Key Functions</th><th>Purpose</th></tr>
-            <tr>
-                <td><code>src/include/graph.h</code></td>
-                <td><code>PATH_*</code> defines</td>
-                <td>Path type constants</td>
-            </tr>
-            <tr>
-                <td><code>src/graph/paths.cc</code></td>
-                <td><code>ncclTopoSetPaths()</code>, <code>ncclTopoComputePaths()</code></td>
-                <td>BFS path computation, GDR/PXN decisions</td>
-            </tr>
-            <tr>
-                <td><code>src/graph/topo.cc</code></td>
-                <td><code>ncclTopoGetLocalNetType()</code>, <code>ncclTopoGetLocal()</code>, <code>ncclTopoFlattenBcmSwitches()</code>, <code>ncclTopoRefreshBcmP2pLinks()</code></td>
-                <td>NIC selection, BCM flattening, virtual link refresh</td>
-            </tr>
-            <tr>
-                <td><code>src/graph/topo.h</code></td>
-                <td><code>mirrorBits()</code></td>
-                <td>GPU-to-rail assignment</td>
-            </tr>
-            <tr>
-                <td><code>src/graph/xml.cc</code></td>
-                <td><code>ncclTopoGetXmlFromSys()</code>, <code>ncclOsGetBcmLinks()</code></td>
-                <td>XML topo building, BCM link reading</td>
-            </tr>
-            <tr>
-                <td><code>src/graph/search.cc</code></td>
-                <td><code>ncclTopoGetNetDev()</code></td>
-                <td>Per-channel NIC assignment</td>
-            </tr>
-            <tr>
-                <td><code>src/init.cc:1928-1935</code></td>
-                <td>Topo dump logic</td>
-                <td><code>NCCL_TOPO_DUMP_FILE</code> handling</td>
-            </tr>
-            <tr>
-                <td><code>rccl-tests/src/common.cu:2467-2494</code></td>
-                <td>SPLIT_MASK parsing</td>
-                <td><code>MPI_Comm_split</code> logic</td>
-            </tr>
-        </table>
-    </section>
-
-    <div class="page-break" data-page="Page 11"></div>
-
-    <!-- ============================================================ -->
-    <!-- SECTION 11: OPEN QUESTIONS -->
-    <!-- ============================================================ -->
-    <section id="s11">
-        <h2>11. Open Questions / Next Steps</h2>
 
         <div class="card blue">
             <h4>1. Deploy and test with switch_discovery module</h4>
