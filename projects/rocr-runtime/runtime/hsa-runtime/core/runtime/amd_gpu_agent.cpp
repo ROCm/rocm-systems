@@ -96,6 +96,12 @@
 #define MAX_WAVE_SCRATCH_GFX12 67106816 // 2MB stack size per wave
 #define MAX_NUM_DOORBELLS 0x400
 
+// AMDGPU_INFO ioctl query id reporting the per-AID persisting GL2 cache
+// maximum (in bytes). Not yet present in the system libdrm uAPI headers.
+#ifndef AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX
+#define AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX 0x25
+#endif
+
 namespace rocr {
 
 namespace AMD {
@@ -708,12 +714,17 @@ void GpuAgent::InitCacheList() {
 }
 
 size_t GpuAgent::GetMaxPersistingL2CacheSize() const {
-  for (const auto& cache : cache_props_) {
-    if ((cache.CacheLevel == 2) && (cache.PersistingCacheSizeMax)) {
-      return cache.PersistingCacheSizeMax;
-    }
-  }
-  return 0;
+  if (ldrm_dev_ == nullptr) return 0;
+
+  // Query the per-AID persisting GL2 cache maximum (in bytes) from the kernel
+  // through the DRM render node (AMDGPU_INFO ioctl). ASICs/kernels that do not
+  // support the feature report 0 or fail the query, self-gating the feature.
+  uint32_t max_size = 0;
+  int err = DRM_CALL(amdgpu_query_info)(
+      ldrm_dev_, AMDGPU_INFO_GL2_PERSISTING_CACHE_SIZE_MAX, sizeof(max_size), &max_size);
+  if (err) return 0;
+
+  return max_size;
 }
 
 void GpuAgent::InitDerivedCuid() {
@@ -2742,8 +2753,16 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
-  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE:{
-        *((size_t*)value) = persisting_l2_cache_size_;
+  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE: {
+        // The kernel tracks the request per-VM on the render node, so query it
+        // directly: this stays correct when the VM was configured by another
+        // process or re-established by CRIU restore. Fall back to the locally
+        // cached request if the driver does not support the query.
+        uint64_t sz = 0;
+        if (driver().GetPersistingCacheSize(node_id(), &sz) == HSA_STATUS_SUCCESS)
+          *((size_t*)value) = sz;
+        else
+          *((size_t*)value) = persisting_l2_cache_size_;
         break;
     }
   case HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: {

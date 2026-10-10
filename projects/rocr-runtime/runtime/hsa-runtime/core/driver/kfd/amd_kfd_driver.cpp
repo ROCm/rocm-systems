@@ -1134,5 +1134,13 @@ hsa_status_t KfdDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const {
+  if (cache_size == nullptr)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (HSAKMT_CALL(hsaKmtGetPersistingCacheSize)(node_id, cache_size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr
