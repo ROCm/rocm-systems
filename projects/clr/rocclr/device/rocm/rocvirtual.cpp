@@ -3766,29 +3766,31 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   bool result = true;
 
-  // Sync caches for all ops
-  device::Memory::SyncFlags syncFlags;
-  syncFlags.skipEntire_ = false;
+  // HIP has no cache coherency layer (see amd::Memory::signalWrite()), so the caches need no sync
+  // and the destinations need no writer. copyBufferBatch finds the device memories itself.
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags syncFlags;
+    syncFlags.skipEntire_ = false;
 
-  for (const auto& op : copyOps) {
-    Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
-    Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
+    for (const auto& op : copyOps) {
+      Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
+      Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
 
-    if (srcDevMem == nullptr || dstDevMem == nullptr) {
-      LogError("submitBatchCopyMemory: Invalid memory objects!");
-      cmd.setStatus(CL_INVALID_MEM_OBJECT);
-      profilingEnd();
-      return;
+      if (srcDevMem == nullptr || dstDevMem == nullptr) {
+        LogError("submitBatchCopyMemory: Invalid memory objects!");
+        cmd.setStatus(CL_INVALID_MEM_OBJECT);
+        profilingEnd();
+        return;
+      }
+
+      dstDevMem->syncCacheFromHost(*this, syncFlags);
+      srcDevMem->syncCacheFromHost(*this);
     }
-
-    dstDevMem->syncCacheFromHost(*this, syncFlags);
-    srcDevMem->syncCacheFromHost(*this);
   }
 
   // KernelBlitManager::copyBufferBatch handles the D2D/D2H/H2D/P2P split:
   // D2D copies use copyBuffer (kernel blit), D2H/H2D/P2P use DMA batch
-  std::vector<amd::BatchCopyOp> batchOps(copyOps.begin(), copyOps.end());
-  if (!blitMgr().copyBufferBatch(batchOps)) {
+  if (!blitMgr().copyBufferBatch(copyOps)) {
     LogError("submitBatchCopyMemory: Batch copy failed!");
     result = false;
   }
@@ -3810,8 +3812,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else {
-    // Mark all destinations as written
+  } else if (!amd::IS_HIP) {
     for (const auto& op : copyOps) {
       op.dstMemory->signalWrite(&dev());
     }

@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <functional>
+#include <future>
+#include <thread>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -226,16 +229,41 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
   }
 }
 
-// Synchronization behavior checks
+// Checks if memcpy_func waits for the preceding work in kernel_stream before it returns. A
+// WaitForHostRelease kernel blocks kernel_stream until a helper thread releases it. Thus the
+// result does not depend on the duration of the copy. If should_sync is true, the helper thread
+// releases the kernel after a short delay, because a blocking memcpy_func cannot return before
+// the release. If should_sync is false, the helper thread releases the kernel after the stream
+// query or after a long timeout. Thus a memcpy_func that blocks causes a failure, not a hang.
 template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
-                             const hipStream_t kernel_stream) {
-  LaunchDelayKernel(std::chrono::milliseconds{100}, kernel_stream);
-  HIP_CHECK(memcpy_func());
+                            const hipStream_t kernel_stream) {
+  constexpr std::chrono::milliseconds kBlockingCopyReleaseDelay{100};
+  constexpr std::chrono::milliseconds kAsyncCopyReleaseTimeout{10000};
+
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  WaitForHostRelease<<<1, 1, 0, kernel_stream>>>(release.ptr());
+  HIP_CHECK(hipGetLastError());
+
+  const auto release_delay = should_sync ? kBlockingCopyReleaseDelay : kAsyncCopyReleaseTimeout;
+  std::promise<void> query_done;
+  std::thread releaser([flag = release.ptr(), query_done_future = query_done.get_future(),
+                        release_delay] {
+    query_done_future.wait_for(release_delay);
+    __atomic_store_n(flag, 1, __ATOMIC_RELEASE);
+  });
+  const auto memcpy_error = memcpy_func();
+  const auto query_error = hipStreamQuery(kernel_stream);
+  query_done.set_value();
+  releaser.join();
+  HIP_CHECK(hipStreamSynchronize(kernel_stream));
+
+  HIP_CHECK(memcpy_error);
   if (should_sync) {
-    HIP_CHECK(hipStreamQuery(kernel_stream));
+    HIP_CHECK(query_error);
   } else {
-    HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+    HIP_CHECK_ERROR(query_error, hipErrorNotReady);
   }
 }
 
