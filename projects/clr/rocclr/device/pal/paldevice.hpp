@@ -604,6 +604,9 @@ class Device : public NullDevice {
   //! Allow access for peer device
   bool deviceAllowAccess(void* dst) const;
 
+  //! Latches a GPU error if PAL reports the device as faulted or lost
+  bool CheckExecutionState() const;
+
   //! Returns a handle to the capture manager (RGP or UberTrace)
   ICaptureMgr* captureMgr() const { return captureMgr_; }
 
@@ -739,6 +742,9 @@ class Device : public NullDevice {
 
   static char* platformObj_;         //!< Memory allocated for PAL platform object
   static Pal::IPlatform* platform_;  //!< Pointer to the PAL platform object
+
+  //! Cleared if PAL doesn't support the execution state query
+  mutable std::atomic<bool> executionStateQuery_{true};
 
   mutable std::recursive_mutex lockAsyncOps_;  //!< Lock to serialise all async ops on this device
   //! Lock to serialise all async ops on initialization heap operation

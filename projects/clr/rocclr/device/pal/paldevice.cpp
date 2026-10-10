@@ -2408,6 +2408,43 @@ bool Device::deviceAllowAccess(void* ptr) const {
   return true;
 }
 
+// ================================================================================================
+bool Device::CheckExecutionState() const {
+  // The error is sticky, so once one is latched there is nothing left to ask.
+  if (amd::Device::IsGPUInError()) {
+    return false;
+  }
+  if (!executionStateQuery_.load(std::memory_order_relaxed)) {
+    return true;
+  }
+
+  Pal::PageFaultStatus pageFault = {};
+  const Pal::Result result = iDev()->CheckExecutionState(&pageFault);
+
+  if ((result == Pal::Result::Unsupported) || (result == Pal::Result::ErrorUnavailable)) {
+    executionStateQuery_.store(false, std::memory_order_relaxed);
+    return true;
+  }
+  // Failures are negative, the positive codes are informational. ErrorInvalidValue
+  // means PAL couldn't read the reset state, which says nothing about the device.
+  if ((result >= Pal::Result::Success) || (result == Pal::Result::ErrorInvalidValue)) {
+    return true;
+  }
+
+  if (result == Pal::Result::ErrorGpuPageFaultDetected) {
+    LogPrintfError("GPU page fault detected! %s at address 0x%llx",
+                   pageFault.flags.readFault ? "read" : "write",
+                   static_cast<unsigned long long>(pageFault.faultAddress));
+  } else {
+    LogPrintfError("PAL reports the device unusable! result:%d", result);
+  }
+  // A trap faults instead of being caught when the KMD trap handler is missing, so
+  // it can't be told apart from a bad access here. Both keep reporting the error
+  // the failed submit in VirtualGPU::Queue::isDone() already reported.
+  gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
+  return false;
+}
+
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   constexpr bool kForceAllocation = true;
