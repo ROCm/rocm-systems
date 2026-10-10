@@ -42,6 +42,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
@@ -130,6 +131,15 @@ static hipError_t DefaultHipRuntimeGetVersion(int* version)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
+
+static hipError_t DefaultHipDriverGetVersion(int* version)
+{
+    if (version) {
+        *version = 70002000;
+    }
+    return hipSuccess;
+}
+std::function<hipError_t(int*)> g_hipDriverGetVersion = DefaultHipDriverGetVersion;
 
 static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 {
@@ -573,6 +583,7 @@ void ResetHipFakes()
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
     // init.cc device-model seams
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
+    g_hipDriverGetVersion           = DefaultHipDriverGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
@@ -958,7 +969,7 @@ hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
-hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
+hipError_t hipDriverGetVersion(int* version) { return g_hipDriverGetVersion(version); }
 hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
     return g_hipStreamWaitEvent(stream, event, flags);

@@ -22,6 +22,12 @@
 #undef freeaddrinfo
 #undef getaddrinfo
 #undef setsockopt
+#undef send
+#undef recv
+#undef fcntl
+#undef accept
+#undef listen
+#undef bind
 #undef connect
 #undef socket
 #undef close

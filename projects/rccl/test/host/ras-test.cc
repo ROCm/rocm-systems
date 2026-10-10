@@ -30,6 +30,8 @@
 #include "fakes/ras_registry_test_support.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
+#include "fakes/ras_fakes.h"
+#include "fakes/ras_param_fakes.h"
 #include "fakes/signature-drift.h"
 #include "os_socket_pair.h"
 #include "ras/ras_internal.h"
@@ -39,7 +41,6 @@ int RasTestPoll(struct pollfd*, nfds_t, int);
 int RasTestClose(int);
 int RasTestAtexit(void (*)(void));
 uint64_t RasTestClockNano();
-ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext*, const struct ncclComm*);
 
 // Redirect the process-wide APIs used by ras.cc before including that file,
 // then restore their real names immediately afterward. Every header that uses
@@ -106,9 +107,6 @@ rasRankInit* g_localAddRanksLast = nullptr;
 int g_localAddRanksLastCount = 0;
 ncclResult_t g_localAddRanksResult = ncclSuccess;
 int g_cleanupCalls[4] = {};
-ncclResult_t g_diagnosticsInitResult = ncclSuccess;
-int g_diagnosticsInitCalls = 0;
-const ncclComm* g_diagnosticsInitComm = nullptr;
 ncclResult_t g_localRunDiagResult = ncclSuccess;
 int g_localRunDiagCalls = 0;
 int g_profilerMask = -1;
@@ -446,6 +444,8 @@ int64_t g_nextWakeupOverride = 0;
 uint64_t g_clockNano = 100 * CLOCK_UNITS_PER_SEC;
 
 void ResetWholeFileSeams() {
+  ResetRasFakes();
+  ResetRasParamFakes();
   ResetRasNetFakes();
   ResetRasClientSupportFakes();
   ResetRasMessageFakes();
@@ -476,9 +476,6 @@ void ResetWholeFileSeams() {
   g_localAddRanksLastCount = 0;
   g_localAddRanksResult = ncclSuccess;
   std::memset(g_cleanupCalls, 0, sizeof(g_cleanupCalls));
-  g_diagnosticsInitResult = ncclSuccess;
-  g_diagnosticsInitCalls = 0;
-  g_diagnosticsInitComm = nullptr;
   g_localRunDiagResult = ncclSuccess;
   g_localRunDiagCalls = 0;
   g_profilerMask = -1;
@@ -620,12 +617,6 @@ void rasClientSupportTerminate() { ++g_cleanupCalls[0]; }
 void rasNetTerminate() { ++g_cleanupCalls[1]; }
 void rasCollectivesTerminate() { ++g_cleanupCalls[2]; }
 void rasPeersTerminate() { ++g_cleanupCalls[3]; }
-ncclResult_t RasTestDiagnosticsContextInit(struct rasDiagnosticsContext* ctx, const struct ncclComm* comm) {
-  ++g_diagnosticsInitCalls;
-  g_diagnosticsInitComm = comm;
-  if (ctx) std::memset(ctx, 0, sizeof(*ctx));
-  return g_diagnosticsInitResult;
-}
 ncclResult_t rasLocalHandleRunDiag(const struct rasDiagnosticsContext* ctx) {
   ++g_localRunDiagCalls;
   if (ctx) g_lastRunDiagContext = *ctx;
@@ -634,7 +625,6 @@ ncclResult_t rasLocalHandleRunDiag(const struct rasDiagnosticsContext* ctx) {
 // src/ras/diagnostics_xid.cc (NCCL 2.32): XID-baseline capture on RAS start; nothing to observe here.
 void rasDiagnosticsInit() {}
 void ncclProfilerSetRasOverride(int mask) { g_profilerMask = mask; }
-int64_t rasTimeoutFactorNs(int64_t baseSeconds) { return baseSeconds * CLOCK_UNITS_PER_SEC; }
 void rasSocksHandleTimeouts(int64_t, int64_t* nextWakeup) {
   ++g_timeoutCalls[0];
   if (g_nextWakeupOverride) *nextWakeup = g_nextWakeupOverride;
@@ -792,23 +782,23 @@ TEST_F(RasMicrotest, DiagnosticsParameterUsesDefaultAndOverride) {
 
 TEST_F(RasMicrotest, RunRasDiagnosticsPropagatesInitFailureAndNotifiesOnSuccess) {
   auto comm = std::make_unique<ncclComm>();
-  g_diagnosticsInitResult = ncclSystemError;
+  g_diagContextInitResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ncclRunRasDiagnostics(comm.get()));
-  EXPECT_EQ(1, g_diagnosticsInitCalls);
+  EXPECT_EQ(1, g_diagContextInitCalls);
   EXPECT_EQ(comm.get(), g_diagnosticsInitComm);
   EXPECT_TRUE(g_pairBytes.empty());
 
-  g_diagnosticsInitResult = ncclSuccess;
+  g_diagContextInitResult = ncclSuccess;
   rasInitialized = true;
   rasNotificationPipe[1] = 52;
   EXPECT_EQ(ncclSuccess, ncclRunRasDiagnostics(comm.get()));
-  EXPECT_EQ(2, g_diagnosticsInitCalls);
+  EXPECT_EQ(2, g_diagContextInitCalls);
   ASSERT_EQ(sizeof(rasNotification), g_pairBytes.size());
   EXPECT_EQ(RAS_RUN_DIAG, reinterpret_cast<const rasNotification*>(g_pairBytes.data())->type);
 }
 
 TEST_F(RasMicrotest, RunRasDiagnosticsReportsUnscopedInitFailure) {
-  g_diagnosticsInitResult = ncclSystemError;
+  g_diagContextInitResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ncclRunRasDiagnostics(nullptr));
   EXPECT_EQ(nullptr, g_diagnosticsInitComm);
 }
