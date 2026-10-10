@@ -57,6 +57,7 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
 | `NCCL_DMABUF_ENABLE` | `0` | Recommended: enables dmabuf-based MR registration |
 | `NCCL_P2P_DISABLE` | `0` | Set to `1` to force inter-GPU traffic over the network (useful for single-node GIN testing) |
+| `NCCL_IB_MERGE_NICS` | `1` | No effect on GIN: every backend keeps using physical devices and never receives a fused vNIC. Fusion applies to the regular transport only, so it does not need to be disabled |
 
 ### Example: AlltoAll with SDMA backend (8 GPUs, single node)
 
@@ -76,7 +77,6 @@ docker run -it --rm --shm-size 64G \
         -x NCCL_DMABUF_ENABLE=1 \
         -x NCCL_P2P_DISABLE=1 \
         -x NCCL_CROSS_NIC=1 \
-        -x NCCL_IB_MERGE_NICS=0 \
         -x NCCL_MSCCL_ENABLE=0 \
         -x HSA_NO_SCRATCH_RECLAIM=1 \
         -x NCCL_DEBUG=INFO \
