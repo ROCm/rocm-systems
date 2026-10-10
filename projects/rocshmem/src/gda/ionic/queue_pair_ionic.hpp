@@ -37,9 +37,14 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
   static_assert(InlineMax == 32, "ionic can send up to 32 bytes inline in a WQE");
 
   /*
-   * @brief ionic preferred inlining threshold is the same as the maximum
+   * @brief ionic preferred inlining threshold matches the hardware maximum.
+   * Inlining up to InlineMax (32B) avoids a second NIC DMA for the payload.
+   * The earlier byte-by-byte inline copy made larger inlines costly; with the
+   * constant-width copy_inline_payload (one or two wide VMEM ops, no byte loop)
+   * latency is flat across 1..32B, so there is no reason to cap below InlineMax.
    */
   static constexpr size_t InlineThreshold = InlineMax;
+  static_assert(InlineThreshold <= InlineMax);
 };
 
 class QueuePairIONIC : public QueuePairDevice<QueuePairIONIC> {
@@ -200,7 +205,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -258,7 +263,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
