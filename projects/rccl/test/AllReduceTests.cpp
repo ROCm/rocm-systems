@@ -835,4 +835,64 @@ namespace RcclUnitTesting
       EXPECT_EQ(ncclInvalidArgument, ncclGroupEnd());
     });
   }
+
+  // The other collectives that read comm before ncclEnqueueCheck must reject a NULL comm the same way.
+  TEST(AllReduceWithBias, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllReduceWithBias_NullCommReturnsInvalidArgument", []()
+    {
+      float acc = 0.0f;
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAllReduceWithBias(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr, &acc));
+    });
+  }
+
+  TEST(AllGather, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AllGather_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAllGather(nullptr, nullptr, 16, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  TEST(ReduceScatter, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("ReduceScatter_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclReduceScatter(nullptr, nullptr, 16, ncclFloat32, ncclSum, nullptr, nullptr));
+    });
+  }
+
+  TEST(AlltoAll, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AlltoAll_NullCommReturnsInvalidArgument", []()
+    {
+      EXPECT_EQ(ncclInvalidArgument, ncclAlltoAll(nullptr, nullptr, 16, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  TEST(AlltoAllv, NullCommReturnsInvalidArgument)
+  {
+    RUN_ISOLATED_TEST("AlltoAllv_NullCommReturnsInvalidArgument", []()
+    {
+      size_t const counts[1] = {16};
+      size_t const displs[1] = {0};
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAlltoAllv(nullptr, counts, displs, nullptr, counts, displs, ncclFloat32, nullptr, nullptr));
+    });
+  }
+
+  // ncclCommCount alone rejects a NULL comm without recording the group error, so ncclGroupEnd would succeed.
+  TEST(AlltoAllv, NullCommInsideGroupFailsGroupEnd)
+  {
+    RUN_ISOLATED_TEST("AlltoAllv_NullCommInsideGroupFailsGroupEnd", []()
+    {
+      size_t const counts[1] = {16};
+      size_t const displs[1] = {0};
+      ASSERT_EQ(ncclSuccess, ncclGroupStart());
+      EXPECT_EQ(ncclInvalidArgument,
+                ncclAlltoAllv(nullptr, counts, displs, nullptr, counts, displs, ncclFloat32, nullptr, nullptr));
+      EXPECT_EQ(ncclInvalidArgument, ncclGroupEnd());
+    });
+  }
 }
