@@ -1676,6 +1676,87 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Every thread of the CTA puts to one peer at once, each put bumping a local
+// counter, so the proxy finds several GFDs queued and drains them per
+// GIN_PROXY_POLL_BATCH.
+__global__ void putBurstLocalCounterKernel(
+    ncclWindow_t srcWin, ncclWindow_t dstWin, size_t bytes, int nPuts,
+    ncclGinCounter_t cntIdx, int peer, struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  if (blockIdx.x == 0) {
+    for (int i = threadIdx.x; i < nPuts; i += blockDim.x) {
+      gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, bytes,
+              ncclGin_None{}, ncclGin_CounterInc{cntIdx});
+    }
+  }
+  gin.waitCounter(ncclCoopCta(), cntIdx, /*least=*/nPuts);
+}
+
+// Waits only on local completion, so it also runs over a backend that moves no
+// data, such as plugins/rma/example. The ext-rma suite uses it to check the
+// aggregation hint that backend receives.
+TEST_F(GinMPIDeviceTests, PutBurst_LocalCounter) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_EQ(2, nRanks);
+
+  constexpr size_t kBufBytes = 4 * 1024;
+  constexpr size_t kPutBytes = 64;
+  constexpr int kPuts = 256;
+  constexpr ncclGinCounter_t kCntIdx = 1;
+  constexpr int kPeer = 1;
+
+  void* dSrc = nullptr;
+  void* dDst = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBufBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBufBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSrc) (void)ncclMemFree(dSrc);
+    if (dDst) (void)ncclMemFree(dDst);
+  });
+
+  ncclWindow_t srcWin = nullptr, dstWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dSrc, kBufBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(comm, dDst, kBufBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+  });
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.railGinBarrierCount = 1;
+  reqs.ginCounterCount     = 2;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (rank == 0) {
+    putBurstLocalCounterKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+        srcWin, dstWin, kPutBytes, kPuts, kCntIdx, kPeer, devComm);
+  }
+  ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/60));
+
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // Producer kernel: rank 0 issues a single put carrying BOTH a remote
 // SignalInc action and a local CounterInc action, then waits on its OWN
 // counter. The remote SignalInc bumps the peer's signal cell when the IB
