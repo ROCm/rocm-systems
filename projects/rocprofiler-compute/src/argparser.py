@@ -270,9 +270,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--target", type=str, default=None, help=argparse.SUPPRESS
-    )
-    profile_group.add_argument(
         "--attach-pid",
         type=str,
         dest="attach_pid",
@@ -1015,11 +1012,6 @@ Examples:
             "(e.g. mem_chart, Roofline charts as tables). "
             "Additional views may be added in future releases."
         ),
-    )
-    analyze_advanced_group.add_argument(
-        "--dependency",
-        action="store_true",
-        help="\t\tList the installation dependency.",
     )
     analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS

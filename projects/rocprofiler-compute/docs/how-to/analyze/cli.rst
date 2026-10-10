@@ -488,7 +488,7 @@ First, list the top kernels in your application using `--list-stats`.
 
 Second, select the index of the kernel you would like to filter; for example,
 ``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
-Then, use this index to apply the filter via ``-k`` or ``--kernels``.
+Then, use this index to apply the filter via ``-k`` or ``--kernel``.
 
 .. code-block:: shell-session
 
