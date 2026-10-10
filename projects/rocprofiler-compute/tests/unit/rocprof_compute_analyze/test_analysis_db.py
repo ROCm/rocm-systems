@@ -19,6 +19,8 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from memory_chart.extdata import layout_extdata
+from memory_chart.loader import Layouts
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
@@ -28,6 +30,7 @@ from rocprof_compute_analyze.analysis_db import (
     filter_dispatch_frame,
     report_evaluation_diagnostics,
 )
+from tests.unit.memory_chart.layout_cases import panel_config, unresolved_metrics
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
@@ -35,6 +38,7 @@ from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
 )
+from utils.utils_common import panel_metric_ids, panel_tables
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -162,6 +166,7 @@ def make_pc_sampling_database_analyzer(
         )
         for workload_path in tool_data_per_workload
     }
+    analyzer._arch_configs = {"gfx942": schema.ArchConfig()}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = tool_data_per_workload
@@ -204,6 +209,7 @@ def make_counter_backed_database_analyzer(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
         )
     }
+    analyzer._arch_configs = {"gfx942": schema.ArchConfig()}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": filter_blocks}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
@@ -223,6 +229,41 @@ def make_counter_backed_database_analyzer(
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
     return analyzer
+
+
+def memory_chart_arch_config(panel):
+    """An arch config holding only a memory chart panel config."""
+    return schema.ArchConfig(panel_configs={panel["id"]: panel})
+
+
+def without_metric(panel, name):
+    """A copy of a panel 300 config without the metric *name*."""
+    panel = copy.deepcopy(panel)
+    for _, table in panel_tables(panel):
+        table["metric"].pop(name, None)
+    return panel
+
+
+def with_a_repeated_layout_metric(panel):
+    """A copy of a panel 300 config whose extra table repeats "Flat Read"."""
+    panel = copy.deepcopy(panel)
+    panel["data source"].append({
+        "metric_table": {
+            "id": 399,
+            "cli_style": "mem_chart",
+            "metric": {"Flat Read": {}},
+        }
+    })
+    return panel
+
+
+def run_memory_chart_workload(tmp_path, gpu_arch, arch_config):
+    """Run analysis of one counter-backed workload; return its workload row."""
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._runs[str(tmp_path)].sys_info = pd.DataFrame([{"gpu_arch": gpu_arch}])
+    analyzer._arch_configs = {gpu_arch: arch_config}
+    run_analysis_with_existing_database(analyzer)
+    return orm.Database.get_session().query(orm.Workload).one()
 
 
 def run_analysis_with_existing_database(analyzer):
@@ -1551,6 +1592,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
         {},
     )
     analyzer._runs = {workload_path: workload}
+    analyzer._arch_configs = {"gfx942": schema.ArchConfig()}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
     analyzer._pc_sampling_tool_data_per_workload = {workload_path: tool_data_records}
@@ -3556,3 +3598,51 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert (df[col] == 42.0).all()
 
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+# =============================================================================
+# Memory chart rendering specification (Workload.memory_chart_render_extdata)
+# =============================================================================
+
+
+@pytest.mark.parametrize("gpu_arch", ["gfx942", "gfx1151"])
+def test_run_analysis_stores_the_workloads_memory_chart_render_spec(
+    db_session, tmp_path, gpu_arch
+):
+    panel = panel_config(Layouts.for_arch(gpu_arch).archs[0])
+    workload = run_memory_chart_workload(
+        tmp_path, gpu_arch, memory_chart_arch_config(panel)
+    )
+    # Ids come from the panel config, not from metric definitions, so chart
+    # metrics without values (left out by --block) are still referenced
+    assert db_session.query(orm.MetricDefinition).count() == 0
+    assert workload.memory_chart_render_extdata == layout_extdata(
+        Layouts.for_arch(gpu_arch), panel_metric_ids(panel)
+    )
+
+
+@pytest.mark.parametrize(
+    ("arch_config", "unresolved"),
+    [
+        (schema.ArchConfig(), Layouts.for_arch("gfx942").metrics()),
+        (
+            memory_chart_arch_config(
+                without_metric(panel_config("gfx942"), "Flat Read")
+            ),
+            {"Flat Read"},
+        ),
+        (
+            memory_chart_arch_config(
+                with_a_repeated_layout_metric(panel_config("gfx942"))
+            ),
+            {"Flat Read"},
+        ),
+    ],
+    ids=["no-chart-panel", "custom-chart-panel", "repeated-name"],
+)
+def test_run_analysis_stores_null_for_metrics_it_cannot_resolve(
+    db_session, tmp_path, arch_config, unresolved
+):
+    workload = run_memory_chart_workload(tmp_path, "gfx942", arch_config)
+    stored = workload.memory_chart_render_extdata
+    assert unresolved_metrics(Layouts.for_arch("gfx942"), stored) == unresolved

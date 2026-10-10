@@ -726,6 +726,51 @@ Analysis database views
    :align: center
    :alt: Analysis database views
 
+.. _analysis-database-memory-chart:
+
+Memory chart rendering specification
+------------------------------------
+
+The ``memory_chart_render_extdata`` column of ``compute_workload`` describes how to draw the
+workload's memory chart, as JSON that ROCm Optiq reads. Every workload has one, even when its
+memory chart metrics have no values.
+
+* ``version``: the version of this JSON format, currently ``1``.
+* ``description``: a short description of the chart.
+* ``scope``: the two labels of the bar above the chart, and the block where the second label
+  starts.
+* ``blocks``: the boxes of the chart. Each block has:
+
+  * ``id`` and ``title``.
+  * ``column``: the column of the chart, starting from ``0`` at the Compute Units.
+  * ``row``: ``0`` for blocks in the main row. Blocks drawn above or below another block have
+    a negative or positive ``row``, and ``host`` names that block.
+  * ``order``: the position of the block in its column, or inside the block that holds it.
+  * ``content``: the metrics the block shows.
+  * ``children``: the blocks drawn inside it.
+  * ``note``: a short label, if any.
+
+* ``arrows``: the metrics drawn between two blocks. Each arrow has ``from`` and ``to``,
+  ``direction`` (``backward``, ``forward``, or ``both``), and an optional ``group`` heading.
+* Each metric in ``content`` and ``arrows`` has:
+
+  * ``metric``: the ``metric_id`` of the metric in the same workload. It is ``null`` when the
+    panel 3 configuration, for example one from ``--config-dir``, has no single metric of
+    that name.
+  * ``title``: the label shown next to the value.
+  * ``category``: ``read``, ``write``, ``atomic``, ``util``, ``hit``, ``stall``, ``neutral``,
+    or ``bw``.
+
+Metrics left out with ``--block`` keep their ``metric_id`` but have no values. To read the
+value of a metric in the chart, look up its ``metric_id`` in ``compute_kernel_metric_view`` or
+``compute_workload_metric_view`` with ``value_name = 'Value'``:
+
+.. code-block:: sql
+
+   SELECT metric_id, metric_name, unit, value
+   FROM compute_workload_metric_view
+   WHERE workload_id = 1 AND metric_id = '3.1.6' AND value_name = 'Value';
+
 Analysis database example
 
 .. note::

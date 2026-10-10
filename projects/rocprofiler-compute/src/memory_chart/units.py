@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
+from utils.utils_common import panel_tables
+
 UnitKind = Literal["percent", "bandwidth", "count", "value"]
 
 
@@ -55,12 +57,9 @@ def display_unit(unit: Optional[str]) -> Optional[DisplayUnit]:
 
 def panel_units(panel_config: dict[str, Any]) -> dict[str, str]:
     """Metric name -> unit, from a panel config."""
-    tables = [
-        table for source in panel_config["data source"] for table in source.values()
-    ]
     return {
         name: body["unit"]
-        for table in tables
+        for _, table in panel_tables(panel_config)
         for name, body in (table.get("metric") or {}).items()
         if body.get("unit")
     }

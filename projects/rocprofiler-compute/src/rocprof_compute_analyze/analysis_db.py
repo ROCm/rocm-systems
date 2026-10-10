@@ -12,6 +12,8 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.extdata import layout_extdata
+from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -82,7 +84,13 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    get_uuid,
+    get_version,
+    is_mem_chart_panel,
+    normalize_filter_to_str_list,
+    panel_metric_ids,
+)
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
@@ -357,6 +365,9 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path
                 ),
                 profiling_config_extdata=self._profiling_config,
+                memory_chart_render_extdata=self._memory_chart_render_extdata(
+                    sys_info["gpu_arch"]
+                ),
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
@@ -494,6 +505,18 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
         return workload_isa_exports
+
+    def _memory_chart_render_extdata(self, gpu_arch: str) -> dict[str, Any]:
+        """The memory chart rendering specification stored for a workload.
+
+        Metric ids come from the full panel config, so metrics left out by
+        --block keep their ids.
+        """
+        panels = self._arch_configs[gpu_arch].panel_configs.values()
+        panel = next((p for p in panels if is_mem_chart_panel(p)), None)
+        metric_ids = panel_metric_ids(panel) if panel else {}
+        # Every GPU family that rocprof-compute supports ships a memory chart layout
+        return layout_extdata(Layouts.for_arch(gpu_arch), metric_ids)
 
     def run_analysis_metrics(
         self,
