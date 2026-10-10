@@ -156,10 +156,9 @@ class AnvilLib {
   // way through building it.
   uint32_t numSdmaQueuesPerEngine_{0};
   // Queues already taken by this process, counted across all engines rather than per engine: a
-  // rejected engine-pinned create retries as a generic queue and reports engine 0, so on a
-  // partition every queue would charge the same key and a per-engine cap would refuse at a
-  // fraction of the real budget. connect() compares this against
-  // numSdmaEnginesTotal_ * numSdmaQueuesPerEngine_.
+  // rejected engine-pinned create retries as a generic queue and reports the requested engine, not
+  // the one KFD picked. connect() compares this against usableSdmaEngines() *
+  // numSdmaQueuesPerEngine_, which on a partition is engine 0's slots alone.
   uint32_t queuesUsedTotal_{0};
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
   // Selection in progress, so getOamId can report why the map was consulted without the caller
