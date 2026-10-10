@@ -360,6 +360,31 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# Header tracking for the add_custom_command compiles below. DEPENDS lists only
+# the source, so without a depfile a header edit rebuilds nothing. Sets
+# FLAGS_VAR to the clang flags that write OUTPUT.d and DEPFILE_VAR to the
+# matching DEPFILE argument; both stay empty before CMake 3.20, which has no
+# DEPFILE under Makefiles (touch the source there instead). -MT names OUTPUT
+# because the device.elf link compiles its dispatcher to a scratch file.
+# DEVICE_ONLY is for --offload-device-only / --cuda-device-only clang calls, where the
+# driver writes no depfile and the request has to go to cc1.
+# ---------------------------------------------------------------------------
+function(dl_depfile OUTPUT FLAGS_VAR DEPFILE_VAR)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
+    if("DEVICE_ONLY" IN_LIST ARGN)
+      set(${FLAGS_VAR} -Xclang -dependency-file -Xclang ${OUTPUT}.d
+                       -Xclang -MT -Xclang ${OUTPUT} -Xclang -sys-header-deps PARENT_SCOPE)
+    else()
+      set(${FLAGS_VAR} -MD -MF ${OUTPUT}.d -MT ${OUTPUT} PARENT_SCOPE)
+    endif()
+    set(${DEPFILE_VAR} DEPFILE ${OUTPUT}.d PARENT_SCOPE)
+  else()
+    set(${FLAGS_VAR} "" PARENT_SCOPE)
+    set(${DEPFILE_VAR} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
 # Derive host triple for the offload bundler
 # ---------------------------------------------------------------------------
 string(TOLOWER "${CMAKE_SYSTEM_NAME}" _dl_sys_name)
@@ -523,6 +548,9 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     set(_dl_profile_rt_arg "--profile-rt=${DL_DEVICE_PROFILE_RT}")
   endif()
 
+  # A target in DEPENDS only orders an OBJECT library before the link; relinking when a
+  # kernel object is rebuilt takes the object files themselves.
+  dl_depfile(${ARCH_DEVICE_ELF} _dl_md _dl_depfile)
   add_custom_command(
     OUTPUT  ${ARCH_DEVICE_ELF}
     COMMAND ${CMAKE_RCCLDEV_COMPILER}
@@ -540,9 +568,12 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${DL_COVERAGE_FLAGS}
       ${DL_MAIN_MODULE_CUID_FLAGS}
       -std=c++17
+      ${_dl_md}
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
+    DEPENDS ${_dev_target} $<TARGET_OBJECTS:${_dev_target}> ${_link_rsp} ${HIPIFY_DIR}/src/device/common.cu.cpp
+            ${_rocshmem_link_depends}
+    ${_dl_depfile}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
@@ -589,6 +620,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     set(SRC     "${SPECIALIZED_DIR}/${CPP_FILE}")
     set(IR_OUT  "${DL_ARCH_IR_DIR}/${BASE}.ll")
 
+    dl_depfile(${IR_OUT} _dl_md _dl_depfile DEVICE_ONLY)
     add_custom_command(
       OUTPUT  ${IR_OUT}
       COMMAND ${DL_CLANG}
@@ -600,9 +632,11 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
         -gline-tables-only
         -std=c++17 ${DL_OPT_FLAGS}
         -emit-llvm -S
+        ${_dl_md}
         -o ${IR_OUT}
         ${SRC}
       DEPENDS ${SRC}
+      ${_dl_depfile}
       COMMENT "DL [${DL_GPU_TARGET}] IR: ${CPP_FILE}"
       VERBATIM
     )
@@ -661,6 +695,7 @@ if(_dev_sys_includes)
   endforeach()
 endif()
 
+dl_depfile(${COMMON_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${COMMON_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -677,9 +712,11 @@ add_custom_command(
     -std=c++17
     -fPIC
     ${DL_HOST_COMPRESS}
+    ${_dl_md}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
   DEPENDS ${DEVICE_HIPFB} ${HIPIFY_DIR}/src/device/common.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL host compile: common.cu.cpp with embedded device binary"
   VERBATIM
 )
@@ -689,6 +726,7 @@ add_custom_command(
 # ===========================================================================
 set(ONERANK_FAT_OBJ "${DEVICE_BUILD_DIR}/onerank.o")
 
+dl_depfile(${ONERANK_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${ONERANK_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -702,9 +740,11 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${ONERANK_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/onerank.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/device/onerank.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: onerank.cu.cpp (normal fat object)"
   VERBATIM
 )
@@ -713,59 +753,30 @@ add_custom_command(
 # collectives.cc: contains a __global__ kernel launch (hierarchicalShuffle)
 # so it needs full HIP compilation, not --offload-host-only.
 # ===========================================================================
-# Dependency tracking note (CMake >= 3.20 vs < 3.20):
-# add_custom_command only rebuilds when files listed in DEPENDS change.  It
-# does NOT automatically track transitive headers (e.g. ce_coll.h), so a
-# struct layout change in a header would not invalidate collectives.o.
-# CMake 3.20 DEPFILE support fixes this by reading the compiler-generated .d
-# file; on older CMake the workaround is: touch hipify/src/collectives.cc.
-# ===========================================================================
 set(COLLECTIVES_FAT_OBJ "${DEVICE_BUILD_DIR}/collectives.o")
 
-if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.20")
-  set(COLLECTIVES_DEPFILE "${DEVICE_BUILD_DIR}/collectives.d")
-  add_custom_command(
-    OUTPUT  ${COLLECTIVES_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -MD -MF ${COLLECTIVES_DEPFILE}
-      -c -o ${COLLECTIVES_FAT_OBJ}
-      ${HIPIFY_DIR}/src/collectives.cc
-    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
-    DEPFILE ${COLLECTIVES_DEPFILE}
-    COMMENT "DL compile: collectives.cc (has __global__ kernel, header-tracking via DEPFILE)"
-    VERBATIM
-  )
-else()
-  add_custom_command(
-    OUTPUT  ${COLLECTIVES_FAT_OBJ}
-    COMMAND ${DL_CLANG}
-      -x hip ${DL_OFFLOAD_ARCH_FLAGS}
-      ${DL_HIP_COMPILER_FLAGS}
-      -DRCCL_DEVICE_LINKER
-      ${_link_def_flags}
-      ${_host_inc_flags}
-      ${DL_OPT_FLAGS}
-      ${DL_INHERITED_FLAGS}
-      ${DL_DEVICE_COVERAGE_FLAGS}
-      -std=c++17
-      -fPIC
-      -c -o ${COLLECTIVES_FAT_OBJ}
-      ${HIPIFY_DIR}/src/collectives.cc
-    DEPENDS ${HIPIFY_DIR}/src/collectives.cc
-    COMMENT "DL compile: collectives.cc (has __global__ kernel)"
-    VERBATIM
-  )
-endif()
+dl_depfile(${COLLECTIVES_FAT_OBJ} _dl_md _dl_depfile)
+add_custom_command(
+  OUTPUT  ${COLLECTIVES_FAT_OBJ}
+  COMMAND ${DL_CLANG}
+    -x hip ${DL_OFFLOAD_ARCH_FLAGS}
+    ${DL_HIP_COMPILER_FLAGS}
+    -DRCCL_DEVICE_LINKER
+    ${_link_def_flags}
+    ${_host_inc_flags}
+    ${DL_OPT_FLAGS}
+    ${DL_INHERITED_FLAGS}
+    ${DL_DEVICE_COVERAGE_FLAGS}
+    -std=c++17
+    -fPIC
+    ${_dl_md}
+    -c -o ${COLLECTIVES_FAT_OBJ}
+    ${HIPIFY_DIR}/src/collectives.cc
+  DEPENDS ${HIPIFY_DIR}/src/collectives.cc
+  ${_dl_depfile}
+  COMMENT "DL compile: collectives.cc (has __global__ kernel)"
+  VERBATIM
+)
 
 # ===========================================================================
 # dda_all_reduce_ipc.cu.cpp: contains device kernels and kernel launches.
@@ -776,6 +787,7 @@ endif()
 # Same reason as the dda objects below - it must be a fat object.
 set(DIAG_P2P_FAT_OBJ "${DEVICE_BUILD_DIR}/diagnostics_p2p.o")
 
+dl_depfile(${DIAG_P2P_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DIAG_P2P_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -789,9 +801,11 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${DIAG_P2P_FAT_OBJ}
     ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: diagnostics/device/p2p.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -801,6 +815,7 @@ set(DDA_REDUCE_SCATTER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_ipc.o
 set(DDA_ALL_GATHER_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_gather_ipc.o")
 set(DDA_ALLTOALL_IPC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_ipc.o")
 
+dl_depfile(${DDA_ALL_REDUCE_IPC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -814,13 +829,16 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${DDA_ALL_REDUCE_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_reduce_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_REDUCE_SCATTER_IPC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -834,13 +852,16 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${DDA_REDUCE_SCATTER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_reduce_scatter_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALL_GATHER_IPC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_GATHER_IPC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -854,13 +875,16 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${DDA_ALL_GATHER_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_gather_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALLTOALL_IPC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALLTOALL_IPC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -874,9 +898,11 @@ add_custom_command(
     ${DL_DEVICE_COVERAGE_FLAGS}
     -std=c++17
     -fPIC
+    ${_dl_md}
     -c -o ${DDA_ALLTOALL_IPC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_alltoall_ipc.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -891,6 +917,7 @@ add_custom_command(
 set(GIN_ALLTOALL_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
   set(GIN_ALLTOALL_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_alltoall_sdma.o")
+  dl_depfile(${GIN_ALLTOALL_SDMA_FAT_OBJ} _dl_md _dl_depfile)
   add_custom_command(
     OUTPUT  ${GIN_ALLTOALL_SDMA_FAT_OBJ}
     COMMAND ${DL_CLANG}
@@ -907,9 +934,11 @@ if(ENABLE_ROCSHMEM_GIN)
       ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
+      ${_dl_md}
       -c -o ${GIN_ALLTOALL_SDMA_FAT_OBJ}
       ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
     DEPENDS ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_alltoall_sdma.cu.cpp
+    ${_dl_depfile}
     COMMENT "DL compile: gin_alltoall_sdma.cu.cpp (GIN-SDMA alltoall kernel)"
     VERBATIM
   )
@@ -925,6 +954,7 @@ endif()
 set(GIN_ALLREDUCE_SDMA_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
   set(GIN_ALLREDUCE_SDMA_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_all_reduce_sdma.o")
+  dl_depfile(${GIN_ALLREDUCE_SDMA_FAT_OBJ} _dl_md _dl_depfile)
   add_custom_command(
     OUTPUT  ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
     COMMAND ${DL_CLANG}
@@ -941,9 +971,11 @@ if(ENABLE_ROCSHMEM_GIN)
       ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
+      ${_dl_md}
       -c -o ${GIN_ALLREDUCE_SDMA_FAT_OBJ}
       ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_reduce_sdma.cu.cpp
     DEPENDS ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_reduce_sdma.cu.cpp
+    ${_dl_depfile}
     COMMENT "DL compile: gin_all_reduce_sdma.cu.cpp (GIN-SDMA allreduce kernel)"
     VERBATIM
   )
@@ -956,6 +988,7 @@ endif()
 set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "")
 if(ENABLE_ROCSHMEM_GIN)
   set(GIN_ANVIL_CONN_CHECK_FAT_OBJ "${DEVICE_BUILD_DIR}/gin_anvil_conn_check_device.o")
+  dl_depfile(${GIN_ANVIL_CONN_CHECK_FAT_OBJ} _dl_md _dl_depfile)
   add_custom_command(
     OUTPUT  ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
     COMMAND ${DL_CLANG}
@@ -970,9 +1003,11 @@ if(ENABLE_ROCSHMEM_GIN)
       ${DL_DEVICE_COVERAGE_FLAGS}
       -std=c++17
       -fPIC
+      ${_dl_md}
       -c -o ${GIN_ANVIL_CONN_CHECK_FAT_OBJ}
       ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     DEPENDS ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
+    ${_dl_depfile}
     COMMENT "DL compile: gin_anvil_conn_check_device.cc (GIN-SDMA conn-check kernels)"
     VERBATIM
   )
@@ -983,6 +1018,7 @@ endif()
 # ===========================================================================
 set(DDA_ALL_REDUCE_FABRIC_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric.o")
 
+dl_depfile(${DDA_ALL_REDUCE_FABRIC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -997,9 +1033,11 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_REDUCE_FABRIC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_reduce_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -1007,6 +1045,7 @@ add_custom_command(
 set(DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll.o")
 set(DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_all_reduce_fabric_ll128.o")
 
+dl_depfile(${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1021,13 +1060,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_reduce_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1042,9 +1084,11 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_REDUCE_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_reduce_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -1059,6 +1103,7 @@ set(DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_alltoall_fabric_l
 set(DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll.o")
 set(DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ "${DEVICE_BUILD_DIR}/dda_reduce_scatter_fabric_ll128.o")
 
+dl_depfile(${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1073,13 +1118,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_reduce_scatter_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALL_GATHER_FABRIC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1094,13 +1142,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_GATHER_FABRIC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_gather_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1115,13 +1166,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_GATHER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_gather_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1136,13 +1190,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALL_GATHER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_all_gather_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALLTOALL_FABRIC_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1157,13 +1214,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALLTOALL_FABRIC_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_alltoall_fabric.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1178,13 +1238,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALLTOALL_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_alltoall_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1199,13 +1262,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_ALLTOALL_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_alltoall_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1220,13 +1286,16 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll.cu.cpp (has device kernels)"
   VERBATIM
 )
 
+dl_depfile(${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ} _dl_md _dl_depfile)
 add_custom_command(
   OUTPUT  ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
   COMMAND ${DL_CLANG}
@@ -1241,9 +1310,11 @@ add_custom_command(
     -std=c++17
     -fPIC
     -w
+    ${_dl_md}
     -c -o ${DDA_REDUCE_SCATTER_FABRIC_LL128_FAT_OBJ}
     ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp
+  ${_dl_depfile}
   COMMENT "DL compile: dda_reduce_scatter_fabric_ll128.cu.cpp (has device kernels)"
   VERBATIM
 )
@@ -1267,6 +1338,7 @@ file(GLOB _ce_reduce_srcs CONFIGURE_DEPENDS "${HIPIFY_DIR}/gensrc/ce_reduce/*.cp
 foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
   get_filename_component(_ce_reduce_name "${_ce_reduce_src}" NAME_WE)
   set(_ce_reduce_obj "${DEVICE_BUILD_DIR}/${_ce_reduce_name}.o")
+  dl_depfile(${_ce_reduce_obj} _dl_md _dl_depfile)
   add_custom_command(
     OUTPUT  ${_ce_reduce_obj}
     COMMAND ${DL_CLANG}
@@ -1281,9 +1353,11 @@ foreach(_ce_reduce_src IN LISTS _ce_reduce_srcs)
       -std=c++17
       -fPIC
       -w
+      ${_dl_md}
       -c -o ${_ce_reduce_obj}
       ${_ce_reduce_src}
     DEPENDS ${_ce_reduce_src}
+    ${_dl_depfile}
     COMMENT "DL compile: ${_ce_reduce_name} (CE AllReduce reduce kernel)"
     VERBATIM
   )
@@ -1329,6 +1403,7 @@ if(GENERATE_SYM_KERNELS)
     set(_cm_bc  "${DEVICE_BUILD_DIR}/gin_rocshmem_constmem.bc")
     set(_qp_raw "${DEVICE_BUILD_DIR}/rocshmem_qp_raw.bc")
 
+    dl_depfile(${_cm_bc} _dl_md _dl_depfile DEVICE_ONLY)
     add_custom_command(
       OUTPUT ${_cm_bc}
       COMMAND ${DL_CLANG}
@@ -1337,8 +1412,10 @@ if(GENERATE_SYM_KERNELS)
         -std=c++17 -fPIC
         -I${ROCSHMEM_SOURCE_DIR}/src
         -I${ROCSHMEM_SOURCE_DIR}/include
+        ${_dl_md}
         -c -o ${_cm_bc} ${_cm_src}
       DEPENDS ${_cm_src}
+      ${_dl_depfile}
       COMMENT "DL: compiling rocshmem constmem stubs to device bitcode"
       VERBATIM)
 
@@ -1371,6 +1448,7 @@ if(GENERATE_SYM_KERNELS)
       set(_this_bc_flag "${_sym_rocshmem_bc_flag}")
       set(_this_bc_deps "${_sym_rocshmem_deps}")
     endif()
+    dl_depfile(${_sym_obj} _dl_md _dl_depfile)
     add_custom_command(
       OUTPUT  ${_sym_obj}
       COMMAND ${DL_CLANG}
@@ -1385,9 +1463,11 @@ if(GENERATE_SYM_KERNELS)
         -std=c++17
         -fPIC
         ${_this_bc_flag}
+        ${_dl_md}
         -c -o ${_sym_obj}
         ${_sym_src}
       DEPENDS ${_sym_src} ${_this_bc_deps}
+      ${_dl_depfile}
       COMMENT "DL compile: sym ${_sym_name} (multi-arch fat object)"
       VERBATIM
     )
