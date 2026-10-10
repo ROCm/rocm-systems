@@ -109,6 +109,7 @@ ROCPROFILER_EXTERN_C_INIT
  * 2. PC sampling is requested from a process that runs within the ROCgdb.
  * 3. HSA runtime does not support PC sampling.
  * 4. GPU device does not support requested PC sampling method.
+ * 5. The KFD device (`/dev/kfd`) is unavailable, e.g. on WSL2/DXG.
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
@@ -207,6 +208,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
  * 1. PC sampling is requested from a process that runs within the ROCgdb.
  * 2. HSA runtime does not support PC sampling.
+ * 3. The KFD device (`/dev/kfd`) is unavailable, e.g. on WSL2/DXG.
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature.
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver

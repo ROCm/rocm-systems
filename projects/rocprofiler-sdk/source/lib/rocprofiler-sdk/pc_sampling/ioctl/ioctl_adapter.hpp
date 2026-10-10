@@ -46,6 +46,29 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint64_t                         interval,
                  uint32_t*                        ioctl_pcs_id);
 
+/**
+ * @brief Issue a KFD ioctl, restarting it while it fails with EINTR or EAGAIN.
+ *
+ * A negative @p fd (KFD unavailable, see @ref get_kfd_fd) is rejected without calling ::ioctl
+ * or printing: errno is set to EBADF and -EBADF is returned.
+ *
+ * @return 0 on success, otherwise the negated errno of the failure.
+ */
+int
+ioctl(int fd, unsigned long request, void* arg);
+
+/**
+ * @brief Get the process-wide file descriptor for /dev/kfd.
+ *
+ * The result is computed on the first call and cached for the lifetime of the process; it is
+ * never retried. On WSL2/DXG (platform::wsl::is_available()), which does not expose KFD, -1 is
+ * cached without opening the device and a single ROCP_INFO message is logged. Elsewhere the device
+ * is opened (O_RDWR | O_CLOEXEC); a failed open is reported once through ROCP_CI_LOG(WARNING),
+ * which is fatal in ROCPROFILER_CI builds, and -1 is cached. The descriptor is owned by this
+ * module and is never closed; callers must not close it.
+ *
+ * @return The KFD file descriptor, or -1 if KFD is unavailable on WSL2/DXG or opening it failed.
+ */
 int
 get_kfd_fd();
 

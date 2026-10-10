@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -30,6 +31,8 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
@@ -97,12 +100,17 @@ kfd_open()
 
     if(fd == -1)
     {
-        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling", kfd_device_name);
+        auto err = errno;
+        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling (errno {}: {})",
+                                            kfd_device_name,
+                                            err,
+                                            std::strerror(err));
         return -1;
     }
 
     return fd;
 }
+}  // namespace
 
 /** Call ioctl, restarting if it is interrupted
  * Taken from libhsakmt.c
@@ -110,6 +118,12 @@ kfd_open()
 int
 ioctl(int fd, unsigned long request, void* arg)
 {
+    if(fd < 0)
+    {
+        errno = EBADF;
+        return -EBADF;
+    }
+
     int ret;
 
     do
@@ -128,6 +142,8 @@ ioctl(int fd, unsigned long request, void* arg)
     return ret * errno;
 }
 
+namespace
+{
 // More or less taken from the HsaKmt
 
 /**
@@ -222,6 +238,10 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioct
 rocprofiler_status_t
 is_pc_sampling_supported()
 {
+    // PC sampling is only implemented on top of the KFD ioctl interface, so it is
+    // unavailable on platforms without /dev/kfd (e.g. WSL2/DXG).
+    if(get_kfd_fd() < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+
     // Verify KFD 1.16 version
     rocprofiler_ioctl_version_info_t ioctl_version = {.major_version = 0, .minor_version = 0};
     auto                             status        = get_ioctl_version(ioctl_version);
@@ -462,7 +482,15 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    static auto _v = kfd_open();
+    static auto _v = []() {
+        if(platform::wsl::is_available())
+        {
+            ROCP_INFO << "WSL2/DXG detected: /dev/kfd is absent by design; PC sampling and KFD "
+                         "profiler ioctls are unavailable";
+            return -1;
+        }
+        return kfd_open();
+    }();
     return _v;
 }
 
