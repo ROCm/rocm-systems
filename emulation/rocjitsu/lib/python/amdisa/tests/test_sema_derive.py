@@ -2158,14 +2158,22 @@ _SCALAR_ATOMIC_OPS = (
 )
 
 
+_IMPLEMENTED_SCALAR_ATOMICS = {
+    'S_ATOMIC_DEC': ('dec', 4, 1),
+    'S_ATOMIC_DEC_X2': ('dec', 8, 2),
+}
+
+
 class TestDeriveSmemAtomic:
-    def test_dec_derives_scalar_atomic(self):
-        sem = derive_semantics('S_ATOMIC_DEC', 'ENC_SMEM')
+    @pytest.mark.parametrize('name', sorted(_IMPLEMENTED_SCALAR_ATOMICS))
+    def test_implemented_scalar_atomics_derive_operation_and_widths(self, name):
+        operation, elem_size, num_elems = _IMPLEMENTED_SCALAR_ATOMICS[name]
+        sem = derive_semantics(name, 'ENC_SMEM')
         assert sem is not None
         assert sem.semantic_class == 'smem_atomic'
-        assert sem.operation == 'dec'
-        assert sem.elem_size == 4
-        assert sem.num_elems == 1
+        assert sem.operation == operation
+        assert sem.elem_size == elem_size
+        assert sem.num_elems == num_elems
 
     @pytest.mark.parametrize(
         'name',
@@ -2174,7 +2182,7 @@ class TestDeriveSmemAtomic:
             for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
             for op in _SCALAR_ATOMIC_OPS
             for width in ('', '_X2')
-            if f'{prefix}{op}{width}' != 'S_ATOMIC_DEC'
+            if f'{prefix}{op}{width}' not in _IMPLEMENTED_SCALAR_ATOMICS
         ],
     )
     def test_unimplemented_scalar_atomics_stay_nop(self, name):

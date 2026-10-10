@@ -7598,6 +7598,31 @@ def test_wide_scalar_load_contributes_two_counter_tokens():
 
 
 @pytest.mark.parametrize(
+    ('name', 'operation', 'elem_size', 'num_elems', 'tokens'),
+    [
+        ('S_ATOMIC_DEC', 'dec', 4, 1, 1),
+        ('S_ATOMIC_DEC_X2', 'dec', 8, 2, 2),
+        ('S_ATOMIC_CMPSWAP', 'cmpswap', 4, 2, 1),
+        ('S_ATOMIC_CMPSWAP_X2', 'cmpswap', 8, 4, 2),
+    ],
+)
+def test_scalar_atomic_counter_tokens_follow_return_width(
+    name, operation, elem_size, num_elems, tokens
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(
+        name,
+        'smem_atomic',
+        operation=operation,
+        elem_size=elem_size,
+        num_elems=num_elems,
+    )
+
+    assert codegen._memory_issue_counter_increment(sem, 'smem_atomic') == tokens
+
+
+@pytest.mark.parametrize(
     'arch',
     ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5'],
 )
