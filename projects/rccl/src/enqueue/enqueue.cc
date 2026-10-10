@@ -4287,6 +4287,13 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
              comm->config.numRmaCtx);
         return ncclInvalidArgument;
       }
+      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+      // sees these descriptors (ncclWaitSignal passes root = 0).
+      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
+        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
+             comm->nRanks);
+        return ncclInvalidArgument;
+      }
     }
   }
 
@@ -4482,6 +4489,13 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
       if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
         WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
              comm->config.numRmaCtx);
+        return ncclInvalidArgument;
+      }
+      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+      // sees these descriptors (ncclWaitSignal passes root = 0).
+      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
+        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
+             comm->nRanks);
         return ncclInvalidArgument;
       }
     }
