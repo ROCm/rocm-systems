@@ -121,6 +121,8 @@ contain that file, look one level down for the GPU model or rank directory.
 `Dispatch list`. The kernel index is what `-k` takes. Dispatch ids are 1-based
 and go to `-d`.
 
+`--list-stats` cannot be used with `--output-format csv` or `db`.
+
 Work on one kernel at a time:
 
 ```bash
