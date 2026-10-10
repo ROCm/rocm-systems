@@ -326,6 +326,28 @@ enum class BarrierFenceOperation : int {
   Get,
 };
 
+// Windows for the BarrierFence visibility tests. The destructor deregisters the
+// windows before freeing the memory under them.
+struct BarrierFenceBuffers {
+  ncclComm_t comm = nullptr;
+  void* src = nullptr;
+  void* dst = nullptr;
+  int* error = nullptr;
+  ncclWindow_t srcWin = nullptr;
+  ncclWindow_t dstWin = nullptr;
+
+  explicit BarrierFenceBuffers(ncclComm_t c) : comm(c) {}
+  BarrierFenceBuffers(const BarrierFenceBuffers&) = delete;
+  BarrierFenceBuffers& operator=(const BarrierFenceBuffers&) = delete;
+  ~BarrierFenceBuffers() {
+    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
+    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
+    if (error) (void)hipFree(error);
+    if (dst) (void)ncclMemFree(dst);
+    if (src) (void)ncclMemFree(src);
+  }
+};
+
 enum class GetCompletion : int {
   Flush,
   FlushAsyncWait,
@@ -539,6 +561,7 @@ class GinMPIDeviceTests : public MPITestBase {
   void runPutValueInline(int nContexts);
   void runWaitCounterAndSignal(int nContexts);
   void runVASignalPut(int nContexts);
+  void setupBarrierFenceBuffers(size_t bytes, BarrierFenceBuffers* bufs);
   void runBarrierFenceVisibility(BarrierFenceOperation operation, bool allContexts, bool defaultFence,
                                  bool coopAny = false);
 
@@ -1799,29 +1822,26 @@ TEST_F(GinMPIDeviceTests, WaitCounterAndSignal_MultiContext) {
   runWaitCounterAndSignal(n);
 }
 
+template <typename Coop, typename GinOrAllContexts>
+__device__ void syncFenceVisibilityBarrierWith(Coop coop, GinOrAllContexts ginOrAllContexts,
+                                               BarrierFenceOperation operation, bool defaultFence) {
+  ncclGinBarrierSession<Coop> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
+  if (defaultFence) {
+    bar.sync(coop, cuda::memory_order_acq_rel);
+  } else {
+    ncclGinFenceLevel fence =
+      operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
+    bar.sync(coop, cuda::memory_order_acq_rel, fence);
+  }
+}
+
 template <typename GinOrAllContexts>
 __device__ void syncFenceVisibilityBarrier(GinOrAllContexts ginOrAllContexts, BarrierFenceOperation operation,
                                            bool defaultFence, bool coopAny) {
   if (coopAny) {
-    ncclCoopAny coop{ncclCoopCta()};
-    ncclGinBarrierSession<ncclCoopAny> bar{coop, ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(coop, cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(coop, cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopAny{ncclCoopCta()}, ginOrAllContexts, operation, defaultFence);
   } else {
-    ncclGinBarrierSession<ncclCoopCta> bar{
-      ncclCoopCta(), ginOrAllContexts, ncclTeamTagWorld{}, /*barrierIndex=*/0};
-    if (defaultFence) {
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
-    } else {
-      ncclGinFenceLevel fence =
-        operation == BarrierFenceOperation::Get ? ncclGinFenceLevel::Get : ncclGinFenceLevel::Put;
-      bar.sync(ncclCoopCta(), cuda::memory_order_acq_rel, fence);
-    }
+    syncFenceVisibilityBarrierWith(ncclCoopCta(), ginOrAllContexts, operation, defaultFence);
   }
 }
 
@@ -1881,6 +1901,28 @@ __global__ void barrierFenceIpcSignalIncKernel(
   }
 }
 
+// Allocates and registers both windows, fills src with this rank's pattern
+// (0x20 + rank + (i & 0x3f)) and zeroes dst and the error word.
+void GinMPIDeviceTests::setupBarrierFenceBuffers(size_t bytes, BarrierFenceBuffers* bufs) {
+  int rank = -1;
+  ncclCommUserRank(bufs->comm, &rank);
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&bufs->src, bytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&bufs->dst, bytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&bufs->error, sizeof(int)));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(bufs->comm, bufs->src, bytes, &bufs->srcWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess,
+                ncclCommWindowRegister(bufs->comm, bufs->dst, bytes, &bufs->dstWin, NCCL_WIN_COLL_SYMMETRIC));
+
+  std::vector<uint8_t> hostSrc(bytes);
+  for (size_t i = 0; i < bytes; ++i)
+    hostSrc[i] = static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(bufs->src, hostSrc.data(), bytes, hipMemcpyHostToDevice));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(bufs->dst, 0, bytes));
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(bufs->error, 0, sizeof(int)));
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+}
+
 void GinMPIDeviceTests::runBarrierFenceVisibility(
     BarrierFenceOperation operation, bool allContexts, bool defaultFence, bool coopAny) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
@@ -1898,48 +1940,12 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
-  int rank = -1;
-  ncclCommUserRank(comm, &rank);
-
   // Larger than the default SDMA threshold so Anvil SDMA (NCCL_GIN_TYPE=7)
   // exercises a real SDMA copy rather than the small-transfer IPC fallback.
   constexpr size_t kBytes = 4096;
-  void* dSrc = nullptr;
-  void* dDst = nullptr;
-  int* dError = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  auto srcCleanup = makeScopeGuard([&]() {
-    if (dSrc) (void)ncclMemFree(dSrc);
-  });
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  auto dstCleanup = makeScopeGuard([&]() {
-    if (dDst) (void)ncclMemFree(dDst);
-  });
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
-  auto errorCleanup = makeScopeGuard([&]() {
-    if (dError) (void)hipFree(dError);
-  });
-
-  ncclWindow_t srcWin = nullptr;
-  ncclWindow_t dstWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto srcWinCleanup = makeScopeGuard([&]() {
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
-  });
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto dstWinCleanup = makeScopeGuard([&]() {
-    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-  });
-
-  std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + rank + (i & 0x3f));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+  BarrierFenceBuffers bufs{comm};
+  setupBarrierFenceBuffers(kBytes, &bufs);
+  if (HasFatalFailure() || IsSkipped()) return;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
@@ -1955,12 +1961,12 @@ void GinMPIDeviceTests::runBarrierFenceVisibility(
 
   MPI_Barrier(MPI_COMM_WORLD);
   barrierFenceVisibilityKernel<<<1, kGinKernelThreads, 0, stream>>>(
-    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, operation, allContexts, defaultFence, coopAny, dError,
-    devComm);
+    bufs.srcWin, bufs.dstWin, static_cast<uint8_t*>(bufs.dst), kBytes, operation, allContexts, defaultFence,
+    coopAny, bufs.error, devComm);
   ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
 
   int error = 0;
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&error, dError, sizeof(error), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&error, bufs.error, sizeof(error), hipMemcpyDeviceToHost));
   EXPECT_EQ(0, error) << "Fence visibility mismatch at byte " << (error == 0 ? 0 : error - 1);
   MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -2021,43 +2027,11 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
   ncclComm_t comm = getActiveCommunicator();
   hipStream_t stream = getActiveStream();
 
+  // Only rank 0 puts, so the kernel checks rank 0's pattern.
   constexpr size_t kBytes = 64;
-  void* dSrc = nullptr;
-  void* dDst = nullptr;
-  int* dError = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSrc, kBytes));
-  auto srcCleanup = makeScopeGuard([&]() {
-    if (dSrc) (void)ncclMemFree(dSrc);
-  });
-  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dDst, kBytes));
-  auto dstCleanup = makeScopeGuard([&]() {
-    if (dDst) (void)ncclMemFree(dDst);
-  });
-  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dError, sizeof(int)));
-  auto errorCleanup = makeScopeGuard([&]() {
-    if (dError) (void)hipFree(dError);
-  });
-
-  ncclWindow_t srcWin = nullptr;
-  ncclWindow_t dstWin = nullptr;
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dSrc, kBytes, &srcWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto srcWinCleanup = makeScopeGuard([&]() {
-    if (srcWin) (void)ncclCommWindowDeregister(comm, srcWin);
-  });
-  ASSERT_MPI_EQ(ncclSuccess,
-                ncclCommWindowRegister(comm, dDst, kBytes, &dstWin, NCCL_WIN_COLL_SYMMETRIC));
-  auto dstWinCleanup = makeScopeGuard([&]() {
-    if (dstWin) (void)ncclCommWindowDeregister(comm, dstWin);
-  });
-
-  std::vector<uint8_t> hostSrc(kBytes);
-  for (size_t i = 0; i < kBytes; ++i)
-    hostSrc[i] = static_cast<uint8_t>(0x20 + /*rank0 pattern*/0 + (i & 0x3f));
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSrc, hostSrc.data(), kBytes, hipMemcpyHostToDevice));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dDst, 0, kBytes));
-  ASSERT_MPI_EQ(hipSuccess, hipMemset(dError, 0, sizeof(int)));
-  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(nullptr));
+  BarrierFenceBuffers bufs{comm};
+  setupBarrierFenceBuffers(kBytes, &bufs);
+  if (HasFatalFailure() || IsSkipped()) return;
 
   ncclDevCommRequirements reqs = defaultGinReqs();
   reqs.worldGinBarrierCount = 1;
@@ -2070,12 +2044,12 @@ TEST_F(GinMPIDeviceTests, BarrierFence_IpcSignalIncMakesPutVisible_SingleNode) {
 
   MPI_Barrier(MPI_COMM_WORLD);
   barrierFenceIpcSignalIncKernel<<<1, kGinKernelThreads, 0, stream>>>(
-    srcWin, dstWin, static_cast<uint8_t*>(dDst), kBytes, dError, devComm);
+    bufs.srcWin, bufs.dstWin, static_cast<uint8_t*>(bufs.dst), kBytes, bufs.error, devComm);
   ASSERT_MPI_EQ(hipSuccess, syncStreamWithinTimeout(stream, /*seconds=*/30));
   MPI_Barrier(MPI_COMM_WORLD);
 
   int err = 0;
-  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, dError, sizeof(int), hipMemcpyDeviceToHost));
+  ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&err, bufs.error, sizeof(int), hipMemcpyDeviceToHost));
   ASSERT_EQ(err, 0) << "payload byte mismatch at index " << (err - 1);
 }
 
