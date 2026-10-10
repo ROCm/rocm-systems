@@ -1,0 +1,113 @@
+{
+  "archs": ["gfx950"],
+  "description": "MI350: CU, L1s, L2, Data Fabric, MALL, UMC, HBM; xGMI above and PCIe below the fabric.",
+  "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
+  "columns": [
+    [
+      {"id": "cu", "title": "Compute Units",
+        "metrics": [
+          {"metric": "Wavefront Occupancy", "title": "Wave Occ", "category": "util"},
+          {"metric": "VGPR", "title": "vGPRs", "category": "util"},
+          {"metric": "SGPR", "title": "sGPRs", "category": "util"},
+          {"metric": "Scratch Allocation", "title": "Scratch/Wave", "category": "util"},
+          {"metric": "LDS Allocation", "title": "LDS Alloc", "category": "util"},
+          {"metric": "Workgroups", "title": "Workgroups/CU", "category": "util"}
+        ]
+      }
+    ],
+    [
+      {"id": "vl1d", "title": "VL1D", "stall_level": "GL1",
+        "metrics": [
+          {"metric": "VL1 Hit", "title": "Hit", "category": "hit"},
+          {"metric": "VL1 Coalesce", "title": "Coalesce", "category": "neutral"}
+        ]
+      },
+      {"id": "lds", "title": "LDS",
+        "metrics": [
+          {"metric": "LDS Util", "title": "Util", "category": "util"}
+        ]
+      },
+      {"id": "sl1d", "title": "sL1D",
+        "metrics": [
+          {"metric": "sL1D Hit", "title": "Hit", "category": "hit"}
+        ]
+      },
+      {"id": "l1i", "title": "L1I",
+        "metrics": [
+          {"metric": "IL1 Hit", "title": "Hit", "category": "hit"}
+        ]
+      }
+    ],
+    [
+      {"id": "l2", "title": "L2", "stall_level": "GL2",
+        "metrics": [
+          {"metric": "L2 Hit", "title": "Hit", "category": "hit"}
+        ]
+      }
+    ],
+    [
+      {"id": "data_fabric", "title": "Data Fabric", "stall_level": "EA",
+        "above": [
+          {"id": "xgmi", "title": "xGMI (to Peer GPU)"}
+        ],
+        "below": [
+          {"id": "pcie", "title": "PCIe (to CPU or Non-xGMI connected GPU)"}
+        ]
+      }
+    ],
+    [
+      {"id": "mall", "title": "MALL"}
+    ],
+    [
+      {"id": "umc", "title": "UMC"}
+    ],
+    [
+      {"id": "hbm", "title": "HBM",
+        "metrics": [
+          {"metric": "HBM Read BW", "title": "Read BW", "category": "read"},
+          {"metric": "HBM Write BW", "title": "Write BW", "category": "write"},
+          {"metric": "HBM Atomic BW", "title": "Atomic BW", "category": "atomic"}
+        ]
+      }
+    ]
+  ],
+  "arrows": [
+    {"from": "cu", "to": "vl1d", "metric": "Flat Read", "title": "Read", "category": "read", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "metric": "Flat Write", "title": "Write", "category": "write", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "metric": "Flat Atomic", "title": "Atomic", "category": "atomic", "group": "Non-buffer Request"},
+    {"from": "cu", "to": "vl1d", "metric": "Buffer Read", "title": "Read", "category": "read", "group": "Buffer Request"},
+    {"from": "cu", "to": "vl1d", "metric": "Buffer Write", "title": "Write", "category": "write", "group": "Buffer Request"},
+    {"from": "cu", "to": "vl1d", "metric": "Buffer Atomic", "title": "Atomic", "category": "atomic", "group": "Buffer Request"},
+
+    {"from": "cu", "to": "lds", "metric": "LDS Read", "title": "Read", "category": "read"},
+    {"from": "cu", "to": "lds", "metric": "LDS Write", "title": "Write", "category": "write"},
+    {"from": "cu", "to": "lds", "metric": "LDS Atomic", "title": "Atomic", "category": "atomic"},
+    {"from": "cu", "to": "lds", "metric": "LDS Req", "title": "Instr", "category": "neutral"},
+
+    {"from": "cu", "to": "sl1d", "metric": "sL1D Rd", "title": "Read", "category": "read", "group": "SMEM"},
+
+    {"from": "cu", "to": "l1i", "metric": "IL1 Fetch", "title": "Read", "category": "read", "group": "ICACHE"},
+
+    {"from": "vl1d", "to": "l2", "metric": "VL1_L2 Read BW", "title": "Read BW", "category": "read"},
+    {"from": "vl1d", "to": "l2", "metric": "VL1_L2 Write BW", "title": "Write BW", "category": "write"},
+    {"from": "vl1d", "to": "l2", "metric": "VL1_L2 Atomic BW", "title": "Atomic BW", "category": "atomic"},
+
+    {"from": "sl1d", "to": "l2", "metric": "sL1D_L2 Read BW", "title": "Read BW", "category": "read"},
+
+    {"from": "l1i", "to": "l2", "metric": "IL1_L2 Read BW", "title": "Read BW", "category": "read"},
+
+    {"from": "l2", "to": "data_fabric", "metric": "L2-Fabric Read BW", "title": "Read BW", "category": "read"},
+    {"from": "l2", "to": "data_fabric", "metric": "L2-Fabric Write and Atomic BW", "title": "Write/Atomic BW", "category": "write"},
+
+    {"from": "data_fabric", "to": "mall", "metric": "HBM Read BW", "title": "Read BW", "category": "read"},
+    {"from": "data_fabric", "to": "mall", "metric": "HBM Write and Atomic BW", "title": "Write/Atomic BW", "category": "write"},
+
+    {"from": "data_fabric", "to": "xgmi", "metric": "xGMI Read BW", "title": "Read BW", "category": "read"},
+    {"from": "data_fabric", "to": "xgmi", "metric": "xGMI Write BW", "title": "Write BW", "category": "write"},
+    {"from": "data_fabric", "to": "xgmi", "metric": "xGMI Atomic BW", "title": "Atomic BW", "category": "atomic"},
+
+    {"from": "data_fabric", "to": "pcie", "metric": "PCIe Read BW", "title": "Read BW", "category": "read"},
+    {"from": "data_fabric", "to": "pcie", "metric": "PCIe Write BW", "title": "Write BW", "category": "write"},
+    {"from": "data_fabric", "to": "pcie", "metric": "PCIe Atomic BW", "title": "Atomic BW", "category": "atomic"}
+  ]
+}

@@ -184,12 +184,7 @@ class InstructionPipelines:
     @staticmethod
     def load() -> dict[str, Any]:
         """Read the generated file, or nothing when it is not installed."""
-        path = (
-            config.rocprof_compute_home
-            / "rocprof_compute_soc"
-            / "analysis_configs"
-            / "instruction_pipelines.yaml"
-        )
+        path = config.analysis_configs_dir / "instruction_pipelines.yaml"
         if not path.is_file():
             return {}
         # The C loader is faster and ships with PyYAML wherever libyaml is.
