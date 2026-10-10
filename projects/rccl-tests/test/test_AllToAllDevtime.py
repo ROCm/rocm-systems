@@ -29,6 +29,10 @@
 # Opt-in locally via RCCL_TESTS_GIN_SDMA_DEVTIME=1. The device-api CI job sets
 # that automatically (see projects/rccl/tools/ci/run-device-api-ci.sh).
 #
+# MPI launch, GPU detection, and the fixed-size -D 3 argv come from
+# gin_sdma_harness. Test names stay as they are: run-device-api-ci.sh runs this
+# file directly, and its pytest args are expanded unquoted.
+#
 # Environment (shared with test_AllToAll.py where noted):
 #   RCCL_TESTS_GIN_SDMA_DEVTIME  enable this module (default: off)
 #   RCCL_TESTS_A2A_NP            MPI ranks (default: detected GPU count)
@@ -37,16 +41,26 @@
 #   RCCL_TESTS_A2A_XENV          extra "-x K=V" env beyond the GIN essentials
 #   RCCL_TESTS_A2A_EXE           path to alltoall_perf (default: ../build/...)
 #   RCCL_TESTS_A2A_TIMEOUT_S     per-run timeout seconds (default: 300)
+#   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
 #   RCCL_TESTS_A2A_CTAS          -V grid CTAs (default: 8)
 #   RCCL_TESTS_A2A_GIN_TYPE      NCCL_GIN_TYPE (default: 2, matches device-api CI)
 
 import os
 import re
 import shlex
-import signal
-import subprocess
 
 import pytest
+
+from .gin_sdma_harness import (
+    detect_ngpus,
+    env_int,
+    gin_env_xflags,
+    gin_hang_msg,
+    gin_perf_argv,
+    launch_mpi_shell,
+    mpi_launch_prefix,
+    run_with_conn_gate_retry,
+)
 
 KiB = 1024
 SMOKE_BYTES = 128 * KiB  # single-size smoke (128 KiB per rank)
@@ -61,111 +75,122 @@ _enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_DEVTIME", "") not in (
 DEVTIME_LINE_RE = re.compile(
     r"#\[a2a-devtime\].*?\bdevtime\s+([0-9]+(?:\.[0-9]+)?)\s+us")
 
+# Release alltoall_perf prints a results row, not the DEBUG_PRINT `#wrong=`
+# line in common.cu. Root is -1 (AlltoAllRunTest). The first #wrong column is
+# out-of-place; in-place is N/A because alltoall.cu sets reportErrors = 0 there.
+_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+_WRONG = r"(?:{}|N/A)".format(_NUM)
+_A2A_OOP_WRONG_RE = re.compile(
+    r"^\s*\d+\s+\d+\s+\S+\s+\S+\s+-?\d+"
+    r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG),
+    re.M,
+)
+_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
 
-def _detect_ngpus():
-    if os.environ.get("ROCR_VISIBLE_DEVICES") is not None:
-        return len(os.environ["ROCR_VISIBLE_DEVICES"].split(","))
-    if os.environ.get("HIP_VISIBLE_DEVICES") is not None:
-        return len(os.environ["HIP_VISIBLE_DEVICES"].split(","))
-    try:
-        out = subprocess.check_output(
-            'rocminfo | grep "Device Type:.\\s*.GPU" | wc -l', shell=True)
-        return int(out)
-    except Exception:
-        return 0
 
-
-NP = int(os.environ.get("RCCL_TESTS_A2A_NP", "0")) or _detect_ngpus()
+# detect_ngpus() raises when rocminfo is missing. Only call it when this module
+# is enabled and RCCL_TESTS_A2A_NP is unset, so a GPU-free collection still works.
+NP = env_int("RCCL_TESTS_A2A_NP", 0) or (detect_ngpus() if _enabled else 0)
 LAUNCHER = os.environ.get("RCCL_TESTS_MPI_LAUNCHER", "mpirun")
 CTAS = os.environ.get("RCCL_TESTS_A2A_CTAS", "8")
-TIMEOUT_S = int(os.environ.get("RCCL_TESTS_A2A_TIMEOUT_S", "300"))
+TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 300)
+CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 5)
 GIN_TYPE = os.environ.get("RCCL_TESTS_A2A_GIN_TYPE", "2")
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
 
-pytestmark = pytest.mark.skipif(
+_gpu = pytest.mark.skipif(
     not _enabled,
     reason="GIN AllToAll devtime smoke tests are opt-in; set "
            "RCCL_TESTS_GIN_SDMA_DEVTIME=1 on a GIN-capable node to enable.")
 
 
+def _wrong_count(field):
+    """Numeric #wrong, or None when the column is N/A because checks were off."""
+    try:
+        return float(field)
+    except ValueError:
+        return None
+
+
 def _assert_datacheck_clean(out):
-    """Perf binary reports wrong elements via #wrong= or Out of bounds values."""
-    if "#wrong=0" in out:
-        return
-    if "Out of bounds values : 0 OK" in out:
-        return
-    if re.search(r"#wrong=\s*[1-9]", out):
-        pytest.fail("datacheck reported wrong elements:\n{}".format(out[-2000:]))
-    if "Out of bounds values : 0" not in out and "#wrong=" not in out:
-        # Some builds only print the summary line on failure; accept clean exit.
-        return
+    """Fail unless the release-build datacheck columns are present and zero.
+
+    `#wrong=` is printed only under DEBUG_PRINT (common.cu). A release binary
+    reports the out-of-place `#wrong` table column and
+    `Out of bounds values : N OK|FAILED`. A missing line is a failure: treating
+    that silence as clean let `Out of bounds values : 3 FAILED` pass.
+    """
+    text = out or ""
+    tail = text[-2000:]
+    wrongs = _A2A_OOP_WRONG_RE.findall(text)
+    if not wrongs:
+        pytest.fail(
+            "datacheck produced no out-of-place #wrong column. "
+            "Release builds do not print #wrong=. tail:\n{}".format(tail))
+    unchecked = [w for w in wrongs if _wrong_count(w) is None]
+    if unchecked:
+        pytest.fail(
+            "out-of-place #wrong is N/A {}, so the data check never ran. "
+            "tail:\n{}".format(unchecked, tail))
+    bad = [w for w in wrongs if _wrong_count(w) != 0.0]
+    if bad:
+        pytest.fail(
+            "out-of-place #wrong is nonzero {}. tail:\n{}".format(bad, tail))
+    m = _OOB_RE.search(text)
+    if not m or m.group(1) != "0":
+        pytest.fail(
+            "out-of-bounds count is {}. tail:\n{}".format(
+                m.group(1) if m else "absent", tail))
+
+
+def _launch_devtime(request, device_timing_mode, devtime_check=False):
+    """Launch alltoall_perf once with GIN (-D 3) and device-timing CLI flags."""
+    size = str(SMOKE_BYTES)
+    # Match device-api CI gin-d3 essentials; deployment extras via RCCL_TESTS_A2A_XENV.
+    gin_env = gin_env_xflags(
+        [
+            "NCCL_CUMEM_ENABLE=1",
+            "HSA_FORCE_FINE_GRAIN_PCIE=1",
+            "NCCL_DMABUF_ENABLE=1",
+            "NCCL_GIN_TYPE={}".format(GIN_TYPE),
+            "HSA_NO_SCRATCH_RECLAIM=1",
+            "NCCL_ENV_PLUGIN=none",
+            "RCCL_ENABLE_INTRANET=1",
+        ]
+        + XENV
+    )
+    timing = ["-B", str(device_timing_mode), "-L", "5", "-P", "2"]
+    if devtime_check:
+        timing += ["-H", "1"]
+    args = (
+        mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
+        + gin_env
+        + gin_perf_argv(executable, size, "int32", CTAS)
+        + timing
+    )
+    cmd = " ".join(shlex.quote(a) for a in args)
+    hang_msg = gin_hang_msg(
+        "AllToAll devtime smoke",
+        TIMEOUT_S,
+        size,
+        "int32",
+        "mode -B {}".format(device_timing_mode),
+    )
+    return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
 
 def _run_devtime(request, device_timing_mode, devtime_check=False):
-    """Launch alltoall_perf with GIN (-D 3) and device-timing CLI flags."""
+    """Retry the devtime launch on gfx950 connectivity-gate aborts."""
     if NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
-
-    size = str(SMOKE_BYTES)
-    # Match device-api CI gin-d3 essentials; deployment extras via RCCL_TESTS_A2A_XENV.
-    gin_env = []
-    for kv in [
-        "NCCL_CUMEM_ENABLE=1",
-        "HSA_FORCE_FINE_GRAIN_PCIE=1",
-        "NCCL_DMABUF_ENABLE=1",
-        "NCCL_GIN_TYPE={}".format(GIN_TYPE),
-        "HSA_NO_SCRATCH_RECLAIM=1",
-        "NCCL_ENV_PLUGIN=none",
-        "RCCL_ENABLE_INTRANET=1",
-    ] + XENV:
-        gin_env += ["-x", kv]
-
-    hostfile = request.config.getoption("--hostfile")
-    launch = [LAUNCHER, "-np", str(NP)] + MPI_OPTS
-    if hostfile:
-        launch += ["-host", hostfile]
-
-    bench_args = [
-        executable,
-        "-b", size, "-e", size,
-        "-f", "2",
-        "-g", "1",
-        "-R", "2",
-        "-D", "3",
-        "-V", CTAS,
-        "-d", "int32",
-        "-c", "1",
-        "-w", "1",
-        "-n", "3",
-        "-B", str(device_timing_mode),
-        "-L", "5",
-        "-P", "2",
-    ]
-    if devtime_check:
-        bench_args += ["-H", "1"]
-
-    args = launch + gin_env + bench_args
-    cmd = " ".join(shlex.quote(a) for a in args)
-    print(cmd)
-    proc = subprocess.Popen(cmd, shell=True, universal_newlines=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            start_new_session=True)
-    try:
-        out, _ = proc.communicate(timeout=TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        out, _ = proc.communicate()
-        pytest.fail(
-            "AllToAll devtime smoke HANG: no completion within {}s (mode -B {}). "
-            "Output tail:\n{}".format(TIMEOUT_S, device_timing_mode, (out or "")[-2000:]))
-    print(out)
-    return proc.returncode, out
+    return run_with_conn_gate_retry(
+        lambda: _launch_devtime(request, device_timing_mode, devtime_check),
+        CONN_RETRIES,
+    )
 
 
+@_gpu
 def test_AllToAllDevtimeMode1Augment(request):
     """Mode 1: normal bench plus #[a2a-devtime] from wall_clock64 timed kernel."""
     rc, out = _run_devtime(request, device_timing_mode=1)
@@ -178,6 +203,7 @@ def test_AllToAllDevtimeMode1Augment(request):
     assert devtime_us > 0.0, "devtime must be positive, got {} us".format(devtime_us)
 
 
+@_gpu
 def test_AllToAllDevtimeMode2DeviceOnly(request):
     """Mode 2: reported metric is in-kernel device latency (no host graph loop)."""
     rc, out = _run_devtime(request, device_timing_mode=2)
@@ -187,6 +213,7 @@ def test_AllToAllDevtimeMode2DeviceOnly(request):
         "device-time-only mode produced no valid measurement:\n{}".format(out[-2000:]))
 
 
+@_gpu
 def test_AllToAllDevtimeMode2WithTimedCheck(request):
     """Mode 2 + --devtime_check: validate timed-kernel output before datacheck."""
     rc, out = _run_devtime(request, device_timing_mode=2, devtime_check=True)
@@ -194,3 +221,64 @@ def test_AllToAllDevtimeMode2WithTimedCheck(request):
     _assert_datacheck_clean(out)
     assert "ERROR: --devtime_check:" not in out, (
         "timed-kernel datacheck failed:\n{}".format(out[-2000:]))
+
+
+def _sample_output(oop_wrong="0", oob="0", oob_tag="OK"):
+    """One release-build alltoall_perf row. In-place #wrong stays N/A."""
+    return "\n".join([
+        "#       size         count      type   redop    root"
+        "     time   algbw   busbw  #wrong     time   algbw   busbw  #wrong",
+        "      131072         32768     int32    none      -1"
+        "     12.34   1.00   1.00  {oop}"
+        "     12.34   1.00   1.00     N/A".format(oop=oop_wrong),
+        "# Out of bounds values : {oob} {tag}".format(oob=oob, tag=oob_tag),
+        "#[a2a-devtime] devtime 1.5 us",
+    ])
+
+
+def test_AllToAllDevtimeDatacheckAcceptsCleanReleaseOutput():
+    """A release run has no `#wrong=` line; the table column and OOB count do."""
+    _assert_datacheck_clean(_sample_output())
+
+
+def test_AllToAllDevtimeDatacheckAcceptsScientificNotation():
+    line = (
+        "  131072  32768  int32  none  -1"
+        "  1.23e+02  1.00e+02  1.00e+02  0"
+        "  1.23e+02  1.00e+02  1.00e+02  N/A\n"
+        "# Out of bounds values : 0 OK\n"
+    )
+    _assert_datacheck_clean(line)
+
+
+def test_AllToAllDevtimeDatacheckRejectsNonzeroOutOfBounds():
+    """`Out of bounds values : 3 FAILED` used to return clean."""
+    out = "# Out of bounds values : 3 FAILED\n"
+    with pytest.raises(pytest.fail.Exception, match="out-of-place #wrong|#wrong="):
+        _assert_datacheck_clean(out)
+    with pytest.raises(pytest.fail.Exception, match="out-of-bounds count is 3"):
+        _assert_datacheck_clean(_sample_output(oob="3", oob_tag="FAILED"))
+
+
+def test_AllToAllDevtimeDatacheckRejectsDebugPrintWrongEquals():
+    """The DEBUG_PRINT `#wrong=0` line is not a release-build data guard."""
+    with pytest.raises(pytest.fail.Exception, match="no out-of-place #wrong"):
+        _assert_datacheck_clean("rank=0 #wrong=0\n")
+
+
+def test_AllToAllDevtimeDatacheckRejectsNonzeroWrongColumn():
+    with pytest.raises(pytest.fail.Exception, match="nonzero"):
+        _assert_datacheck_clean(_sample_output(oop_wrong="3"))
+
+
+def test_AllToAllDevtimeDatacheckRejectsUncheckedNa():
+    with pytest.raises(pytest.fail.Exception, match="N/A"):
+        _assert_datacheck_clean(_sample_output(oop_wrong="N/A"))
+
+
+def test_AllToAllDevtimeDatacheckIgnoresColumnHeader():
+    header = (
+        "#       size         count      type   redop    root"
+        "     time   algbw   busbw  #wrong\n"
+    )
+    assert _A2A_OOP_WRONG_RE.findall(header) == []
