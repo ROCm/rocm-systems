@@ -113,11 +113,14 @@ class IpcOnImpl {
   int ipc_first_pe{0};
   int ipc_stride{0};    // 0 = pattern invalid
 
+  // shmcomm_out / shm_ranks_out, when given, receive the node-local IPC group so a caller can run
+  // its own collective over it (IpcSdmaImpl agrees on SDMA there). shmcomm_out is not freed here.
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            MPI_Comm thread_comm);
+                            MPI_Comm thread_comm, MPI_Comm *shmcomm_out = nullptr);
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                            TcpBootstrap *bootstrap);
+                            TcpBootstrap *bootstrap,
+                            std::vector<int> *shm_ranks_out = nullptr);
 
   __host__ void ipcHostStop();
 
