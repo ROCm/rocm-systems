@@ -23,7 +23,7 @@ from membw_analysis.summary import (
     has_active_nodes,
     status_text,
 )
-from memory_chart.loader import Layouts
+from memory_chart.loader import Layouts, is_memory_chart_panel
 from memory_chart.mem_chart import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
@@ -726,14 +726,6 @@ def process_table_data(
     return result_df
 
 
-def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
-    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
-    )
-
-
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
@@ -1081,7 +1073,7 @@ def show_all(
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
             # A panel drawn entirely as the memory chart carries its own heading
-            if mem_chart_data and _panel_is_mem_chart_only(panel):
+            if mem_chart_data and is_memory_chart_panel(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)

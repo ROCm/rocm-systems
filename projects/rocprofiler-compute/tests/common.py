@@ -13,6 +13,8 @@ from threading import Thread
 from typing import Set
 from unittest.mock import Mock
 
+import config
+from memory_chart.loader import PanelConfigs
 from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -34,6 +36,15 @@ SUPPORTED_ARCHS = {
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
+
+
+def memory_chart_archs() -> list[str]:
+    """Analysis-config archs that have a memory chart panel."""
+    return sorted(
+        path.name
+        for path in config.analysis_configs_dir.iterdir()
+        if path.is_dir() and PanelConfigs.for_arch(path.name)
+    )
 
 
 def check_resource_allocation():

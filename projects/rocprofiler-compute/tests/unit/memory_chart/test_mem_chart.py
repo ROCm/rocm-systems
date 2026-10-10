@@ -6,22 +6,23 @@
 import re
 import zlib
 
+import common
 import pytest
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
-from memory_chart.loader import Layouts
+from memory_chart.loader import Layouts, PanelConfigs
 from memory_chart.mem_chart import MemChart, plot_mem_chart, progress_bar
 from memory_chart.units import display_unit, panel_units
-from tests.unit.memory_chart.layout_cases import CONFIG_ARCHS, panel_config
 from utils.utils_common import strip_ansi
 
 DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
+MEMORY_CHART_ARCHS = common.memory_chart_archs()
 
 
 def sample_values(arch: str) -> dict[str, float]:
     """A distinct, plausible value for every memory chart metric of an arch."""
     values = {}
-    for name, unit in panel_units(panel_config(arch)).items():
+    for name, unit in panel_units(PanelConfigs.for_arch(arch)).items():
         seed = zlib.crc32(name.encode()) % 97
         kind = display_unit(unit).kind
         if kind == "percent":
@@ -37,7 +38,7 @@ def render(arch, values=None, membw=None):
     """Plain-text chart for an analysis-config arch (gfx115x stands for its family)."""
     if values is None:
         values = sample_values(arch)
-    units = panel_units(panel_config(arch))
+    units = panel_units(PanelConfigs.for_arch(arch))
     return strip_ansi(
         plot_mem_chart(
             values, chart_title=DEFAULT_TITLE, gpu_arch=arch, units=units, membw=membw
@@ -55,7 +56,7 @@ def make_membw(*nodes):
 
 
 def make_chart(arch, values, membw=None):
-    units = panel_units(panel_config(arch))
+    units = panel_units(PanelConfigs.for_arch(arch))
     return MemChart(Layouts.for_arch(arch), values, units, membw)
 
 
@@ -85,7 +86,7 @@ VALUE_SETS = {
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_full_metrics_render_every_block_label_and_note(gpu_arch):
     output = render(gpu_arch)
     assert output.splitlines()[0] == DEFAULT_TITLE
@@ -100,7 +101,7 @@ def test_full_metrics_render_every_block_label_and_note(gpu_arch):
         assert arrow.title in output
 
 
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_empty_metrics_render_one_placeholder_per_value(gpu_arch):
     output = render(gpu_arch, {})
     layout = Layouts.for_arch(gpu_arch)
@@ -109,7 +110,7 @@ def test_empty_metrics_render_one_placeholder_per_value(gpu_arch):
     assert "GB/s" not in output
 
 
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_rows_have_one_width(gpu_arch):
     # Grid rows (between the scope bar and the legend) line up
     lines = render(gpu_arch).splitlines()
@@ -125,7 +126,7 @@ def test_rows_have_one_width(gpu_arch):
     assert len(lines[start]) == widths.pop()
 
 
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_typical_values_stay_on_their_label_line(gpu_arch):
     output = render(gpu_arch)
     assert re.search(r"Scratch/Wave \d+\.\d{3} KB", output)
@@ -149,7 +150,7 @@ def test_unknown_arch_is_an_error():
 
 
 @pytest.mark.parametrize("values", VALUE_SETS)
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_arrows_stay_inside_their_box(gpu_arch, values):
     chart = make_chart(gpu_arch, *VALUE_SETS[values](gpu_arch))
     for placement in chart.placements:

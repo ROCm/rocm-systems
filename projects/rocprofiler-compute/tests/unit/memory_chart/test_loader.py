@@ -12,15 +12,16 @@ import common
 import pytest
 
 from memory_chart import loader
-from memory_chart.loader import Layouts, load_layout
+from memory_chart.loader import Layouts, PanelConfigs, layout_files, load_layout
 from memory_chart.units import display_unit, panel_units
-from tests.unit.memory_chart.layout_cases import (
-    CONFIG_ARCHS,
-    LAYOUT_ARCH_IDS,
-    LAYOUT_ARCHS,
-    panel_config,
-    panel_metric_names,
-)
+
+MEMORY_CHART_ARCHS = common.memory_chart_archs()
+
+# Every (layout file, arch it serves) pair
+LAYOUT_ARCHS = [
+    (path, arch) for path in layout_files() for arch in load_layout(path).archs
+]
+LAYOUT_ARCH_IDS = [f"{path.stem}-{arch}" for path, arch in LAYOUT_ARCHS]
 
 READ_ARROW = {
     "from": "cu",
@@ -42,6 +43,16 @@ def console_error(monkeypatch):
 
 def error_message(console_error):
     return console_error.call_args.args[1]
+
+
+def panel_metric_names(arch):
+    """Memory chart metric names of an arch, in config order, duplicates kept."""
+    return [
+        name
+        for source in PanelConfigs.for_arch(arch)["data source"]
+        for table in source.values()
+        for name in table.get("metric") or {}
+    ]
 
 
 def gfx950_data():
@@ -80,7 +91,7 @@ def with_duplicate_block():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
 def test_every_config_arch_has_one_layout(arch):
     owners = [path.name for path, served in LAYOUT_ARCHS if served == arch]
     assert len(owners) == 1, f"{arch} is served by {owners}"
@@ -96,7 +107,7 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 
-@pytest.mark.parametrize("arch", CONFIG_ARCHS)
+@pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
 def test_panel_metric_names_are_unique(arch):
     # Charts and the analysis database find metrics by name
     duplicates = [n for n, c in Counter(panel_metric_names(arch)).items() if c > 1]
@@ -105,7 +116,7 @@ def test_panel_metric_names_are_unique(arch):
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_every_shown_unit_has_a_display_rule(path, arch):
-    units = panel_units(panel_config(arch))
+    units = panel_units(PanelConfigs.for_arch(arch))
     shown = load_layout(path).metrics()
     unknown = {m: units.get(m) for m in shown if display_unit(units.get(m)) is None}
     assert not unknown
