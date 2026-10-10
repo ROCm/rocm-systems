@@ -1,0 +1,26 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "A 2 second trace-period delay is only reachable on the cputime clock. transpose 2 100 50 runs for roughly 1.5 seconds of realtime but burns about 5 seconds of process CPU time across its threads, so the window opens and records kernels on cputime and never opens on the realtime default",
+                    "error_message": "No kernels captured. A 2 second delay on the cputime clock should open well before the run ends; zero kernels means the delay was measured against realtime, i.e. ROCPROFSYS_TRACE_PERIOD_CLOCK_ID did not take effect",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels"
+                }
+            ]
+        }
+    ]
+}

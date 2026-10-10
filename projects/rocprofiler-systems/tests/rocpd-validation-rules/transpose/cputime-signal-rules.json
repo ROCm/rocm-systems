@@ -1,0 +1,46 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Overriding the cputime sampler signal must not disturb GPU kernel tracing",
+                    "error_message": "No kernels captured while ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL was overridden",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels"
+                }
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "rocpd_sample",
+            "required_columns": [
+                "id",
+                "guid",
+                "track_id",
+                "timestamp",
+                "event_id"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "The cputime sampler must keep delivering samples on the overridden signal. 100 is a deliberately loose floor: the run records thousands, so this only catches a sampler that stopped firing, not a slow host",
+                    "error_message": "Fewer than 101 timer_sampling samples recorded; overriding ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL stopped the cputime sampler from firing",
+                    "expected_result": 100,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_sample R INNER JOIN rocpd_event E ON E.id = R.event_id AND E.guid = R.guid INNER JOIN rocpd_string S ON S.id = E.category_id AND S.guid = E.guid WHERE S.string = 'timer_sampling'"
+                }
+            ]
+        }
+    ]
+}
