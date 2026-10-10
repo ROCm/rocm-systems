@@ -191,7 +191,7 @@ public:
   }
 
   hsa_status_t Process(void);
-  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
+  uint64_t * GetDoorbellPtr() const { return doorbell_ptr_; }
   void RingDoorbell(uint64_t value);
   GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }
 
@@ -263,12 +263,11 @@ private:
   uint32_t ScratchSizePerWave() { return scratch_size_per_wave_; }
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
-  GpuMemoryHandle amd_queue_mem_;
   GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
-  amd_queue_v2_t *amd_queue_;
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
-  uint64_t doorbell_signal_value_;
+  GpuMemoryHandle doorbell_mem_;
+  uint64_t *doorbell_ptr_;          //!< amd_signal_t::hardware_doorbell_ptr exposed to ROCr
   std::thread aql_to_pm4_thread_;
   std::thread fault_monitor_thread_;
   std::atomic<bool> thread_stop_;
