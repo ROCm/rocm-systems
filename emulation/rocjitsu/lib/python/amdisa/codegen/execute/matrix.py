@@ -308,10 +308,22 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     uses_supported_swmmac_layout = swmmac_layout is not SwmmacLayout.NONE
     uses_fixed_wave_swmmac_layout = swmmac_layout is SwmmacLayout.FIXED_WAVE
     uses_runtime_wave_swmmac_layout = swmmac_layout is SwmmacLayout.RUNTIME_WAVE
-    # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
-    swmmac_index_key_expr = (
-        '0u' if uses_fixed_wave_swmmac_layout else 'inst_.opsel & 0x1u'
+    uses_rdna_swmmac_arithmetic = (
+        uses_runtime_wave_swmmac_layout
+        and result_type == 'I32'
+        and (M, N) == (16, 16)
+        and (input_type, K) in {('IU8', 32), ('IU4', 32), ('IU4', 64)}
     )
+    # Floating-point RDNA4 forms still use the generic 16-bit index reader here.
+    # The floating-point SWMMAC slice supplies the matching mask and set width;
+    # changing only this mask would leave wave64 FP8/BF8 index selection incorrect.
+    # Fixed-wave OPSEL bits are matrix-reuse hints, not sparse index selectors.
+    if uses_fixed_wave_swmmac_layout:
+        swmmac_index_key_expr = '0u'
+    elif uses_rdna_swmmac_arithmetic:
+        swmmac_index_key_expr = 'inst_.opsel & 0x3u'
+    else:
+        swmmac_index_key_expr = 'inst_.opsel & 0x1u'
     uses_fixed_wave32_split_k_dense_layout = (
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size == 32
@@ -328,6 +340,18 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         matrix_layout is MatrixLayout.WMMA_SPLIT_K
         and ctx.profile.wave_size < ctx.profile.wave_size_max
         and is_dense_wmma
+    )
+    uses_rdna_wmma_arithmetic = (
+        (uses_gfx11_wmma_layout or uses_gfx12_wmma_layout)
+        and input_type in ('IU4', 'IU8')
+        and (
+            (M, N, K) == (16, 16, 16)
+            or (
+                uses_gfx12_wmma_layout
+                and input_type == 'IU4'
+                and (M, N, K) == (16, 16, 32)
+            )
+        )
     )
     is_gfx1251_f64_wmma = (
         arch == 'cdna5'
@@ -365,8 +389,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
-            L.append(f'  uint32_t s2 = dst;')
+            if not uses_rdna_swmmac_arithmetic:
+                L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
+                L.append(f'  uint32_t s2 = dst;')
             L.append(
                 f'  auto index_off = Isa::resolved_vgpr_offset(wf, {s2}.opr_type_, '
                 f'{s2}.encoding_value_, {s2}.vgpr_msb_role());'
@@ -414,8 +439,9 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         src0_base_expr = 'src0_base'
         src1_base_expr = 'src1_base'
         if uses_supported_swmmac_layout:
-            L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
-            L.append(f'  uint32_t s2 = dst;')
+            if not uses_rdna_swmmac_arithmetic:
+                L.append(f'  uint32_t const_acc = amdgpu::ACC_FROM_VGPR;')
+                L.append(f'  uint32_t s2 = dst;')
             L.append(
                 f'  uint32_t index_base = amdgpu::src_base(vb, {s2}.encoding_value_);'
             )
@@ -449,6 +475,15 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         L.append(f'                 s2, const_acc, {neg});')
     elif result_type == 'I32':
 
+        if uses_rdna_swmmac_arithmetic:
+            L.append(
+                f'  amdgpu::exec_rdna_swmmac_i32<{in_bits}, {K}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, {index_base_expr}, {index_key_expr},'
+                f' /*a_signed=*/(inst_.neg & 0x1u) != 0,'
+                f' /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);'
+            )
+            return '\n'.join(L)
+
         def append_signed_extractors(suffix: str) -> None:
             L.append(
                 f'  auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {{'
@@ -466,6 +501,18 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' : amdgpu::extract_u{suffix}(cu, base, loc);'
             )
             L.append(f'  }};')
+
+        if uses_rdna_wmma_arithmetic:
+            gfx12 = str(uses_gfx12_wmma_layout).lower()
+            shape_arg = f', {K}' if K != 16 else ''
+            L.append(
+                f'  amdgpu::exec_rdna_wmma_i32<{gfx12}, {in_bits}{shape_arg}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
+                f' /*a_signed=*/(inst_.neg & 0x1u) != 0,'
+                f' /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp);'
+            )
+            return '\n'.join(L)
 
         if uses_fixed_wave_swmmac_layout:
             if input_type in ('IU4', 'IU8'):
@@ -505,43 +552,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
-        elif uses_runtime_wave_swmmac_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
-                f' {swmmac_index_entries}, {index_key_expr}, extract_a, extract_b,'
-                f' inst_.clamp, const_acc, wf.wf_size());'
-            )
-        elif uses_gfx11_wmma_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
-                f' inst_.clamp, const_acc);'
-            )
-        elif uses_gfx12_wmma_layout:
-            if input_type in ('IU4', 'IU8'):
-                suffix = '4' if input_type == 'IU4' else '8'
-                append_signed_extractors(suffix)
-            else:
-                L.append(f'  auto extract_a = amdgpu::extract_i8;')
-                L.append(f'  auto extract_b = amdgpu::extract_i8;')
-            L.append(
-                f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
-                f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
-                f' inst_.clamp, const_acc, wf.wf_size());'
-            )
+        elif (
+            uses_runtime_wave_swmmac_layout
+            or uses_gfx11_wmma_layout
+            or uses_gfx12_wmma_layout
+        ):
+            # Do not apply an existing accumulation policy to an unsupported shape.
+            L.append('  throw util::UnimplementedInst(mnemonic());')
         else:
             has_blgp = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
             if not has_blgp:
