@@ -474,6 +474,10 @@ class Runtime {
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,
                                                    hsa_amd_memory_type_t* type);
+
+  hsa_status_t VMemoryGetHandleInfo(const hsa_amd_vmem_alloc_handle_t memoryHandle,
+                                    hsa_amd_vmem_handle_info_t* info);
+
   hsa_status_t VMemoryExportFabricHandle(hsa_fabric_handle_t* fabric_handle,
                                          hsa_amd_vmem_alloc_handle_t handle, uint64_t flags);
   hsa_status_t VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handle,
@@ -493,7 +497,14 @@ class Runtime {
 
   const std::vector<uint32_t>& gpu_ids() { return gpu_ids_; }
 
-  Agent* agent_by_gpuid(uint32_t gpuid) { return agents_by_gpuid_[gpuid]; }
+  // find() rather than operator[]: the latter inserts a null entry for an
+  // unknown gpuid, mutating a map that is otherwise only written during init
+  // and is guarded by no lock. Callers can pass driver-supplied ids that name
+  // a GPU outside this process's topology.
+  Agent* agent_by_gpuid(uint32_t gpuid) {
+    auto it = agents_by_gpuid_.find(gpuid);
+    return (it == agents_by_gpuid_.end()) ? nullptr : it->second;
+  }
 
   Agent* region_gpu() { return region_gpu_; }
 
@@ -1118,6 +1129,11 @@ class Runtime {
     MemoryRegion::AllocateFlags alloc_flag;
     core::Agent* drm_owner;  // Gpu agent used for import of host memory, NULL for device
                              // memory/imported handles
+
+    /* An import's placement is recovered lazily, on the first query that needs
+     * it, and then cached in region/alloc_flag/driver_handle.size. Set once the
+     * driver has been asked, so a buffer it cannot describe is not re-queried. */
+    bool import_info_queried;
   };
   // hsa_amd_vmem_alloc_handle_t (MemoryHandle*) to MemoryHandle mapping. Owns MemoryHandle
   // lifetime. Uniqueness is guaranteed by the runtime, independent of any driver-supplied
@@ -1126,6 +1142,12 @@ class Runtime {
 
   MemoryHandle* FindMemoryHandle(MemoryHandle* handle);
   void ReleaseMemoryHandle(MemoryHandle* handle);
+
+  const MemoryRegion* ResolveImportedRegion(const core::DmaBufInfo& info);
+
+  /// @brief Recover an imported handle's placement and size on first use, caching
+  /// the result. No-op for locally created handles and for repeat calls.
+  void EnsureImportInfo(MemoryHandle* memoryHandle);
 
   struct MappedHandle;
   struct MappedHandleAllowedAgent {

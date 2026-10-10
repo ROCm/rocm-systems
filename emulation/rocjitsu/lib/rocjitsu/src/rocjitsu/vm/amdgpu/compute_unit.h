@@ -127,6 +127,7 @@ public:
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
   static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
+  static constexpr uint32_t kMaxIsaDiagnostics = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -161,6 +162,20 @@ public:
   uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
   /// @brief Number of replay-source hazards, including suppressed reports.
   uint64_t xcnt_diagnostic_count() const { return xcnt_diagnostic_count_; }
+  /// @brief Number of ISA diagnostics, including suppressed reports.
+  uint64_t isa_diagnostic_count() const {
+    return isa_diagnostic_count_.load(std::memory_order_relaxed);
+  }
+  /// @brief Report static encoding restrictions on the issuing thread.
+  void check_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
+    constexpr uint64_t mask = INVALID_MFMA_BROADCAST | INVALID_VOPD_OPERANDS |
+                              INVALID_IU_MODIFIERS | MISALIGNED_SCALAR_DATA;
+    if (inst.flags() & mask) [[unlikely]]
+      report_static_isa_diagnostics(inst, wf);
+  }
+  void report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf);
+  /// @brief Report only conditions explicitly undefined for the executing architecture.
+  void report_undefined_behavior(const Wavefront &wf, std::string_view reason);
   /// @brief Register a producer using planned FLAT lanes before execution.
   void track_memory_wait(Instruction &inst, Wavefront &wf);
   /// @brief Format a scoreboard hazard using its owning wavefront context.
@@ -1111,6 +1126,7 @@ public:
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
     if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
       return util::Result::success();
+    check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
@@ -1416,6 +1432,8 @@ protected:
   uint64_t memory_wait_diagnostic_count_ = 0;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
+  // Reports come only from the CU issuing thread; helpers must not report.
+  std::atomic<uint64_t> isa_diagnostic_count_{0};
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;

@@ -3297,6 +3297,140 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   CATCH
 }
 
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (mode == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(mode)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string mode_str;
+  rsmi_status_t ret = amd::smi::get_npm_board_mode(*board_path_str, &mode_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_mode failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  *mode = (mode_str == "2") ? RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
+                            : RSMI_NPM_BALANCING_MODE_POWER_BALANCING;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", mode=" << mode;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+
+  CHECK_DV_IND_RANGE
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  if (mode != RSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    ss << __PRETTY_FUNCTION__ << " | invalid mode=" << mode << " -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // supported_mode is not yet implemented on all platforms, so its absence
+  // (RSMI_STATUS_NOT_SUPPORTED) must not block the write. Any other read
+  // failure (e.g. corrupt content) fails closed with RSMI_STATUS_SETTING_UNAVAILABLE,
+  // since we can't confirm the requested mode is allowed.
+  uint64_t supported_modes = 0;
+  rsmi_status_t supported_ret =
+      amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
+  if (supported_ret != RSMI_STATUS_NOT_SUPPORTED) {
+    if (supported_ret != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | get_npm_supported_modes failed: " << getRSMIStatusString(supported_ret, false)
+         << " -> rejecting write (fail closed)";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+    if ((supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
+      ss << __PRETTY_FUNCTION__ << " | mode=" << mode
+         << " not in supported_modes bitmask=" << supported_modes << " -> returning "
+         << getRSMIStatusString(RSMI_STATUS_SETTING_UNAVAILABLE);
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+  }
+
+  // Fail closed and NEVER touch sysfs when NPM is disabled on this node.
+  // Unlike rsmi_dev_npm_limit_set()'s analogous check (which returns
+  // RSMI_STATUS_INVALID_ARGS), balancing mode requires RSMI_STATUS_NOT_SUPPORTED
+  // here so it surfaces as AMDSMI_STATUS_NOT_SUPPORTED at the public API.
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string mode_str = (mode == RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ? "2" : "1";
+  rsmi_status_t ret = amd::smi::set_npm_board_mode(*board_path_str, mode_str);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit) {
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", limit=" << limit;
@@ -3373,6 +3507,48 @@ rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uin
      << getRSMIStatusString(ret, false);
   LOG_TRACE(ss);
   return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (bitmask == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(bitmask)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret = amd::smi::get_npm_supported_modes(*board_path_str, bitmask);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_supported_modes failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

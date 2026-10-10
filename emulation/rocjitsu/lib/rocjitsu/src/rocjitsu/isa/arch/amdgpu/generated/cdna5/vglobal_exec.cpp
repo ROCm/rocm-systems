@@ -1548,6 +1548,9 @@ void GlobalLoadTr16B128Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 4;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -1564,6 +1567,9 @@ void GlobalLoadTr8B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 6;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -2145,6 +2151,9 @@ void GlobalLoadTr4B64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 1;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
@@ -2161,6 +2170,9 @@ void GlobalLoadTr6B96Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->transpose = 2;
+  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());
+  if (wf.exec() != 0 && wf.exec() != full_exec)
+    wf.report_undefined_behavior("global transpose load requires a full or empty EXEC mask");
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->non_temporal = 0;
   flat_calculate_addresses(inst_, wf, *d);
