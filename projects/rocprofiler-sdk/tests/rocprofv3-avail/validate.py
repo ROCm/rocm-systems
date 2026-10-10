@@ -61,15 +61,15 @@ def test_validate_spm_refclk_config(rocm_path):
     for agent, configs in avail.get_spm_configs().items():
         name = str(agent_info_map[agent].get("name", ""))
         refclk = [
-            config
-            for config in configs
-            if config.type == "SAMPLE_INTERVAL_REFCLK_CYCLES"
+            config for config in configs if config.type == "SAMPLE_INTERVAL_REFCLK_CYCLES"
         ]
         if not refclk:
             continue
-        assert name.removesuffix("-strict") in {"gfx1200", "gfx1201", "gfx1250"}, (
-            f"{name} advertised a reference-clock SPM interval"
-        )
+        assert name.removesuffix("-strict") in {
+            "gfx1200",
+            "gfx1201",
+            "gfx1250",
+        }, f"{name} advertised a reference-clock SPM interval"
         refclk_configs.extend(refclk)
 
     if not refclk_configs:
