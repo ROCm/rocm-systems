@@ -151,8 +151,8 @@ AisCapability::ioProbeReason(IoProbeResult result)
         case IoProbeResult::Ok:
             return "ok";
         case IoProbeResult::NoDevice:
-            return "ENODEV: storage not on a P2PDMA-capable NVMe device (e.g. md volume or "
-                   "unsupported lvm volume), AIS not initialized on the device, or "
+            return "ENODEV: storage not on a P2PDMA-capable NVMe device (e.g. an lvm or md "
+                   "volume with a non-NVMe member), AIS not initialized on the device, or "
                    "pcie_p2pdma_distance < 0";
         case IoProbeResult::InternalError:
             return "fastpath rejected the request (unsupported filesystem, misaligned I/O, "

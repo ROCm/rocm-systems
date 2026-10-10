@@ -26,6 +26,7 @@ fallback path instead.
   /           ext4 (ordered)  nvme0n1  nvme     yes       yes
   /home       xfs             nvme1n1  nvme     yes       yes
   /data       ext4 (ordered)  dm-0     lvm      yes       yes
+  /mnt/raid   xfs             md0      md       yes       yes
 
   AIS support in:
           Kernel P2PDMA support   : True
@@ -50,6 +51,7 @@ uses one of the following storage configurations:
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
 * an LVM logical volume whose physical volumes are all local NVMe
+* an MD software RAID array whose member devices are all local NVMe
 
 If the target file or device is backed by any other storage configuration,
 hipFile uses the fallback path.

@@ -4,6 +4,8 @@
 
 ### Added
 
+* MD software RAID arrays (`mdadm`, `/dev/md*`) whose member devices are all local NVMe are now documented as fastpath capable, and `ais-check` reports them as such. This also covers MD stacked with LVM in either order.
+
 ### Changed
 
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
