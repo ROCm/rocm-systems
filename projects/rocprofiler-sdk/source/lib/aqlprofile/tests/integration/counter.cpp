@@ -21,15 +21,9 @@
 // SOFTWARE.
 
 #include <assert.h>
+#include <hsa/hsa.h>
 #include "counter.hpp"
 #include <cstring>
-
-#define CHECK_HSA(x)                                                                               \
-    if((x) != HSA_STATUS_SUCCESS)                                                                  \
-    {                                                                                              \
-        std::cerr << __FILE__ << " error at " << __LINE__ << std::endl;                            \
-        exit(-1);                                                                                  \
-    }
 
 hsa_status_t
 data_callback(aqlprofile_pmc_event_t event,
@@ -73,14 +67,15 @@ void
 AQLPacket::Free(void* ptr, void* /*data*/)
 {
     if(ptr == nullptr) return;
-    hsa_amd_memory_pool_free(ptr);
+    CHECK_HSA(hsa_amd_memory_pool_free(ptr));
 }
 
 hsa_status_t
 AQLPacket::Copy(void* dst, const void* src, size_t size, void* /*data*/)
 {
     if(size == 0) return HSA_STATUS_SUCCESS;
-    return hsa_memory_copy(dst, src, size);
+    CHECK_HSA(hsa_memory_copy(dst, src, size));
+    return HSA_STATUS_SUCCESS;
 }
 
 AQLPacket::AQLPacket(AgentInfo& agent, const std::vector<std::string>& _counters)
