@@ -1829,10 +1829,12 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
 
   const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
-  // copying only kLead packets instead of a full kPeriod. The GPU starts
-  // executing the lead while the CPU keeps copying the remaining
-  // packet+metadata payload, overlapping the bulk copy with GPU execution and
-  // cutting the one-time startup idle that grew with the 256B/packet metadata.
+  // copying only kLead packets instead of a full kPeriod, then double the chunk
+  // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
+  // copying the remaining packet+metadata payload. Doubling keeps each chunk's
+  // host work (copy plus per-packet profiling fixups) covered by the GPU executing
+  // the previous chunk; jumping from kLead straight to kPeriod lets the GPU drain
+  // the lead and idle until the full kPeriod chunk is published.
   constexpr size_t kLead = 8;
   auto* first_loc = reinterpret_cast<uint32_t*>(
       queueBase + (startIndex & queueMask) * kPacketSize);
@@ -2000,9 +2002,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   };
 
+  size_t chunk_size = kLead;
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
-    const size_t period = (chunkStart == 0) ? kLead : kPeriod;
-    const size_t chunkEnd  = std::min(chunkStart + period, numPackets);
+    const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
@@ -2122,6 +2124,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     chunkStart = chunkEnd;
+    chunk_size = std::min(chunk_size * 2, kPeriod);
   }
 
   SetStateFlag(kHasPendingDispatch);
@@ -4408,19 +4411,24 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // If Physical address is not set, then it is map command. If set, it is unmap command.
   if (phys_mem_obj != nullptr) {
-    amd::Memory* vaddr_sub_obj =
-        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-    if (vaddr_sub_obj == nullptr) {
-      LogError("HSA Command: MapMemObjBookkeeping failed!");
-      profilingEnd();
-      return;
+    amd::Memory* vaddr_sub_obj = nullptr;
+    if (vcmd.trackMapping()) {
+      vaddr_sub_obj =
+          dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+      if (vaddr_sub_obj == nullptr) {
+        LogError("HSA Command: MapMemObjBookkeeping failed!");
+        profilingEnd();
+        return;
+      }
     }
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
-    if ((hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), vcmd.size(),
-                                       vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0)) ==
-        HSA_STATUS_SUCCESS) {
+    size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
+    if ((hsa_status = Hsa::vmem_map(const_cast<void*>(vcmd.ptr()), vcmd.size(), phys_offset,
+                                    opaque_hsa_handle, 0)) != HSA_STATUS_SUCCESS) {
+      LogError("HSA Command: hsa_amd_vmem_map failed!");
+    } else if (vaddr_sub_obj != nullptr) {
       constexpr bool kImportVmmForInterprocess = true;
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
@@ -4429,25 +4437,30 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
         devMem->refreshOwningAgentFromPointerInfo();
       }
-    } else {
-      LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
 
-    amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
-    assert(vaddr_sub_obj != nullptr);
-
-    // Unmap the object, since the physical addr is set.
-    if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
-        HSA_STATUS_SUCCESS) {
-      constexpr bool kDestroyVirtualBuffer = true;
-      constexpr bool kReleaseSubObj = true;
-      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
-                                   kDestroyVirtualBuffer, kReleaseSubObj);
+    if (!vcmd.trackMapping()) {
+      if ((hsa_status = Hsa::vmem_unmap(const_cast<void*>(vcmd.ptr()), vcmd.size())) !=
+          HSA_STATUS_SUCCESS) {
+        LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      }
     } else {
-      LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+      assert(vaddr_sub_obj != nullptr);
+
+      // Unmap the object, since the physical addr is set.
+      if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
+          HSA_STATUS_SUCCESS) {
+        constexpr bool kDestroyVirtualBuffer = true;
+        constexpr bool kReleaseSubObj = true;
+        dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                     kDestroyVirtualBuffer, kReleaseSubObj);
+      } else {
+        LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      }
     }
   }
 
@@ -5336,7 +5349,10 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 
       int32_t releaseFlags = vcmd.getCommandEntryScope();
       if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
-        if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
+        // A barrier-value packet carries one dependency; a Barrier-AND carries five, so
+        // multi-event waits stay on Barrier-AND to remain a single packet.
+        if (settings.barrier_value_packet_ &&
+            (vcmd.profilingInfo().marker_ts_ || vcmd.eventWaitList().size() <= 1)) {
           dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
         } else {
           dispatchBarrierPacket(kNopPacketHeader, false);

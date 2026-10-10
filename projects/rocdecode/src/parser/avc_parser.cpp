@@ -120,18 +120,37 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         if (ret == PARSER_NOT_FOUND) {
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             return ret;
+        } else if (ret == PARSER_INVALID_FORMAT) {
+            // The frame data cannot be walked; GetNalUnit() has logged why. This has to return
+            // rather than fall through, because the loop below is while (1) and GetNalUnit()
+            // would report the same thing on every pass.
+            //
+            // Returning here also skips the end of packet finalization below, so slices already
+            // accumulated for the current picture would be dropped rather than decoded. Neither
+            // condition that reports this can leave any accumulated: the short packet one tests
+            // pic_data_size_, which is set once per packet, so it only fires on the first pass
+            // when num_slices_ is still 0, and the offset ordering one is not reachable with the
+            // current callers. A third condition that can fire mid packet would have to decide
+            // whether to finalize what was accumulated before returning.
+            return ret;
         }
 
         // Parse the NAL unit
         if (nal_unit_size_ >= 4) {
-            // start code + NAL unit header = 4 bytes
-            int ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
+            // start code + NAL unit header = 4 bytes. Subtract once, here, where the floor above
+            // is in view: the subtraction is unsigned, so doing it further down would wrap for a
+            // NAL unit shorter than the header without that floor being obvious.
+            uint32_t nal_payload_size = nal_unit_size_ - 4;
+            uint32_t ebsp_size = nal_payload_size > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_payload_size; // only copy enough bytes for header parsing
 
             nal_unit_header_ = ParseNalUnitHeader(pic_data_buffer_ptr_[curr_start_code_offset_ + 3]);
             switch (nal_unit_header_.nal_unit_type) {
                 case kAvcNalTypeSeq_Parameter_Set: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     if ((ret2 = ParseSps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in SPS parsing. This SPS NAL unit is skipped.");
                     }
@@ -140,7 +159,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                 case kAvcNalTypePic_Parameter_Set: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     if ((ret2 = ParsePps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in PPS parsing. This PPS NAL unit is skipped.");
                     }
@@ -155,7 +177,10 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     // Parse the slice header into a temporary first, so we can decide whether this
                     // slice begins a new primary coded picture before committing it.
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     AvcSliceHeader curr_slice_header;
                     if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, &curr_slice_header)) != PARSER_OK) {
                         ErrorLog(g_rocdec_logger, "Error occurred in slice header parsing. This slice NAL unit is skipped.");
@@ -252,7 +277,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                 case kAvcNalTypeSEI_Info: {
                     if (pfn_get_sei_message_cb_) {
-                        int sei_ebsp_size = nal_unit_size_ - 4; // copy the entire NAL unit
+                        uint32_t sei_ebsp_size = nal_payload_size; // copy the entire NAL unit
                         if (sei_rbsp_buf_) {
                             if (sei_ebsp_size > sei_rbsp_buf_size_) {
                                 delete [] sei_rbsp_buf_;
@@ -264,8 +289,13 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                             sei_rbsp_buf_ = new uint8_t [sei_rbsp_buf_size_];
                         }
                         memcpy(sei_rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), sei_ebsp_size);
-                        rbsp_size_ = EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size);
-                        ParseSeiMessage(sei_rbsp_buf_, rbsp_size_);
+                        if (EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size, &rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                            break;
+                        }
+                        if (ParseSeiMessage(sei_rbsp_buf_, rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "Error in SEI message parsing. Remaining SEI messages in this NAL unit are skipped.");
+                        }
                     }
                     break;
                 }
@@ -695,7 +725,7 @@ ParserResult AvcVideoParser::SendPicForDecode() {
     if (num_slices_ > slice_param_list_.size()) {
         slice_param_list_.resize(num_slices_, {0});
     }
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecAvcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         AvcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         AvcSliceHeader *p_slice_header = &p_slice_info->slice_header;
@@ -3719,7 +3749,7 @@ void AvcVideoParser::PrintVappiBufInfo() {
     }
 
     MSG("Slice ref lists:")
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecAvcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         AvcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         MSG("Slice " << slice_index << " ref list 0:");

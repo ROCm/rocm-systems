@@ -12,6 +12,11 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
+/// Constructs a DDI validation or state error without a native I/O source.
+pub(crate) fn error(kind: ErrorKind, detail: &'static str) -> Error {
+    Error::Operation { kind, detail }
+}
+
 /// Stable, coarse error classification for programmatic recovery decisions.
 ///
 /// This enum deliberately omits paths and driver text. It is suitable for
