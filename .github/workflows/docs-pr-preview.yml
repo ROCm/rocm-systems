@@ -184,7 +184,7 @@ jobs:
             --request PATCH \
             --header "Authorization: Token $RTD_TOKEN" \
             --header "Content-Type: application/json" \
-            --data '{"active": true, "hidden": true, "privacy_level": "private"}' \
+            --data '{"active": true, "hidden": true, "privacy_level": "public"}' \
             "https://app.readthedocs.com/api/v3/projects/${{ steps.rtd.outputs.project_slug }}/versions/${{ steps.rtd.outputs.version_slug }}/"
 
       - name: Trigger RTD build for PR branch
