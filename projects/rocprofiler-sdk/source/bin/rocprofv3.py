@@ -42,6 +42,12 @@ CONST_VERSION_INFO = {
     "rocm_version": "@rocm_version_FULL_VERSION@",
 }
 
+# `rocprofv3 --doctor` execs this script. SYNC: DOCTOR_FLAG and DOCTOR_COMMAND in
+# source/lib/python/rocprofv3/doctor_result.py, and source/libexec/rocprofiler-sdk/
+# rocprofv3-doctor/CMakeLists.txt for where it is installed.
+DOCTOR_FLAG = "--doctor"
+DOCTOR_LIBEXEC_DIR = "@CMAKE_INSTALL_LIBEXECDIR@"
+
 # Perfetto's TraceConfig BufferConfig.size_kb field is a uint32_t, and the
 # tracing service allocates size_kb * 1024 bytes and rejects the config when
 # that byte count does not fit in a uint32_t. So although the option is named
@@ -348,7 +354,6 @@ def resolve_library_path(val, args, is_sdk_lib=True):
 
 
 def get_att_paths(args):
-
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     if args.rocm_root is not None:
@@ -377,7 +382,6 @@ def get_att_paths(args):
 
 
 def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
-
     library_paths = get_att_paths(args)
 
     for path in library_paths:
@@ -478,7 +482,6 @@ class omptTraceArgAction(argparse.Action):
 
 
 def parse_arguments(args=None):
-
     usage_examples = """
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
@@ -1177,6 +1180,18 @@ For attachment profiling of running processes:
         default=True,
     )
 
+    # NOTE: --doctor is intercepted in main() before parse_arguments() runs, so
+    # this entry exists only to document the flag in --help. Any remaining
+    # arguments are forwarded verbatim to the doctor, which is why the
+    # interception cannot be deferred to argparse: flags such as --format have
+    # incompatible meanings in the two.
+    advanced_options.add_argument(
+        DOCTOR_FLAG,
+        action="store_true",
+        help="""Check whether this machine and ROCm installation are ready for profiling, report what would stop rocprofv3 from working and how to fix it, then exit. Options after --doctor configure the check (for example: rocprofv3 --doctor --format json); see rocprofv3 --doctor --help.""",
+        default=False,
+    )
+
     add_parser_bool_argument(
         advanced_options,
         "--attach-sync-output",
@@ -1392,10 +1407,10 @@ def parse_text(text_file):
 
 
 def parse_input(input_file):
-
     _, extension = os.path.splitext(input_file)
     if extension == ".txt" or extension == ".text":
-        warning("""
+        warning(
+            """
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
 
@@ -1412,7 +1427,8 @@ def parse_input(input_file):
 
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
-            """)
+            """
+        )
         text_input = parse_text(input_file)
         text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
         return [dotdict(itr) for itr in text_input_lst]
@@ -1608,7 +1624,6 @@ def int_auto(num_str):
 
 
 def run(app_args, args, **kwargs):
-
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
@@ -2120,7 +2135,6 @@ def run(app_args, args, **kwargs):
             update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
-
         cfg_init_message = "\n- rocprofv3 configuration{}:\n".format(
             "" if app_pass is None else f" (pass {app_pass})"
         )
@@ -2309,7 +2323,6 @@ def run(app_args, args, **kwargs):
             )
 
     if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
-
         if (
             not args.pc_sampling_beta_enabled
             and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
@@ -2339,7 +2352,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
     if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
-
         if (
             not args.spm_beta_enabled
             and os.environ.get("ROCPROFILER_SPM_BETA_ENABLED", None) is None
@@ -2392,7 +2404,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
         update_env("ROCPROF_ATT_NO_INTERCEPT", args.att_no_intercept, overwrite=True)
 
@@ -2537,7 +2548,74 @@ def run(app_args, args, **kwargs):
         return exit_code
 
 
+def find_doctor_script():
+    """Path of the script behind --doctor, or None.
+
+    Installed and build trees keep it at <prefix>/<libexecdir>/rocprofiler-sdk/;
+    a source checkout keeps it under source/libexec/.
+    """
+    prefix = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    libexec_dirs = ["libexec"]
+    if not DOCTOR_LIBEXEC_DIR.startswith("@"):
+        libexec_dirs.insert(0, DOCTOR_LIBEXEC_DIR)
+    candidates = [
+        os.path.join(prefix, libexec_dir, "rocprofiler-sdk", "rocprofv3-doctor")
+        for libexec_dir in libexec_dirs
+    ]
+    candidates.append(
+        os.path.join(
+            prefix,
+            "libexec",
+            "rocprofiler-sdk",
+            "rocprofv3-doctor",
+            "rocprofv3-doctor.py",
+        )
+    )
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def dispatch_doctor(raw_args):
+    """Replace this process with the doctor, passing the remaining arguments.
+
+    Intercepted before parse_arguments() because rocprofv3 and the doctor both
+    define --format and --output with different meanings; letting argparse see
+    the doctor's flags would be an error rather than a passthrough.
+
+    exec rather than a child process: no rocprofv3 process lingers while the
+    doctor runs (it would otherwise appear to the doctor as a running
+    profiler), and signals and the exit status pass straight through.
+    Returns only when the doctor cannot be started.
+    """
+    args = [itr for itr in raw_args if itr != DOCTOR_FLAG]
+    script = find_doctor_script()
+    if script is None:
+        sys.stderr.write(
+            "rocprofv3: the {} component is not installed next to this rocprofv3 "
+            "({}); reinstall rocprofiler-sdk\n".format(
+                DOCTOR_FLAG, os.path.dirname(os.path.realpath(__file__))
+            )
+        )
+        return 2
+
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        os.execv(sys.executable, [sys.executable, script] + args)
+    except OSError as exc:
+        sys.stderr.write("rocprofv3: cannot run {} ({})\n".format(script, exc))
+    return 2
+
+
 def main(argv=None):
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    # only rocprofv3's own options count: everything after "--" belongs to the
+    # application and must reach it verbatim, "--doctor" included
+    profiler_args = raw_args[: raw_args.index("--")] if "--" in raw_args else raw_args
+    if DOCTOR_FLAG in profiler_args:
+        return dispatch_doctor(profiler_args)
 
     cmd_args, app_args = parse_arguments(argv)
 

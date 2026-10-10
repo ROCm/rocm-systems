@@ -45,6 +45,7 @@ The documentation is structured as follows:
       * :ref:`kernel-naming-filtering`
       * :ref:`rocprofv3-io-options`
       * :ref:`using-rocprofv3-avail`
+      * :ref:`using-rocprofv3-doctor`
       * :ref:`rocprofv3-process-attachment`
       * :ref:`using-rocpd-output-format`
       * :ref:`using-rocprofiler-sdk-roctx`
