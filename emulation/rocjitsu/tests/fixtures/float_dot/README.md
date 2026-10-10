@@ -1,8 +1,10 @@
 # DOT2 and WMMA hardware fixtures
 
-The floating-point raw results below were captured on Radeon Pro W7900 (`gfx1100`) and Radeon AI
-Pro R9700 (`gfx1201`) using TheRock `10.2.0a20260916`. The decoded regression
-tests consume the captured bits directly and require no GPU.
+The original GFX11/GFX12 and packed floating-point fixtures were captured on
+Radeon Pro W7900 (`gfx1100`) and Radeon AI Pro R9700 (`gfx1201`) using
+TheRock `10.2.0a20260916`. The decoded regression
+tests consume the captured bits directly and require no GPU. Later per-opcode
+fixtures record their SDK version and date in the sections below.
 
 | Header | Contents |
 | --- | --- |
@@ -15,6 +17,10 @@ tests consume the captured bits directly and require no GPU.
 | `rdna_wmma_iu4_k32_cases.h` | Two IU4 K32 matrices for signed saturation on gfx1201, both wave sizes. |
 | `rdna_wmma_iu4_cases.h` | Four IU4 matrices for signed saturation, both architectures and wave sizes. |
 | `rdna_wmma_iu8_cases.h` | Four IU8 matrices for signed saturation, both architectures and wave sizes. |
+| `rdna_wmma_f32_fp8_fp8_cases.h` | FP8/FP8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_wmma_f32_fp8_bf8_cases.h` | FP8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_wmma_f32_bf8_fp8_cases.h` | BF8/FP8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
+| `rdna_wmma_f32_bf8_bf8_cases.h` | BF8/BF8 F32 WMMA raw matrices and operand witnesses on gfx1201, both wave sizes. |
 | `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
 
 DOT2 records store packed A/B words, FP32 C and the expected FP32 result.
@@ -148,3 +154,71 @@ other lane group, interchanging compressed K bits 3 and 4 relative to the generi
 layout. Its wave64 order is the generic order. These are inferences from local
 outputs, not observations of internal hardware steps. The decoded tests retain
 all measured raw destination words, signedness/wrap expectations and key aliases.
+
+## Native FP8/BF8 WMMA captures
+
+The `V_WMMA_F32_16X16X16_*` fixtures below were captured on R9700/gfx1201
+on 2026-10-10 using TheRock 10.1.0a20260822, for wave32 and wave64. Matrix
+records retain the exact instruction words, MODE, input seed, input pattern
+and a counted span of raw destination words. The shared `RdnaWmmaFloat` test
+reconstructs all 33 registers and checks every register after decoded execution
+in both default and forced-scalar modes. Destinations v0 and v8 directly overlap
+A and B; v24 is a control. The xorshift seed is `0x12056f10`; the finite pattern
+bounds each factor to its format's finite range and selects C boundary words.
+
+The best-effort model uses two steps of eight products. Within each modeled
+step, it aligns groups of four products independently, then aligns their sums
+with C. It interchanges generic K bits 2 and 3 for wave64 and uses the generic
+order for wave32. Native FP8/BF8 subnormal exponent floors participate in this
+alignment model. Factor NaNs and invalid operations involving BF8 infinities
+produce `0xffc00a3d` in the model; otherwise it preserves and quiets C's NaN
+payload. Its invalid products take precedence over a NaN C, while a valid
+infinite product preserves it. These choices fit the local captures but do not
+identify hardware internals. FP8 has no infinities. Saved uniform witnesses
+include negative-zero A and C with positive-one B producing positive zero, and
+a negative subnormal C surviving zero products.
+
+Captures with BF8 in A or B constrain special-value precedence in the model:
+opposing infinities within one modeled step override a NaN C, while opposite
+infinities in separate modeled steps preserve C's NaN payload. In that model,
+each step receives a NaN accumulator, which takes precedence over its valid
+infinite products. The captures expose only final outputs, not these steps.
+
+Uniform operand records retain A/B/C/D/index words and physical expected bits.
+Inline 0, 0.5 and integer -1 fixtures exercise constant C, including raw
+`0xffffffff`. Compact matrix fixtures also record MODE `0x0f` and `0x8000ff`;
+zero-product cases keep subnormal C observable under preserve/flush and rounding
+settings. The ISA lists no ABS/NEG support for FP8/BF8 WMMA. LLVM accepts the
+C ABS/NEG bit encodings; additional local gfx1201 captures returned unchanged
+outputs for those bits. The model ignores them based on those cases. These are
+extra encoding observations, not defined modifiers.
+
+For a factor made of repeated `0x7c` bytes, with the other factor +1 and C
+zero, the measured D word is `0x45c00000` for FP8 and `0x7f800000` for BF8.
+Positive one is encoded as `0x38` in FP8 and `0x3c` in BF8. Both operand
+positions and both wave widths are captured.
+
+The per-format headers select these operand interpretations:
+
+- `rdna_wmma_f32_fp8_fp8_cases.h`: FP8 A and B; neither has infinities.
+  Compact operands cover C-bit encodings, inline C and zero-product MODE cases.
+  Direct special-value witnesses are in the retained op70 corpus. The remaining
+  headers below also embed their special-value witnesses as compact operands.
+- `rdna_wmma_f32_fp8_bf8_cases.h`: FP8 A and BF8 B. The `0x7c` witnesses
+  distinguish finite A from infinite B.
+- `rdna_wmma_f32_bf8_fp8_cases.h`: BF8 A and FP8 B. The `0x7c` witnesses
+  distinguish infinite A from finite B, independently of the reverse format order.
+- `rdna_wmma_f32_bf8_bf8_cases.h`: BF8 A and B. Both `0x7c` factors
+  are infinite; invalid-product and accumulator-NaN witnesses cover both sides.
+  Twenty-four nonuniform operand records distinguish infinities within and across
+  steps, with quiet/signaling NaN or zero C, at both wave widths. These records
+  optionally replace 128 lane words starting at VGPR `factor_base`: each of the
+  eight `factor_groups` words repeats across sixteen consecutive lanes, in
+  register-major order. The span covers four VGPRs at wave32 or two at wave64.
+  All other input registers retain the uniform words.
+
+The larger retained local corpus includes all 65,536 raw byte pairs per format,
+finite and raw matrices, every inline C selector, MODE sweeps, destination
+overlaps, cancellation/alignment witnesses and the extra C-bit encodings.
+These finite observations qualify the model but do not prove all possible
+matrix inputs.

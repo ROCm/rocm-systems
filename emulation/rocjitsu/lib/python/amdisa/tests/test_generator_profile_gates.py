@@ -2437,6 +2437,30 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             'exec_gfx12_wmma_dot4<true, true>',
             False,
         ),
+        (
+            'V_WMMA_F32_16X16X16_FP8_FP8',
+            'rdna4',
+            'exec_gfx12_wmma_dot8<false, false>',
+            False,
+        ),
+        (
+            'V_WMMA_F32_16X16X16_FP8_BF8',
+            'rdna4',
+            'exec_gfx12_wmma_dot8<false, true>',
+            False,
+        ),
+        (
+            'V_WMMA_F32_16X16X16_BF8_FP8',
+            'rdna4',
+            'exec_gfx12_wmma_dot8<true, false>',
+            False,
+        ),
+        (
+            'V_WMMA_F32_16X16X16_BF8_BF8',
+            'rdna4',
+            'exec_gfx12_wmma_dot8<true, true>',
+            False,
+        ),
         # MFMA specialized and generic float dispatches.
         (
             'V_MFMA_F32_16X16X32_FP8_FP8',
@@ -2818,6 +2842,33 @@ def test_rdna4_sparse_integers_use_full_index_key_and_measured_groups(bits, k):
     assert 'index_base, index_key' in body
     assert 'const_acc' not in body
     assert 'exec_rdna_swmmac_i32' not in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize(
+    'input_type, a_bf8, b_bf8',
+    [
+        ('FP8_FP8', 'false', 'false'),
+        ('FP8_BF8', 'false', 'true'),
+        ('BF8_FP8', 'true', 'false'),
+        ('BF8_BF8', 'true', 'true'),
+    ],
+)
+def test_rdna_wmma_f8_uses_native_eight_product_steps(input_type, a_bf8, b_bf8):
+    inst = Instruction(f'V_WMMA_F32_16X16X16_{input_type}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert f'exec_gfx12_wmma_dot8<{a_bf8}, {b_bf8}>' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
+    assert 'wmma_c_modifier' not in body
+    assert 'exec_gfx12_wmma_dot8' not in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+def test_rdna_unmeasured_f8_shape_is_not_approximated(input_type):
+    inst = Instruction(f'V_WMMA_F32_16X16X32_{input_type}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert 'exec_wmma_f32(' not in body
+    assert 'exec_gfx12_wmma_dot8' not in body
 
 
 def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():

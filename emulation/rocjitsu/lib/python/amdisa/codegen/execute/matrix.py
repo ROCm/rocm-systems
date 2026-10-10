@@ -44,12 +44,13 @@ def _mma_targ(M: int, N: int, K: int, B: int, *, batch_optional: bool) -> str:
     return f'{M}, {N}, {K}, {B}'
 
 
-def _f8_bools(input_type: str) -> tuple[str, str]:
-    """(A_FP8, B_FP8) C++ bool literals for a fixed f8 input family."""
+def _f8_bools(input_type: str, *, bf8: bool = False) -> tuple[str, str]:
+    """C++ (A, B) bool literals: true for FP8 by default, or BF8 with bf8=True."""
     parts = input_type.split('_')
+    true_format = 'BF8' if bf8 else 'FP8'
     return (
-        'true' if parts[0] == 'FP8' else 'false',
-        'true' if parts[1] == 'FP8' else 'false',
+        'true' if parts[0] == true_format else 'false',
+        'true' if parts[1] == true_format else 'false',
     )
 
 
@@ -744,6 +745,21 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt,'
                 f" inst_.neg, inst_.neg_hi{', wf.fp16_ovfl()' if packed_arg else ''});"
             )
+        elif (
+            uses_gfx12_wmma_layout
+            and result_type == 'F32'
+            and input_type in _F8_FIXED
+            and (M, N, K) == (16, 16, 16)
+        ):
+            a_bf8, b_bf8 = _f8_bools(input_type, bf8=True)
+            L.append(
+                f'  amdgpu::exec_gfx12_wmma_dot8<{a_bf8}, {b_bf8}>(cu, wf.wf_size(), dst,'
+                f' {src0_base_expr}, {src1_base_expr}, s2,'
+                f' {s2}.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc) : std::nullopt);'
+            )
+        elif uses_gfx12_wmma_layout and input_type in _F8_FIXED:
+            # Other shapes need local observations before inferring a model.
+            L.append('  throw util::UnimplementedInst(mnemonic());')
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':
                 L.append(

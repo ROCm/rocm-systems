@@ -1933,6 +1933,45 @@ void exec_gfx12_wmma_dot4(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s
     }
 }
 
+// Best-effort GFX12 FP8/BF8 WMMA model based solely on local gfx1201 captures.
+// Its two eight-product steps and wave64 K order are inferences, not known
+// hardware internals; untested inputs, flags and devices may differ.
+// The model orders wave64 four-product blocks by K bits 3, then 2.
+template <bool ABf8, bool BBf8>
+void exec_gfx12_wmma_dot8(auto &cu, uint32_t wave_size, uint32_t dst, uint32_t s0, uint32_t s1,
+                          uint32_t s2, std::optional<uint32_t> const_acc) {
+  require_gfx12_wmma_wave_size(wave_size);
+  std::array<uint32_t, 256> results;
+  RegisterAccess regs(cu);
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      // Assembler-accepted C ABS/NEG bit encodings do not modify C on gfx1201.
+      uint32_t acc = const_acc ? *const_acc : regs.read_vgpr(s2 + out.reg, out.lane);
+      for (uint32_t k = 0; k < 16; k += 8) {
+        std::array<uint8_t, 8> a, b;
+        for (uint32_t j = 0; j < 8; ++j) {
+          const uint32_t logical_k = k + j;
+          const uint32_t physical_k =
+              wave_size == 64 ? (logical_k & 3) | ((logical_k & 4) << 1) | ((logical_k & 8) >> 1)
+                              : logical_k;
+          const auto al = gfx12_wmma_input_loc(wave_size, 16, 16, row, physical_k, 8);
+          const auto bl = gfx12_wmma_input_loc(wave_size, 16, 16, col, physical_k, 8);
+          a[j] = uint8_t(regs.read_vgpr(s0 + al.vgpr_offset, al.lane) >> al.bit_offset);
+          b[j] = uint8_t(regs.read_vgpr(s1 + bl.vgpr_offset, bl.lane) >> bl.bit_offset);
+        }
+        acc = gfx12_dot8_f32<ABf8, BBf8>(a, b, acc);
+      }
+      results[row * 16 + col] = acc;
+    }
+  }
+  for (uint32_t row = 0; row < 16; ++row)
+    for (uint32_t col = 0; col < 16; ++col) {
+      const auto out = gfx12_wmma_output_loc_32(wave_size, 16, 16, row, col);
+      regs.write_vgpr(dst + out.reg, out.lane, results[row * 16 + col]);
+    }
+}
+
 template <typename ExtractA, typename ExtractB>
 void exec_gfx11_wmma_f32_mixed(auto &cu, uint32_t wave_size, uint32_t M, uint32_t N, uint32_t K,
                                uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
