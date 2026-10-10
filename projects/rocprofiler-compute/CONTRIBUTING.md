@@ -135,6 +135,14 @@ When a feature is ready for general availability:
 3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters.
 4. Update documentation and tests accordingly.
 
+## Adding or Changing Command-Line Options
+
+[`.ai/rules/cli-options.md`](.ai/rules/cli-options.md) is the single source of truth
+for how options are named, how their help text is written, and how an option is
+renamed or deprecated
+(see [Renaming and Deprecation](.ai/rules/cli-options.md#renaming-and-deprecation)).
+Follow it for every new or changed option.
+
 ## Using Pre-Commit Hooks
 
 Pre-commit hooks automatically check your code for formatting issues before each commit, helping you catch problems before they reach CI.
