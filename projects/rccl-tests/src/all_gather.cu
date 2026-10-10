@@ -220,7 +220,7 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
     gin.put(ncclTeamWorld(devComm), r,
         recvwin, recvoffset + (size_t)devComm.rank * chunkBytes,
         sendwin, sendoffset,
-        chunkBytes, ncclGin_SignalInc{signalIndex});
+        chunkBytes, TEST_GIN_WEAK_SIGNAL_INC(signalIndex));
   }
   // The puts above are per-thread; the flush below is CTA-collective and must not
   // run until every issuing thread in this CTA has submitted.

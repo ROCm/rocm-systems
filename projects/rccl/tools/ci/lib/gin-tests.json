@@ -88,6 +88,14 @@
       "args": "--gtest_filter=GinMPIDeviceTests.BarrierFence_*"
     },
     {
+      "name": "rccl-gin-mpi-anvil-strong-signal",
+      "kind": "mpi-fixtures",
+      "bin": "rccl-UnitTestsMPI",
+      "np": 2,
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "NCCL_DEBUG=WARN"],
+      "args": "--gtest_filter=GinMPIDeviceTests.AnvilStrongSignal_*"
+    },
+    {
       "name": "rccl-gin-rocshmem-sdma-internal",
       "kind": "rccl-tests",
       "bin": "alltoall_perf",
