@@ -3893,6 +3893,37 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
       });
 }
 
+// NCCL_PROTO=NaN past the NaN DDA kernel's reach (the fake says ineligible) must
+// not fall back to the fabric LL/LL128/VMM tiers, which have no NaN variant.
+TEST(WrapMicrotestIsolated, SelectAllReduce_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; };
+        ScopedHook llEligible(g_allReduceDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allReduceDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The selector delegates LL128 parameter and message-size gating to the
 // eligibility helper. An eligible message above the former selector-owned
 // 64MiB threshold must therefore still select LL128 rather than VMM.
@@ -4185,6 +4216,64 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaFabricLL128ChosenWhenLLNotEligibl
         EXPECT_EQ(124u, decision.nMaxChannels);  // proves ncclAllGatherDdaFabricLL128Blocks ran, not a sibling
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN past the NaN DDA kernel's reach (the fake says ineligible) must
+// not fall back to the fabric LL/LL128/VMM tiers, which have no NaN variant.
+TEST(WrapMicrotestIsolated, SelectAllGather_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; };
+        ScopedHook llEligible(g_allGatherDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allGatherDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                                   /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                   &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; };
+        ScopedHook llEligible(g_allToAllDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_allToAllDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_allToAllDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        comm->p2pnChannels = 17;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false,
+                                                  &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_NAN, decision.protocol);
         DeleteCommWithArch(comm);
       });
 }
@@ -5169,6 +5258,34 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_PROTO=NaN past the NaN DDA kernel's reach (the fake says ineligible) must
+// not fall back to the fabric LL/LL128/VMM tiers, which have no NaN variant.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_NanForcedSkipsNonNanFabricTiers) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_NanForcedSkipsNonNanFabricTiers",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "NaN");
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_DDA_LL") == 0 || std::strcmp(env, "RCCL_DDA_LL128") == 0) return 1;
+          if (std::strcmp(env, "RCCL_DDA_LL_THRESHOLD") == 0 || std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0)
+            return INT64_MAX;
+          return def;
+        };
+        auto eligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; };
+        ScopedHook llEligible(g_reduceScatterDdaFabricLLEligible, eligible);
+        ScopedHook ll128Eligible(g_reduceScatterDdaFabricLL128Eligible, eligible);
+        ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible, eligible);
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 2;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                        ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
         DeleteCommWithArch(comm);
       });
 }

@@ -245,8 +245,13 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // with no DDA and no CE, falling back to the generic ring/tree kernel across
   // the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  // RCCL_DDA_NAN_ROUND lets the NaN-flag two-shot take any size in rounds.
+  const bool nanRounds = rcclDdaNanRoundBytes() > 0 &&
+                         rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype) &&
+                         (!ddaFabricArch1250 || comm->ddaNanFabricMemHandler != nullptr);
   const bool result = !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
-                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+                      rcclDdaEnabled(comm, msgBytes,
+                                     nanRounds ? SIZE_MAX : rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
   if (!result && !query) {
     if (symEligible)
       INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");

@@ -631,21 +631,38 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         tdm::tdmWait();
       }
 
-      // A plain receive forwards the window untouched.
+      // A plain receive forwards the window untouched. n is whole rows, so each row's test is
+      // uniform; rows go four at a time to keep their LDS loads in flight together.
       if (SRC || SEND || postOp) {
-        for (int b = lane * 16; b < n; b += RowBytes) {
-          v4u v;
-          if (SRC) {
-            // Past the user bytes the window holds stale data; the wire carries zeros there.
-            v4u s = keepBytes(*(const v4u*)(swin + b), u - b);
-            if (SrcBuf == Input) s = applyPreOp(redOp, s);
-            v = RECV ? applyReduce(redOp, *(const v4u*)(rwin + b), s) : s;
-          } else {
-            v = *(const v4u*)(rwin + b);
+        constexpr int Unroll = 4;
+        for (int r0 = 0; r0 < n; r0 += Unroll * RowBytes) {
+          v4u sv[Unroll], rv[Unroll];
+#pragma unroll
+          for (int k = 0; k < Unroll; k++) {
+            const int b = r0 + k * RowBytes + lane * 16;
+            if (r0 + k * RowBytes < n) {
+              if (SRC) sv[k] = *(const v4u*)(swin + b);
+              if (RECV) rv[k] = *(const v4u*)(rwin + b);
+            }
           }
-          if (postOp) v = applyPostOp(redOp, v);
-          if (SEND) v = escapePack(v);
-          *(v4u*)(out + b) = v;
+#pragma unroll
+          for (int k = 0; k < Unroll; k++) {
+            const int b = r0 + k * RowBytes + lane * 16;
+            if (r0 + k * RowBytes < n) {
+              v4u v;
+              if (SRC) {
+                // Past the user bytes the window holds stale data; the wire carries zeros there.
+                v4u s = keepBytes(sv[k], u - b);
+                if (SrcBuf == Input) s = applyPreOp(redOp, s);
+                v = RECV ? applyReduce(redOp, rv[k], s) : s;
+              } else {
+                v = rv[k];
+              }
+              if (postOp) v = applyPostOp(redOp, v);
+              if (SEND) v = escapePack(v);
+              *(v4u*)(out + b) = v;
+            }
+          }
         }
         __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
       }

@@ -103,6 +103,20 @@ static inline size_t rcclDdaNanRegMin() {
   return v;
 }
 
+// Per-source bytes that one round of an all-peer NaN-flag DDA call stages in
+// scratch (algorithms/dda/dda_nan.h). RCCL_DDA_NAN_ROUND sets it (rounded down
+// to a 128B line, at most the 4 MiB slot); set, calls of any size take those
+// kernels under NCCL_PROTO=NaN, streaming through their slots in rounds. Unset
+// or 0: a call must fit one slot, and larger ones leave DDA.
+static inline size_t rcclDdaNanRoundBytes() {
+  static const size_t v = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_ROUND");
+    const size_t b = s ? (size_t)strtoull(s, nullptr, 0) / 128 * 128 : 0;
+    return b < ((size_t)4 << 20) ? b : (size_t)4 << 20;
+  }();
+  return v;
+}
+
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
   RCCL_RS_TUNABLE = 0,    // reduce_scatter index

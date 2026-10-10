@@ -77,18 +77,29 @@ static ncclResult_t ncclAllGatherDdaNanBytes(const void* sendbuff, void* recvbuf
   dda::nan::RegAddrs mine;
   const bool reg = rcclDdaNanRecvAddrs(comm, recvbuff, bytesPerRank * comm->nRanks, bytesPerRank, &mine);
   const bool perPeer = !reg && rcclDdaNanPerPeer(bytesPerRank);
-  const auto gridBlock = rcclDdaNanCopyGeometry(comm, bytesPerRank / 16, perPeer);
+  const size_t units = bytesPerRank / 16;
+  const size_t round = reg || perPeer ? units : rcclDdaNanRound(units);
+  const auto gridBlock = rcclDdaNanCopyGeometry(comm, round, perPeer);
+#if ENABLE_TDM_NAN
+  if (!reg && !perPeer && rcclDdaNanTdm(comm, round * 16, /*copy=*/true)) {
+    rcclDdaNanTdmLaunch<uint32_t, dda::nan::TdmKind::AllGather>(comm, sendbuff, recvbuff, bytesPerRank / 16, stopEvent, stream);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+#endif
   if (reg) {
     hipExtLaunchKernelGGL((dda::nan::ddaNanAllGatherReg<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
                           static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), mine, bytesPerRank / 16,
                           comm->rank);
-  } else {
-    hipExtLaunchKernelGGL((perPeer ? dda::nan::ddaNanAllGatherPeer<uint32_t> : dda::nan::ddaNanAllGather<uint32_t>),
-                          gridBlock.first, gridBlock.second, 0, stream,
+  } else if (perPeer) {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllGatherPeer<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
-                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), bytesPerRank / 16,
-                          comm->rank);
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+  } else {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllGather<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
@@ -114,7 +125,12 @@ bool ncclAllGatherDdaNanEligible(ncclComm* comm, void* recvbuff, size_t sendcoun
 
 uint32_t ncclAllGatherDdaNanBlocks(ncclComm* comm, size_t sendcount, ncclDataType_t datatype) {
   const size_t bytesPerRank = sendcount * ncclTypeSize(datatype);
-  const dim3 grid = rcclDdaNanCopyGeometry(comm, bytesPerRank / 16, rcclDdaNanPerPeer(bytesPerRank)).first;
+  const bool perPeer = rcclDdaNanPerPeer(bytesPerRank);
+  const size_t round = perPeer ? bytesPerRank / 16 : rcclDdaNanRound(bytesPerRank / 16);
+  if (!perPeer && rcclDdaNanTdm(comm, round * 16, /*copy=*/true)) {
+    return rcclDdaNanTdmGeometry(round).first.x;
+  }
+  const dim3 grid = rcclDdaNanCopyGeometry(comm, round, perPeer).first;
   return grid.x * grid.y;
 }
 

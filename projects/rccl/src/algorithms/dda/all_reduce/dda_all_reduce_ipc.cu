@@ -107,14 +107,25 @@ static DdaNanArShape ddaNanArShape(const ncclComm* comm, size_t count, size_t ty
   const size_t bytes = count * typeSize;
   const bool twoShot = count % kDdaNranks == 0 && rcclDdaNanFits(comm, bytes / kDdaNranks);
   if (bytes <= ddaNanOneShotMax(comm) || !twoShot) {
-    return rcclDdaNanFits(comm, bytes) ? DdaNanArShape::OneShot : DdaNanArShape::None;
+    // The one-shot has no rounds: its input must fit one slot.
+    return rcclDdaNanFits(comm, bytes) && bytes <= dda::nan::kSlotBytes ? DdaNanArShape::OneShot
+                                                                        : DdaNanArShape::None;
   }
   return DdaNanArShape::TwoShot;
 }
 
+// Only the two-shot has a TDM kernel: the one-shot pushes its whole input to every peer, which
+// keeps the fabric just as busy from vector stores, and its TDM kernel ran 4-9% slower.
+// units: the two-shot's units per round.
+static bool ddaNanArTdm(const ncclComm* comm, bool twoShot, size_t units) {
+  return twoShot && rcclDdaNanTdm(comm, units * 16);
+}
+
 static std::pair<dim3, dim3> ddaNanAllReduceGeom(const ncclComm* comm, size_t count, size_t typeSize) {
   const size_t bytes = count * typeSize;
-  const size_t units = ddaNanArShape(comm, count, typeSize) == DdaNanArShape::TwoShot ? bytes / kDdaNranks / 16 : bytes / 16;
+  const bool twoShot = ddaNanArShape(comm, count, typeSize) == DdaNanArShape::TwoShot;
+  const size_t units = twoShot ? rcclDdaNanRound(bytes / kDdaNranks / 16) : bytes / 16;
+  if (ddaNanArTdm(comm, twoShot, units)) return rcclDdaNanTdmGeometry(units);
   return rcclDdaNanGeometry(comm, units, 128);
 }
 
@@ -123,12 +134,20 @@ static ncclResult_t ncclAllReduceDdaNanTyped(const void* sendbuff, void* recvbuf
                                              cudaStream_t stream) {
   const bool twoShot = ddaNanArShape(comm, count, sizeof(T)) == DdaNanArShape::TwoShot;
   const size_t units = count * sizeof(T) / 16 / (twoShot ? kDdaNranks : 1);
+  const size_t round = rcclDdaNanRound(units);
   const auto gridBlock = ddaNanAllReduceGeom(comm, count, sizeof(T));
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+#if ENABLE_TDM_NAN
+  if (ddaNanArTdm(comm, twoShot, round)) {
+    rcclDdaNanTdmLaunch<T, dda::nan::TdmKind::TwoShot>(comm, sendbuff, recvbuff, units, stopEvent, stream);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+#endif
   if (twoShot) {
     hipExtLaunchKernelGGL((dda::nan::ddaNanAllReduceTwoShot<T>), gridBlock.first, gridBlock.second, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
-                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
   } else {
     hipExtLaunchKernelGGL((dda::nan::ddaNanAllReduceOneShot<T>), gridBlock.first, gridBlock.second, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,

@@ -24,6 +24,9 @@
 
 #include "../common/ProcessIsolatedTestRunner.hpp"
 #include "algorithms/dda/device/CollCommon.h"
+#if ENABLE_TDM_NAN
+#include "device/tdm/tdmCopy.h"
+#endif
 
 #include <rccl/rccl.h>
 
@@ -92,7 +95,6 @@ bool isHalfNaN(uint16_t h) { return (h & 0x7C00) == 0x7C00 && (h & 0x03FF) != 0;
 // ---------------------------------------------------------------------------
 
 namespace ddan = under_test::dda::nan;
-namespace ddan = under_test::dda::nan;
 using ddan::kRanks;
 constexpr int    kSelf  = 0;
 constexpr size_t kUnits = 1000; // 16B units per source, not a multiple of the block
@@ -159,10 +161,10 @@ void runDdaCopy() {
       }
     } else if constexpr (kAllToAll) {
       hipLaunchKernelGGL(ddan::ddaNanAllToAll<uint32_t>, kDdaGeom.first, kDdaGeom.second, 0, 0, lb.peers(),
-                         lb.epoch.ptr, s, r, kUnits, kSelf);
+                         lb.epoch.ptr, s, r, kUnits, kUnits, kSelf);
     } else {
       hipLaunchKernelGGL(ddan::ddaNanAllGather<uint32_t>, kDdaGeom.first, kDdaGeom.second, 0, 0, lb.peers(),
-                         lb.epoch.ptr, s, r, kUnits, kSelf);
+                         lb.epoch.ptr, s, r, kUnits, kUnits, kSelf);
     }
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -224,7 +226,7 @@ void runDdaReduceScatter() {
   for (int iter = 0; iter < kIters; iter++) {
     hipLaunchKernelGGL(ddan::ddaNanReduceScatter<half>, kDdaGeom.first, kDdaGeom.second, 0, 0, lb.peers(),
                        lb.epoch.ptr, reinterpret_cast<const v4u*>(send.ptr), reinterpret_cast<v4u*>(recv.ptr),
-                       kUnits, kSelf);
+                       kUnits, kUnits, kSelf);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     const std::vector<uint32_t> out = recv.copyTo();
@@ -273,7 +275,7 @@ void runDdaAllReduceTwoShot() {
   for (int iter = 0; iter < kIters; iter++) {
     hipLaunchKernelGGL(ddan::ddaNanAllReduceTwoShot<half>, kDdaGeom.first, kDdaGeom.second, 0, 0, lb.peers(),
                        lb.epoch.ptr, reinterpret_cast<const v4u*>(send.ptr), reinterpret_cast<v4u*>(recv.ptr),
-                       kUnits, kSelf);
+                       kUnits, kUnits, kSelf);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
     const std::vector<uint32_t> out = recv.copyTo();
@@ -286,6 +288,66 @@ void runDdaAllReduceTwoShot() {
     }
   }
 }
+
+#if ENABLE_TDM_NAN
+using DdaKernel = void (*)(ddan::Peers, uint32_t*, const v4u*, v4u*, size_t, size_t, int);
+
+// The TDM kernel of kind K on even calls and the register kernel of the same kind on odd ones, so
+// each restores what the other deferred and reuses banks the other restored. 1000 units defer
+// their restores; 5000 restore as they consume, over several passes per block with a partial
+// last chunk, in one round, three, or four with a partial last round.
+template <ddan::TdmKind K>
+void runDdaTdm() {
+  using Kind = ddan::TdmKind;
+  constexpr bool kPerPeerSrc = K == Kind::AllToAll || K == Kind::ReduceScatter || K == Kind::TwoShot;
+  constexpr bool kGatherOut = K == Kind::AllGather || K == Kind::AllToAll || K == Kind::TwoShot;
+  constexpr bool kReduce = K == Kind::ReduceScatter || K == Kind::TwoShot;
+  DdaKernel reg, tdm;
+  if constexpr (K == Kind::AllGather) reg = ddan::ddaNanAllGather<uint32_t>;
+  if constexpr (K == Kind::AllToAll) reg = ddan::ddaNanAllToAll<uint32_t>;
+  if constexpr (K == Kind::ReduceScatter) reg = ddan::ddaNanReduceScatter<half>;
+  if constexpr (K == Kind::TwoShot) reg = ddan::ddaNanAllReduceTwoShot<half>;
+  if constexpr (kReduce) tdm = ddan::ddaNanTdm<half, K>;
+  else tdm = ddan::ddaNanTdm<uint32_t, K>;
+
+  ASSERT_EQ(hipSetDevice(0), hipSuccess);
+  const std::pair<size_t, size_t> shapes[] = {{kUnits, kUnits}, {5000, 5000}, {5000, 2048}, {5000, 1536}};
+  for (const auto& [units, round] : shapes) {
+    const size_t           dw = units * 4;
+    DdaLoopback            lb(ddan::slotStride(round));
+    DeviceBuffer<uint32_t> send((kPerPeerSrc ? kRanks : 1) * dw), recv((kGatherOut ? kRanks : 1) * dw);
+    const auto             tdmGeom = ddan::tdmGeometry(round, 2);
+    const auto             regGeom = ddan::geometry(round, 4, 256);
+    for (int iter = 0; iter < 2 * kIters; iter++) {
+      SCOPED_TRACE(::testing::Message() << "units " << units << " round " << round << " iter " << iter);
+      std::vector<uint32_t> in(send.count);
+      for (size_t i = 0; i < in.size(); i++)
+        in[i] = kReduce ? reduceDword(kPerPeerSrc ? (int)(i / dw) : 0, i % dw) : copyDword(i, in.size(), iter);
+      send.copyFrom(in);
+      const bool useTdm = iter % 2 == 0;
+      const auto& g = useTdm ? tdmGeom : regGeom;
+      hipLaunchKernelGGL(useTdm ? tdm : reg, g.first, g.second, 0, 0, lb.peers(), lb.epoch.ptr,
+                         reinterpret_cast<const v4u*>(send.ptr), reinterpret_cast<v4u*>(recv.ptr), units, round,
+                         kSelf);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipDeviceSynchronize());
+      const std::vector<uint32_t> out = recv.copyTo();
+      for (int s = 0; s < (kGatherOut ? kRanks : 1); s++) {
+        for (size_t j = 0; j < dw; j++) {
+          const uint32_t got = out[s * dw + j];
+          if constexpr (!kReduce) {
+            const uint32_t x = in[(kPerPeerSrc ? s * dw : 0) + j];
+            ASSERT_EQ(got, escapedDword(x)) << where(iter, j, s) << " sent 0x" << std::hex << x;
+          } else {
+            if constexpr (K == Kind::TwoShot) ASSERT_NE(got, kAllOnes) << where(iter, j, s);
+            checkBlockSum(got, j, where(iter, j, s));
+          }
+        }
+      }
+    }
+  }
+}
+#endif
 
 ProcessIsolatedTestRunner::TestConfig ddaConfig(const char* name, void (*body)()) {
   return ProcessIsolatedTestRunner::TestConfig(name, body)
@@ -698,6 +760,28 @@ TEST(DdaNanSentinelEscape, AllReduceTwoShot)
 {
   RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllReduceTwoShot", runDdaAllReduceTwoShot));
 }
+
+#if ENABLE_TDM_NAN
+TEST(DdaNanSentinelEscape, AllGatherTdm)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllGatherTdm", runDdaTdm<ddan::TdmKind::AllGather>));
+}
+
+TEST(DdaNanSentinelEscape, AllToAllTdm)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllToAllTdm", runDdaTdm<ddan::TdmKind::AllToAll>));
+}
+
+TEST(DdaNanSentinelEscape, ReduceScatterTdm)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.ReduceScatterTdm", runDdaTdm<ddan::TdmKind::ReduceScatter>));
+}
+
+TEST(DdaNanSentinelEscape, AllReduceTwoShotTdm)
+{
+  RUN_ISOLATED_TESTS(ddaConfig("DdaNanSentinelEscape.AllReduceTwoShotTdm", runDdaTdm<ddan::TdmKind::TwoShot>));
+}
+#endif
 
 // AllGather, AlltoAll, AllReduce and ReduceScatter.
 TEST(PrimsNanSentinelEscape, Ring)

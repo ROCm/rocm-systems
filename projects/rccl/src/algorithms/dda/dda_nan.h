@@ -9,12 +9,16 @@
 #pragma once
 
 #include "algorithms/dda/device/CollCommon_nan.h"
+#include "archinfo.h"
 #include "comm.h"
 #include "p2p.h"
 #include "rccl_common.h"
 #include "register.h"
 #include "register_inline.h"
 
+#include <hip/hip_ext.h>
+
+#include <algorithm>
 #include <cstdlib>
 
 // RCCL_DDA_NAN_MAX_BLOCKS caps the grid; it cannot exceed the epoch cells. The
@@ -64,16 +68,77 @@ static inline std::pair<dim3, dim3> rcclDdaNanCopyGeometry(const ncclComm* comm,
                  : rcclDdaNanGeometry(comm, units);
 }
 
+// RCCL_DDA_NAN_TDM runs all-peer kernels (not the per-peer or registered ones) through the gfx1250
+// tensor data mover when the per-source block is at least RCCL_DDA_NAN_TDM_MIN bytes (default
+// 256 KiB): 1 for AllReduce and ReduceScatter, 2 for AllGather and AlltoAll as well. The copies
+// gain nothing (0.85-1.0x at 2-32 MiB) while the reductions do (1.06-1.21x at 4-32 MiB). Off by
+// default; builds without -DENABLE_TDM_NAN=ON ignore it.
+static inline bool rcclDdaNanTdm(const ncclComm* comm, size_t slotBytes, bool copy = false) {
+#if ENABLE_TDM_NAN
+  static const int mode = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_TDM");
+    return s ? atoi(s) : 0;
+  }();
+  static const size_t min = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_TDM_MIN");
+    return s ? (size_t)strtoull(s, nullptr, 0) : (size_t)256 << 10;
+  }();
+  return mode >= (copy ? 2 : 1) && slotBytes >= min && comm->archName != nullptr &&
+         IsArchMatch(comm->archName, "gfx1250");
+#else
+  (void)comm;
+  (void)slotBytes;
+  (void)copy;
+  return false;
+#endif
+}
+
+// The TDM kernels' grid; RCCL_DDA_NAN_TDM_BLOCKS caps it (default 384: four blocks on each of the
+// 96 WGPs, as many as their LDS holds).
+static inline std::pair<dim3, dim3> rcclDdaNanTdmGeometry(size_t units) {
+#if ENABLE_TDM_NAN
+  static const int env = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_TDM_BLOCKS");
+    return s ? atoi(s) : 0;
+  }();
+  return dda::nan::tdmGeometry(units, std::min(env > 0 ? env : 384, dda::nan::kEpochCells));
+#else
+  (void)units;
+  return {dim3(1), dim3(1)};
+#endif
+}
+
 static inline dda::nan::Peers rcclDdaNanPeers(const ncclComm* comm) {
   dda::nan::Peers peers;
   for (int i = 0; i < dda::nan::kRanks; i++) peers.p[i] = static_cast<v4u*>(comm->ddaNanPeers[i]);
   return peers;
 }
 
-// Whether a NaN-flag DDA call whose largest per-source block is `slotBytes` fits.
+// Units per source that an all-peer call of `units` per source stages per round
+// (rcclDdaNanRoundBytes): all of them when they fit one round. Its grid, and
+// whether it takes TDM, follow from the round.
+static inline size_t rcclDdaNanRound(size_t units) {
+  const size_t r = rcclDdaNanRoundBytes() / 16;
+  return r > 0 && units > r ? r : units;
+}
+
+#if ENABLE_TDM_NAN
+template <typename T, dda::nan::TdmKind K>
+static inline void rcclDdaNanTdmLaunch(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t units,
+                                       hipEvent_t stopEvent, cudaStream_t stream) {
+  const size_t round = rcclDdaNanRound(units);
+  const auto gridBlock = rcclDdaNanTdmGeometry(round);
+  hipExtLaunchKernelGGL((dda::nan::ddaNanTdm<T, K>), gridBlock.first, gridBlock.second, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                        static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
+}
+#endif
+
+// Whether a NaN-flag DDA call whose largest per-source block is `slotBytes` fits:
+// in one slot, or in any number of rounds when RCCL_DDA_NAN_ROUND is set.
 static inline bool rcclDdaNanFits(const ncclComm* comm, size_t slotBytes) {
   return comm->ddaNanScratch != nullptr && comm->nRanks == dda::nan::kRanks && slotBytes > 0 &&
-         slotBytes % 16 == 0 && slotBytes <= dda::nan::kSlotBytes;
+         slotBytes % 16 == 0 && (slotBytes <= dda::nan::kSlotBytes || rcclDdaNanRoundBytes() > 0);
 }
 
 // This rank's recv buffer as every rank maps it, when the user registered it

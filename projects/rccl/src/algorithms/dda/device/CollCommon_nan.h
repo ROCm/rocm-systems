@@ -24,6 +24,9 @@
 #pragma once
 
 #include "algorithms/dda/device/CollCommon.h"
+#if ENABLE_TDM_NAN
+#include "device/tdm/tdmCopy.h"
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -149,13 +152,15 @@ struct Call {
 };
 
 // Picks this call's bank. `stages` and `units` give the extent this call will
-// consume.
-__device__ __forceinline__ Call begin(v4u* mine, const uint32_t* epoch, int stages, size_t units) {
+// consume per round; `total`, when larger than `units`, makes it a call of several
+// rounds (nextRound), which restores as it consumes.
+__device__ __forceinline__ Call begin(v4u* mine, const uint32_t* epoch, int stages, size_t units,
+                                      size_t total = 0) {
   Call c;
   c.e = epoch[flatBlock()];
   c.bank = c.e;
   const size_t extent = (size_t)stages * kRanks * slotStride(units);
-  c.deferred = extent <= kDeferUnits ? (uint32_t)extent : 0;
+  c.deferred = extent <= kDeferUnits && total <= units ? (uint32_t)extent : 0;
   // Read every bank's extent alongside the cell rather than after it.
   uint32_t lefts[kBanks];
 #pragma unroll
@@ -217,9 +222,44 @@ __device__ __forceinline__ v4u sumInRankOrder(const v4u (&v)[kRanks]) {
   return acc;
 }
 
+// A call larger than its scratch slots streams through them in rounds that
+// alternate between its bank and the next one, leaving the previous call's bank to
+// its deferred restore. Block i owns the same units of every round on every rank
+// (a partial last round included), so once its restores are acknowledged no
+// peer's block i can push into that bank again before they land: the peer first
+// needs this block's pushes of the round in between.
+__device__ __forceinline__ void nextRound(Call& c) {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
+#else
+  __builtin_amdgcn_s_waitcnt(0);
+#endif
+  __syncthreads();
+  c.bank = c.bank == c.e ? (c.e + 1) % kBanks : c.e;
+}
+
+// Runs body(r0, n, first, last) on each round of a call of `units` per source,
+// `round` at a time. A call of one round runs it once, outside any loop: a loop's
+// back-edge carries the previous round's outstanding stores into the body's
+// waits, which cost a single-round 2 MiB TDM call 10-15%.
+template <typename F>
+__device__ __forceinline__ void forRounds(Call& c, size_t units, size_t round, F&& body) {
+  if (units <= round) {
+    body((size_t)0, units, true, true);
+    return;
+  }
+  for (size_t r0 = 0;;) {
+    const size_t n = std::min<size_t>(round, units - r0);
+    body(r0, n, r0 == 0, r0 + n >= units);
+    if ((r0 += n) >= units) break;
+    nextRound(c);
+  }
+}
+
 // Cell i belongs to block i % flatBlocks(); no other block reads it this launch.
+// The next call starts after the last bank this one used.
 __device__ __forceinline__ void epochAdvance(uint32_t* epoch, const Call& c) {
-  const uint32_t next = (c.e + 1) % kBanks;
+  const uint32_t next = (c.bank + 1) % kBanks;
   for (uint32_t i = flatBlock() + threadIdx.x * flatBlocks(); i < kEpochCells; i += flatBlocks() * blockDim.x)
     epoch[i] = next;
   if (flatBlock() == 0 && threadIdx.x == 0) epoch[kEpochCells + c.bank] = c.deferred;
@@ -290,24 +330,28 @@ __global__ void __launch_bounds__(kThreads)
   peerCopy<false>(peers, epoch, send, recv, units, self);
 }
 
+// The all-peer kernels take `round` units per source per round (round >= units:
+// one round), and are launched with a grid for `round` units.
 template <typename Unused>
 __global__ void __launch_bounds__(kThreads)
-  ddaNanAllGather(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, int self) {
-  const Call c = begin(peers.p[self], epoch, 1, units);
+  ddaNanAllGather(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, size_t round, int self) {
+  Call c = begin(peers.p[self], epoch, 1, round, units);
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
-  for (size_t u = g0; u < units; u += G) {
-    const v4u x = escape(load(send + u));
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, units) + u, x);
-  }
-  catchUp(c);
   v4u* mine = peers.p[self];
-  for (size_t u = g0; u < units; u += G) {
-    v4u v[kRanks];
-    collect(mine, c, 0, u, units, v);
+  forRounds(c, units, round, [&](size_t r0, size_t n, bool first, bool) {
+    for (size_t u = g0; u < n; u += G) {
+      const v4u x = escape(load(send + r0 + u));
 #pragma unroll
-    for (int s = 0; s < kRanks; s++) store(recv + s * units + u, v[s]);
-  }
+      for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, round) + u, x);
+    }
+    if (first) catchUp(c);
+    for (size_t u = g0; u < n; u += G) {
+      v4u v[kRanks];
+      collect(mine, c, 0, u, round, v);
+#pragma unroll
+      for (int s = 0; s < kRanks; s++) store(recv + s * units + r0 + u, v[s]);
+    }
+  });
   epochAdvance(epoch, c);
 }
 
@@ -445,24 +489,26 @@ __global__ void __launch_bounds__(kThreads)
 
 template <typename Unused>
 __global__ void __launch_bounds__(kThreads)
-  ddaNanAllToAll(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, int self) {
-  const Call c = begin(peers.p[self], epoch, 1, units);
+  ddaNanAllToAll(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, size_t round, int self) {
+  Call c = begin(peers.p[self], epoch, 1, round, units);
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
-  for (size_t u = g0; u < units; u += G) {
-    v4u x[kRanks];
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, units) + u, x[p]);
-  }
-  catchUp(c);
   v4u* mine = peers.p[self];
-  for (size_t u = g0; u < units; u += G) {
-    v4u v[kRanks];
-    collect(mine, c, 0, u, units, v);
+  forRounds(c, units, round, [&](size_t r0, size_t n, bool first, bool) {
+    for (size_t u = g0; u < n; u += G) {
+      v4u x[kRanks];
 #pragma unroll
-    for (int s = 0; s < kRanks; s++) store(recv + s * units + u, v[s]);
-  }
+      for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + r0 + u));
+#pragma unroll
+      for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, round) + u, x[p]);
+    }
+    if (first) catchUp(c);
+    for (size_t u = g0; u < n; u += G) {
+      v4u v[kRanks];
+      collect(mine, c, 0, u, round, v);
+#pragma unroll
+      for (int s = 0; s < kRanks; s++) store(recv + s * units + r0 + u, v[s]);
+    }
+  });
   epochAdvance(epoch, c);
 }
 
@@ -470,23 +516,26 @@ __global__ void __launch_bounds__(kThreads)
 // rank order.
 template <typename T>
 __global__ void __launch_bounds__(kThreads)
-  ddaNanReduceScatter(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, int self) {
-  const Call c = begin(peers.p[self], epoch, 1, units);
+  ddaNanReduceScatter(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, size_t round,
+                      int self) {
+  Call c = begin(peers.p[self], epoch, 1, round, units);
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
-  for (size_t u = g0; u < units; u += G) {
-    v4u x[kRanks];
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, units) + u, x[p]);
-  }
-  catchUp(c);
   v4u* mine = peers.p[self];
-  for (size_t u = g0; u < units; u += G) {
-    v4u v[kRanks];
-    collect(mine, c, 0, u, units, v);
-    store(recv + u, sumInRankOrder<T>(v));
-  }
+  forRounds(c, units, round, [&](size_t r0, size_t n, bool first, bool) {
+    for (size_t u = g0; u < n; u += G) {
+      v4u x[kRanks];
+#pragma unroll
+      for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + r0 + u));
+#pragma unroll
+      for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, round) + u, x[p]);
+    }
+    if (first) catchUp(c);
+    for (size_t u = g0; u < n; u += G) {
+      v4u v[kRanks];
+      collect(mine, c, 0, u, round, v);
+      store(recv + r0 + u, sumInRankOrder<T>(v));
+    }
+  });
   epochAdvance(epoch, c);
 }
 
@@ -515,32 +564,237 @@ __global__ void __launch_bounds__(kThreads)
 // reduced blocks through stage 1. units: 16B units per block (count / 8).
 template <typename T>
 __global__ void __launch_bounds__(kThreads)
-  ddaNanAllReduceTwoShot(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, int self) {
-  const Call c = begin(peers.p[self], epoch, 2, units);
+  ddaNanAllReduceTwoShot(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, size_t round,
+                         int self) {
+  Call c = begin(peers.p[self], epoch, 2, round, units);
   const size_t g0 = (size_t)blockIdx.x * blockDim.x + threadIdx.x, G = (size_t)gridDim.x * blockDim.x;
-  for (size_t u = g0; u < units; u += G) {
-    v4u x[kRanks];
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + u));
-#pragma unroll
-    for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, units) + u, x[p]);
-  }
-  catchUp(c);
   v4u* mine = peers.p[self];
-  for (size_t u = g0; u < units; u += G) {
-    v4u v[kRanks];
-    collect(mine, c, 0, u, units, v);
-    const v4u r = escape(sumInRankOrder<T>(v));
+  forRounds(c, units, round, [&](size_t r0, size_t n, bool first, bool) {
+    for (size_t u = g0; u < n; u += G) {
+      v4u x[kRanks];
 #pragma unroll
-    for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 1, self, units) + u, r);
-  }
-  for (size_t u = g0; u < units; u += G) {
-    v4u v[kRanks];
-    collect(mine, c, 1, u, units, v);
+      for (int p = 0; p < kRanks; p++) x[p] = escape(load(send + p * units + r0 + u));
 #pragma unroll
-    for (int s = 0; s < kRanks; s++) store(recv + s * units + u, v[s]);
-  }
+      for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 0, self, round) + u, x[p]);
+    }
+    if (first) catchUp(c);
+    for (size_t u = g0; u < n; u += G) {
+      v4u v[kRanks];
+      collect(mine, c, 0, u, round, v);
+      const v4u r = escape(sumInRankOrder<T>(v));
+#pragma unroll
+      for (int p = 0; p < kRanks; p++) put(slot(peers.p[p], c.bank, 1, self, round) + u, r);
+    }
+    for (size_t u = g0; u < n; u += G) {
+      v4u v[kRanks];
+      collect(mine, c, 1, u, round, v);
+#pragma unroll
+      for (int s = 0; s < kRanks; s++) store(recv + s * units + r0 + u, v[s]);
+    }
+  });
   epochAdvance(epoch, c);
 }
+
+#if ENABLE_TDM_NAN
+// Tensor-data-mover variants of the all-peer kernels above (gfx1250, RCCL_DDA_NAN_TDM=1). They use
+// the same slots, banks, epoch cells and sentinel, so a call may take either kind; every rank makes
+// the same choice from the same size. A block takes one chunk of every source at a time, and warp w
+// pushes the chunk for rank w with one tensor store instead of a b128 store per lane per unit. A
+// wave has only a few tensor ops in flight, so one op per warp keeps the eight peers' transfers
+// concurrent. The two-shot all-reduce also collects by tensor ops: warp w polls source w's slot
+// with one tensor load (repeated from the first row still pending) and restores it with one tensor
+// store. The one-shot all-reduce has no TDM kernel: it is bound by pushing its whole input to every
+// peer, which TDM does no faster.
+enum class TdmKind { AllGather, AllToAll, ReduceScatter, TwoShot };
+
+constexpr int kTdmWarps = kRanks;
+constexpr uint32_t kTdmThreads = kTdmWarps * 32; // gfx1250 is wave32
+// Largest chunk per source; a small call's chunk shrinks towards kTdmMinChunk to spread it wider.
+// A window per source plus the sentinel window is 72 KiB, so four blocks share a WGP and one
+// issues while the others wait out fabric round trips. Bigger windows lose: at 16 MiB
+// AllReduce, 32 KiB windows (a block per WGP) ran 1.15x slower than the register kernel and 8 KiB
+// windows 1.23x faster.
+constexpr uint32_t kTdmWin = 8 << 10;
+constexpr uint32_t kTdmMinChunk = 1 << 10;
+constexpr size_t kTdmLds = (size_t)(kRanks + 1) * kTdmWin;
+static_assert(kTdmWin / 4 <= 0xFFFF, "a window is one dword-granular tensor op");
+
+// Grid for `units` 16B units per source.
+inline std::pair<dim3, dim3> tdmGeometry(size_t units, int maxBlocks) {
+  const size_t chunks = (units * 16 + kTdmMinChunk - 1) / kTdmMinChunk;
+  const size_t blocks = std::min<size_t>(chunks, (size_t)std::max(1, maxBlocks));
+  return {dim3((uint32_t)std::max<size_t>(blocks, 1)), dim3(kTdmThreads)};
+}
+
+#if TDM_SUPPORTED
+// Slots are shared with peers: system scope, kept out of this GPU's caches like put()/poll().
+constexpr CachePolicy kTdmSlot = createCachePolicy(TemporalHint::NT, MemScope::SYS);
+constexpr CachePolicy kTdmUser = createCachePolicy(TemporalHint::RT, MemScope::DEV);
+
+__device__ __forceinline__ uint32_t tdmUniform(uint32_t x) {
+  return __builtin_amdgcn_readfirstlane(x);
+}
+
+// One tensor op on n bytes (a multiple of 4) of a slot. Dword elements, never bytes: a dword that
+// had landed only in part would be neither the sentinel nor the data, and would read as landed.
+template <bool kStore>
+__device__ __forceinline__ void tdmSlot(v4u* slotPtr, char* lds, uint32_t n) {
+  gfx1250_TDM_GROUP1 g1;
+  g1.dataSize(2);
+  g1.tileDim0(n / 4);
+  g1.tensorDim0(n / 4);
+  gfx1250_TDM_GROUP0 g0((uint32_t)(uintptr_t)lds, (uintptr_t)slotPtr);
+  if constexpr (kStore) tdm::detail::store<kTdmSlot>(g0, g1);
+  else tdm::detail::load<kTdmSlot>(g0, g1);
+}
+
+// Waits for n bytes of one source's slot to land in win, then restores them unless the call
+// deferred that. A retry reloads from the first row that still held the sentinel; every row ahead
+// of it is complete.
+__device__ __forceinline__ void tdmCollect(v4u* p, uint32_t n, char* win, char* sent, const Call& c, int lane) {
+  uint32_t from = 0;
+  while (from < n) {
+    tdmSlot<false>(p + from / 16, win + from, n - from);
+    tdm::tdmWait();
+    uint32_t first = n;
+    for (uint32_t b = from + lane * 16; b < n; b += 512) {
+      if (pending(*(const v4u*)(win + b))) {
+        first = b - lane * 16;
+        break;
+      }
+    }
+#pragma unroll
+    for (int m = 16; m > 0; m /= 2) first = min(first, (uint32_t)__shfl_xor((int)first, m));
+    from = tdmUniform(first);
+  }
+  if (!c.deferred) tdmSlot<true>(p, sent, n);
+}
+
+// The two-shot's collects: warp w polls and restores source w, the block reduces the eight windows,
+// and warp w pushes the sum to rank w; then warp w collects rank w's sum. One round of `bytes` per
+// block, at byte r0 of the msgBytes blocks, through slots of `units` units.
+template <typename T>
+__device__ __forceinline__ void tdmTwoShotCollect(const Peers& peers, const Call& c, v4u* recv, size_t units,
+                                                  size_t msgBytes, size_t r0, int self, uint32_t bytes,
+                                                  uint32_t chunk, char* lds, char* sent, int lane, bool first) {
+  const int w = (int)tdmUniform(threadIdx.x / 32);
+  char* mineWin = lds + w * kTdmWin;
+  v4u* mine = peers.p[self];
+  uint8_t* dst = (uint8_t*)recv + r0;
+  if (first) catchUp(c);
+  for (uint32_t off = blockIdx.x * chunk; off < bytes; off += gridDim.x * chunk) {
+    const uint32_t n = min(chunk, bytes - off);
+    tdmCollect(slot(mine, c.bank, 0, w, units) + off / 16, n, mineWin, sent, c, lane);
+    __syncthreads();
+    for (uint32_t b = threadIdx.x * 16; b < n; b += blockDim.x * 16) {
+      v4u v[kRanks];
+#pragma unroll
+      for (int s = 0; s < kRanks; s++) v[s] = *(const v4u*)(lds + s * kTdmWin + b);
+      *(v4u*)(lds + b) = escape(sumInRankOrder<T>(v));
+    }
+    __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
+    __syncthreads();
+    tdmSlot<true>(slot(peers.p[w], c.bank, 1, self, units) + off / 16, lds, n);
+    tdm::tdmWait();
+    __syncthreads();
+  }
+
+  for (uint32_t off = blockIdx.x * chunk; off < bytes; off += gridDim.x * chunk) {
+    const uint32_t n = min(chunk, bytes - off);
+    tdmCollect(slot(mine, c.bank, 1, w, units) + off / 16, n, mineWin, sent, c, lane);
+    tdm::asyncStoreFromLDS<SyncPolicy::Async, kTdmUser>((const uint8_t*)mineWin, dst + (size_t)w * msgBytes + off,
+                                                        n);
+    tdm::tdmWait();
+  }
+}
+
+// Stage 0 of every kind, then each kind's output. units: 16B units per source block, and round: units
+// per source per round, as for the register kernel of the same kind.
+template <typename T, TdmKind K>
+__device__ __forceinline__ void tdmBody(const Peers& peers, uint32_t* epoch, const v4u* send, v4u* recv,
+                                        size_t units, size_t round, int self) {
+  __shared__ __attribute__((aligned(128))) char lds[kTdmLds];
+  constexpr bool kPerPeerSrc = K == TdmKind::AllToAll || K == TdmKind::ReduceScatter || K == TdmKind::TwoShot;
+  // The two-shot collects into LDS, where it reduces and stages its second push. The other kinds
+  // collect with plain polls, like the register kernels: a tensor poll queues behind the wave's
+  // earlier tensor ops, and its copy to the output is one more serialized tensor round trip.
+  constexpr bool kLdsCollect = K == TdmKind::TwoShot;
+  const int lane = threadIdx.x % 32;
+  const int w = (int)tdmUniform(threadIdx.x / 32);
+  char* mineWin = lds + w * kTdmWin;
+  char* sent = lds + kRanks * kTdmWin;
+  if constexpr (kLdsCollect) {
+    for (uint32_t b = threadIdx.x * 16; b < kTdmWin; b += blockDim.x * 16) *(v4u*)(sent + b) = sentinel();
+  }
+  // begin()'s barrier also publishes the sentinel window.
+  Call c = begin(peers.p[self], epoch, K == TdmKind::TwoShot ? 2 : 1, round, units);
+  v4u* mine = peers.p[self];
+  const size_t msgBytes = units * 16;
+  const uint32_t full = tdmUniform((uint32_t)std::min<size_t>(round * 16, msgBytes));
+  // Every block makes the same number of passes, each with at most kTdmWin bytes per source. A
+  // short last round keeps the chunk, so that each block owns the same bytes in every round
+  // (nextRound()).
+  const uint32_t passes = (full + gridDim.x * kTdmWin - 1) / (gridDim.x * kTdmWin);
+  const uint32_t chunk = tdmUniform((full + gridDim.x * passes * 512 - 1) / (gridDim.x * passes * 512) * 512);
+  const uint8_t* src = (const uint8_t*)send;
+
+  forRounds(c, units, round, [&](size_t r0u, size_t nu, bool first, bool last) {
+    const size_t r0 = r0u * 16;
+    const uint32_t bytes = tdmUniform((uint32_t)(nu * 16));
+
+    // Push: warp w sends this rank's chunk for rank w. A shared source is loaded by every warp: eight
+    // local reads cost less than the two block barriers that sharing one copy of it would take.
+    for (uint32_t off = blockIdx.x * chunk; off < bytes; off += gridDim.x * chunk) {
+      const uint32_t n = min(chunk, bytes - off);
+      tdm::asyncLoadToLDS<SyncPolicy::Async, kTdmUser>(src + (kPerPeerSrc ? (size_t)w * msgBytes : 0) + r0 + off,
+                                                       (uint8_t*)mineWin, n);
+      tdm::tdmWait();
+      for (uint32_t b = lane * 16; b < n; b += 512) *(v4u*)(mineWin + b) = escape(*(const v4u*)(mineWin + b));
+      __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
+      tdmSlot<true>(slot(peers.p[w], c.bank, 0, self, round) + off / 16, mineWin, n);
+      tdm::tdmWait();
+    }
+
+    if constexpr (!kLdsCollect) {
+      // Polling only once the whole block's pushes are acknowledged keeps the polls from competing
+      // with the peers' pushes into this rank: polling right away ran up to 2x slower.
+      __syncthreads();
+      if (first) catchUp(c);
+      v4u* out = recv + r0u;
+      for (uint32_t off = blockIdx.x * chunk; off < bytes; off += gridDim.x * chunk) {
+        const uint32_t n = min(chunk, bytes - off);
+        for (uint32_t b = threadIdx.x * 16; b < n; b += blockDim.x * 16) {
+          const size_t u = (off + b) / 16;
+          v4u v[kRanks];
+          collect(mine, c, 0, u, round, v);
+          if constexpr (K == TdmKind::ReduceScatter) {
+            store(out + u, sumInRankOrder<T>(v));
+          } else {
+#pragma unroll
+            for (int s = 0; s < kRanks; s++) store(out + s * units + u, v[s]);
+          }
+        }
+      }
+    } else {
+      tdmTwoShotCollect<T>(peers, c, recv, round, msgBytes, r0, self, bytes, chunk, lds, sent, lane, first);
+    }
+    // The tensor restores, too, must be done before nextRound().
+    if (!last) tdm::tdmWait();
+  });
+  epochAdvance(epoch, c);
+}
+#endif // TDM_SUPPORTED
+
+// Launched with tdmGeometry() for `round` units. Copy kinds ignore T.
+template <typename T, TdmKind K>
+__global__ void __launch_bounds__(kTdmThreads)
+  ddaNanTdm(Peers peers, uint32_t* epoch, const v4u* send, v4u* recv, size_t units, size_t round, int self) {
+#if TDM_SUPPORTED
+  tdmBody<T, K>(peers, epoch, send, recv, units, round, self);
+#else
+  __builtin_trap();
+#endif
+}
+#endif // ENABLE_TDM_NAN
 
 } // namespace dda::nan

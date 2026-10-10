@@ -70,11 +70,19 @@ template <typename T>
 static ncclResult_t ncclReduceScatterDdaNanTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
                                                  ncclComm* comm, cudaStream_t stream) {
   const size_t units = recvcount * sizeof(T) / 16;
-  const auto gridBlock = rcclDdaNanGeometry(comm, units);
+  const size_t round = rcclDdaNanRound(units);
+  const auto gridBlock = rcclDdaNanGeometry(comm, round);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+#if ENABLE_TDM_NAN
+  if (rcclDdaNanTdm(comm, round * 16)) {
+    rcclDdaNanTdmLaunch<T, dda::nan::TdmKind::ReduceScatter>(comm, sendbuff, recvbuff, units, stopEvent, stream);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+#endif
   hipExtLaunchKernelGGL((dda::nan::ddaNanReduceScatter<T>), gridBlock.first, gridBlock.second, 0, stream,
                         /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
-                        static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+                        static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
 }
@@ -93,7 +101,9 @@ bool ncclReduceScatterDdaNanEligible(ncclComm* comm, size_t recvcount, ncclDataT
 }
 
 uint32_t ncclReduceScatterDdaNanBlocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
-  return rcclDdaNanGeometry(comm, recvcount * ncclTypeSize(datatype) / 16).first.x;
+  const size_t round = rcclDdaNanRound(recvcount * ncclTypeSize(datatype) / 16);
+  if (rcclDdaNanTdm(comm, round * 16)) return rcclDdaNanTdmGeometry(round).first.x;
+  return rcclDdaNanGeometry(comm, round).first.x;
 }
 
 ncclResult_t ncclReduceScatterDdaNan(const void* sendbuff, void* recvbuff, size_t recvcount, ncclDataType_t datatype,
