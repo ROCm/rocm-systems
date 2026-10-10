@@ -169,10 +169,8 @@ metadata_initialize_kokkos_category()
 void
 metadata_initialize_kokkos_track()
 {
-    rocprofsys::trace_cache::get_metadata_registry().add_track(
-        { .track_name = rocprofsys::trait::name<category::kokkos>::value,
-          .thread_id  = std::nullopt,
-          .extdata    = "{}" });
+    rocprofsys::trace_cache::get_metadata_registry().ensure_track(
+        rocprofsys::trait::name<category::kokkos>::value, std::nullopt);
 }
 
 void

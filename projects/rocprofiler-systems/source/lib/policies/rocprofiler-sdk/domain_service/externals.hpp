@@ -220,13 +220,14 @@ concept externals =
             }
         };
     } &&
-    requires(std::string_view text, Externals::thread_info_t thread_info,
-             Externals::track_t track, Externals::pmc_info_t pmc_info,
-             Externals::kfd_sample_t sample) {
+    requires(std::string_view      text, Externals::thread_info_t (&make_thread)(),
+             Externals::pmc_info_t pmc_info, Externals::kfd_sample_t sample) {
         { Externals::get_metadata_registry() };
         { Externals::get_metadata_registry().add_string(text) };
-        { Externals::get_metadata_registry().add_thread_info(thread_info) };
-        { Externals::get_metadata_registry().add_track(track) };
+        {
+            Externals::get_metadata_registry().ensure_thread(std::uint64_t{}, make_thread)
+        };
+        { Externals::get_metadata_registry().ensure_track(text, std::nullopt) };
         { Externals::get_metadata_registry().add_pmc_info(pmc_info) };
         { Externals::get_buffer_storage() };
         { Externals::get_buffer_storage().store(std::move(sample)) };

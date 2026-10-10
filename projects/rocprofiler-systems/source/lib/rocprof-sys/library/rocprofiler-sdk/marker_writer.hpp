@@ -4,6 +4,7 @@
 #pragma once
 
 #include "core/categories.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 
@@ -13,7 +14,9 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unistd.h>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -51,7 +54,16 @@ struct default_marker_policy
 
     static void add_string(std::string_view string_value);
     static void store_region(const trace_cache::region_sample& sample);
-    static void add_thread_info(const rocprofsys::trace_cache::info::thread& thread_info);
+
+    /// Registers the thread only if @p thread_id is unknown; @p make is not invoked
+    /// otherwise.
+    template <typename MakeFn>
+        requires std::is_invocable_r_v<trace_cache::info::thread, MakeFn>
+    static void ensure_thread(std::uint64_t thread_id, MakeFn&& make)
+    {
+        trace_cache::get_metadata_registry().ensure_thread(thread_id,
+                                                           std::forward<MakeFn>(make));
+    }
 };
 
 /// Output layer for writing marker data to Perfetto, timemory, and cache.
@@ -112,8 +124,11 @@ public:
         }
 
         constexpr size_t UNKNOWN_TIME = 0;
-        MarkerWriterPolicy::add_thread_info(
-            { getppid(), getpid(), record.thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+        MarkerWriterPolicy::ensure_thread(record.thread_id, [&] {
+            return trace_cache::info::thread{ getppid(),        getpid(),
+                                              record.thread_id, UNKNOWN_TIME,
+                                              UNKNOWN_TIME,     "{}" };
+        });
 
         MarkerWriterPolicy::store_region(trace_cache::region_sample{
             record.thread_id, name, record.correlation_id.internal,

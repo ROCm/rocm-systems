@@ -118,13 +118,16 @@ struct thread_metadata_source
         {
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
-            rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { .parent_process_id = getppid(),
-                  .process_id        = getpid(),
-                  .thread_id         = thread_id,
-                  .start             = UNKNOWN_TIME,
-                  .end               = UNKNOWN_TIME,
-                  .extdata           = "{}" });
+            rocprofsys::trace_cache::get_metadata_registry().ensure_thread(
+                thread_id, [thread_id] {
+                    return rocprofsys::trace_cache::info::thread{ .parent_process_id =
+                                                                      getppid(),
+                                                                  .process_id = getpid(),
+                                                                  .thread_id  = thread_id,
+                                                                  .start   = UNKNOWN_TIME,
+                                                                  .end     = UNKNOWN_TIME,
+                                                                  .extdata = "{}" };
+                });
         }
         return thread_id;
     }

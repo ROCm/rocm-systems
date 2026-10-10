@@ -408,12 +408,12 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("threads", [&_registry](const auto& item) {
         auto const thread = from_json_thread(item);
-        _registry.add_thread_info(thread);
+        _registry.ensure_thread(thread.thread_id, [&thread] { return thread; });
     });
 
     fill_from_json("tracks", [&_registry](const auto& item) {
         auto const track = from_json_track(item);
-        _registry.add_track(track);
+        _registry.ensure_track(track.track_name, track.thread_id, track.extdata);
     });
 
     fill_from_json("queues", [&_registry](const auto& item) {
@@ -463,73 +463,34 @@ metadata_registry::set_process(const info::process& process)
 void
 metadata_registry::add_pmc_info(const info::pmc& pmc_info)
 {
-    m_pmc_infos.wlock([&pmc_info](auto& _data) {
-        if(_data.count(pmc_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(pmc_info);
-    });
+    detail::insert_if_absent(m_pmc_infos, pmc_info);
 }
 
 void
-metadata_registry::add_thread_info(const info::thread& thread_info)
+metadata_registry::ensure_track(std::string_view name, std::optional<size_t> thread_id,
+                                std::string_view extdata)
 {
-    m_threads.wlock([&thread_info](auto& _data) {
-        if(_data.count(thread_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(thread_info);
-    });
-}
-
-void
-metadata_registry::add_track(const info::track& track_info)
-{
-    m_tracks.wlock([&track_info](auto& _data) {
-        if(_data.count(track_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(track_info);
+    detail::insert_if_absent(m_tracks, name, [&] {
+        return info::track{ std::string{ name }, thread_id, std::string{ extdata } };
     });
 }
 
 void
 metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
-    m_queues.wlock([&queue_handle](auto& _data) {
-        if(_data.count(queue_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(queue_handle);
-    });
+    detail::insert_if_absent(m_queues, queue_handle);
 }
 
 void
 metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
-    m_streams.wlock([&stream_handle](auto& _data) {
-        if(_data.count(stream_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(stream_handle);
-    });
+    detail::insert_if_absent(m_streams, stream_handle);
 }
 
 void
 metadata_registry::add_string(const std::string_view string_value)
 {
-    m_strings.wlock([&string_value](auto& _data) {
-        std::string str{ string_value };
-        if(_data.count(str) == 0)
-        {
-            _data.emplace(std::move(str));
-        }
-    });
+    detail::insert_if_absent(m_strings, string_value);
 }
 
 info::process
@@ -649,13 +610,7 @@ void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-    m_code_objects.wlock([&code_object](auto& _data) {
-        if(_data.count(code_object) > 0)
-        {
-            return;
-        }
-        _data.emplace(code_object);
-    });
+    detail::insert_if_absent(m_code_objects, code_object);
 }
 
 void
@@ -663,13 +618,7 @@ metadata_registry::add_kernel_symbol(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
         kernel_symbol)
 {
-    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
-        if(_data.count(kernel_symbol) > 0)
-        {
-            return;
-        }
-        _data.emplace(kernel_symbol);
-    });
+    detail::insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
