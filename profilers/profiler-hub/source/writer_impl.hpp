@@ -119,6 +119,15 @@ public:
         m_memory_alloc_writer->insert(memory_alloc_data, trace_environment);
     }
 
+    void write_sample(const writer_types::sample_data_t& sample_data,
+                      const writer_types::event_data_t&  event_data)
+    {
+        auto transaction_block = m_ctx->backend->begin_transaction();
+
+        const auto event_pk = m_common_ops->insert_event(event_data);
+        m_common_ops->insert_sample(sample_data, event_pk);
+    }
+
     void flush_in_memory_data_to_disk() { m_ctx->backend->flush(); }
 
 private:
