@@ -1,3 +1,4 @@
+import { isOfficialHistoryRun } from './runClassification.js';
 import { backfillRunIds, compareRunExecution, sortRunsByCommit } from './runOrdering.js';
 
 const CURRENT_SCHEMA_VERSION = 1;
@@ -294,7 +295,7 @@ function buildDashboardData(raw) {
     || !hasText(run.provenance?.rocjitsuCommitSha)
   ));
   if (invalidRun) {
-    throw new Error(`Run ${invalidRun.runId ?? '(unknown)'} is not a valid official develop run`);
+    throw new Error(`Run ${invalidRun.runId ?? '(unknown)'} is not a valid benchmark run`);
   }
 
   const commitTimestamps = new Map();
@@ -313,7 +314,10 @@ function buildDashboardData(raw) {
   }
 
   const pluginRuns = [...allRuns].sort(compareRunExecution);
-  const runs = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
+  const comparisonRuns = pluginRuns.filter((run) => run.plugin.id === 'vanilla');
+  const runs = comparisonRuns.filter(isOfficialHistoryRun);
+  const officialTestIds = new Set(runs.flatMap((run) => run.tests.map((test) => test.logicalTestId)));
+  const testCatalog = raw.testCatalog.filter((test) => officialTestIds.has(test.id));
   const latestCommitRun = sortRunsByCommit(runs).at(-1) ?? null;
   const targets = [...new Set(runs.flatMap((run) => run.targets))];
 
@@ -321,11 +325,15 @@ function buildDashboardData(raw) {
     ...raw,
     pluginRuns,
     runs,
+    comparisonRuns,
+    testCatalog,
+    comparisonTargets: [...new Set(comparisonRuns.flatMap((run) => run.targets))],
+    comparisonSuites: [...new Set(comparisonRuns.flatMap((run) => run.tests.map((test) => test.suite)))].sort(),
     latestRun: runs.at(-1) ?? null,
     latestCommitRun,
     backfillRunIds: backfillRunIds(runs),
     targets,
-    suites: [...new Set(raw.testCatalog.map((test) => test.suite))].sort(),
+    suites: [...new Set(testCatalog.map((test) => test.suite))].sort(),
   };
 }
 
@@ -340,7 +348,7 @@ export function validatePublicationPolicy(runs) {
 
   return runs.flatMap((run) => {
     const issues = [];
-    if (run.source.branch !== 'develop') {
+    if (run.execution.trigger === 'auto' && run.source.branch !== 'develop') {
       issues.push({
         runId: run.id,
         message: `Run ${run.id} must use source branch develop`,
@@ -506,7 +514,7 @@ export function validatePublishedDashboardData({
     runs: normalizedRuns,
   });
 
-  if (!data.latestRun) throw new Error('The data files do not contain any Vanilla benchmark runs');
+  if (data.comparisonRuns.length === 0) throw new Error('The data files do not contain any Vanilla benchmark runs');
 
   const publicationIssues = validatePublicationPolicy(acceptedSourceRuns);
   if (publicationIssues.length > 0) {

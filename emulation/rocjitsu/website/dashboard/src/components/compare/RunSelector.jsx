@@ -23,7 +23,7 @@ function formatRunTime(timestamp) {
 }
 
 function optionLabel(run) {
-  return `${formatRunTime(run.timestamp)} · ${shortSha(run)} · ${formatRunTime(commitTimestampFor(run))}`;
+  return `${formatRunTime(run.timestamp)} · ${shortSha(run)} · ${formatRunTime(commitTimestampFor(run))} · ${run.branch} · ${run.trigger === 'manual' ? 'Manual' : 'Auto'}`;
 }
 
 function searchableRunText(run) {
@@ -72,7 +72,7 @@ export default function RunSelector({ label, options, value, onChange }) {
               secondary={(
                 <>
                   <Box component="span" sx={{ fontFamily: 'monospace', fontWeight: 700 }}>{shortSha(run)}</Box>
-                  {` · Commit · ${formatRunTime(commitTimestampFor(run))}`}
+                  {` · Commit · ${formatRunTime(commitTimestampFor(run))} · ${run.branch} · ${run.trigger === 'manual' ? 'Manual' : 'Auto'}`}
                 </>
               )}
               slotProps={{
