@@ -214,6 +214,7 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirement
   return ncclSuccess;
 }
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                              ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int) {
   ginRegisterMemHeadAtCall = comm ? comm->devrState.memHead : nullptr;

@@ -2215,19 +2215,8 @@ fail:
   // ncclGinDevCommSetup and the signal bind leaves them registered with the
   // backend (Anvil keeps them pending), and a retried create binds the stale
   // contexts alongside the new ones.
-  //
-  // ncclGinDevCommFree matches the devComm by ginHandles[0]. Clear the same
-  // fields ginDevCommSetupWithBackend clears on its own error path, or a later
-  // ncclDevCommDestroy sees a non-zero ginContextCount and frees that handle again.
   if (ginDevCommSetupDone && ncclGinDevCommFree(comm, outDevComm) == ncclSuccess) {
-    outDevComm->backendIndex = 0;
-    outDevComm->ginConnectionCount = 0;
-    outDevComm->ginContextCount = 0;
-    outDevComm->ginConnectionStride = 0;
-    outDevComm->ginConnectionStride_rcp32 = 0;
-    outDevComm->ginContextStride = 0;
-    memset(outDevComm->ginNetDeviceTypes, 0, sizeof(outDevComm->ginNetDeviceTypes));
-    memset(outDevComm->ginHandles, 0, sizeof(outDevComm->ginHandles));
+    ncclGinDevCommClearFields(outDevComm);
   }
   CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&captureMode));
   return ret;
