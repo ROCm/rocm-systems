@@ -26,7 +26,9 @@ class VersionCommands:
         # if no args are given, display everything available on this build
         if args.gpu_version is None and args.cpu_version is None and args.nic_version is None:
             args.gpu_version = True
-            args.cpu_version = self.helpers.is_amd_hsmp_initialized()
+            args.cpu_version = self.helpers.is_amd_hsmp_initialized() or bool(
+                self.helpers.get_devices_without_driver("hsmp_acpi")
+            )
             args.nic_version = True
 
         if not self.group_check_printed:
@@ -56,7 +58,9 @@ class VersionCommands:
         self.logger.output["amd_hsmp_driver_version"] = "N/A"
         self.logger.output["nic_driver_version"] = "N/A"
 
-        if args.gpu_version:
+        if args.gpu_version and not self.helpers.is_driver_loaded("amdgpu"):
+            self.logger.output["amdgpu_version"] = "not loaded"
+        elif args.gpu_version:
             try:
                 gpus = amdsmi_interface.amdsmi_get_processor_handles()
                 if isinstance(gpus, list) and len(gpus) > 0:
@@ -64,7 +68,10 @@ class VersionCommands:
                     self.logger.output["amdgpu_version"] = driver_info["driver_full_version"]
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get amdgpu driver versions | %s", e.get_error_info())
-        if args.cpu_version:
+        if args.cpu_version and not self.helpers.is_driver_loaded("hsmp_acpi"):
+            cpu_version_str = "not loaded"
+            self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
+        elif args.cpu_version:
             try:
                 ret = amdsmi_interface.amdsmi_get_cpu_handles()
                 cpus = ret["processor_handles"]
@@ -83,7 +90,12 @@ class VersionCommands:
             self.logger.output["amd_hsmp_driver_version"] = cpu_version_str
 
         nic_version_str = "N/A"
-        if args.nic_version:
+        if args.nic_version and not (
+            self.helpers.is_driver_loaded("ionic") or self.helpers.is_driver_loaded("bnxt_en")
+        ):
+            nic_version_str = "not loaded"
+            self.logger.output["nic_driver_version"] = nic_version_str
+        elif args.nic_version:
             try:
                 ainic_device_handles = self.helpers.get_ainic_handles()
                 for nic_id, device_handle in enumerate(ainic_device_handles):

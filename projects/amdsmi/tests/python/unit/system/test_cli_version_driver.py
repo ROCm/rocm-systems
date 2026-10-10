@@ -81,14 +81,20 @@ def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict
 
 
 def _run_version_with_interface(
-    interface: types.SimpleNamespace, gpu_version: bool = True, human_readable: bool = False
+    interface: types.SimpleNamespace,
+    gpu_version: bool = True,
+    human_readable: bool = False,
+    driver_loaded: bool = True,
+    all_drivers: bool = False,
 ) -> dict:
     module = _load_version_module(interface)
     commands = object.__new__(module.VersionCommands)
     commands.logger = _Logger(human_readable=human_readable)
-    commands.helpers = types.SimpleNamespace()
+    commands.helpers = types.SimpleNamespace(is_driver_loaded=lambda _driver: driver_loaded)
     commands.group_check_printed = True
-    args = types.SimpleNamespace(gpu_version=gpu_version, cpu_version=False, nic_version=False)
+    args = types.SimpleNamespace(
+        gpu_version=gpu_version, cpu_version=all_drivers, nic_version=all_drivers
+    )
     commands.version(args)
     return commands.logger.output
 
@@ -134,6 +140,15 @@ class TestVersionDriverOutput(unittest.TestCase):
         output = _run_version_with_interface(interface)
 
         self.assertEqual(output["amdgpu_version"], "N/A")
+
+    def test_unloaded_drivers_report_not_loaded(self) -> None:
+        output = _run_version_with_interface(
+            _default_interface(), driver_loaded=False, all_drivers=True
+        )
+
+        self.assertEqual(output["amdgpu_version"], "not loaded")
+        self.assertEqual(output["amd_hsmp_driver_version"], "not loaded")
+        self.assertEqual(output["nic_driver_version"], "not loaded")
 
     def test_driver_info_failure_reports_amdgpu_version_as_na(self) -> None:
         interface = _default_interface()

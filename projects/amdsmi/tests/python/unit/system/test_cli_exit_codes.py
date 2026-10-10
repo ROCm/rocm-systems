@@ -1124,6 +1124,9 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             cli_exc.AmdSmiDeviceNotFoundException(
                 command=text, outputformat="csv", device_kind=cli_exc.AmdSmiDeviceKind.GPU
             ),
+            cli_exc.AmdSmiDriverNotLoadedException(
+                subject=text, drivers=["amdgpu"], outputformat="csv"
+            ),
             cli_exc.AmdSmiInvalidCommandException(command=text, outputformat="csv"),
             cli_exc.AmdSmiInvalidFilePathException(command=text, outputformat="csv"),
             cli_exc.AmdSmiInvalidParameterException(command="set", arg=text, outputformat="csv"),
