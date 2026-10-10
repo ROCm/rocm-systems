@@ -2286,6 +2286,27 @@
           "test_filter": "SymWin_WindowLifecycle.ReregisterWithDifferentAsymmetricPattern"
         },
         {
+          "name": "SymWin_WindowLifecycle_SlicesShareBacking",
+          "description": "Many slices of one allocation share a backing registration",
+          "test_filter": "SymWin_WindowLifecycle.SlicesShareBackingRegistration"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_BackingReleasedAfterLast",
+          "description": "Shared backing stays alive until its last window is deregistered",
+          "test_filter": "SymWin_WindowLifecycle.BackingReleasedAfterLastWindow"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_DuplicateExactRange",
+          "description": "Two live windows on the same range deregister independently",
+          "test_filter": "SymWin_WindowLifecycle.DuplicateExactRange"
+        },
+        {
+          "name": "SymWin_WindowLifecycle_RankDivergentReregister",
+          "description": "Collective re-register when only one rank has dropped its backing cache",
+          "test_filter": "SymWin_WindowLifecycle.RankDivergentReregister",
+          "timeout": 120
+        },
+        {
           "name": "SymWin_AsymRegister_AscendingSizes",
           "description": "Collective registration where the window size grows with rank",
           "test_filter": "SymWin_AsymRegister.AscendingSizes"
