@@ -782,6 +782,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx908
           - gfx90a
           - gfx9
@@ -837,6 +839,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx940
           - gfx908
           - gfx900
@@ -869,6 +873,8 @@ rocprofiler-sdk:
           - gfx1151
           - gfx1152
           - gfx1153
+          - gfx1170
+          - gfx1171
           - gfx908
           - gfx90a
           - gfx9
