@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/vm/amdgpu/aql/aql_metadata.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/packet_processor.h"
@@ -98,6 +99,10 @@ struct AqlPacketProcessRequest {
   /// Whether the queue currently has at least one eligible compute unit.
   /// Non-kernel packets remain processable while kernel admission is disabled.
   bool kernel_admission_enabled = true;
+  /// Version 0.0 companion, captured by the ring owner in the same VM transaction.
+  /// Empty when disabled or absent: descriptor, kernargs and event ID then come
+  /// from memory. Otherwise follows the layout in aql_metadata.h.
+  std::span<const uint32_t> metadata{};
 };
 
 struct AqlPacketProcessResult {

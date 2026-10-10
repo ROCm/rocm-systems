@@ -2123,6 +2123,17 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   if (daemon_mode_ && alloc.memfd >= 0 && alloc.host_ptr != nullptr)
     return alloc.host_ptr;
 
+  // A GTT/VRAM CPU mapping is an alias of the BO, not its GPU backing. Keep the
+  // private driver mapping alive when the client maps or unmaps an alias.
+  if ((alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT)) &&
+      alloc.memfd >= 0) {
+    if (length > alloc.size) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+    return safe_mmap(addr, length, prot, MAP_SHARED | (flags & MAP_FIXED), alloc.memfd, 0);
+  }
+
   void *host_ptr;
   bool host_ptr_owned = true;
 
@@ -2437,16 +2448,14 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
 
   bool user_provided_va = (args->va_addr != 0);
   uint64_t va = args->va_addr;
-  if (va == 0) {
+  if (va == 0)
     va = proc.next_gpu_va_;
-    proc.next_gpu_va_ += allocation_size;
-  }
 
   KfdProcess::GpuAllocation alloc{};
   alloc.gpu_va = va;
   alloc.size = allocation_size;
   alloc.flags = args->flags;
-  alloc.handle = proc.next_handle_++;
+  alloc.handle = proc.next_handle_;
   alloc.host_ptr = nullptr;
   alloc.gpu_id = args->gpu_id;
   alloc.user_va = user_provided_va;
@@ -2454,43 +2463,46 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   auto alloc_mtype = pte_mtype_for_flags(args->flags);
   bool is_userptr = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) != 0;
   bool is_doorbell = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) != 0;
+  const bool is_vram = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) != 0;
+  const bool is_gtt = (args->flags & KFD_IOC_ALLOC_MEM_FLAGS_GTT) != 0;
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va) {
-    auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (raw_fd >= 0) {
-      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-      if (alloc.memfd < 0)
-        alloc.memfd = raw_fd;
-      else
-        libc_passthrough().close(raw_fd);
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.insert(alloc.memfd);
-      }
-      if (alloc.memfd >= 0) {
-        [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
-        fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-        safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+  } else if (daemon_mode_ || !user_provided_va || is_vram || is_gtt) {
+    UniqueDriverFd backing(memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    if (!backing)
+      return -errno;
+    const int relocated = safe_fcntl(backing.get(), F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (relocated >= 0)
+      backing.reset(relocated);
+    if (ftruncate(backing.get(), static_cast<off_t>(alloc.size)) != 0 ||
+        fallocate(backing.get(), 0, 0, static_cast<off_t>(alloc.size)) != 0 ||
+        safe_fcntl(backing.get(), F_ADD_SEALS, F_SEAL_SHRINK) != 0)
+      return -errno;
 
-        if (daemon_mode_ && !is_doorbell) {
-          auto *mapped =
-              safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
-          if (mapped != MAP_FAILED) {
-            alloc.host_ptr = mapped;
-            alloc.host_ptr_owned = true;
-            // Driver-owned: this is our memfd, mapped read-write here and held
-            // open, so nothing outside can change its protection or unmap it.
-            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
-                       KfdProcess::HostExtentOwner::Driver);
-          }
-        }
-      }
+    // GTT/VRAM BOs own backing independently of client CPU mappings, including
+    // VRAM without PUBLIC access. Publish no handle until that backing exists.
+    if ((daemon_mode_ || is_vram || is_gtt) && !is_doorbell) {
+      void *mapped =
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, backing.get(), 0);
+      if (mapped == MAP_FAILED)
+        return -errno;
+      alloc.host_ptr = mapped;
+      alloc.host_ptr_owned = true;
+      map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
+                 KfdProcess::HostExtentOwner::Driver);
     }
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(backing.get());
+    }
+    alloc.memfd = backing.release();
   }
 
   proc.allocations_[alloc.handle] = alloc;
+  ++proc.next_handle_;
+  if (!user_provided_va)
+    proc.next_gpu_va_ += allocation_size;
 
   args->handle = alloc.handle;
   args->va_addr = va;
@@ -2641,8 +2653,13 @@ int SimulatedKfd::free_memory_ioctl(KfdProcess &proc, void *arg) {
         proc.imported_dmabufs_.erase(dmabuf_it);
       }
     }
-    if (alloc.host_ptr && !alloc.user_va)
+    const bool bo_backing =
+        (alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT)) &&
+        alloc.host_ptr_owned;
+    if (alloc.host_ptr && (!alloc.user_va || bo_backing))
       unmap_from_gpu(proc, alloc.gpu_va, alloc.size);
+    if (bo_backing)
+      safe_munmap(alloc.host_ptr, alloc.size);
     if (alloc.memfd >= 0) {
       {
         std::lock_guard<std::mutex> lk(owned_fds_mutex_);
@@ -2732,6 +2749,14 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!ring_size)
     return -EINVAL;
   args->ring_size = *ring_size;
+  if ((args->metadata_ring_size && !is_aql_compute) ||
+      !amdgpu::aql_metadata::valid_ring_layout(args->ring_base_address, args->ring_size,
+                                               args->metadata_ring_size))
+    return -EINVAL;
+
+  const uint64_t mapped_ring_size = uint64_t{args->ring_size} + args->metadata_ring_size;
+  if (args->ring_base_address > UINT64_MAX - mapped_ring_size)
+    return -EINVAL;
 
   // Queue IDs are process-local and start at one. Equivalent runtime queues in
   // different processes therefore share XCD resources while each process still
@@ -2746,6 +2771,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   amdgpu::CommandProcessor *target_cp =
       is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(owner_ordinal);
   if (!is_sdma && target_cp == nullptr)
+    return -EINVAL;
+  if (args->metadata_ring_size &&
+      (target_cp->compute_units().empty() ||
+       target_cp->compute_units()[0]->arch() != ROCJITSU_CODE_ARCH_CDNA5))
     return -EINVAL;
   const uint32_t target_xcc_id =
       is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(owner_ordinal);
@@ -2765,15 +2794,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
 
     if (!daemon_mode_) {
-      map_to_gpu(proc, args->ring_base_address, reinterpret_cast<void *>(args->ring_base_address),
-                 args->ring_size, amdgpu::Mtype::UC);
-      map_to_gpu(proc, args->read_pointer_address,
-                 reinterpret_cast<void *>(args->read_pointer_address), sizeof(uint64_t),
-                 amdgpu::Mtype::UC);
+      proc.map_identity_gaps(args->ring_base_address, mapped_ring_size);
+      proc.map_identity_gaps(args->read_pointer_address, sizeof(uint64_t));
       if (args->write_pointer_address != args->read_pointer_address)
-        map_to_gpu(proc, args->write_pointer_address,
-                   reinterpret_cast<void *>(args->write_pointer_address), sizeof(uint64_t),
-                   amdgpu::Mtype::UC);
+        proc.map_identity_gaps(args->write_pointer_address, sizeof(uint64_t));
     }
 
     queue_id = proc.next_queue_id_++;
@@ -2819,7 +2843,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     queue_request.ring = {.base_address = args->ring_base_address,
                           .size_bytes = args->ring_size,
                           .consumer_pointer_address = args->read_pointer_address,
-                          .producer_pointer_address = args->write_pointer_address};
+                          .producer_pointer_address = args->write_pointer_address,
+                          .metadata_size_bytes = args->metadata_ring_size};
     queue_request.binding_factory =
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
                 : amdgpu::make_compute_queue_binding_factory(*target_cp);
@@ -3148,6 +3173,16 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   if (dupfd < 0)
     return -errno;
 
+  // IMPORT attaches the BO at a GPU VA, even when no CPU alias exists there.
+  // Hold a private mapping so closing the export fd or unmapping a client
+  // alias cannot revoke the imported GPU backing.
+  void *backing = safe_mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, dupfd, 0);
+  if (backing == MAP_FAILED) {
+    int error = errno;
+    libc_passthrough().close(dupfd);
+    return -error;
+  }
+
   uint64_t handle;
   {
     std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
@@ -3160,7 +3195,9 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     alloc.user_va = true;
     alloc.imported = true;
     alloc.dmabuf_fd = dupfd;
-    alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
+    alloc.host_ptr = backing;
+    alloc.host_ptr_owned = true;
+    alloc.gpu_id = args->gpu_id;
     proc.allocations_[handle] = alloc;
 
     KfdProcess::ImportedDmabuf info{};
@@ -3174,8 +3211,8 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   }
 
   if (args->va_addr)
-    map_to_gpu(proc, args->va_addr, reinterpret_cast<void *>(args->va_addr), size,
-               amdgpu::Mtype::UC);
+    map_to_gpu(proc, args->va_addr, backing, size, amdgpu::Mtype::UC,
+               KfdProcess::HostExtentOwner::Driver);
 
   args->handle = handle;
   return 0;

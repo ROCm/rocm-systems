@@ -3729,6 +3729,28 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test(${_test_args})
     endfunction()
 
+    # Exercise CLR's extended dispatch and barrier companions through KFD 1.19,
+    # and its descriptor/kernarg memory path when companion publication is disabled.
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX1250)
+        rj_add_hip_test(hip_vector_add_gfx1250_test
+            SOURCE hip_vector_add_test.cpp ARCH gfx1250
+        )
+        rj_add_hip_test_case(hip_vector_add_gfx1250_test
+            "HipVectorAddTest.CorrectResult"
+            NAME HipVectorAddTest.Gfx1250MetadataQueue
+            CONFIG "${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json"
+            TIMEOUT 60
+        )
+        rj_add_hip_test_case(hip_vector_add_gfx1250_test
+            "HipVectorAddTest.CorrectResult"
+            NAME HipVectorAddTest.Gfx1250MetadataQueueMemoryFallback
+            CONFIG "${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json"
+            ENVIRONMENT DEBUG_CLR_ENABLE_KDQ=0
+            TIMEOUT 60
+        )
+    endif()
+
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
         rj_add_hip_test_case(
