@@ -1037,6 +1037,9 @@ RUNTIME_ENTRY(cl_int, clGetProgramInfo,
       return amd::clGetInfo(numKernels, param_value_size, param_value, param_value_size_ret);
     }
     case CL_PROGRAM_KERNEL_NAMES: {
+      if (as_amd(program)->symbolsPtr() == NULL) {
+        return CL_INVALID_PROGRAM_EXECUTABLE;
+      }
       const char* kernelNames = as_amd(program)->kernelNames().c_str();
       return amd::clGetInfo(kernelNames, param_value_size, param_value, param_value_size_ret);
     }
