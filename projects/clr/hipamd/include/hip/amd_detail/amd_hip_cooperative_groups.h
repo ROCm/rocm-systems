@@ -1281,6 +1281,132 @@ __CG_QUALIFIER__ thread_block_tile<size, ParentCGTy> tiled_partition(const Paren
   return impl::tiled_partition_internal<size, ParentCGTy>(g);
 }
 
+namespace impl {
+
+template <typename T>
+__CG_QUALIFIER__ T&& forward(typename __hip_internal::remove_reference<T>::type& t) {
+  return static_cast<T&&>(t);
+}
+
+template <typename T>
+__CG_QUALIFIER__ T&& forward(typename __hip_internal::remove_reference<T>::type&& t) {
+  return static_cast<T&&>(t);
+}
+
+}  // namespace impl
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function
+ *           with specified arguments. All group types are supported. The group is
+ *           not synchronized, so communication or synchronization within the
+ *           calling group is not allowed inside function.
+ *
+ *  \tparam Group The cooperative group class template parameter.
+ *  \tparam Fn    The type of the invocable.
+ *  \tparam Args  The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <typename Group, typename Fn, typename... Args>
+__CG_QUALIFIER__ void invoke_one(const Group& g, Fn&& fn, Args&&... args) {
+  if (g.thread_rank() == 0) {
+    impl::forward<Fn>(fn)(impl::forward<Args>(args)...);
+  }
+}
+
+namespace impl {
+
+template <typename Group, typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast_impl(const Group& g, Fn&& fn, Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(forward<Fn>(fn)(
+        forward<Args>(args)...))>::type {
+  using ResultType = typename __hip_internal::remove_reference<decltype(forward<Fn>(fn)(
+      forward<Args>(args)...))>::type;
+  static_assert(__hip_internal::is_trivially_copyable<ResultType>::value,
+                "The return type of the invocable must be trivially copyable");
+  static_assert(sizeof(ResultType) <= 32,
+                "The return type of the invocable must be at most 32 bytes");
+
+  // The result is moved one 32-bit word at a time.
+  constexpr unsigned int num_words =
+      (sizeof(ResultType) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
+  unsigned int words[num_words] = {};
+
+  if (g.thread_rank() == 0) {
+    ResultType selected = forward<Fn>(fn)(forward<Args>(args)...);
+    __builtin_memcpy(words, &selected, sizeof(ResultType));
+  }
+
+  for (unsigned int i = 0; i < num_words; ++i) {
+    words[i] = g.shfl(words[i], 0);
+  }
+
+  ResultType result;
+  __builtin_memcpy(&result, words, sizeof(ResultType));
+  return result;
+}
+
+}  // namespace impl
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group and broadcasts the result.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function with
+ *           specified arguments and then, distributes the returned value to all threads of
+ *           the group. The group is not synchronized, so communication or synchronization
+ *           within the calling group is not allowed inside function. The return type of the
+ *           function must be trivially copyable and at most 32 bytes in size.
+ *
+ *  \tparam Fn    The type of the invocable.
+ *  \tparam Args  The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast(const coalesced_group& g, Fn&& fn, Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = decltype(impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
+  static_assert(!__hip_internal::is_void<ResultType>::value,
+                "For invocables returning void invoke_one should be used instead");
+  return impl::invoke_one_broadcast_impl(g, impl::forward<Fn>(fn), impl::forward<Args>(args)...);
+}
+
+/** \ingroup CooperativeGAPI
+ *  \brief   Calls an invocable on a single thread of the group and broadcasts the result.
+ *
+ *  \details Selects one thread of the group and uses it to call the supplied function with
+ *           specified arguments and then, distributes the returned value to all threads of
+ *           the group. The group is not synchronized, so communication or synchronization
+ *           within the calling group is not allowed inside function. The return type of the
+ *           function must be trivially copyable and at most 32 bytes in size.
+ *
+ *  \tparam Size   The size of the thread block tile group.
+ *  \tparam Parent The cooperative group class template parameter of the input group.
+ *  \tparam Fn     The type of the invocable.
+ *  \tparam Args   The types of the arguments of the invocable.
+ *
+ *  \param g    [in] The group to select the thread from.
+ *  \param fn   [in] The invocable called by the selected thread.
+ *  \param args [in] The arguments passed to the invocable.
+ */
+template <unsigned int Size, typename Parent, typename Fn, typename... Args>
+__CG_QUALIFIER__ auto invoke_one_broadcast(const thread_block_tile<Size, Parent>& g, Fn&& fn,
+                                           Args&&... args) ->
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = decltype(impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
+  static_assert(!__hip_internal::is_void<ResultType>::value,
+                "For invocables returning void invoke_one should be used instead");
+  return impl::invoke_one_broadcast_impl(g, impl::forward<Fn>(fn), impl::forward<Args>(args)...);
+}
+
 #if !defined(HIP_DISABLE_WARP_SYNC_BUILTINS)
 
 /** \ingroup CooperativeGConstruct
