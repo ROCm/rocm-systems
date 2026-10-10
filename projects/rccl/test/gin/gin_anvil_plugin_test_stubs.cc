@@ -44,7 +44,11 @@ struct State {
   int bootstrapAllGatherCalls = 0;
   int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  // First input address resolved since the last Reset/SetLsaSelfAddr. Later
+  // inputs map to lsaSelfAddr plus their offset from it. A flag marks it latched,
+  // so an input of 0 is not mistaken for "unset".
   uintptr_t lsaInputBase = 0;
+  bool lsaInputBaseSet = false;
 };
 
 struct FakeSdmaOpaque {
@@ -73,6 +77,7 @@ void SetLsaSelfAddr(void* addr) {
   // Drop the latched input base so the next resolve is relative to this address,
   // not the first arena that happened to be resolved.
   g.lsaInputBase = 0;
+  g.lsaInputBaseSet = false;
 }
 void SetConnCheckMissingCalls(int calls) { g.connCheckMissingCalls = calls; }
 int GetConnCheckWriteCalls() { return g.connCheckWriteCalls; }
@@ -175,7 +180,10 @@ ncclResult_t ncclDevrGetLsaSelfAddr(struct ncclDevrState* devr, void* addr, void
     return ncclSuccess;
   }
   uintptr_t input = reinterpret_cast<uintptr_t>(addr);
-  if (GinAnvilPluginStubs::g.lsaInputBase == 0) GinAnvilPluginStubs::g.lsaInputBase = input;
+  if (!GinAnvilPluginStubs::g.lsaInputBaseSet) {
+    GinAnvilPluginStubs::g.lsaInputBase = input;
+    GinAnvilPluginStubs::g.lsaInputBaseSet = true;
+  }
   uintptr_t offset = input - GinAnvilPluginStubs::g.lsaInputBase;
   *outAddr = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.lsaSelfAddr) + offset);
   return ncclSuccess;

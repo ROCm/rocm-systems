@@ -759,26 +759,32 @@ cleanup:
   return ret;
 }
 
+// Peer VAs for a signal region at local flat address `base`. The table is indexed by
+// GIN-team peer, matching resolveRemotePeerVa's (peer - rsCtx->rank); lsaSelf is a
+// different space under NCCL_GIN_CONNECTION_RAIL. Caller frees the result.
+static uintptr_t* ginAnvilBuildSignalPeerAddrs(void* base, int nRanks, int ginRank, ptrdiff_t stride) {
+  uintptr_t* addrs = (uintptr_t*)calloc((size_t)nRanks, sizeof(uintptr_t));
+  if (!addrs) return nullptr;
+  for (int pe = 0; pe < nRanks; pe++) {
+    addrs[pe] = (uintptr_t)base + static_cast<ptrdiff_t>(pe - ginRank) * stride;
+  }
+  return addrs;
+}
+
 static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* spanLsaSelf, size_t spanBytes, int nRanks,
                                                int ginRank) {
   struct ncclDevrState* devr = &comm->devrState;
-  const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
 
   if (nRanks != devr->lsaSize) {
     WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", nRanks, devr->lsaSize, ginRank);
   }
   if (ginRank != devr->lsaSelf) {
-    WARN("GIN anvil-sdma: ctx->rank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ginRank,
+    WARN("GIN anvil-sdma: ginRank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ginRank,
          devr->lsaSelf);
   }
 
-  // signal_remote_addrs is indexed by GIN-team peer, matching resolveRemotePeerVa's
-  // (peer - rsCtx->rank). lsaSelf is a different space under NCCL_GIN_CONNECTION_RAIL.
-  uintptr_t* hostAddrs = (uintptr_t*)calloc((size_t)nRanks, sizeof(uintptr_t));
+  uintptr_t* hostAddrs = ginAnvilBuildSignalPeerAddrs(spanLsaSelf, nRanks, ginRank, (ptrdiff_t)devr->bigSize);
   if (!hostAddrs) return ncclSystemError;
-  for (int pe = 0; pe < nRanks; pe++) {
-    hostAddrs[pe] = (uintptr_t)spanLsaSelf + static_cast<ptrdiff_t>(pe - ginRank) * stride;
-  }
 
   int rc = ncclGinAnvilIpcTableRegisterExplicit(spanLsaSelf, hostAddrs, nRanks, spanBytes);
   free(hostAddrs);
@@ -815,24 +821,14 @@ static ncclResult_t ginAnvilRegisterSignalSpan(struct ncclComm* comm, void* span
 static ncclResult_t ginAnvilBindContextSignals(ginAnvilGinCtx* ctx, int contextId, int signalSlot, void* lsaSelf,
                                                size_t bytes) {
   struct ncclDevrState* devr = &ctx->comm->devrState;
-  const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
   ncclGinAnvilSdmaGPUContext* gpuCtxHost = &ctx->gpuCtxHost[contextId];
 
   gpuCtxHost->signals = (uint64_t*)lsaSelf;
 
-  uintptr_t* hostAddrs = (uintptr_t*)calloc((size_t)ctx->nRanks, sizeof(uintptr_t));
+  uintptr_t* hostAddrs = ginAnvilBuildSignalPeerAddrs(lsaSelf, ctx->nRanks, ctx->rank, (ptrdiff_t)devr->bigSize);
   if (!hostAddrs) {
     gpuCtxHost->signals = nullptr;
     return ncclSystemError;
-  }
-  for (int pe = 0; pe < ctx->nRanks; pe++) {
-    hostAddrs[pe] = (uintptr_t)lsaSelf + static_cast<ptrdiff_t>(pe - ctx->rank) * stride;
-  }
-
-  uintptr_t selfExpected = (uintptr_t)lsaSelf;
-  if (hostAddrs[ctx->rank] != selfExpected) {
-    WARN("GIN anvil-sdma: signal_remote_addrs[self=%d]=%#lx != signals=%#lx (lsaSelf=%#lx stride=%zd)", ctx->rank,
-         (unsigned long)hostAddrs[ctx->rank], (unsigned long)selfExpected, (unsigned long)lsaSelf, (long)stride);
   }
 
   if (hipMalloc(&ctx->signal_remote_addrs_dev[contextId], sizeof(uintptr_t) * (size_t)ctx->nRanks) != hipSuccess ||
