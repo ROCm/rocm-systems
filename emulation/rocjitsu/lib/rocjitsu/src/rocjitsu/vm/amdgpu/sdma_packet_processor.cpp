@@ -3,6 +3,8 @@
 
 #include "rocjitsu/vm/amdgpu/sdma_packet_processor.h"
 
+#include "util/bit.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -48,12 +50,14 @@ constexpr uint8_t kOpGcr = 17;
 constexpr uint8_t kOpHdpFlush = 0x26;
 
 constexpr uint8_t kSubopLinear = 0;
+constexpr uint8_t kSubopLinearRect = 4;
 constexpr uint8_t kSubopFence64 = 2;
 constexpr uint8_t kSubopPollMemory64 = 5;
 
 constexpr std::size_t kTransferBytes = 4096;
 constexpr std::size_t kCopyLinearDwords = 7;
 constexpr std::size_t kCopyBroadcastDwords = 9;
+constexpr std::size_t kCopyLinearRectDwords = 13;
 constexpr std::size_t kFenceDwords = 4;
 constexpr std::size_t kFence64Dwords = 5;
 constexpr std::size_t kTrapDwords = 2;
@@ -180,6 +184,13 @@ public:
     bool completes_signal = false;
     bool timestamp_captured = false;
     bool retire_on_fault = false;
+    bool rectangular = false;
+    uint32_t rect_row_bytes = 0;
+    uint32_t rect_rows = 0;
+    uint64_t src_pitch = 0;
+    uint64_t dst_pitch = 0;
+    uint64_t src_slice = 0;
+    uint64_t dst_slice = 0;
     uint64_t mailbox = 0;
     uint32_t event_id = 0;
     std::array<std::byte, sizeof(uint64_t)> mailbox_bytes{};
@@ -298,7 +309,13 @@ private:
 
   bool gfx11_plus() const {
     // Extended copy counts do not opt legacy dialects into gfx11 packet layouts.
-    return dialect_ == SdmaPacketDialect::Gfx11Plus || dialect_ == SdmaPacketDialect::Gfx1250;
+    // RDNA4 keeps those layouts; only its rectangle copy uses the GFX12 placement.
+    return dialect_ == SdmaPacketDialect::Gfx11Plus || dialect_ == SdmaPacketDialect::Rdna4 ||
+           dialect_ == SdmaPacketDialect::Gfx1250;
+  }
+
+  bool gfx12_linear_rect() const {
+    return dialect_ == SdmaPacketDialect::Rdna4 || dialect_ == SdmaPacketDialect::Gfx1250;
   }
 
   PacketExtent packet_extent(std::span<const uint32_t> words) const {
@@ -318,6 +335,8 @@ private:
       return need(((header >> 16) & 0x3fff) + 1);
     case kOpCopy: {
       constexpr uint8_t kSubopLinearBroadcast = 16;
+      if (subopcode == kSubopLinearRect)
+        return need(kCopyLinearRectDwords);
       if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast)
         return {};
       if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
@@ -389,6 +408,11 @@ private:
     case kOpCopy: {
       operation.kind = Kind::Copy;
       constexpr uint8_t kSubopLinearBroadcast = 16;
+      if (subopcode == kSubopLinearRect) {
+        if (!decode_linear_rect(frame, operation))
+          return SdmaPacketExecutionOutcome::Malformed;
+        break;
+      }
       if (subopcode != kSubopLinear && subopcode != kSubopLinearBroadcast)
         return SdmaPacketExecutionOutcome::Malformed;
       if (gfx11_plus() && (header & ((1u << 30) | (1u << 31))) != 0) {
@@ -577,6 +601,114 @@ private:
     }
   }
 
+  // COPY_LINEAR_RECT. Counts in the packet are stored as value-1. Pitches and the
+  // slice are in elements. RDNA4 and Gfx1250 use the GFX12 field placement.
+  // Earlier dialects, including the CDNA4 layout hipMemcpy2D submits, use the
+  // pre-GFX12 placement. A non-zero endian swap is rejected: the rectangle copy
+  // that reaches this path does not set one, and swapping would publish different
+  // bytes than the packet asked for.
+  bool decode_linear_rect(const Frame &frame, Operation &operation) {
+    const bool gfx12_rect = gfx12_linear_rect();
+    const uint32_t element = util::bits(word(frame, 0), 29, 31);
+    if (element > 4 || !has(frame, kCopyLinearRectDwords))
+      return false;
+    const uint64_t element_bytes = uint64_t{1} << element;
+    // Highest bit of each field: GFX12 widens the offsets, pitches, and rectangle size.
+    const int xy_last = gfx12_rect ? 15 : 13;
+    const int z_last = gfx12_rect ? 13 : 10;
+    const int pitch_first = gfx12_rect ? 16 : 13;
+
+    const uint32_t src_off_x = util::bits(word(frame, 3), 0, xy_last);
+    const uint32_t src_off_y = util::bits(word(frame, 3), 16, 16 + xy_last);
+    const uint32_t src_off_z = util::bits(word(frame, 4), 0, z_last);
+    const uint64_t src_pitch_elements = util::bits(word(frame, 4), pitch_first, 31) + uint64_t{1};
+    const uint32_t dst_off_x = util::bits(word(frame, 8), 0, xy_last);
+    const uint32_t dst_off_y = util::bits(word(frame, 8), 16, 16 + xy_last);
+    const uint32_t dst_off_z = util::bits(word(frame, 9), 0, z_last);
+    const uint64_t dst_pitch_elements = util::bits(word(frame, 9), pitch_first, 31) + uint64_t{1};
+    const uint64_t rect_x = util::bits(word(frame, 11), 0, xy_last) + uint64_t{1};
+    const uint64_t rect_y = util::bits(word(frame, 11), 16, 16 + xy_last) + uint64_t{1};
+    const uint64_t rect_z = util::bits(word(frame, 12), 0, z_last) + uint64_t{1};
+    if (!gfx12_rect &&
+        (util::bits(word(frame, 12), 16, 17) != 0 || util::bits(word(frame, 12), 24, 25) != 0))
+      return false;
+
+    // A one-slice copy can still name a nonzero Z origin. The slice field is
+    // stored as value-minus-one, including when the copy itself has one slice.
+    const uint64_t src_slice_elements =
+        (gfx12_rect ? word(frame, 5) : util::bits(word(frame, 5), 0, 27)) + uint64_t{1};
+    const uint64_t dst_slice_elements =
+        (gfx12_rect ? word(frame, 10) : util::bits(word(frame, 10), 0, 27)) + uint64_t{1};
+
+    const std::optional<uint64_t> src_pitch = util::checked_mul(src_pitch_elements, element_bytes);
+    const std::optional<uint64_t> dst_pitch = util::checked_mul(dst_pitch_elements, element_bytes);
+    const std::optional<uint64_t> src_slice = util::checked_mul(src_slice_elements, element_bytes);
+    const std::optional<uint64_t> dst_slice = util::checked_mul(dst_slice_elements, element_bytes);
+    const std::optional<uint64_t> row_bytes = util::checked_mul(rect_x, element_bytes);
+    const std::optional<uint64_t> row_count = util::checked_mul(rect_y, rect_z);
+    if (!src_pitch || !dst_pitch || !src_slice || !dst_slice || !row_bytes || !row_count ||
+        *row_bytes > std::numeric_limits<uint32_t>::max() ||
+        rect_y > std::numeric_limits<uint32_t>::max())
+      return false;
+    const std::optional<uint64_t> total_bytes = util::checked_mul(*row_bytes, *row_count);
+    if (!total_bytes)
+      return false;
+
+    const auto origin_address = [&](uint32_t low, uint32_t high, uint64_t off_x, uint64_t off_y,
+                                    uint64_t off_z, uint64_t pitch,
+                                    uint64_t slice) -> std::optional<uint64_t> {
+      const std::optional<uint64_t> x_bytes = util::checked_mul(off_x, element_bytes);
+      const std::optional<uint64_t> y_bytes = util::checked_mul(off_y, pitch);
+      const std::optional<uint64_t> z_bytes = util::checked_mul(off_z, slice);
+      if (!x_bytes || !y_bytes || !z_bytes)
+        return std::nullopt;
+      std::optional<uint64_t> address = util::checked_add(*x_bytes, *y_bytes);
+      if (address)
+        address = util::checked_add(*address, *z_bytes);
+      if (address)
+        address = util::checked_add(join(low, high), *address);
+      const std::optional<uint64_t> y_span = util::checked_mul(rect_y - 1, pitch);
+      const std::optional<uint64_t> z_span = util::checked_mul(rect_z - 1, slice);
+      if (!address || !y_span || !z_span)
+        return std::nullopt;
+      std::optional<uint64_t> span = util::checked_add(*y_span, *z_span);
+      if (span)
+        span = util::checked_add(*span, *row_bytes);
+      if (!span || !valid_range(*address, *span))
+        return std::nullopt;
+      return address;
+    };
+
+    const std::optional<uint64_t> source = origin_address(
+        word(frame, 1), word(frame, 2), src_off_x, src_off_y, src_off_z, *src_pitch, *src_slice);
+    const std::optional<uint64_t> destination = origin_address(
+        word(frame, 6), word(frame, 7), dst_off_x, dst_off_y, dst_off_z, *dst_pitch, *dst_slice);
+    if (!source || !destination)
+      return false;
+
+    operation.rectangular = true;
+    operation.source = *source;
+    operation.destinations[0] = *destination;
+    operation.destination_count = 1;
+    operation.count = *total_bytes;
+    operation.rect_row_bytes = static_cast<uint32_t>(*row_bytes);
+    operation.rect_rows = static_cast<uint32_t>(rect_y);
+    operation.src_pitch = *src_pitch;
+    operation.dst_pitch = *dst_pitch;
+    operation.src_slice = *src_slice;
+    operation.dst_slice = *dst_slice;
+    return true;
+  }
+
+  static uint64_t rectangular_address(uint64_t base, uint64_t pitch, uint64_t slice,
+                                      uint32_t row_bytes, uint32_t rows, uint64_t completed) {
+    const uint64_t row = completed / row_bytes;
+    const uint64_t column = completed % row_bytes;
+    const uint64_t z = row / rows;
+    const uint64_t y = row % rows;
+    return base + y * pitch + z * slice + column;
+  }
+
   SdmaPacketExecutionOutcome execute_copy(Operation &operation) {
     if (operation.phase == 0) {
       if (operation.wait_enabled && operation.address > 0x1000) {
@@ -611,12 +743,23 @@ private:
     if (operation.phase == 3)
       cache_before_write(operation);
     while (operation.phase == 3 && operation.completed < operation.count) {
-      if (operation.chunk_size == 0)
-        operation.chunk_size = static_cast<std::size_t>(
-            std::min<uint64_t>(kTransferBytes, operation.count - operation.completed));
+      if (operation.chunk_size == 0) {
+        uint64_t room = operation.count - operation.completed;
+        if (operation.rectangular) {
+          const uint64_t column = operation.completed % operation.rect_row_bytes;
+          room = std::min(room, static_cast<uint64_t>(operation.rect_row_bytes) - column);
+        }
+        operation.chunk_size = static_cast<std::size_t>(std::min<uint64_t>(kTransferBytes, room));
+      }
+      const auto address_at = [&](uint64_t base, uint64_t pitch, uint64_t slice) {
+        if (!operation.rectangular)
+          return base + operation.completed;
+        return rectangular_address(base, pitch, slice, operation.rect_row_bytes,
+                                   operation.rect_rows, operation.completed);
+      };
       if (operation.destination_index == 0) {
         const VmAccessOutcome read = access_->read(
-            operation.source + operation.completed,
+            address_at(operation.source, operation.src_pitch, operation.src_slice),
             std::span(operation.scratch).first(operation.chunk_size), operation.io_progress);
         if (read != VmAccessOutcome::Complete)
           return map_outcome(read);
@@ -625,7 +768,9 @@ private:
       }
       while (operation.destination_index <= operation.destination_count) {
         const uint64_t destination =
-            operation.destinations[operation.destination_index - 1] + operation.completed;
+            operation.rectangular
+                ? address_at(operation.destinations[0], operation.dst_pitch, operation.dst_slice)
+                : operation.destinations[operation.destination_index - 1] + operation.completed;
         const VmAccessOutcome write = access_->write(
             destination, std::span<const std::byte>(operation.scratch).first(operation.chunk_size),
             operation.io_progress);

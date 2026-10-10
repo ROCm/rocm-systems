@@ -116,7 +116,7 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
       std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Rdna4},
   };
   for (const auto &[arch, expected] : cases) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -620,8 +620,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Rdna4);
 
   auto rdna3 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
@@ -2713,7 +2712,7 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
   EXPECT_EQ(restored_soc->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+            amdgpu::SdmaPacketDialect::Rdna4);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);

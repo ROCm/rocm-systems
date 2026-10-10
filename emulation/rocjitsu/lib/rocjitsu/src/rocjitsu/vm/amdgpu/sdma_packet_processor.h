@@ -26,6 +26,8 @@ enum class SdmaPacketDialect {
   LegacyExtendedCount,
   Gfx11Plus,
   Gfx1250,
+  /// RDNA4 keeps the gfx11 packet sizes. COPY_LINEAR_RECT uses the GFX12 placement.
+  Rdna4,
 };
 
 using SdmaCacheOperation = DeviceCacheOperation;

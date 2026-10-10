@@ -27,6 +27,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sys/stat.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -457,6 +458,18 @@ public:
   /// @retval false the local process is gone, so nothing was unmapped.
   [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
 
+  /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
+  /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
+  /// and dmabuf fd to it. The first state offered is shared by every allocation of
+  /// that file and freed with the last of them.
+  /// @returns The state those allocations keep, or @p state when no allocation uses the file.
+  /// @note Called by the interposer's prime_import with its fd_mutex_ held. This takes
+  /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
+  /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
+  /// recorded here, not in the global ordering below; no reverse edge exists.
+  [[nodiscard]] std::shared_ptr<GemObject> retain_bo_state(const struct stat &st,
+                                                           std::shared_ptr<GemObject> state);
+
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
 
@@ -518,6 +531,11 @@ private:
                   amdgpu::Mtype mtype = amdgpu::Mtype::RW,
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+
+  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
+  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
+  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
+  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 

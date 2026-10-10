@@ -9279,3 +9279,43 @@ TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {
     }
   }
 }
+
+TEST(InstructionExecution, Cdna2GwsInitRetiresAndSynchronizationStaysUnimplemented) {
+  amdgpu::GpuMemory gpu_mem("gws_mem");
+  amdgpu::L2Cache l2("gws_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 106;
+  cfg.vgprs_per_wf = 256;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("gws", cfg, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+
+  // INIT retires so runtime initialization completes. Retiring a barrier or
+  // semaphore wait would falsely claim synchronization, so those stay unimplemented.
+  for (const std::string_view mnemonic : {"ds_gws_sema_release_all", "ds_gws_init", "ds_gws_sema_v",
+                                          "ds_gws_sema_br", "ds_gws_sema_p", "ds_gws_barrier"}) {
+    SCOPED_TRACE(mnemonic);
+    const auto *encoding = std::ranges::find(cdna2::test_data::ENCODINGS, mnemonic,
+                                             &cdna2::test_data::TestEncoding::mnemonic);
+    ASSERT_NE(encoding, std::ranges::end(cdna2::test_data::ENCODINGS));
+    amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding->words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->mnemonic(), mnemonic);
+    if (mnemonic == "ds_gws_init") {
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+    } else {
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+      EXPECT_EQ(wf->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    }
+    if (!wf->is_halted())
+      wf->halt();
+  }
+}
