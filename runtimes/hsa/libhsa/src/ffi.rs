@@ -857,7 +857,11 @@ pub struct HsaAmdEvent {
 }
 
 pub(crate) const AMD_GPU_MEMORY_FAULT_EVENT: u32 = 0;
+pub(crate) const AMD_GPU_HW_EXCEPTION_EVENT: u32 = 1;
 pub(crate) const AMD_SYSTEM_SHUTDOWN_EVENT: u32 = 3;
+pub(crate) const AMD_HW_EXCEPTION_RESET_TYPE_OTHER: u32 = 1;
+pub(crate) const AMD_HW_EXCEPTION_CAUSE_GPU_HANG: u32 = 1;
+pub(crate) const AMD_HW_EXCEPTION_CAUSE_ECC: u32 = 1 << 1;
 pub(crate) const AMD_MEMORY_FAULT_PAGE_NOT_PRESENT: u32 = 1;
 pub(crate) const AMD_MEMORY_FAULT_READ_ONLY: u32 = 1 << 1;
 pub(crate) const AMD_MEMORY_FAULT_NO_EXECUTE: u32 = 1 << 2;

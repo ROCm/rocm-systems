@@ -2342,14 +2342,19 @@ class VirtualMapCommand : public Command {
   const void* ptr_;  //!< Virtual address to map to the memory
 
  protected:
-  Memory* memory_;  //!< Memory to map, nullptr means unmap
-  size_t size_;     //!< Size of the mapping in bytes
+  Memory* memory_;     //!< Memory to map, nullptr means unmap
+  size_t size_;        //!< Size of the mapping in bytes
+  bool trackMapping_;  //!< Create a memory object for the mapped range and add it to MemObjMap
 
  public:
   //! Construct a new VirtualMapCommand
   VirtualMapCommand(HostQueue& queue, const EventWaitList& eventWaitList, void* ptr, size_t size,
-                    Memory* memory)
-      : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
+                    Memory* memory, bool trackMapping = true)
+      : Command(queue, 1, eventWaitList),
+        ptr_(ptr),
+        memory_(memory),
+        size_(size),
+        trackMapping_(trackMapping) {
     // Sanity checks
     assert(size > 0 && "invalid");
     if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
@@ -2372,6 +2377,8 @@ class VirtualMapCommand : public Command {
   size_t size() const { return size_; }
   //! Read the pointer
   const void* ptr() const { return ptr_; }
+  //! Returns true if the mapping is tracked with a memory object in MemObjMap
+  bool trackMapping() const { return trackMapping_; }
 };
 
 //! Union used in memory suballocator, must be updated with the new commands

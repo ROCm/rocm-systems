@@ -690,6 +690,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -2091,18 +2092,25 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 rj_add_interposer_test_suite(
     InterposerDrmTest
     CanonicalSysfsPathsRetainSimulatedDevice
+    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
     DmabufExportKeepsADriverCpuMapping
     DmabufExportKeepsAReservedCpuMapping
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
+    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
+    IpcImportSharesThePagesOfTheExportedAllocation
     KfdBufferKeepsItsMetadataAfterEveryHandleCloses
+    KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
+    KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
     OpensWithinCurrentDescriptorLimit
     PrimeHandleToFdReturnsTheBuffer
     PrimeImportKeepsTheBoStateAfterTheHandleCloses
+    PrimeImportRejectsADescriptorThatIsNotADmabuf
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor

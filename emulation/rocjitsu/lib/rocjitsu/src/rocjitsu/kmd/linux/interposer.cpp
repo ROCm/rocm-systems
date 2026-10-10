@@ -102,6 +102,35 @@ using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
+namespace rocjitsu {
+
+/// @brief BO state every handle to one backing file shares.
+/// @details The kernel returns the same BO for every import of its dmabuf, so
+/// create info, placement, and UMD metadata set through one handle are what
+/// every other handle reads.
+struct GemObject {
+  dev_t device = 0; ///< Backing file identity; zero when fstat failed.
+  ino_t inode = 0;
+  // GET_GEM_CREATE_INFO returns this record: the allocated size and the
+  // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
+  drm_amdgpu_gem_create_in create_info{};
+  // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
+  // writes this on every VMM import. An empty record is a valid buffer.
+  uint64_t metadata_flags = 0;
+  uint64_t tiling_info = 0;
+  uint32_t metadata_size = 0;
+  uint32_t metadata[64] = {};
+  // The KFD allocation flags the GPU PTE type derives from, recorded at the first
+  // export or import of the buffer. A duplicate of the export fd, or a repeated
+  // import, has no EXPORT_DMABUF record of its own and takes them from here.
+  uint32_t alloc_flags = 0;
+  bool has_alloc_flags = false;
+};
+
+} // namespace rocjitsu
+
+using rocjitsu::GemObject;
+
 namespace {
 
 static_assert(std::atomic<bool>::is_always_lock_free,
@@ -2399,24 +2428,6 @@ public:
     }
   };
 
-  /// @brief BO state every handle to one backing file shares.
-  /// @details The kernel returns the same BO for every import of its dmabuf, so
-  /// create info, placement, and UMD metadata set through one handle are what
-  /// every other handle reads.
-  struct GemObject {
-    dev_t device = 0; ///< Backing file identity; zero when fstat failed.
-    ino_t inode = 0;
-    // GET_GEM_CREATE_INFO returns this record: the allocated size and the
-    // GEM_CREATE alignment, domains, and flags. SET_PLACEMENT updates domains.
-    drm_amdgpu_gem_create_in create_info{};
-    // Userspace (libdrm amdgpu_bo_query_info / amdgpu_bo_set_metadata) reads and
-    // writes this on every VMM import. An empty record is a valid buffer.
-    uint64_t metadata_flags = 0;
-    uint64_t tiling_info = 0;
-    uint32_t metadata_size = 0;
-    uint32_t metadata[64] = {};
-  };
-
   struct GemEntry {
     std::shared_ptr<PrivateDrmFd>
         dmabuf_fd;            ///< Backing retained through lazy mmap and submissions.
@@ -2926,22 +2937,65 @@ public:
   /// consumed by the next PRIME_FD_TO_HANDLE on the same fd (which folds the flags
   /// into a stable-handle GemEntry). To keep the fd key from going stale — a dmabuf
   /// fd closed without a PRIME, then recycled by the kernel for an unrelated file —
-  /// drop_pending_gem_flags(fd) clears the record at close(fd), so a reused fd
+  /// drop_gem_export(fd) clears the record at close(fd), so a reused fd
   /// number can never inherit a previous export's MTYPE.
   void track_gem_flags(int dmabuf_fd, uint32_t alloc_flags) {
     std::lock_guard lock(fd_mutex_);
     pending_gem_flags_[dmabuf_fd] = alloc_flags;
   }
 
-  /// @brief Drop any transient EXPORT_DMABUF flags recorded for @p fd (at close(fd)).
-  /// @details Called from the close() hook for every fd. Cheap no-op when @p fd is
-  /// not a pending dmabuf export. Prevents a closed-without-PRIME export fd from
-  /// leaving a stale flag that a later PRIME on the recycled fd number would apply.
-  /// Also releases the BO state a PRIME export retained for @p fd.
-  void drop_pending_gem_flags(int fd) {
+  /// @brief Drop what the interposer keeps for the dma-buf export @p fd (at close(fd), or
+  /// when dup2/dup3 replace it).
+  /// @details Erases the transient EXPORT_DMABUF flags and releases the BO state the
+  /// export retained. Called from the close() hook for every fd; a cheap no-op when
+  /// @p fd is not an export. Prevents a closed-without-PRIME export fd from leaving a
+  /// stale flag that a later PRIME on the recycled fd number would apply, and ends
+  /// the export's hold on the BO record that duplicate_gem_export extends to a
+  /// duplicate. Call it, and the kernel close or replacement it pairs with, inside one
+  /// lock_drm_fd_lifecycle() scope, as duplicate_gem_export is.
+  /// @returns Whether @p fd was a dma-buf export.
+  bool drop_gem_export(int fd) {
     std::lock_guard lock(fd_mutex_);
-    pending_gem_flags_.erase(fd);
-    exported_gem_objects_.erase(fd);
+    const bool flags = pending_gem_flags_.erase(fd) != 0;
+    const bool state = exported_gem_objects_.erase(fd) != 0;
+    return flags || state;
+  }
+
+  /// @brief Whether @p fd is a descriptor the interposer serves itself (a KFD, DRM or
+  /// sync-file descriptor, or one of its private backing fds) and so cannot be a dma-buf.
+  bool is_interposer_fd(int fd) {
+    if (lookup(fd) || owns_fd(fd) || PrivateDrmFd::owns(fd))
+      return true;
+    std::lock_guard lock(fd_mutex_);
+    return drm_fds_.count(fd) != 0 || sync_file_fds_.count(fd) != 0 || kfd_dup_fds_.count(fd) != 0;
+  }
+
+  /// @brief Whether the interposer holds an export record for @p fd.
+  bool has_gem_export(int fd) {
+    std::lock_guard lock(fd_mutex_);
+    return pending_gem_flags_.count(fd) != 0 || exported_gem_objects_.count(fd) != 0;
+  }
+
+  /// @brief Keep the BO state a PRIME export retained for @p source on its duplicate @p target.
+  /// @details The state must outlive the export fd's last close, and a duplicate is
+  /// that same open file under another number. Called after a successful dup,
+  /// dup2, dup3 or fcntl(F_DUPFD*), in the lock_drm_fd_lifecycle() scope of that call so
+  /// a racing close of @p source cannot drop the record between the kernel dup and
+  /// this copy; a no-op when @p source is neither a PRIME export nor a KFD export awaiting its
+  /// import.
+  void duplicate_gem_export(int source, int target) {
+    std::lock_guard lock(fd_mutex_);
+    // A KFD export has only its pending flags until the first PRIME import, and the
+    // duplicate must import with them whichever descriptor reaches PRIME first.
+    if (const auto flags = pending_gem_flags_.find(source); flags != pending_gem_flags_.end()) {
+      const uint32_t alloc_flags = flags->second;
+      pending_gem_flags_[target] = alloc_flags;
+    }
+    const auto it = exported_gem_objects_.find(source);
+    if (it == exported_gem_objects_.end())
+      return;
+    std::shared_ptr<GemObject> object = it->second;
+    exported_gem_objects_[target] = std::move(object);
   }
 
   /// @brief Mint a stable GEM handle for a prime-imported dmabuf (PRIME_FD_TO_HANDLE).
@@ -2958,8 +3012,10 @@ public:
     if (gem_entries_.size() == std::numeric_limits<uint32_t>::max())
       return 0;
     uint32_t alloc_flags = 0;
+    bool flags_exported = false;
     if (auto it = pending_gem_flags_.find(dmabuf_fd); it != pending_gem_flags_.end()) {
       alloc_flags = it->second;
+      flags_exported = true;
       pending_gem_flags_.erase(it);
     }
     // Pin the backing to the HANDLE's lifetime by dup'ing the dmabuf fd now, rather
@@ -2985,7 +3041,6 @@ public:
     // Only fresh GEM allocations qualify for disjoint parallel RAM accesses.
     gem.drm_file_id = drm_file->id;
     gem.size = size;
-    gem.alloc_flags = alloc_flags;
     struct stat st {};
     const bool identified = real().fstat_fn(dmabuf_fd, &st) == 0;
     if (identified)
@@ -3007,7 +3062,20 @@ public:
     // ROCr's IPC export sets metadata through a handle it closes at once, with
     // its dmabuf fd, and the importer checks that metadata later.
     if (auto *drv = identified ? drm_file_simulated(drm_file) : nullptr)
-      gem.object = std::static_pointer_cast<GemObject>(drv->retain_bo_state(st, gem.object));
+      gem.object = drv->retain_bo_state(st, gem.object);
+    // The dmabuf fd is a reference to the buffer too: a KFD export has none of the
+    // state a PRIME export retains, and the allocation may be freed while the fd lives.
+    if (identified)
+      exported_gem_objects_[dmabuf_fd] = gem.object;
+    // The first export or import fixes the buffer's flags; later imports of any
+    // descriptor to it map with the same cache policy.
+    if (flags_exported) {
+      gem.object->alloc_flags = alloc_flags;
+      gem.object->has_alloc_flags = true;
+    } else if (gem.object->has_alloc_flags) {
+      alloc_flags = gem.object->alloc_flags;
+    }
+    gem.alloc_flags = alloc_flags;
     // hsaKmtMemoryGetCpuAddr follows a prime import with GEM_MMAP. A zero offset
     // is "no mapping" and that call fails the VMM handle create.
     const uint64_t map_bytes = (size + 4095) & ~uint64_t{4095};
@@ -3067,6 +3135,10 @@ public:
     track_gem_flags(exported, alloc_flags);
     {
       std::lock_guard lock(fd_mutex_);
+      if (!object->has_alloc_flags) {
+        object->alloc_flags = alloc_flags;
+        object->has_alloc_flags = true;
+      }
       exported_gem_objects_[exported] = std::move(object);
     }
     return exported;
@@ -4353,7 +4425,29 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // later PRIME on the recycled fd number could misapply as the wrong PTE MTYPE.
   // A PRIME export fd also releases the BO state it retained. No-op for
   // non-dmabuf fds.
-  InterposerContext::ctx.drop_pending_gem_flags(fd);
+  //
+  // A record does not prove the fd is a dmabuf: close_range or a raw SYS_close leaves
+  // it behind on a number the kernel then reuses. The descriptor's own cleanup below
+  // therefore still runs, and only a descriptor nothing else tracks is closed here.
+  const bool maybe_export = InterposerContext::ctx.has_gem_export(fd);
+  const bool tracked_elsewhere = maybe_export && (InterposerContext::ctx.lookup(fd) != nullptr ||
+                                                  InterposerContext::ctx.owns_fd(fd) ||
+                                                  InterposerContext::PrivateDrmFd::owns(fd));
+  bool dropped_export = false;
+  InterposerContext::DrmUntrackResult drm_close;
+  {
+    // The record goes with the kernel close, inside the scope a dup of this fd holds
+    // from its syscall to duplicate_gem_export, so that dup sees both or neither.
+    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
+    dropped_export = InterposerContext::ctx.drop_gem_export(fd);
+    if (InterposerContext::ctx.close_sync_file(fd))
+      return 0;
+    drm_close = InterposerContext::ctx.untrack_drm(fd);
+    if (drm_close.tracked)
+      InterposerContext::real().close(fd);
+    else if (dropped_export && !tracked_elsewhere && !InterposerContext::ctx.is_kfd_dup(fd))
+      return static_cast<int>(InterposerContext::real().close(fd));
+  }
   // NOTE: a GEM/dmabuf mapping is NOT torn down when a transient dmabuf EXPORT fd
   // closes. ROCr closes that fd immediately after VMemorySetAccessPerHandle()
   // returns, while the GPU mapping must stay live for the caller. GEM state is keyed
@@ -4361,15 +4455,6 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
   // handler). Closing the DRM FILE itself, however, is the true backstop: reap any
   // handles still open on it (mirroring the kernel dropping a drm_file's GEM
   // objects) so a leaked/never-GEM_CLOSE'd handle cannot outlive its DRM file.
-  InterposerContext::DrmUntrackResult drm_close;
-  {
-    auto drm_lifecycle = InterposerContext::ctx.lock_drm_fd_lifecycle();
-    if (InterposerContext::ctx.close_sync_file(fd))
-      return 0;
-    drm_close = InterposerContext::ctx.untrack_drm(fd);
-    if (drm_close.tracked)
-      InterposerContext::real().close(fd);
-  }
   if (drm_close.tracked) {
     // Reaps GEM while the backend is still open, then drops the lease. Releasing a
     // local lease routes through release_local_open(), so a final DRM close can
@@ -4581,6 +4666,17 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     if (type == kDrmIoctlType && nr == kDrmIoctlNrPrimeFdToHandle && arg) {
       auto *prime = static_cast<drm_prime_handle *>(arg);
       if (prime->fd < 0) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      // Only a dma-buf can be imported. It is a regular file to fstat; a device node,
+      // pipe or socket is not, and neither is a descriptor the interposer serves
+      // itself. Retaining one as an export would misclassify it once its descriptor
+      // number is reused.
+      struct stat kind {};
+      if (InterposerContext::ctx.is_interposer_fd(prime->fd) ||
+          InterposerContext::real().fstat_fn(prime->fd, &kind) != 0 || !S_ISREG(kind.st_mode)) {
         errno = EINVAL;
         return -1;
       }
@@ -5042,6 +5138,7 @@ RJ_INTERPOSER_EXPORT int dup(int oldfd) {
     rc = InterposerContext::real().dup(oldfd);
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       drm_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
     }
   }
@@ -5080,12 +5177,11 @@ void reconcile_dup_target(int newfd, std::optional<InterposerContext::DupBackend
                           InterposerContext::DrmFinalRelease displaced_release) {
   InterposerContext::ctx.untrack_sysfs(newfd);
   // dup2/dup3 atomically close whatever newfd was, bypassing the close() hook, so
-  // every per-fd cleanup close() performs must be mirrored here. Drop any transient
-  // EXPORT_DMABUF flags for newfd: a dmabuf export fd overwritten before a
-  // PRIME_FD_TO_HANDLE would otherwise leave a stale fd→flags record that a later
-  // PRIME on the recycled fd number could misapply as the wrong PTE MTYPE. No-op for
-  // non-dmabuf fds.
-  InterposerContext::ctx.drop_pending_gem_flags(newfd);
+  // every per-fd cleanup close() performs must be mirrored here. The export record
+  // for newfd was dropped with the kernel replacement, in the lifecycle scope: a
+  // dmabuf export fd overwritten before a PRIME_FD_TO_HANDLE would otherwise leave a
+  // stale fd→flags record that a later PRIME on the recycled fd number could
+  // misapply as the wrong PTE MTYPE.
   InterposerContext::ctx.complete_drm_release(std::move(overwritten_release));
   InterposerContext::ctx.complete_drm_release(std::move(displaced_release));
   InterposerContext::ctx.invalidate_overwritten_kfd_fd(newfd);
@@ -5124,6 +5220,9 @@ RJ_INTERPOSER_EXPORT int dup2(int oldfd, int newfd) {
         newfd, [&] { return InterposerContext::real().dup2(oldfd, newfd); });
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -5170,6 +5269,9 @@ RJ_INTERPOSER_EXPORT int dup3(int oldfd, int newfd, int flags) {
         newfd, [&] { return InterposerContext::real().dup3(oldfd, newfd, flags); });
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(oldfd, rc);
+      // The replaced target's export record goes with its descriptor.
+      InterposerContext::ctx.drop_gem_export(rc);
+      InterposerContext::ctx.duplicate_gem_export(oldfd, rc);
       auto drm_close = InterposerContext::ctx.untrack_drm(rc);
       overwritten_release = std::move(drm_close.release);
       displaced_release = InterposerContext::ctx.commit_drm_dup(rc, drm_file);
@@ -5305,6 +5407,7 @@ int fcntl_impl(int fd, int cmd, void *ptr_arg, int int_arg) {
     rc = invoke();
     if (rc >= 0) {
       InterposerContext::ctx.duplicate_sync_file(fd, static_cast<int>(rc));
+      InterposerContext::ctx.duplicate_gem_export(fd, static_cast<int>(rc));
       drm_release = InterposerContext::ctx.commit_drm_dup(static_cast<int>(rc), drm_file);
     }
   } else {

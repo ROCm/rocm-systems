@@ -467,8 +467,8 @@ public:
   /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
   /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
   /// recorded here, not in the global ordering below; no reverse edge exists.
-  [[nodiscard]] std::shared_ptr<void> retain_bo_state(const struct stat &st,
-                                                      std::shared_ptr<void> state);
+  [[nodiscard]] std::shared_ptr<GemObject> retain_bo_state(const struct stat &st,
+                                                           std::shared_ptr<GemObject> state);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
@@ -532,6 +532,11 @@ private:
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
+  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
+  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
+  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
+  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
+
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
@@ -566,10 +571,6 @@ private:
   int wait_events_ioctl(KfdProcess &proc, void *arg);
   int import_dmabuf_ioctl(KfdProcess &proc, void *arg);
   int export_dmabuf_ioctl(KfdProcess &proc, void *arg);
-  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
-  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
-  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
-  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
   int get_dmabuf_info_ioctl(KfdProcess &proc, void *arg);
   int ipc_export_handle_ioctl(KfdProcess &proc, void *arg);
   int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);

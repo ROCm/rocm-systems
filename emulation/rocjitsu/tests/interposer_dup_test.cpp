@@ -62,6 +62,17 @@ RJ_DIAGNOSTIC_POP
 
 extern char **environ;
 
+// close_range(2) landed in Linux 5.9 and glibc 2.34. gcc-toolset-13 on the CI base
+// image builds against an older glibc with no wrapper, so issue the syscall directly.
+// 436 is the number on every architecture ROCm targets.
+#ifndef SYS_close_range
+#ifdef __NR_close_range
+#define SYS_close_range __NR_close_range
+#else
+#define SYS_close_range 436
+#endif
+#endif
+
 namespace {
 
 // Issue AMDKFD_IOC_GET_VERSION on fd. Returns true if the fd routed to a KFD
@@ -997,7 +1008,12 @@ TEST(InterposerDrmTest, PrimeImportSharesTheBufferAndItsMetadata) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
+namespace {
+
+// Exports a GEM_CREATE buffer, closes its handle, and imports it through the fd
+// @p duplicate returns for the export fd. The BO state must survive the close of
+// every other reference to the buffer, including the original export fd.
+template <typename Duplicate> void check_prime_import_keeps_the_bo_state(Duplicate duplicate) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   int exporter = open_drm_render();
@@ -1023,10 +1039,15 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   prime.handle = create.out.handle;
   prime.flags = DRM_CLOEXEC;
   ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  const int import_fd = duplicate(prime.fd);
+  ASSERT_GE(import_fd, 0);
+  if (import_fd != prime.fd) {
+    EXPECT_EQ(close(prime.fd), 0);
+  }
   ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
   uint32_t imported = 0;
-  ASSERT_TRUE(prime_import(importer, prime.fd, &imported));
-  EXPECT_EQ(close(prime.fd), 0);
+  ASSERT_TRUE(prime_import(importer, import_fd, &imported));
+  EXPECT_EQ(close(import_fd), 0);
 
   drm_amdgpu_gem_metadata query{};
   query.handle = imported;
@@ -1047,6 +1068,147 @@ TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
   EXPECT_EQ(info.domains, static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_CPU));
   EXPECT_EQ(info.domain_flags, static_cast<uint64_t>(AMDGPU_GEM_CREATE_EXT_COHERENT));
 
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(exporter), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+TEST(InterposerDrmTest, PrimeImportKeepsTheBoStateAfterTheHandleCloses) {
+  const struct {
+    const char *name;
+    int (*duplicate)(int);
+  } cases[] = {
+      {"original fd", [](int fd) { return fd; }},
+      {"dup", [](int fd) { return dup(fd); }},
+      {"dup2", [](int fd) { return dup2(fd, 900); }},
+      {"dup3", [](int fd) { return dup3(fd, 901, O_CLOEXEC); }},
+      {"F_DUPFD", [](int fd) { return fcntl(fd, F_DUPFD, 902); }},
+      {"F_DUPFD_CLOEXEC", [](int fd) { return fcntl(fd, F_DUPFD_CLOEXEC, 903); }},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    check_prime_import_keeps_the_bo_state(test_case.duplicate);
+  }
+}
+
+namespace {
+
+#if defined(__SANITIZE_THREAD__)
+#define RJ_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define RJ_TEST_TSAN 1
+#endif
+#endif
+
+#ifdef RJ_TEST_TSAN
+extern "C" {
+void AnnotateIgnoreReadsBegin(const char *file, int line);
+void AnnotateIgnoreReadsEnd(const char *file, int line);
+void AnnotateIgnoreWritesBegin(const char *file, int line);
+void AnnotateIgnoreWritesEnd(const char *file, int line);
+}
+#endif
+
+// Scopes the deliberate dup/close race on one descriptor number. The kernel
+// serializes the two on its descriptor table, so the race is the scenario under test,
+// not a defect; ThreadSanitizer would otherwise report it as a race on the fd itself.
+struct IgnoreFdRace {
+#ifdef RJ_TEST_TSAN
+  IgnoreFdRace() {
+    AnnotateIgnoreReadsBegin(__FILE__, __LINE__);
+    AnnotateIgnoreWritesBegin(__FILE__, __LINE__);
+  }
+  ~IgnoreFdRace() {
+    AnnotateIgnoreWritesEnd(__FILE__, __LINE__);
+    AnnotateIgnoreReadsEnd(__FILE__, __LINE__);
+  }
+#else
+  IgnoreFdRace() = default;
+  ~IgnoreFdRace() {}
+#endif
+};
+
+} // namespace
+
+// A dup racing the close of the export fd either fails or returns a descriptor that
+// still carries the BO state: the record follows the kernel descriptor, so neither
+// operation may slip between the other's table update and its syscall.
+//
+// Once the close wins, another thread of the process can open a file under the freed
+// number before the dup looks it up, and the dup then copies that file. A copy that is
+// not the exported buffer says nothing about the BO state and is not counted.
+TEST(InterposerDrmTest, DupRacingTheCloseOfAPrimeExportKeepsTheBoState) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int exporter = open_drm_render();
+  ASSERT_GE(exporter, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  constexpr int kAttempts = 3000;
+  int duplicated = 0;
+  int foreign = 0;
+  int lost = 0;
+  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+    drm_amdgpu_gem_create create{};
+    create.in.bo_size = 4096;
+    create.in.alignment = 65536;
+    create.in.domains = AMDGPU_GEM_DOMAIN_CPU;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+    drm_amdgpu_gem_metadata store{};
+    store.handle = create.out.handle;
+    store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+    store.data.tiling_info = 0x11;
+    store.data.data_size_bytes = sizeof(uint32_t);
+    store.data.data[0] = 0xA1B2C3D4u;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+    drm_prime_handle prime{};
+    prime.handle = create.out.handle;
+    prime.flags = DRM_CLOEXEC;
+    ASSERT_EQ(ioctl(exporter, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+    ASSERT_EQ(gem_close(exporter, create.out.handle), 0);
+    struct stat exported {};
+    ASSERT_EQ(fstat(prime.fd, &exported), 0);
+
+    std::barrier start(2);
+    int copy = -1;
+    std::thread closer([&] {
+      IgnoreFdRace ignore;
+      start.arrive_and_wait();
+      close(prime.fd);
+    });
+    {
+      IgnoreFdRace ignore;
+      start.arrive_and_wait();
+      copy = dup(prime.fd);
+    }
+    closer.join();
+    if (copy < 0)
+      continue;
+    struct stat copied {};
+    if (fstat(copy, &copied) != 0 || copied.st_dev != exported.st_dev ||
+        copied.st_ino != exported.st_ino) {
+      ++foreign;
+      EXPECT_EQ(close(copy), 0);
+      continue;
+    }
+    ++duplicated;
+    uint32_t imported = 0;
+    ASSERT_TRUE(prime_import(importer, copy, &imported));
+    drm_amdgpu_gem_metadata query{};
+    query.handle = imported;
+    query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+    ASSERT_EQ(ioctl(importer, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+    if (query.data.data_size_bytes != sizeof(uint32_t) || query.data.tiling_info != 0x11u)
+      ++lost;
+    EXPECT_EQ(gem_close(importer, imported), 0);
+    EXPECT_EQ(close(copy), 0);
+  }
+  EXPECT_GT(duplicated, 0);
+  EXPECT_EQ(lost, 0) << lost << " of " << duplicated << " duplicates lost the BO state (" << foreign
+                     << " copies were of another file)";
   EXPECT_EQ(close(importer), 0);
   EXPECT_EQ(close(exporter), 0);
   EXPECT_EQ(close(kfd), 0);
@@ -1111,6 +1273,68 @@ TEST(InterposerDrmTest, DmabufExportKeepsADriverCpuMapping) {
   check_dmabuf_export_keeps_cpu_mapping(false);
 }
 
+// An IPC export is not a snapshot: the importer's allocation and the exporter's
+// pages are the same memory, whichever side stores.
+TEST(InterposerDrmTest, IpcImportSharesThePagesOfTheExportedAllocation) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  constexpr size_t kBytes = 4096;
+  void *reserved =
+      mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *mapping = mmap(reserved, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kfd,
+                       static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(mapping, MAP_FAILED);
+  auto *words = static_cast<volatile uint32_t *>(mapping);
+  words[0] = 0x1111u;
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = gpu_id;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::memcpy(imported.share_handle, exported.share_handle, sizeof(imported.share_handle));
+  imported.gpu_id = gpu_id;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  EXPECT_NE(imported.handle, allocation.handle);
+
+  kfd_ioctl_export_dmabuf_args view_fd{};
+  view_fd.handle = imported.handle;
+  view_fd.flags = O_CLOEXEC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &view_fd), 0);
+  const int dmabuf = static_cast<int>(view_fd.dmabuf_fd);
+  void *view = mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED, dmabuf, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  auto *view_words = static_cast<volatile uint32_t *>(view);
+  EXPECT_EQ(view_words[0], 0x1111u);
+
+  // A store through the exporter's pointer after the import reaches the importer.
+  words[0] = 0x2222u;
+  EXPECT_EQ(view_words[0], 0x2222u);
+  // A store through the importer's view reaches the exporter's pointer.
+  view_words[1] = 0x3333u;
+  EXPECT_EQ(words[1], 0x3333u);
+
+  EXPECT_EQ(munmap(view, kBytes), 0);
+  EXPECT_EQ(close(dmabuf), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = imported.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(munmap(mapping, kBytes), 0);
+  free_args.handle = allocation.handle;
+  EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, KfdBufferKeepsItsMetadataAfterEveryHandleCloses) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -1165,6 +1389,238 @@ TEST(InterposerDrmTest, KfdBufferKeepsItsMetadataAfterEveryHandleCloses) {
   kfd_ioctl_free_memory_of_gpu_args free_args{};
   free_args.handle = allocation.handle;
   EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(munmap(reserved, kBytes), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+namespace {
+
+// A 4096-byte KFD allocation exported as a dma-buf. The allocation and its CPU
+// reservation stay alive until release().
+struct KfdExport {
+  int kfd = -1;
+  void *reserved = MAP_FAILED;
+  uint64_t handle = 0;
+  int dmabuf = -1;
+
+  bool create(int kfd_fd, uint32_t flags) {
+    kfd = kfd_fd;
+    uint32_t gpu_id = 0;
+    if (!read_gpu_id(gpu_id))
+      return false;
+    reserved = mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (reserved == MAP_FAILED)
+      return false;
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+    allocation.size = 4096;
+    allocation.gpu_id = gpu_id;
+    allocation.flags = flags;
+    if (ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0)
+      return false;
+    handle = allocation.handle;
+    kfd_ioctl_export_dmabuf_args exported{};
+    exported.handle = handle;
+    exported.flags = O_CLOEXEC;
+    if (ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported) != 0)
+      return false;
+    dmabuf = static_cast<int>(exported.dmabuf_fd);
+    return true;
+  }
+
+  void release() {
+    if (handle != 0) {
+      kfd_ioctl_free_memory_of_gpu_args free_args{};
+      free_args.handle = handle;
+      EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+    }
+    if (reserved != MAP_FAILED) {
+      EXPECT_EQ(munmap(reserved, 4096), 0);
+    }
+  }
+};
+
+constexpr uint32_t kPublicVram = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                                 KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+
+// Opens /dev/null after @p expected_fd was freed and expects the interposer to treat
+// it as the plain character device it is, not as a DRM file.
+void expect_plain_dev_null_on(int expected_fd) {
+  const int null_fd = open("/dev/null", O_RDWR | O_CLOEXEC);
+  ASSERT_EQ(null_fd, expected_fd);
+  struct stat st {};
+  ASSERT_EQ(fstat(null_fd, &st), 0);
+  EXPECT_EQ(major(st.st_rdev), 1u);
+  EXPECT_EQ(minor(st.st_rdev), 3u);
+  drm_version version{};
+  errno = 0;
+  EXPECT_EQ(ioctl(null_fd, DRM_IOCTL_VERSION, &version), -1);
+  drm_amdgpu_info_device device{};
+  EXPECT_FALSE(query_drm_device_info(null_fd, &device));
+  EXPECT_EQ(close(null_fd), 0);
+}
+
+} // namespace
+
+// Closing the descriptors of a KFD export behind the interposer's back leaves its
+// record on a number the kernel then hands to another file. Closing that file must
+// still release what it is: the DRM tracking of a render fd, in particular, cannot
+// outlive it and classify the next file on the number.
+TEST(InterposerDrmTest, CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int number = buffer.dmabuf;
+  ASSERT_EQ(
+      syscall(SYS_close_range, static_cast<unsigned>(number), static_cast<unsigned>(number), 0u),
+      0);
+  const int render = open_drm_render();
+  ASSERT_EQ(render, number);
+  ASSERT_EQ(close(render), 0);
+  expect_plain_dev_null_on(number);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int importer = open_drm_render();
+  ASSERT_GE(importer, 0);
+  int render = open_drm_render();
+  ASSERT_GE(render, 0);
+  uint32_t handle = 0;
+  errno = 0;
+  EXPECT_FALSE(prime_import(importer, render, &handle));
+  EXPECT_EQ(errno, EINVAL);
+  ASSERT_EQ(close(render), 0);
+  expect_plain_dev_null_on(render);
+  EXPECT_EQ(close(importer), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+namespace {
+
+// The domain the interposer reports for @p handle, which follows the allocation
+// flags the import received.
+uint64_t gem_domains(int drm, uint32_t handle) {
+  drm_amdgpu_gem_create_in info{};
+  drm_amdgpu_gem_op op{};
+  op.handle = handle;
+  op.op = AMDGPU_GEM_OP_GET_GEM_CREATE_INFO;
+  op.value = reinterpret_cast<uint64_t>(&info);
+  if (ioctl(drm, DRM_IOCTL_AMDGPU_GEM_OP, &op) != 0)
+    return ~uint64_t{0};
+  return info.domains;
+}
+
+// Runs @p duplicate on a public-VRAM KFD export and imports the result. The import
+// must see the export's flags whichever descriptor reaches PRIME first.
+template <typename Duplicate>
+void check_kfd_export_flags_survive_duplication(Duplicate duplicate, bool close_original) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int copy = duplicate(buffer.dmabuf);
+  ASSERT_GE(copy, 0);
+  if (close_original && copy != buffer.dmabuf) {
+    ASSERT_EQ(close(buffer.dmabuf), 0);
+  }
+
+  uint32_t from_copy = 0;
+  ASSERT_TRUE(prime_import(drm, copy, &from_copy));
+  EXPECT_EQ(gem_domains(drm, from_copy), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+  if (!close_original && copy != buffer.dmabuf) {
+    uint32_t from_original = 0;
+    ASSERT_TRUE(prime_import(drm, buffer.dmabuf, &from_original));
+    EXPECT_EQ(gem_domains(drm, from_original), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+    EXPECT_EQ(gem_domains(drm, from_copy), static_cast<uint64_t>(AMDGPU_GEM_DOMAIN_VRAM));
+    EXPECT_EQ(gem_close(drm, from_original), 0);
+    EXPECT_EQ(close(buffer.dmabuf), 0);
+  }
+  EXPECT_EQ(gem_close(drm, from_copy), 0);
+  EXPECT_EQ(close(copy), 0);
+  buffer.release();
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+} // namespace
+
+TEST(InterposerDrmTest, KfdExportFlagsSurviveDuplicationBeforeThePrimeImport) {
+  const struct {
+    const char *name;
+    int (*duplicate)(int);
+  } cases[] = {
+      {"original fd", [](int fd) { return fd; }},
+      {"dup", [](int fd) { return dup(fd); }},
+      {"dup2", [](int fd) { return dup2(fd, 900); }},
+      {"dup3", [](int fd) { return dup3(fd, 901, O_CLOEXEC); }},
+      {"F_DUPFD_CLOEXEC", [](int fd) { return fcntl(fd, F_DUPFD_CLOEXEC, 903); }},
+  };
+  for (const auto &test_case : cases) {
+    for (const bool close_original : {true, false}) {
+      SCOPED_TRACE(std::string(test_case.name) +
+                   (close_original ? ", original closed" : ", original open"));
+      check_kfd_export_flags_survive_duplication(test_case.duplicate, close_original);
+    }
+  }
+}
+
+TEST(InterposerDrmTest, KfdExportKeepsItsMetadataAfterTheAllocationIsFreed) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  constexpr size_t kBytes = 4096;
+  void *reserved =
+      mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(reserved);
+  allocation.size = kBytes;
+  allocation.gpu_id = gpu_id;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = allocation.handle;
+  exported.flags = O_CLOEXEC;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  const int dmabuf = static_cast<int>(exported.dmabuf_fd);
+  uint32_t tagged = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &tagged));
+  drm_amdgpu_gem_metadata store{};
+  store.handle = tagged;
+  store.op = AMDGPU_GEM_METADATA_OP_SET_METADATA;
+  store.data.data_size_bytes = sizeof(uint32_t);
+  store.data.data[0] = 0x6D82u;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &store), 0);
+  // The dma-buf outlives both the GEM handle and the KFD allocation.
+  ASSERT_EQ(gem_close(drm, tagged), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = allocation.handle;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+
+  uint32_t attached = 0;
+  ASSERT_TRUE(prime_import(drm, dmabuf, &attached));
+  drm_amdgpu_gem_metadata query{};
+  query.handle = attached;
+  query.op = AMDGPU_GEM_METADATA_OP_GET_METADATA;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_METADATA, &query), 0);
+  EXPECT_EQ(query.data.data_size_bytes, sizeof(uint32_t));
+  EXPECT_EQ(query.data.data[0], 0x6D82u);
+
+  EXPECT_EQ(gem_close(drm, attached), 0);
+  EXPECT_EQ(close(dmabuf), 0);
   EXPECT_EQ(munmap(reserved, kBytes), 0);
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
