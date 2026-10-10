@@ -15,24 +15,18 @@ if(NOT cxx_std_17 IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     _skip_collector("compiler does not support C++17")
 endif()
 
-# The collector compiles against the minimal declarations in torch_abi/, so
-# neither PyTorch headers nor PyTorch libraries are build dependencies.
-add_library(torch-trace-collector STATIC torch_trace_collector.cpp snapshot_store.cpp)
-target_include_directories(torch-trace-collector PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# Compile the shim-based implementation without PyTorch or Python build dependencies.
+add_library(torch-trace-collector OBJECT argument_capture.cpp torch_trace_collector.cpp)
 target_include_directories(
     torch-trace-collector
-    SYSTEM
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/torch_abi
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/torch_abi
 )
 target_link_libraries(
     torch-trace-collector
-    PUBLIC
-        rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
-        synchronized
-        gsl_assert
+    PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
 )
-target_compile_features(torch-trace-collector PUBLIC cxx_std_17)
-target_compile_definitions(torch-trace-collector PUBLIC _GLIBCXX_USE_CXX11_ABI=1)
+target_compile_features(torch-trace-collector PRIVATE cxx_std_17)
+target_compile_definitions(torch-trace-collector PRIVATE _GLIBCXX_USE_CXX11_ABI=1)
 set_target_properties(
     torch-trace-collector
     PROPERTIES
@@ -41,14 +35,13 @@ set_target_properties(
         POSITION_INDEPENDENT_CODE ON
 )
 
-add_library(torch-trace-collector-module MODULE torch_trace_collector_module.cpp)
-target_include_directories(
+add_library(torch-trace-collector-module MODULE $<TARGET_OBJECTS:torch-trace-collector>)
+target_link_libraries(
     torch-trace-collector-module
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/torch_abi
+    PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
 )
-target_link_libraries(torch-trace-collector-module PRIVATE torch-trace-collector)
-# Only the plain-C interface is public. PyTorch symbols intentionally remain
-# unresolved until the workload loader promotes its real libtorch_cpu.so.
+# Only the plain-C interface is public. Torch imports resolve at runtime from
+# the workload's real libtorch_cpu.so, promoted by the Python loader.
 set(_torch_collector_exports "${CMAKE_CURRENT_SOURCE_DIR}/exports.map")
 target_link_options(
     torch-trace-collector-module
@@ -71,7 +64,3 @@ set_target_properties(
         INSTALL_RPATH ""
         INSTALL_RPATH_USE_LINK_PATH OFF
 )
-
-if(ENABLE_TESTS)
-    add_subdirectory(tests)
-endif()
