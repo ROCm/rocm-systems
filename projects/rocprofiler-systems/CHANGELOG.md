@@ -15,6 +15,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
   target cannot see this installation's library (for example, inside a container), so
   `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
 
 ### Resolved issues
 

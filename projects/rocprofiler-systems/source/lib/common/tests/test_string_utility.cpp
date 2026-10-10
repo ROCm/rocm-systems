@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 
 using namespace rocprofsys::utility::string;
@@ -188,4 +189,29 @@ TEST(hex_padded, custom_width_is_honored)
 TEST(hex_padded, custom_width_narrower_than_value_is_not_truncated)
 {
     EXPECT_EQ(hex_padded(std::uintptr_t{ 0x1234 }, 2), "0x1234");
+}
+
+TEST(to_integral, parses_whole_string) { EXPECT_EQ(to_integral<int>("1234"), 1234); }
+
+TEST(to_integral, negative_value_for_signed_type)
+{
+    EXPECT_EQ(to_integral<int>("-7"), -7);
+}
+
+TEST(to_integral, rejects_empty_and_partial_input)
+{
+    for(const auto* text : { "", "12abc", "abc", " 12", "12 ", "1.5" })
+    {
+        EXPECT_FALSE(to_integral<int>(text).has_value()) << "text: '" << text << "'";
+    }
+}
+
+TEST(to_integral, rejects_negative_value_for_unsigned_type)
+{
+    EXPECT_FALSE(to_integral<std::size_t>("-1").has_value());
+}
+
+TEST(to_integral, rejects_out_of_range_value)
+{
+    EXPECT_FALSE(to_integral<std::int8_t>("128").has_value());
 }
