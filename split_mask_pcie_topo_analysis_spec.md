@@ -485,12 +485,6 @@ Without root privilege, there is **no reliable unprivileged method** to discover
 
 > **Note**: Topology dumps, test configuration, and source file references have been moved to [split_mask_experiment_notes.md](split_mask_experiment_notes.md).
 
-1. **Deploy and test with switch_discovery module**: Load the kernel module, verify `/sys/kernel/pci_switch_link/` populates, collect new topo dump showing pcilink edges, re-run all_reduce to confirm GDR enables for cross-partition pairs.
+1. **DSN-based userspace alternative**: Could RCCL read PCIe DSN directly from config space (offset 0x100) to infer physical switch membership without requiring a kernel module? This would be a portable, module-free solution.
 
-2. **DSN-based userspace alternative**: Could RCCL read PCIe DSN directly from config space (offset 0x100) to infer physical switch membership without requiring a kernel module? This would be a portable, module-free solution.
-
-3. **Performance delta quantification**: Compare all_reduce bandwidth with GDR disabled (current PATH_PHB) vs GDR enabled (with switch_discovery, PATH_PXB) for the cross-partition GPU-NIC pairs.
-
-4. **NIC-aware split strategy**: Explore whether `NCCL_TESTS_SPLIT=DIV` or `MOD` can create communicators aligned with NIC topology to avoid cross-partition contention.
-
-5. **QP sharing interaction**: How does `RCCL_IB_QP_SHARING_ENABLE` interact with split-mask testing (multiple independent comms hitting the same NIC)?
+2. **NIC-aware split strategy**: Explore whether `NCCL_TESTS_SPLIT=DIV` or `MOD` can create communicators aligned with NIC topology to avoid cross-partition contention.

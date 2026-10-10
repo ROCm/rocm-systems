@@ -1097,17 +1097,8 @@ Result: <span class="bad">PATH_PHB (8)</span> &rarr; GDR disabled
             <a href="split_mask_experiment_notes.md">split_mask_experiment_notes.md</a>.
         </div>
 
-        <div class="card blue">
-            <h4>1. Deploy and test with switch_discovery module</h4>
-            <p>
-                Load the kernel module, verify <code>/sys/kernel/pci_switch_link/</code> populates,
-                collect new topo dump showing pcilink edges, re-run all_reduce to confirm GDR enables
-                for cross-partition pairs.
-            </p>
-        </div>
-
         <div class="card purple">
-            <h4>2. DSN-based userspace alternative</h4>
+            <h4>1. DSN-based userspace alternative</h4>
             <p>
                 Could RCCL read PCIe DSN directly from config space (offset <code>0x100</code>) to infer
                 physical switch membership without requiring a kernel module? This would be a portable,
@@ -1115,27 +1106,11 @@ Result: <span class="bad">PATH_PHB (8)</span> &rarr; GDR disabled
             </p>
         </div>
 
-        <div class="card orange">
-            <h4>3. Performance delta quantification</h4>
-            <p>
-                Compare all_reduce bandwidth with GDR disabled (current PATH_PHB) vs GDR enabled
-                (with switch_discovery, PATH_PXB) for the cross-partition GPU-NIC pairs.
-            </p>
-        </div>
-
         <div class="card cyan">
-            <h4>4. NIC-aware split strategy</h4>
+            <h4>2. NIC-aware split strategy</h4>
             <p>
                 Explore whether <code>NCCL_TESTS_SPLIT=DIV</code> or <code>MOD</code> can create
                 communicators aligned with NIC topology to avoid cross-partition contention.
-            </p>
-        </div>
-
-        <div class="card">
-            <h4>5. QP sharing interaction</h4>
-            <p>
-                How does <code>RCCL_IB_QP_SHARING_ENABLE</code> interact with split-mask testing
-                (multiple independent comms hitting the same NIC)?
             </p>
         </div>
     </section>
