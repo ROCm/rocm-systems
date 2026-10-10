@@ -27,6 +27,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <functional>
+
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "util.hpp"
 
@@ -57,9 +59,16 @@ class SdmaImpl {
   int my_pe{0};
   int local_rank{0};
 
-  // Host initialization (called from IpcOnImpl::ipcHostInit)
-  __host__ void sdmaHostInit(int pe, int num_pes, int local_rank);
+  // Gathers one int from every node-local rank into values[0, num_pes), indexed by local rank. The
+  // caller has already written its own entry at values[local_rank].
+  using LocalAllGather = std::function<void(int* values)>;
+
+  // Host initialization (called from IpcSdmaImpl::ipcHostInit). Collective over the node-local IPC
+  // group: allGather agrees on the connect result, so a failure on any rank drops SDMA on all of them.
+  __host__ void sdmaHostInit(int pe, int num_pes, int local_rank, const LocalAllGather& allGather);
   __host__ void sdmaHostStop();
+  // Copy this rank's queue handles to deviceHandles_d, or nulls when SDMA was dropped.
+  __host__ void sdmaPublishHandles(int deviceId, bool useQueues);
 
   // Device-side copy with optional wavefront-affine channel spreading.
   //
