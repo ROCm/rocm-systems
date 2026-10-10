@@ -512,3 +512,12 @@ stream:
     # Pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit
     # stream wait-value deadlocks on HW rings.
     disabled: [amd_windows, amd_wsl]
+  Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream:
+    <<: *level_0
+    tags: [synchronization, P0]
+  Unit_hipStreamImplicitSync_InterleavedNullStreamWork:
+    <<: *level_0
+    tags: [synchronization, P0]
+  Unit_hipStreamImplicitSync_MultipleBlockingStreams:
+    <<: *level_0
+    tags: [synchronization, P0]
