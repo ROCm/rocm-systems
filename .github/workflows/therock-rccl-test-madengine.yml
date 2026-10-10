@@ -12,6 +12,9 @@ on:
       artifact_run_id:
         type: string
       workload:
+        # A key of WORKLOAD_CONFIGS in test_madengine.py, which validates it.
+        # workflow_call inputs cannot be typed as choice, so the list of
+        # accepted values lives on the workflow_dispatch input below.
         type: string
         default: 'llama-3.1-70b-training'
       nodes:
@@ -37,7 +40,10 @@ on:
         type: string
       workload:
         description: 'MADEngine workload to run'
-        type: string
+        type: choice
+        options:
+          - llama-3.1-70b-training
+          - gpt-oss-120b-training
         default: 'llama-3.1-70b-training'
       nodes:
         description: 'Number of SLURM nodes to allocate'
@@ -69,8 +75,9 @@ jobs:
       RESULTS_DIR: "/apps/rccl-ci/madengine/perf"
       # run_attempt too: run_id is stable across re-runs, and the cleanup step
       # leaves the result files behind, so a re-run could parse a previous
-      # attempt's perf.csv.
-      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}"
+      # attempt's perf.csv.  The workload is in the path because the scheduled
+      # caller runs several of them from one workflow run, which shares both.
+      WORK_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}"
       # Workspace-local, as in the JAX and PyTorch test workflows: the fetched
       # ROCm tree is only read on the head node, and /apps/cvs_tests/dist_new
       # belongs to the CVS suite, which this job may neither traverse nor wipe.
