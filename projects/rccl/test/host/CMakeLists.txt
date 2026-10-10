@@ -617,6 +617,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/VersionInfoTests.cpp
     ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
     ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
+    ${RCCL_TEST_DIR}/DdaNranksRelaxConsensusTests.cpp
     RomeTopoConsensusLogTests.cpp
     ${RCCL_TEST_DIR}/MiscTests.cpp
     ${RCCL_TEST_DIR}/VersionGateTests.cpp
@@ -629,6 +630,7 @@ function(rccl_standalone_setup)
     ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
     ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
     ${RCCL_HIPIFY_DIR}/src/graph/rome_topo_consensus.cc
+    ${RCCL_HIPIFY_DIR}/src/algorithms/dda/ipc/dda_nranks_relax_consensus.cc
   )
 
   target_include_directories(rccl-HostUnitTests PRIVATE

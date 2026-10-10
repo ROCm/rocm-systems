@@ -16,6 +16,7 @@
 #include "nvtx_payload_schemas.h"
 #include "device/hierarchical_shuffle.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
@@ -243,8 +244,11 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
   // with no DDA and no CE, falling back to the generic ring/tree kernel across
   // the whole 4 MiB+ range that DDA still wins.
   const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
+  // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+  const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : nccl_dda_detail::kDdaNranks;
   const bool result = !symEligible && (ddaFabricArch1250 || !ceAllReduceAllowed) &&
-                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
+                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce),
+                                     /*query=*/false, /*prefix=*/nullptr, ddaMinRanks);
   if (!result && !query) {
     if (symEligible)
       INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
@@ -302,7 +306,10 @@ static bool rcclEnqueueSetupNeedsSwitch(int algo) {
 bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
   // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
   // CE never dispatches. Full contract is on the declaration in rccl_common.h.
-  return !ceAlltoAllAllowed && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll));
+  // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+  const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : nccl_dda_detail::kDdaNranks;
+  return !ceAlltoAllAllowed && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll),
+                                              /*query=*/false, /*prefix=*/nullptr, ddaMinRanks);
 }
 
 // Check if symmetric kernels is requested for this collective.
