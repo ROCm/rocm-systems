@@ -373,10 +373,30 @@ newType = std::max(path-&gt;type, newType);</pre>
         <div class="card">
             <p><code>src/graph/topo.cc</code> &mdash; <code>ncclTopoFlattenBcmSwitches()</code>:</p>
             <p>
-                RCCL detects Gen4/Gen5 Broadcom switches (device ID pattern <code>0x1000c010...</code> /
-                <code>0x1000c030...</code>) and <strong>flattens their internal 2-level hierarchy</strong>
-                into a single switch node. This reduces hop count for same-partition paths.
+                RCCL detects Gen4/Gen5 Broadcom switches via the <code>getBcmGen()</code> helper
+                (<code>topo.cc:215-219</code>) and flattens their internal 2-level hierarchy into a single switch node.
+                The 64-bit <code>pci.device</code> field is composed as
+                <code>vendor(16) | device(16) | subsystem_vendor(16) | subsystem_device(16)</code>.
+                The matching criteria are:
             </p>
+            <ul>
+                <li><strong>Gen4:</strong> <code>(pci.device &amp; 0xfffffffffffff000) == 0x1000c0101000a000</code>
+                    &mdash; matches <code>vendor=0x1000, device=0xc010, subsystem_vendor=0x1000</code></li>
+                <li><strong>Gen5:</strong> <code>(pci.device &amp; 0xfffffffffffff000) == 0x1000c03010000000</code>
+                    &mdash; matches <code>vendor=0x1000, device=0xc030, subsystem_vendor=0x1000</code></li>
+            </ul>
+        </div>
+
+        <div class="callout warn">
+            <strong>Not applicable to this platform:</strong> On the SMC300x MI300X, the PEX89104 switches have
+            <code>vendor=0x1000, device=0xc030</code> but <code>subsystem_vendor=0x15d9</code> (Supermicro),
+            <code>subsystem_device=0x1d2a</code>. This yields <code>pci.device = 0x1000c03015d91d2a</code>.
+            The Gen5 mask check produces <code>0x1000c03015d91000 &ne; 0x1000c03010000000</code> &mdash;
+            <strong>the subsystem_vendor mismatch (<code>0x15d9</code> vs <code>0x1000</code>) means
+            <code>getBcmGen()</code> returns 0 and flattening is skipped</strong>.
+            The internal 2-level BCM switch hierarchy is preserved, which adds extra hop count to same-partition
+            paths but does not affect the PATH_PXB vs PATH_PHB classification (the BFS Rule 1 classifies
+            PCI&rarr;PCI traversals as PATH_PXB regardless of hop count).
         </div>
     </section>
 
@@ -444,8 +464,9 @@ Result: <span class="good">PATH_PXB (5)</span> &rarr; GDR enabled
         <div class="card green">
             <ol>
                 <li><strong>Kernel:</strong> <code>switch_discovery</code> module loaded, exposing <code>/sys/kernel/pci_switch_link/</code></li>
-                <li><strong>RCCL:</strong> PR #3121 (Wenkai Du) &mdash; reads BCM P2P links and adds pcilink topology edges</li>
-                <li>Both must be deployed <strong>together</strong></li>
+                <li><strong>RCCL:</strong> PR #3121 (Wenkai Du) &mdash; reads BCM P2P links and adds pcilink topology edges.
+                    <span class="tag green">Note</span> This NCCL patch is already incorporated in the latest RCCL codebase.</li>
+                <li>Both kernel module and RCCL pcilink support must be deployed <strong>together</strong></li>
             </ol>
         </div>
 

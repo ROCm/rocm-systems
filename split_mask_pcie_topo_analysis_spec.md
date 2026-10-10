@@ -88,7 +88,12 @@ Path selection prefers: lower type > higher bandwidth > fewer hops.
 ### 3.3 BCM Switch Flattening
 `src/graph/topo.cc` — `ncclTopoFlattenBcmSwitches()`:
 
-RCCL detects Gen4/Gen5 Broadcom switches (device ID pattern `0x1000c010...` / `0x1000c030...`) and flattens their internal 2-level hierarchy into a single switch node. This reduces hop count for same-partition paths.
+RCCL detects Gen4/Gen5 Broadcom switches via the `getBcmGen()` helper (`topo.cc:215-219`) and flattens their internal 2-level hierarchy into a single switch node. The 64-bit `pci.device` field is composed as `vendor(16) | device(16) | subsystem_vendor(16) | subsystem_device(16)`. The matching criteria are:
+
+- **Gen4**: `(pci.device & 0xfffffffffffff000) == 0x1000c0101000a000` — matches `vendor=0x1000, device=0xc010, subsystem_vendor=0x1000`
+- **Gen5**: `(pci.device & 0xfffffffffffff000) == 0x1000c03010000000` — matches `vendor=0x1000, device=0xc030, subsystem_vendor=0x1000`
+
+**Not applicable to this platform**: On the SMC300x MI300X, the PEX89104 switches have `vendor=0x1000, device=0xc030` but `subsystem_vendor=0x15d9` (Supermicro), `subsystem_device=0x1d2a`. This yields `pci.device = 0x1000c03015d91d2a`. The Gen5 mask check produces `0x1000c03015d91000 != 0x1000c03010000000` — **the subsystem_vendor mismatch (`0x15d9` vs `0x1000`) means `getBcmGen()` returns 0 and flattening is skipped**. The internal 2-level BCM switch hierarchy is preserved, which adds extra hop count to same-partition paths but does not affect the PATH_PXB vs PATH_PHB classification (the BFS Rule 1 classifies PCI→PCI traversals as PATH_PXB regardless of hop count).
 
 ---
 
@@ -138,8 +143,8 @@ Result: **PATH_PXB (5)** → GDR enabled → direct GPU↔NIC DMA
 
 ### 4.4 Required Fix Components
 1. **Kernel**: `switch_discovery` module loaded, exposing `/sys/kernel/pci_switch_link/`
-2. **RCCL**: PR #3121 (Wenkai Du) — reads BCM P2P links and adds pcilink topology edges
-3. Both must be deployed together
+2. **RCCL**: PR #3121 (Wenkai Du) — reads BCM P2P links and adds pcilink topology edges. **Note**: This NCCL patch is already incorporated in the latest RCCL codebase.
+3. Both kernel module and RCCL pcilink support must be deployed together
 
 ### 4.5 gfx1250 Path Rewriting (related but different arch)
 `src/graph/paths.cc` lines 885-899 — `rcclRewriteSameDomainNetPaths()`:
