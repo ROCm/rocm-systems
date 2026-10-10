@@ -261,7 +261,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
-  compiles for real. See `test_categories_micro_diagnostics.yaml`.
+  compiles for real. It builds with `__HIP_PLATFORM_AMD__`, so it pins the AMD
+  remediation advice and the HIP wording of the report lines; the NVIDIA arm of
+  `p2p.cc` is not compiled here. See `test_categories_micro_diagnostics.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
