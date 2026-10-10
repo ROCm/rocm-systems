@@ -18,7 +18,8 @@ all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # Unroll factors whose device functions are compiled for one arch only, and the single
 # source of truth for that restriction: get_arch_guard(), the specialized_files.txt guard
 # the device linker filters on, the local-arch unroll set, and the ncclDevFuncUnrollArch[]
-# table the host checks before selecting an unroll. --all_unrolls clears it.
+# table emitted into host_table.cpp. commSetUnrollFactor does not read that table.
+# --all_unrolls does not clear it.
 unroll_arch_requirement = {
   "32": "gfx1250",
 }
@@ -132,7 +133,8 @@ def paste(sep, *args):
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
-# BUILD_ALL_UNROLLS / install.sh --all_unrolls: generate every unroll for the targeted archs.
+# BUILD_ALL_UNROLLS / install.sh --all_unrolls: also generate unroll 8 and 16.
+# Off by default, so a normal build does not compile those factors.
 build_all_unrolls  = 1 if sys.argv[6] == "ON" else 0
 
 func_pattern = sys.argv[7:8]
@@ -306,12 +308,16 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
-# --all_unrolls widens the unroll set and compiles every one for the targeted archs, so the
-# pin no longer holds. The arch's pipeline decision stands. Must follow the call above, the
-# only reader of unrolls_requiring_arch.
+# --all_unrolls appends the unrolls the multi-arch default skips (8 and 16). The
+# per-arch set and any arch pin stay as calc_unroll_and_pipeline_for_local_arch
+# decided them, and the arch's pipeline decision stands. A build without the flag
+# does not compile the skipped factors. Must follow the call above, the only
+# reader of unrolls_requiring_arch.
 if build_all_unrolls:
-  local_unroll = all_unrolls
-  unroll_arch_requirement.clear()
+  local_unroll = list(local_unroll)
+  for unroll in [u for u in all_unrolls if u not in default_unrolls]:
+    if unroll not in local_unroll:
+      local_unroll.append(unroll)
 
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
@@ -659,13 +665,13 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
     out("  %s, // unroll %s\n" % ("true" if u in local_unroll else "false", u))
   out("};\n")
 
-  # Being generated is not sufficient: a multi-arch build generates every unroll
-  # while get_arch_guard() still compiles some of them for one arch only. The
-  # host must additionally match the running GPU against this table, otherwise
-  # it dispatches into an all-nullptr table and traps on the device.
+  # Records the compile-time pin from unroll_arch_requirement. get_arch_guard()
+  # is what keeps those device functions off other archs. commSetUnrollFactor
+  # does not read this table; it only checks ncclDevFuncUnrollGenerated.
   out("\n")
   out("// Arch required by each unroll factor's device functions, or nullptr when\n")
   out("// the unroll is built for every arch. Mirrors unroll_arch_requirement.\n")
+  out("// Not consulted by commSetUnrollFactor.\n")
   out("char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS] = {\n")
   for u in all_unrolls:
     arch = unroll_arch_requirement.get(u)

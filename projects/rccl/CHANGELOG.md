@@ -24,6 +24,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * nccl4py: per-call collective configuration (`NCCLCollConfig`, `VendorOption`) including the launch completion event, communicator properties (`NCCLCommProperties`), and the `GIN_ONLY` window flag. On ROCm, the HIP `Event` shim provides only an event handle; `record()`, `sync()` and `query` are not implemented.
 
 ### Changed
+* `install.sh --all_unrolls` (`-DBUILD_ALL_UNROLLS=ON`) now adds the unroll factors the multi-arch default skips (8 and 16) on top of each architecture's existing set. It no longer replaces that set or clears the gfx1250 pin on unroll 32. The flag stays off by default, so a normal build does not compile unroll 8 or 16.
 * Host-side device API declarations (`ncclDevCommCreate`, `ncclDevCommDestroy`, `ncclCommQueryProperties`, `ncclGetPeerDevicePointer`, the `*CreateRequirement` helpers, the `ncclDevCommRequirements` and `ncclCommProperties` structs and their initializers) moved to `nccl_device/host.h`. `nccl_device.h` still includes it; code that includes individual `nccl_device/*.h` headers directly must also include `nccl_device/host.h`.
 * Profiler `ncclProfileKernelPhase` events are emitted only by symmetric kernels, matching NCCL 2.32. Regular and P2P kernels report only `ncclProfileKernelCh` start and stop.
 * Updated the RMA plugin interface to v16, which adds a per-communicator `getRmaProperties` query. Plugins built against v13, v14 or v15 still load.

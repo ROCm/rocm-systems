@@ -345,14 +345,46 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
     )
 
     counts = _count_by(records, "unroll")
-    assert set(counts) == {"1", "2", "4", "8", "16", "32"}, (
-        "--all_unrolls did not generate every unroll: %s" % sorted(counts)
+    baseline = _count_by(generated["OFF"]["records"], "unroll")
+    assert set(counts) - set(baseline) == {"8", "16"}, (
+        "--all_unrolls should add only unroll 8 and 16: %s vs %s" % (sorted(counts), sorted(baseline))
+    )
+    assert set(baseline) <= set(counts), (
+        "--all_unrolls dropped a default unroll: %s vs %s" % (sorted(counts), sorted(baseline))
     )
     assert len(set(counts.values())) == 1, "--all_unrolls broke unroll lockstep: %s" % counts
-
-    baseline = _count_by(generated["OFF"]["records"], "unroll")
     assert set(counts.values()) == set(baseline.values()), (
         "--all_unrolls changed the per-unroll kernel count: %s vs %s" % (counts, baseline)
+    )
+
+    # Counts alone cannot tell this apart from the old flag, which replaced the
+    # set with every unroll and cleared the gfx1250 pin: both emit {1,2,4,8,16,32}
+    # at the same per-unroll count. The pin on the unroll-32 shards is the
+    # difference. SendRecv LL128 (reg=1) is a wider guard on purpose.
+    pin = re.compile(
+        r"^\(defined\(__gfx1250__\) \|\| defined\(__gfx1250_strict__\)\)"
+        r"(?: && defined\(ENABLE_LL128\))?$"
+    )
+    pinned_32 = sendrecv_ll128_32 = 0
+    for fp in sorted(glob.glob(os.path.join(str(d), "specialized", "*.cpp"))):
+        with open(fp) as f:
+            text = f.read()
+        match = _DEFINE_RE.search(text)
+        assert match is not None, "specialized file has no DEFINE_ncclDevFunc: %s" % fp
+        guards = re.findall(r"^#if (.*)$", text, re.M)
+        guard = guards[0] if guards else ""
+        unroll = match.group("unroll")
+        if unroll == "32" and match.group("coll") == "SendRecv" and match.group("reg") == "1":
+            assert not pin.match(guard), "SendRecv LL128 unroll 32 must keep its wider guard"
+            sendrecv_ll128_32 += 1
+        elif unroll == "32":
+            assert pin.match(guard), "unroll 32 lost the gfx1250 pin: %s guard %r" % (fp, guard)
+            pinned_32 += 1
+        elif unroll in ("8", "16"):
+            assert not pin.match(guard), "unroll %s picked up the gfx1250 pin: %s" % (unroll, fp)
+    assert pinned_32 > 0, "--all_unrolls emitted no gfx1250-pinned unroll 32 kernels"
+    assert sendrecv_ll128_32 == 1, (
+        "expected one SendRecv LL128 unroll-32 kernel, found %d" % sendrecv_ll128_32
     )
 
 

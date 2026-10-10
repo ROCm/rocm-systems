@@ -946,9 +946,10 @@ inline int ncclDevFuncLL128RegMode(bool regUsed, bool netRegUsed) {
 extern bool const ncclDevFuncUnrollGenerated[NCCL_NUM_UNROLLS];
 
 // Arch each unroll factor's device functions were compiled for, or nullptr when
-// the unroll carries no arch restriction. Neither table implies the other, so both
-// have to be consulted: an entry names its arch even for an unroll this build left
-// out, and BUILD_ALL_UNROLLS clears every entry because it compiles them all.
+// the unroll carries no arch restriction. Emitted into host_table.cpp. An entry
+// names its arch even for an unroll this build left out. get_arch_guard() enforces
+// the pin at compile time. commSetUnrollFactor does not read this table, and
+// BUILD_ALL_UNROLLS does not clear it.
 extern char const* const ncclDevFuncUnrollArch[NCCL_NUM_UNROLLS];
 
 // `ncclDevFuncId()` needs to be in sync with 'all_colls' in generate.py
