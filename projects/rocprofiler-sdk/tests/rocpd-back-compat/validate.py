@@ -255,6 +255,49 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.5 (kernel replay pass identity)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Schema 3.0.5 additions must be absent for pre-3.0.5 schemas.
+
+    Pre-3.0.5 databases have no replay_pass column, so the counter CSV must not carry
+    the column and the export must still complete.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        print(
+            f"Schema {old_schema} is newer than 3.0.5, calling test_csv_for_schema_3_0_5_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
+
+    counters_csv = output_root / old_schema / "csv" / "out_counter_collection_trace.csv"
+    if not counters_csv.exists():
+        return
+
+    assert "replay_pass" not in _csv_columns(
+        counters_csv
+    ), f"replay_pass column should not appear in the counter CSV for schema {old_schema}"
+
+
+def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Schema 3.0.5 additions must be present for the latest schema.
+
+    The database holds one dispatch replayed over two passes, so the counter CSV has to
+    name the pass that produced each row.
+    """
+    counters_csv = (
+        output_root / latest_schema / "csv" / "out_counter_collection_trace.csv"
+    )
+    assert (
+        counters_csv.exists()
+    ), f"out_counter_collection_trace.csv not found for schema {latest_schema}: {counters_csv}"
+    assert "replay_pass" in _csv_columns(
+        counters_csv
+    ), f"replay_pass column missing from the counter CSV for schema {latest_schema}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 
