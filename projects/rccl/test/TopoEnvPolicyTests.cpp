@@ -245,7 +245,9 @@ void expectAutoSelection(struct ncclTopoSystem* system)
 
 constexpr int kXgmiPeerRank = 1;
 
-void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
+// cpuVendor >= 0 replaces the fixture's CPU vendor, for the host-dependent
+// defaults ncclTopoCheckP2p applies. The CPU arch is forced to x86 as well.
+void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut, int cpuVendor = -1)
 {
     *p2pOut     = -1;
     *cudaP2pOut = -1;
@@ -254,6 +256,14 @@ void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
     ASSERT_EQ(loadTopoSystem(kTopoXmlPath, &system), ncclSuccess)
         << "failed to load topo fixture: " << kTopoXmlPath;
     ASSERT_NE(system, nullptr);
+    if(cpuVendor >= 0)
+    {
+        for(int c = 0; c < system->nodes[CPU].count; c++)
+        {
+            system->nodes[CPU].nodes[c].cpu.arch   = NCCL_TOPO_CPU_ARCH_X86;
+            system->nodes[CPU].nodes[c].cpu.vendor = cpuVendor;
+        }
+    }
 
     MockComm mock(system);
     ASSERT_EQ(ncclTopoComputePaths(system, mock.comm), ncclSuccess);
@@ -606,6 +616,58 @@ TEST(SymmetricMemP2pLevelTests, P2pDisable_KeepsCudaP2p)
                 << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
         },
         {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// On Intel (and ARM, Zhaoxin) hosts ncclTopoCheckP2p lowers its default level to
+// PXB. The user's NCCL_P2P_DISABLE must still win over that host default rather
+// than be overwritten by it.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnIntelHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_HonoredOnIntelHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_INTEL);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate on an Intel host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// Same host default and the same contract on Zhaoxin, the other x86 vendor with
+// a lowered default level.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnZhaoxinHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_HonoredOnZhaoxinHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_ZHAOXIN);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate on a Zhaoxin host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// The NCCL_P2P_LEVEL half of the same contract: the host default must not raise
+// a user level back up to PXB.
+TEST(SymmetricMemP2pLevelTests, RestrictiveLevelLOC_HonoredOnIntelHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RestrictiveLevelLOC_HonoredOnIntelHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_INTEL);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_LEVEL=LOC must engage the distance gate on an Intel host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_LEVEL", "LOC"}});
 }
 
 }  // namespace RcclUnitTesting
