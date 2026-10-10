@@ -212,6 +212,7 @@ jobs:
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       - name: Run AMDSMI Build and Install
+        id: build
         run: |
           set -euo pipefail
           # The script autodetects package manager, format, and distro
@@ -253,7 +254,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      # The command and test steps run whenever the install succeeded, so a failure
+      # in one does not hide the results of the other.
       - name: AMDSMI Command Tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/test-results-${{ matrix.os }}
@@ -272,9 +276,10 @@ jobs:
             "amd-smi xgmi"
             "amd-smi partition"
           )
-          # Command failures are not hard fails here; the AMDSMI CI
-          # Summary step scans amd-smi_*.log for 'Error code:' / 'Traceback'
-          # / 'AmdSmiException' and surfaces any failures in the summary.
+          # Every command runs before the step fails, so one run reports them all.
+          # The AMDSMI CI Summary step also flags 'Error code:' / 'Traceback' /
+          # 'AmdSmiException' in amd-smi_*.log.
+          failed=()
           for cmd in "${commands[@]}"; do
             debug_cmd="$cmd --loglevel debug"
             echo "Running: $debug_cmd"
@@ -285,8 +290,13 @@ jobs:
               echo "Command '$debug_cmd' failed (exit $rc)."
               cat "$log"
               echo "Error code: $rc" >> "$log"
+              failed+=("$cmd")
             fi
           done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed: ${failed[*]}"
+            exit 1
+          fi
 
       - name: Upload AMDSMI Command Test Results
         if: always()
@@ -296,33 +306,49 @@ jobs:
           path: /tmp/test-results-${{ matrix.os }}
 
       - name: Run AMDSMI, Python, and Example Tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -euo pipefail
           RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
+
+          # Every suite runs even after one fails, so one run reports them all. A
+          # failed run gets an 'Exit code:' line that the summary step reports.
+          failed=()
+          run() {
+            local log=$1 rc=0
+            shift
+            "$@" > "$log" 2>&1 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              # On its own line even when the output lacks a final newline.
+              printf '\nExit code: %s\n' "$rc" >> "$log"
+              failed+=("$(basename "$log") (exit $rc)")
+            fi
+          }
 
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
-          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
+          run "$RESULTS_DIR/amdsmi_tests.log" ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
-          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
-          python3 test_abi_compat.py -v > "$RESULTS_DIR/abi_compat_output.txt" 2>&1
-          if [ -f ./perf_tests.py ]; then
-            ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
-          else
-            echo "perf_tests.py not present; skipping" > "$RESULTS_DIR/perf_test_output.txt"
-          fi
+          run "$RESULTS_DIR/integration_test_output.txt" ./integration_test.py -v
+          run "$RESULTS_DIR/unit_test_output.txt" ./unit_tests.py -v
+          run "$RESULTS_DIR/cli_test_output.txt" ./cli_unit_test.py -v
+          run "$RESULTS_DIR/abi_compat_output.txt" python3 test_abi_compat.py -v
 
           cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
           cd build
-          ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
-          ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
+          run "$RESULTS_DIR/amd_smi_drm_ex.log" ./amd_smi_drm_ex
+          run "$RESULTS_DIR/amd_smi_nodrm_ex.log" ./amd_smi_nodrm_ex
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed: ${failed[*]}"
+            exit 1
+          fi
 
       - name: AMDSMI Test Results
         if: always()
@@ -336,9 +362,9 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
 
-      - name: Perf Test Results
+      - name: CLI Test Results
         if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
+        run: cat /tmp/test-results-${{ matrix.os }}/cli_test_output.txt || echo "No CLI test results"
 
       - name: ABI Compat Test Results
         if: always()
