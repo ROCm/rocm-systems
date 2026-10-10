@@ -3425,6 +3425,15 @@ void VirtualGPU::enableSyncedBlit() const { return blitMgr_->enableSynchronizati
 void VirtualGPU::setGpuEvent(GpuEvent gpuEvent, bool flush) {
   events_[engineID_] = gpuEvent;
 
+  // Preserve the last compute-engine submission durably. flush() clears
+  // events_[MainEngine] (e.g. when a hipEventRecord marker is submitted between
+  // a kernel and a copy), which would otherwise leave the following SDMA copy
+  // with no wait on the compute work. WaitForIdleCompute() falls back to this
+  // when events_[MainEngine] is no longer valid (rocm-systems #12571).
+  if (gpuEvent.engineId_ == MainEngine) {
+    lastComputeEvent_ = gpuEvent;
+  }
+
   // Flush current DMA buffer if requested
   if (flush) {
     flushDMA(engineID_);
