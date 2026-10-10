@@ -152,6 +152,13 @@ bool Os::protectMemory(void* addr, size_t size, MemProt prot) {
   return VirtualProtect(addr, size, memProtToOsProt(prot), &OldProtect) != 0;
 }
 
+void Os::prefetchRange(const void* addr, size_t size) {
+  // No-op on Windows: the reclaimed-file-backed-mmap H2D case this hint targets
+  // is Linux/KFD specific. PrefetchVirtualMemory could be wired here if needed.
+  (void)addr;
+  (void)size;
+}
+
 
 uint64_t Os::hostTotalPhysicalMemory() {
   static uint64_t totalPhys = 0;

@@ -385,6 +385,21 @@ bool Os::protectMemory(void* addr, size_t size, MemProt prot) {
   return 0 == ::mprotect(addr, size, memProtToOsProt(prot));
 }
 
+void Os::prefetchRange(const void* addr, size_t size) {
+  if (addr == nullptr || size == 0) return;
+  // madvise() needs a page-aligned start; extend the length to cover the tail.
+  const size_t page = pageSize();
+  auto base = reinterpret_cast<uintptr_t>(addr);
+  uintptr_t aligned = base & ~(page - 1);
+  size_t len = alignUp(size + (base - aligned), page);
+  int status = ::madvise(reinterpret_cast<void*>(aligned), len, MADV_WILLNEED);
+  if (status != 0) {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
+            "madvise(MADV_WILLNEED) at %p size 0x%zx returned %d, errno: %s",
+            reinterpret_cast<void*>(aligned), len, status, strerror(errno));
+  }
+}
+
 uint64_t Os::hostTotalPhysicalMemory() {
   static uint64_t totalPhys = 0;
 

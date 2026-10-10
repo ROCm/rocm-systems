@@ -10,6 +10,7 @@
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rockernel.hpp"
 #include "device/rocm/rocsched.hpp"
+#include "os/os.hpp"
 #include "utils/debug.hpp"
 #include <algorithm>
 #include <map>
@@ -1099,6 +1100,19 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
   // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
   // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
   bool status = true;
+
+  // The H2D source is pageable app memory. If it is a large, non-resident
+  // file-backed mapping (e.g. an mmap'd weight file the kernel has reclaimed
+  // under memory pressure) the per-chunk pin below faults it back in one page
+  // at a time through get_user_pages(), which serializes against reclaim and
+  // can stall for tens of seconds. Kick off clustered readahead for the whole
+  // range up front so later chunks are already in the page cache by the time
+  // the loop reaches them. Best-effort and non-blocking. See ROCm/TheRock#7832.
+  // Only when the copy takes the pinned path and spans several pin chunks: a
+  // smaller copy has no later chunks to overlap with, so skip the syscall.
+  if (hostToDev && enablePin && size > std::max(MinSizeForPinnedXfer, PinXferSize)) {
+    amd::Os::prefetchRange(hostSrc, size);
+  }
   size_t copyOffset = 0;
   size_t totalSize = size;
 
