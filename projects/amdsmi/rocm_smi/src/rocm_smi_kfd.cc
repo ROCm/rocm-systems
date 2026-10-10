@@ -464,6 +464,32 @@ static int ReadKFDGpuName(uint32_t kfd_node_id, std::string* gpu_name) {
   return 0;
 }
 
+// readdir() of a sysfs directory can skip an entry that exists the whole time
+// when another entry is removed during the scan. A process is missed only if
+// every one of these scans of the KFD process root skips it.
+constexpr int kKfdProcRootScans = 2;
+
+// The names in the KFD process root that any of kKfdProcRootScans scans saw, in
+// the order first seen. Returns 0, or errno when the first scan cannot open the
+// root; a later scan that cannot open it keeps the names already seen.
+static int ListKfdProcRoot(std::vector<std::string>* names) {
+  names->clear();
+  std::unordered_set<std::string> seen;
+  for (int scan = 0; scan < kKfdProcRootScans; ++scan) {
+    DIR* proc_dir = opendir(kKFDProcPathRoot);
+    if (proc_dir == nullptr) {
+      return scan == 0 ? errno : 0;
+    }
+    while (const dirent* dentry = readdir(proc_dir)) {
+      if (dentry->d_name[0] != '.' && seen.insert(dentry->d_name).second) {
+        names->emplace_back(dentry->d_name);
+      }
+    }
+    closedir(proc_dir);
+  }
+  return 0;
+}
+
 int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_procs_found) {
   assert(num_procs_found != nullptr);
 
@@ -474,29 +500,17 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
     return ScanProcForKfdPids(procs, num_allocated, num_procs_found);
   }
 
-  errno = 0;
-  auto proc_dir = opendir(kKFDProcPathRoot);
-
-  if (proc_dir == nullptr) {
-    perror("Unable to open process directory");
-    return errno;
+  std::vector<std::string> names;
+  const int err = ListKfdProcRoot(&names);
+  if (err != 0) {
+    return err;
   }
-  auto dentry = readdir(proc_dir);
 
-  std::string proc_id_str;
-  std::string tmp;
   // Keep track of PIDs we've already seen to avoid duplicates
   // (e.g., if both "1234" and "pid:1234-id:1" exist)
   std::unordered_set<uint32_t> seen_pids;
 
-  while (dentry != nullptr) {
-    if (dentry->d_name[0] == '.') {
-      dentry = readdir(proc_dir);
-      continue;
-    }
-
-    proc_id_str = dentry->d_name;
-
+  for (const std::string& proc_id_str : names) {
     // Check if the entry is a plain number (traditional format)
     if (is_number(proc_id_str)) {
       uint32_t pid = static_cast<uint32_t>(std::stoul(proc_id_str));
@@ -526,19 +540,9 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
           }
         }
       }
-    } else {
-      // Skip unexpected entries that don't match known formats
-      // (e.g., non-numeric, non-pid: format files/directories)
-      dentry = readdir(proc_dir);
-      continue;
     }
-
-    dentry = readdir(proc_dir);
-  }
-
-  errno = 0;
-  if (closedir(proc_dir)) {
-    return errno;
+    // Skip unexpected entries that don't match known formats
+    // (e.g., non-numeric, non-pid: format files/directories)
   }
   return 0;
 }
@@ -562,20 +566,17 @@ static std::vector<std::string> KfdAltContextRootDirsForPid(long pid) {
   auto now = std::chrono::steady_clock::now();
   if (!valid || (now - built) > kTtl) {
     index.clear();
-    DIR* proc_root = opendir(kKFDProcPathRoot);
-    if (proc_root) {
-      struct dirent* entry;
-      while ((entry = readdir(proc_root)) != nullptr) {
-        if (entry->d_name[0] == '.') continue;
-        // Match exactly "pid:<owner>-id:<n>" and bucket the full path by <owner>.
-        if (strncmp(entry->d_name, "pid:", 4) != 0) continue;
-        char* end = nullptr;
-        long owner = strtol(entry->d_name + 4, &end, 10);
-        if (end == entry->d_name + 4) continue;      // no digits after "pid:"
-        if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
-        index[owner].push_back(std::string(kKFDProcPathRoot) + "/" + entry->d_name);
-      }
-      closedir(proc_root);
+    // A root that cannot be listed has no alternate-context dirs to report.
+    std::vector<std::string> names;
+    ListKfdProcRoot(&names);
+    for (const std::string& name : names) {
+      // Match exactly "pid:<owner>-id:<n>" and bucket the full path by <owner>.
+      if (strncmp(name.c_str(), "pid:", 4) != 0) continue;
+      char* end = nullptr;
+      long owner = strtol(name.c_str() + 4, &end, 10);
+      if (end == name.c_str() + 4) continue;       // no digits after "pid:"
+      if (strncmp(end, "-id:", 4) != 0) continue;  // require "pid:<owner>-id:"
+      index[owner].push_back(std::string(kKFDProcPathRoot) + "/" + name);
     }
     built = now;
     valid = true;

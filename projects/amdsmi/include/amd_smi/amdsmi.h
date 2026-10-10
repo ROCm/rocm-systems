@@ -8126,7 +8126,12 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES, filled list buffer with data, but
- * number of actual running processes is larger than the size provided.
+ * number of actual running processes is larger than the size provided,
+ *                            | ::AMDSMI_STATUS_INVAL if max_processes is NULL. When the GPU's
+ * processes cannot be listed, the error from that listing is returned, which can be any status
+ * (including ::AMDSMI_STATUS_INVAL), and the list is not filled. Without KFD the list is empty. A
+ * process whose KFD statistics cannot be read is still listed, with cu_occupancy, evicted_time and
+ * sdma_usage all-ones (not available) and memory sizes from its fdinfo only (0 if unreadable).
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
@@ -8151,8 +8156,10 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES if max_processes was too small,
- *                            | ::AMDSMI_STATUS_INVAL if processor_handles is NULL or num_processors
- * is 0
+ *                            | ::AMDSMI_STATUS_INVAL if processor_handles or max_processes is NULL,
+ * or num_processors is 0. Handles that do not resolve to a GPU are skipped. When a GPU's processes
+ * cannot be listed, the error from that listing is returned, which can be any status, and nothing
+ * is filled. Each GPU's processes are listed as amdsmi_get_gpu_process_list() lists them.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* processor_handles,
                                                    uint32_t num_processors,
