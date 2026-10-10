@@ -161,8 +161,8 @@ using RocpdImportData with multiple databases, these views query across the atta
 | memory_allocations | Alloc/free with type, level, agent, size, queue/stream. | Memory usage. |
 | scratch_memory | Scratch-only allocations (subset of memory_allocate). | GPU scratch analysis. |
 | pmc_info | PMC counter metadata. | Discover available counters. |
-| pmc_events | PMC values per kernel (counter name, value, duration). | Counter time series. |
-| counters_collection | Aggregated PMC per dispatch/kernel/counter (e.g. SUM of value). | Counter summaries per kernel. |
+| pmc_events | PMC values per kernel (counter name, value, duration, kernel-replay pass). | Counter time series. |
+| counters_collection | Aggregated PMC per dispatch/kernel/counter: instances are summed, kernel-replay passes are averaged. | Counter summaries per kernel. |
 | events_args | Events with argument rows (category, arg name/value). | API or event arguments. |
 | stream_args | Stream arguments with stream description. | Stream-related API analysis. |
 

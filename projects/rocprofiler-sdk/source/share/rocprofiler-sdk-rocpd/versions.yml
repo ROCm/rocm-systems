@@ -59,3 +59,6 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.4
 # - Added rocpd_hip_event table for HIP event barrier records (hipEventRecord, hipStreamWaitEvent)
 # - Added hip_events data view
+# - Fix (no table change): kernel-replay passes after the first tag their rocpd_pmc_event rows with
+#   replay_pass in extdata, counters_collection averages a counter over the passes that collected
+#   it instead of summing them, and pmc_events reports the pass in a replay_pass column
