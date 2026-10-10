@@ -959,9 +959,9 @@ TEST(spm_core, query_agent_configurations)
                 {
                     found_interval = true;
                     // aqlprofile uses a minimum of 1 after gfx10, and 32 on gfx10 and older.
-                    EXPECT_EQ(cfg.interval.min_interval,
-                              ROCPROFILER_GFXIP_MAJOR(rocp_agent->gfx_target_version) >= 11 ? 1
-                                                                                           : 32);
+                    EXPECT_EQ(
+                        cfg.interval.min_interval,
+                        ROCPROFILER_GFXIP_MAJOR(rocp_agent->gfx_target_version) >= 11 ? 1 : 32);
                     EXPECT_GT(cfg.interval.max_interval, cfg.interval.min_interval);
                 }
                 if(cfg.type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES)
