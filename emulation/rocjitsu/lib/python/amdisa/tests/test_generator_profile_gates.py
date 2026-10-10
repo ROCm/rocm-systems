@@ -7777,6 +7777,59 @@ def test_gfx1250_flat_cmpswap_payload_width_is_independent_of_element_width():
     assert 'data_base + 3' in b64_body
 
 
+@pytest.mark.parametrize(
+    ('name', 'operation', 'elem_size', 'num_elems', 'op_enum'),
+    [
+        ('S_ATOMIC_DEC', 'dec', 4, 1, 'DEC'),
+        ('S_ATOMIC_DEC_X2', 'dec', 8, 2, 'DEC'),
+        ('S_ATOMIC_CMPSWAP', 'cmpswap', 4, 2, 'CMPSWAP'),
+        ('S_ATOMIC_CMPSWAP_X2', 'cmpswap', 8, 4, 'CMPSWAP'),
+    ],
+)
+def test_smem_atomic_payload_and_return_widths_follow_semantics(
+    name, operation, elem_size, num_elems, op_enum
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = SimpleNamespace(
+        name=name,
+        semantic_class='smem_atomic',
+        operation=operation,
+        elem_size=elem_size,
+        num_elems=num_elems,
+    )
+
+    body = codegen._gen_smem_atomic(sem)
+
+    return_dwords = elem_size // 4
+    assert f'resolve_scalar_register_range(wf, inst_.sdata, {num_elems}u);' in body
+    assert f'd->num_dwords = {return_dwords};' in body
+    assert f'd->atomic_op = amdgpu::AtomicOp::{op_enum};' in body
+    last = num_elems - 1
+    assert (
+        f'd->store_data[{last}] = amdgpu::read_scalar_register(wf, *data_register, {last});'
+        in body
+    )
+    assert f'd->store_data[{num_elems}]' not in body
+    narrowed = f'd->dst_register.width = {return_dwords};'
+    assert (narrowed in body) == (return_dwords != num_elems)
+
+
+def test_smem_atomic_rejects_unknown_operation():
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = SimpleNamespace(
+        name='S_ATOMIC_UNKNOWN',
+        semantic_class='smem_atomic',
+        operation='unknown',
+        elem_size=4,
+        num_elems=1,
+    )
+
+    with pytest.raises(ValueError, match='unsupported smem_atomic operation'):
+        codegen._gen_smem_atomic(sem)
+
+
 def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
