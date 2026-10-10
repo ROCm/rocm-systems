@@ -19,33 +19,47 @@
 # FOLLOW_SYMLINK_CHAIN is used so versioned SONAME links (e.g.
 # libhsa-runtime64.so -> libhsa-runtime64.so) are reproduced verbatim.
 
-if(NOT DEFINED HOTSWAP_ROOT OR NOT DEFINED HOTSWAP_GLOB OR NOT DEFINED HOTSWAP_DST)
-  message(FATAL_ERROR "hotswap_copy_glob: HOTSWAP_ROOT, HOTSWAP_GLOB and HOTSWAP_DST are required")
+if(
+    NOT DEFINED HOTSWAP_ROOT
+    OR NOT DEFINED HOTSWAP_GLOB
+    OR NOT DEFINED HOTSWAP_DST
+)
+    message(
+        FATAL_ERROR
+        "hotswap_copy_glob: HOTSWAP_ROOT, HOTSWAP_GLOB and HOTSWAP_DST are required"
+    )
 endif()
 
 set(_base "${HOTSWAP_ROOT}")
 if(DEFINED HOTSWAP_RECURSE_ANCHOR AND NOT HOTSWAP_RECURSE_ANCHOR STREQUAL "")
-  file(GLOB_RECURSE _anchor "${HOTSWAP_ROOT}/${HOTSWAP_RECURSE_ANCHOR}")
-  if(NOT _anchor)
-    message(FATAL_ERROR "hotswap_copy_glob: ${HOTSWAP_RECURSE_ANCHOR} not found under ${HOTSWAP_ROOT}")
-  endif()
-  list(GET _anchor 0 _anchor0)
-  get_filename_component(_base "${_anchor0}" DIRECTORY)
+    file(GLOB_RECURSE _anchor "${HOTSWAP_ROOT}/${HOTSWAP_RECURSE_ANCHOR}")
+    if(NOT _anchor)
+        message(
+            FATAL_ERROR
+            "hotswap_copy_glob: ${HOTSWAP_RECURSE_ANCHOR} not found under ${HOTSWAP_ROOT}"
+        )
+    endif()
+    list(GET _anchor 0 _anchor0)
+    get_filename_component(_base "${_anchor0}" DIRECTORY)
 endif()
 
 set(_patterns)
 foreach(_g IN LISTS HOTSWAP_GLOB)
-  list(APPEND _patterns "${_base}/${_g}")
+    list(APPEND _patterns "${_base}/${_g}")
 endforeach()
 
 file(GLOB _files LIST_DIRECTORIES false ${_patterns})
 if(NOT _files)
-  message(FATAL_ERROR "hotswap_copy_glob: no files matched ${_patterns}")
+    message(FATAL_ERROR "hotswap_copy_glob: no files matched ${_patterns}")
 endif()
 
 file(MAKE_DIRECTORY "${HOTSWAP_DST}")
 foreach(_f IN LISTS _files)
-  file(INSTALL "${_f}" DESTINATION "${HOTSWAP_DST}"
-       USE_SOURCE_PERMISSIONS FOLLOW_SYMLINK_CHAIN)
+    file(
+        INSTALL "${_f}"
+        DESTINATION "${HOTSWAP_DST}"
+        USE_SOURCE_PERMISSIONS
+        FOLLOW_SYMLINK_CHAIN
+    )
 endforeach()
 message(STATUS "hotswap: staged ${_files} -> ${HOTSWAP_DST}")

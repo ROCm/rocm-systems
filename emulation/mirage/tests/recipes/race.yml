@@ -66,4 +66,3 @@ cells:
   - name: xnack-local
     mitigations: [xnack]
     environment: local
- 
