@@ -326,24 +326,31 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtGetQueueInfo(HSA_QUEUEID QueueId, HsaQueueInfo* Q
 HSAKMT_STATUS HSAKMTAPI vhsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUMaskCount,
                                               HSAuint32* QueueCUMask) {
   CHECK_VIRTIO_KFD_OPEN();
-  if (CUMaskCount > VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE) return -EINVAL;
+  /* CUMaskCount is a bit count (always a multiple of 32, see hsaKmtSetQueueCUMask callers);
+   * VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE is in HSAuint32 words, i.e. CUMaskCount/32 words. */
+  if ((CUMaskCount % 32) != 0 || (CUMaskCount / 32) > VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE)
+    return -EINVAL;
+  size_t mask_bytes = CUMaskCount / 8;
 
   vhsakmt_device_handle dev = vhsakmt_dev();
   vhsakmt_bo_handle bo = (vhsakmt_bo_handle)QueueId;
   struct vhsakmt_ccmd_queue_rsp* rsp;
-  /* payload[] is a flexible array: size the request buffer for the maximum CU mask */
-  uint8_t reqbuf[sizeof(struct vhsakmt_ccmd_queue_req) +
-                 VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE * sizeof(HSAuint32)];
-  struct vhsakmt_ccmd_queue_req* req = (struct vhsakmt_ccmd_queue_req*)reqbuf;
+  /* payload[] is a flexible array: size the request buffer for the maximum CU mask.
+   * Union with the request struct so reqbuf is suitably aligned to cast to it. */
+  union {
+    struct vhsakmt_ccmd_queue_req req;
+    uint8_t buf[sizeof(struct vhsakmt_ccmd_queue_req) +
+                VHSAKMT_CCMD_QUEUE_MAX_CU_MASK_SIZE * sizeof(HSAuint32)];
+  } reqbuf;
+  struct vhsakmt_ccmd_queue_req* req = &reqbuf.req;
   *req = (struct vhsakmt_ccmd_queue_req){
-      .hdr = VHSAKMT_CCMD(QUEUE,
-                          sizeof(struct vhsakmt_ccmd_queue_req) + CUMaskCount * sizeof(HSAuint32)),
+      .hdr = VHSAKMT_CCMD(QUEUE, sizeof(struct vhsakmt_ccmd_queue_req) + mask_bytes),
       .type = VHSAKMT_CCMD_QUEUE_SET_CU_MASK,
       .res_id = bo->real.res_id,
       .CUMaskCount = CUMaskCount,
   };
 
-  memcpy(req->payload, QueueCUMask, CUMaskCount * sizeof(HSAuint32));
+  memcpy(req->payload, QueueCUMask, mask_bytes);
   rsp = vhsakmt_alloc_rsp(dev, &req->hdr, sizeof(struct vhsakmt_ccmd_queue_rsp));
   if (!rsp) return -ENOMEM;
 

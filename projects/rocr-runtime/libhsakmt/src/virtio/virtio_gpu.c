@@ -47,7 +47,7 @@ static int set_context(int fd) {
 }
 
 int virtio_gpu_map_handle(struct virtio_gpu_device* vgdev, uint32_t handle, uint64_t size,
-                          void** addr, void* fixed_map) {
+                          void** addr, void* fixed_map, int prot) {
   struct drm_virtgpu_map args = {
       .handle = handle,
   };
@@ -56,7 +56,7 @@ int virtio_gpu_map_handle(struct virtio_gpu_device* vgdev, uint32_t handle, uint
   r = virtio_gpu_ioctl(vgdev->fd, VIRTGPU_MAP, &args);
   if (r) return r;
 
-  *addr = mmap(fixed_map, size, PROT_READ | PROT_WRITE, MAP_SHARED | (fixed_map ? MAP_FIXED : 0),
+  *addr = mmap(fixed_map, size, prot, MAP_SHARED | (fixed_map ? MAP_FIXED : 0),
                vgdev->fd, args.offset);
 
   if (*addr == MAP_FAILED) return -EINVAL;
@@ -85,7 +85,8 @@ static int virtio_gpu_shmem_init(struct virtio_gpu_device* vgdev, size_t size) {
   int r = virtio_gpu_ioctl(vgdev->fd, VIRTGPU_RESOURCE_CREATE_BLOB, &args);
   if (r) return r;
 
-  r = virtio_gpu_map_handle(vgdev, args.bo_handle, size, (void**)&vgdev->shmem, NULL);
+  r = virtio_gpu_map_handle(vgdev, args.bo_handle, size, (void**)&vgdev->shmem, NULL,
+                            PROT_READ | PROT_WRITE);
   if (r) {
     virtio_gpu_bo_close(vgdev, args.bo_handle);
     return r;
