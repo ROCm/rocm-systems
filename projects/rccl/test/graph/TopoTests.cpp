@@ -714,6 +714,74 @@ TEST_F(TopoTest, CheckGdr_NonMloPartGpuStillUsesOwnPath) {
   ncclTopoFree(built);
 }
 
+// DPX node of two rails: each GPU carries two partitions and has its own NIC, and the GPUs are XGMI
+// peers. A partition reaches the other rail's NIC through a partition of that rail (PXN), whose
+// buffers the NIC reads, so GDR is the relay's call. The PXN mark lives on the partition's own
+// GPU->NET entry while its parent DEV keeps the raw PHB distance; reading only the DEV refused GDR,
+// which diverted the relay through the CPU here and sent net.cc's shared p2p buffers to host memory
+// in the relay's process ("PXN should not use host buffers for data").
+TEST_F(TopoTest, CheckGdr_MloPartPxnRelayUsesRelayDistance) {
+  // NCCL_PXN_DISABLE gates the PXN rewrite and NCCL_PARAM caches it for the whole process.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckGdr_MloPartPxnRelayUsesRelayDistance",
+      [this]() {
+        const uint64_t host = 0xd3;
+        const int kParts = 2;
+        // Rails 0 and 2 keep the HIP dev indices 0-1 and 2-3 apart, as on the node that hit this.
+        const int rails[2] = {0, 2};
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        struct ncclXmlNode* gpuPci[2];
+        char gpuBus[2][32];
+        for (int r = 0; r < 2; r++) {
+          gpuPci[r] = addRail(cpu, rails[r], kParts, /*partitioned=*/true);
+          railGpuBusId(rails[r], gpuBus[r], sizeof(gpuBus[r]));
+        }
+        // XGMI entries hang off each partition's <gpu>; a target function picks the peer partition.
+        for (int r = 0; r < 2; r++) {
+          for (int s = 0; s < gpuPci[r]->nSubs; s++) {
+            struct ncclXmlNode* gpu = gpuPci[r]->subs[s];
+            if (strcmp(gpu->name, "gpu") != 0) continue;
+            for (int p = 0; p < kParts; p++) {
+              char target[32];
+              strcpy(target, gpuBus[1 - r]);
+              target[strlen(target) - 1] = '0' + p;
+              addGpuLink(gpu, target, /*count=*/8, PCI_ACCELERATOR_CLASS);
+            }
+          }
+        }
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2 * kParts);
+        ASSERT_EQ(built->nodes[NET].count, 2);
+
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+          ASSERT_NE(gpu->gpu.mloPart, NCCL_TOPO_UNDEF);
+          ASSERT_NE(gpu->gpu.parent, nullptr);
+          for (int n = 0; n < built->nodes[NET].count; n++) {
+            struct ncclTopoNode* net = built->nodes[NET].nodes + n;
+            // addRail numbers a rail's NIC like its partition 0.
+            const bool ownRail = gpu->gpu.dev / kParts == net->net.dev / kParts;
+            SCOPED_TRACE(testing::Message() << "gpu dev " << gpu->gpu.dev << " net dev " << net->net.dev
+                                            << (ownRail ? " (own rail)" : " (other rail)"));
+            if (ownRail) {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXB);
+            } else {
+              EXPECT_EQ(gpu->paths[NET][n].type, PATH_PXN);
+              EXPECT_EQ(gpu->gpu.parent->paths[NET][n].type, PATH_PHB);
+            }
+            enum ncclTopoGdrMode mode = ncclTopoGdrModeDisable;
+            ASSERT_EQ(ncclTopoCheckGdr(built, gpu->gpu.rank, net->id, /*read=*/1, &mode), ncclSuccess);
+            EXPECT_NE(mode, ncclTopoGdrModeDisable);
+          }
+        }
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_PXN_DISABLE", "0"}});
+}
+
 // rcclRewriteSameDomainNetPaths() reclassifies a GPU/NIC pair sharing a PCI domain from PHB to PXB
 // on gfx1250, where the domain is one root complex and the host-bridge hop the BFS walked is not
 // the cost PHB stands for. It is keyed on the physical device because ncclTopoGdrDistance() reads
