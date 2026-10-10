@@ -22,6 +22,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * nccl4py: per-call collective configuration (`NCCLCollConfig`, `VendorOption`) including the launch completion event, communicator properties (`NCCLCommProperties`), and the `GIN_ONLY` window flag. On ROCm, the HIP `Event` shim provides only an event handle; `record()`, `sync()` and `query` are not implemented.
+* `NCCL_GIN_ALLREDUCE_GFX1250_ENABLE` (default `0`): opt in to GinScatter AllReduce on gfx1250 for symmetric sum messages from 64 MiB through 4 GiB. Left off, gfx1250 keeps the pre-existing AllReduce selectors.
+* `NCCL_GIN_ALLREDUCE_SCRATCH_BYTES` (default 512 MiB): GinScatter incoming scratch. `0` skips the allocation and GinScatter is not selected. The buffer is allocated only on the GinScatter path.
 
 ### Changed
 * Host-side device API declarations (`ncclDevCommCreate`, `ncclDevCommDestroy`, `ncclCommQueryProperties`, `ncclGetPeerDevicePointer`, the `*CreateRequirement` helpers, the `ncclDevCommRequirements` and `ncclCommProperties` structs and their initializers) moved to `nccl_device/host.h`. `nccl_device.h` still includes it; code that includes individual `nccl_device/*.h` headers directly must also include `nccl_device/host.h`.

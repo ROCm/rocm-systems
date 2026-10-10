@@ -511,6 +511,17 @@ in the following table.
         | ``6``: rocSHMEM GDA (required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
 
+    * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
+        | Opt in to GinScatter AllReduce on gfx1250.
+      - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)
+        | ``1``: symmetric ``ncclSum`` fp32/fp16/bf16 messages from 64 MiB
+          through 4 GiB use GinScatter when scratch can hold them
+
+    * - | ``NCCL_GIN_ALLREDUCE_SCRATCH_BYTES``
+        | GinScatter incoming scratch size, in bytes.
+      - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
+        | ``0``: do not allocate scratch, and do not select GinScatter
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.

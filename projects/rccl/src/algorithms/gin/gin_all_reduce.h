@@ -2,10 +2,11 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Host entry points for the GIN-SDMA AllReduce path selected by rcclSelectAllReduce
- * when symmetric windows are used. By default only messages >= 256 MiB
- * (GIN two-shot) take this path; smaller messages use DDA AllReduce.
+ * when symmetric windows are used. By default gfx950 takes GIN two-shot for
+ * messages >= 256 MiB. gfx1250 GinScatter (64 MiB to 4 GiB) is opt-in via
+ * NCCL_GIN_ALLREDUCE_GFX1250_ENABLE. Smaller messages use DDA AllReduce.
  * RCCL_GIN_ALLREDUCE_FORCE_ENABLE=1 also enables LSA one-shot (<= 4 MiB) and
- * LSA two-shot ((4 MiB, 256 MiB)).
+ * LSA two-shot ((4 MiB, GIN floor)).
  * See LICENSE.txt for license information.
  ******************************************************************************/
 
@@ -19,12 +20,16 @@
 #include <stdint.h>
 
 struct ncclComm;
+struct ncclDevrWindow;
 
 // Size and CTA constants live in gin_all_reduce_policy.h so host unit tests and
 // ncclAllReduceGinSdmaEligible() share one definition.
 // LSA one-shot for messages <= kGinAllReduceLsaOneShotMaxBytes (force-enable only).
-// LSA two-shot for (4 MiB, 256 MiB) (force-enable only).
-// GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes (default path).
+// LSA two-shot between 4 MiB and the GIN floor (force-enable only).
+// gfx950 + Anvil SDMA: GIN two-shot for messages >= kGinAllReduceGinTwoShotMinBytes (256 MiB).
+// gfx1250 + Anvil SDMA: GinScatter for messages in
+// [kGinAllReduceGinScatterMinBytes, kGinAllReduceGinScatterMaxBytes] when
+// NCCL_GIN_ALLREDUCE_GFX1250_ENABLE=1.
 
 // Lazily created on the first eligible AllReduce and torn down with the comm.
 // Declared unconditionally: ncclComm embeds this even when ENABLE_ROCSHMEM_GIN is off.
@@ -36,10 +41,16 @@ struct ncclComm;
 // would freeze at its captured value while the device counters kept advancing.
 // intraGpuCtaBar is two device uint32s (arrived, sense) for the GIN two-shot intra-GPU
 // CTA barrier; the pointer is stable, the words themselves advance on the device.
+// scratch / scratchWin are the symmetric staging buffer for GinScatter (512 MiB of
+// CE-style ping-pong incoming slots by default). Allocated on the GinScatter path
+// only, before GIN connect when that path is the first GIN AllReduce.
 struct ncclGinAllReduceState {
   bool initialized;
   struct ncclDevComm devComm;
   uint32_t* intraGpuCtaBar;
+  void* scratch;
+  size_t scratchBytes;
+  struct ncclDevrWindow* scratchWin;
 };
 
 #if defined(ENABLE_ROCSHMEM_GIN)
@@ -51,7 +62,7 @@ bool ncclAllReduceGinSdmaEligible(ncclComm* comm, const void* sendbuff, void* re
                                   ncclDataType_t datatype, ncclRedOp_t op);
 
 // True when this AllReduce is a GIN-SDMA candidate that the default size policy
-// left for DDA (message < 256 MiB and RCCL_GIN_ALLREDUCE_FORCE_ENABLE is not 1).
+// left for DDA (message below the GIN floor and RCCL_GIN_ALLREDUCE_FORCE_ENABLE is not 1).
 bool ncclAllReduceGinSdmaYieldToDda(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                     ncclDataType_t datatype, ncclRedOp_t op);
 

@@ -164,6 +164,7 @@ set(SRC_FILES
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
   algorithms/gin/sdma/all_reduce_gin_sdma.h
+  algorithms/gin/sdma/gin_scatter_reduce.h
   include/alloc.h
   include/allocator.h
   include/alltoallv_meta.h
