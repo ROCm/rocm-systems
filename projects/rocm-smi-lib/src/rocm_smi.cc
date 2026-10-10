@@ -445,11 +445,10 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type, uint32_t 
 static bool is_power_of_2(uint64_t n) { return n && !(n & (n - 1)); }
 
 rsmi_status_t rsmi_init(uint64_t flags) {
-  // Rocm smi is deprecated now, give warning for all users
-  std::cout << "WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 "
-               "(https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). "
-               "Please switch to AMD-SMI (https://github.com/ROCm/amdsmi)."
-            << std::endl;
+  // The deprecation notice stays a compile-time #pragma message in the
+  // headers. Do not write it here. slurmstepd reads the first four bytes
+  // from this process as a status word; "WARN" is 0x4e524157 and the step
+  // is cancelled before it can send "ok".
 
   TRY amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());

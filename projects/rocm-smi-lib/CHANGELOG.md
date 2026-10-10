@@ -8,6 +8,8 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Fixed
 
+- **`rsmi_init()` no longer writes the deprecation warning to standard output**.
+  - slurmstepd reads a 4-byte status from the process that loads RSMI. The warning's first four bytes (`WARN`) were taken as return code `0x4E524157` and the step was cancelled. The deprecation notice remains a compile-time `#pragma message` in the headers.
 - **Process CU occupancy survives a missing file on another KFD GPU**.
   - `GetProcessInfoForPID()` used to set `cu_occupancy` to `CU_OCCUPANCY_INVALID` (`0xFFFFFFFF`) when any candidate GPU lacked `stats_<gpu_id>/cu_occupancy`. A cgroup or `ROCR_VISIBLE_DEVICES` limit that lets a process open one GPU on a multi-KFD node therefore reported invalid utilization even when that GPU's file held a real sample. VRAM and SDMA already skip `ENOENT` ([rocm_smi_lib#194](https://github.com/ROCm/rocm_smi_lib/pull/194)). Occupancy now does the same. The sentinel is returned only when no GPU published a sample. Other read errors, including permission and I/O failures that `ReadSysfsStr` does not collapse to `ENOENT`, are still returned. Malformed file contents still return `EINVAL`.
 
