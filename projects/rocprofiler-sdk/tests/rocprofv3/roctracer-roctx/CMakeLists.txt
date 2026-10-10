@@ -34,7 +34,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     WSL_TIMEOUT_SCALE
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
     FIXTURES_SETUP rocprofv3-test-roctracer-roctx-trace)
 
