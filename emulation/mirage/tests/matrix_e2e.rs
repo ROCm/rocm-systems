@@ -14,8 +14,6 @@
 //! reason rather than failed, so the same suite is meaningful on a
 //! laptop, in CI, and on an emulation host:
 //!
-//! * `rocjitsu-dbt` is skipped unless a translation-target GPU is
-//!   physically present (DBT runs translated code on real hardware).
 //! * `rocjitsu` is skipped when its KMD library cannot be located.
 //! * the `race` plugin is skipped when the selected backend does not
 //!   advertise it.
@@ -23,7 +21,7 @@
 //! A combination that *fails* is recorded and the matrix carries on. The
 //! point of a matrix is to say which dimensions are broken, and stopping
 //! at the first failure answers that question for one cell and hides it
-//! for the other seventy-one; the whole table is printed either way, and
+//! for the other thirty-five; the whole table is printed either way, and
 //! the test fails at the end with the list.
 //!
 //! # The run *is* the session
@@ -91,14 +89,12 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(90);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Emulator {
     Rocjitsu,
-    RocjitsuDbt,
 }
 
 impl Emulator {
     fn kind(self) -> &'static str {
         match self {
             Emulator::Rocjitsu => "rocjitsu",
-            Emulator::RocjitsuDbt => "rocjitsu-dbt",
         }
     }
 }
@@ -316,12 +312,12 @@ impl Combo {
 /// emulator/hosting slice of the matrix.
 ///
 /// Sliced rather than enumerated whole because each cell is a real
-/// `mirage run` — a bring-up, a workload and a teardown — and seventy-two
-/// of them inside one `#[test]` is seventy-two of them in sequence. The
+/// `mirage run` — a bring-up, a workload and a teardown — and thirty-six
+/// of them inside one `#[test]` is thirty-six of them in sequence. The
 /// two outer dimensions are the ones worth cutting on: they are what a
 /// cell's *cost* varies with (a containerised cell shells out to a
 /// provider several times per node) and they are how a failure is
-/// usually described ("docker is broken", "dbt is broken"), so a slice
+/// usually described ("docker is broken", "podman is broken"), so a slice
 /// that fails names something a person would say.
 fn combos_in(emulator: Emulator, container: Container) -> Vec<Combo> {
     let mut combos = Vec::new();
@@ -356,36 +352,14 @@ struct Caps {
 impl Caps {
     /// Decide why (if at all) a combination cannot run on this host.
     fn skip_reason(&self, c: &Combo) -> Option<String> {
-        let (installed, supported) = self
+        let (installed, _) = self
             .emulators
             .get(c.emulator.kind())
             .copied()
             .unwrap_or((false, false));
 
-        match c.emulator {
-            // The DBT backend translates code objects and runs them on a
-            // *real* GPU; with no translation-target hardware present it
-            // is impossible — this is the "skip unsupported hardware"
-            // case called out in matrix.md.
-            Emulator::RocjitsuDbt if !supported => {
-                return Some("rocjitsu-dbt unsupported: no translation-target GPU present".into());
-            }
-            Emulator::RocjitsuDbt if !installed => {
-                return Some("rocjitsu-dbt not installed: HSA tools hook library not found".into());
-            }
-            // MI450X (gfx1250) is deliberately not a DBT-translatable
-            // source ISA, so even with hardware it cannot be a guest.
-            Emulator::RocjitsuDbt if c.hardware == Hardware::Mi450x => {
-                return Some(
-                    "rocjitsu-dbt: MI450X (gfx1250) is not a translatable source ISA".into(),
-                );
-            }
-            // The software emulator runs anywhere, but only if its KMD
-            // library can be found; otherwise every exec would fail loudly.
-            Emulator::Rocjitsu if !installed => {
-                return Some("rocjitsu not installed: KMD library not found".into());
-            }
-            _ => {}
+        if !installed {
+            return Some("rocjitsu not installed: KMD library not found".into());
         }
 
         if c.plugin == Plugin::Race
@@ -907,9 +881,6 @@ fn run_slice(emulator: Emulator, container: Container, expect_a_run: bool) {
 ///
 /// `rocjitsu` is a software emulator: if the binary reports it installed
 /// there is no further excuse for a cell to skip, whatever the hosting.
-/// `rocjitsu-dbt` translates onto a real GPU and every one of its cells
-/// legitimately skips on a host without one, so demanding a run there
-/// would fail the suite on every laptop.
 fn must_run(emulator: Emulator) -> bool {
     emulator == Emulator::Rocjitsu
         && caps()
@@ -943,21 +914,6 @@ fn matrix_rocjitsu_under_docker() {
         Container::Docker,
         must_run(Emulator::Rocjitsu),
     );
-}
-
-#[test]
-fn matrix_rocjitsu_dbt_on_the_node() {
-    run_slice(Emulator::RocjitsuDbt, Container::Node, false);
-}
-
-#[test]
-fn matrix_rocjitsu_dbt_under_podman() {
-    run_slice(Emulator::RocjitsuDbt, Container::Podman, false);
-}
-
-#[test]
-fn matrix_rocjitsu_dbt_under_docker() {
-    run_slice(Emulator::RocjitsuDbt, Container::Docker, false);
 }
 
 #[test]

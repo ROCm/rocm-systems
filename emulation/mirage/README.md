@@ -74,7 +74,7 @@ terminal, and takes everything with it when it exits.
 
 | Concept      | What it is                                                                 |
 | ------------ | -------------------------------------------------------------------------- |
-| **Emulator** | A backend that runs GPU code (`rocjitsu`, `rocjitsu-dbt`, `hotswap`). |
+| **Emulator** | A backend that runs GPU code (`rocjitsu`). |
 | **Agent**    | A hardware GPU definition (e.g. `MI300X`, `MI350X`, `MI450X`).             |
 | **Topology** | A rack/node/GPU layout that references an agent.                           |
 | **Profile**  | A reusable preset binding an emulator + topology + options.               |
@@ -245,8 +245,7 @@ cargo build --workspace          # debug build -> target/debug/mirage
 ```
 
 By default the `rocjitsu` backend is compiled in. Backends are selected
-with Cargo features (`--no-default-features --features hotswap`, and so
-on). See [`docs/building.md`](docs/building.md) for the full guide,
+with Cargo features (`--no-default-features --features rocjitsu`). See [`docs/building.md`](docs/building.md) for the full guide,
 including building `rocjitsu` itself.
 
 ## Testing

@@ -15,7 +15,6 @@ mirage_ctl = { workspace = true }
 # `inventory` at link time (see `src/main.rs`). Toggle a backend on or
 # off with its feature flag.
 mirage_rocjitsu = { workspace = true, optional = true }
-mirage_hotswap = { workspace = true, optional = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
@@ -27,7 +26,6 @@ tokio = { workspace = true }
 # want, e.g. `cargo build --no-default-features --features rocjitsu`.
 default = ["rocjitsu"]
 rocjitsu = ["dep:mirage_rocjitsu"]
-hotswap = ["dep:mirage_hotswap"]
 
 [lints]
 workspace = true
@@ -50,7 +48,6 @@ members = [
     "core",
     "container",
     "ctl",
-    "hotswap",
     "rocjitsu",
     "rocjitsu_sys",
     "supervisor",
@@ -166,6 +163,5 @@ mirage_ctl = { path = "ctl" }
 mirage_builtin = { path = "builtin" }
 mirage_supervisor = { path = "supervisor" }
 mirage_rocjitsu = { path = "rocjitsu" }
-mirage_hotswap = { path = "hotswap" }
 mirage_container = { path = "container" }
 rocjitsu_sys = { path = "rocjitsu_sys" }

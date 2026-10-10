@@ -1,8 +1,7 @@
 //! Generic host GPU detection.
 //!
 //! Emulator backends sometimes require specific physical hardware to
-//! be present (for example, HotSwap can only retarget code onto a real
-//! GPU of a compatible architecture). This module exposes a small,
+//! be present (for example, a compatible GPU). This module exposes a small,
 //! emulator-agnostic way to enumerate the AMD GPUs the kernel reports,
 //! so each backend can decide for itself whether the host is
 //! supported.

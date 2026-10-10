@@ -544,7 +544,6 @@ dependencies = [
  "clap",
  "libc",
  "mirage_ctl",
- "mirage_hotswap",
  "mirage_rocjitsu",
  "nix",
  "serde",
@@ -611,15 +610,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "mirage_hotswap"
-version = "0.2.0"
-dependencies = [
- "inventory",
- "mirage_core",
- "serde_json",
 ]
 
 [[package]]

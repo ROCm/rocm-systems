@@ -30,8 +30,6 @@ use mirage_core::profile::ProfileDef;
 use mirage_core::session::{SessionContext, SessionHealth, state};
 use mirage_core::topology::TopologyDef;
 
-pub mod dbt;
-
 /// Overridable default environment for workloads run under rocjitsu.
 ///
 /// These mirror the environment the upstream rocjitsu RCCL collective
@@ -282,8 +280,7 @@ impl Rocjitsu {
     /// [`EmulatorBackend::injection_def`] against an explicit KMD
     /// interposer, as [`kmd_preload`] located it.
     ///
-    /// Threaded in for the reason `hotswap` and `rocjitsu-dbt` thread
-    /// theirs: whether rocjitsu is installed is a fact about the host,
+    /// Whether rocjitsu is installed is a fact about the host,
     /// Rust 2024 makes `set_var` `unsafe` and this workspace forbids
     /// `unsafe`, so a test that could not supply the library could only
     /// assert about the machine it happened to run on. With it as a
@@ -661,8 +658,7 @@ pub fn write_config_discovery(
 
 /// Environment variable naming the KMD interposer directly, as an
 /// absolute path to the `.so`. The explicit override that wins over
-/// every search location, and the counterpart of the DBT backend's
-/// `ROCJITSU_HOOKS_LIB`.
+/// every search location.
 pub const LIB_ENV: &str = "ROCJITSU_LIB";
 
 /// Returns the path mirage should pass as `LD_PRELOAD` to an
@@ -748,8 +744,8 @@ fn with_kmd_search<R>(f: impl FnOnce(&LibSearch<'_>) -> R) -> R {
         home_env: &[],
         lib_name: LIB_NAME,
         binary_relative_dirs: &in_tree,
-        // rocjitsu is an ordinary ROCm-adjacent shared library: unlike
-        // HotSwap it does not ship patched copies of the ROCm runtime,
+        // rocjitsu is an ordinary ROCm-adjacent shared library and
+        // does not ship patched copies of the ROCm runtime,
         // so picking it up from `$LD_LIBRARY_PATH` or `/opt/rocm/lib` is
         // exactly what a user who installed it there expects.
         system_fallbacks: true,
