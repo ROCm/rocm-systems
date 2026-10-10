@@ -73,6 +73,15 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
     to_noise_clamp,
 )
+from utils.metrics.pass_provenance import (
+    PASS_VAR_SEP,
+    PassLayout,
+    bind_expression_dataframe,
+    extract_row_refs,
+    legacy_pass_merge_enabled,
+    ordered_scoped_builtin_bindings,
+    pass_scoped_builtins,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
@@ -91,6 +100,11 @@ from utils.utils_counter_defs import (
 KernelKey = str
 CodeObjectKey = tuple[int, int]
 KernelSymbolKey = tuple[int, int, str]  # (pid, code_object_id, kernel_name)
+
+# Bound same-pass builtins look like ammolite__VAR__pass12; strip for discovery.
+_BOUND_AMMOLITE_PASS_RE = re.compile(
+    rf"(ammolite__[A-Za-z0-9_]+?){re.escape(PASS_VAR_SEP)}\d+"
+)
 
 # db_analysis.evaluate runs once per kernel, so the same expression problem is
 # hit again for every kernel. Collect the messages here and report each
@@ -576,23 +590,28 @@ class db_analysis(OmniAnalyze_Base):
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
+        # Shadow columns + PassLayout; expressions are bound in calc_expressions.
+        self._pass_layout_per_workload: dict[str, Optional[PassLayout]] = {}
+        iteration_multiplexing = self._profiling_config.get("iteration_multiplexing")
 
         for workload_path in self._runs.keys():
-            pmc_df = file_io.create_df_pmc(
+            pmc_df, pass_layout = file_io.load_df_pmc(
                 workload_path,
                 self.get_args().verbose,
+                preserve_pass_provenance=iteration_multiplexing is None,
             )
             if pmc_df.empty:
                 continue
 
-            if self._profiling_config.get("iteration_multiplexing") is not None:
+            if iteration_multiplexing is not None:
                 pmc_df = self.iteration_multiplex_impute_counters(
                     pmc_df,
-                    policy=self._profiling_config["iteration_multiplexing"],
+                    policy=iteration_multiplexing,
                     workload_dir=Path(workload_path),
                 )
 
             pmc_df_per_workload[workload_path] = pmc_df
+            self._pass_layout_per_workload[workload_path] = pass_layout
 
         if pmc_df_per_workload:
             console_debug("Collected dispatch data")
@@ -1031,21 +1050,104 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
     @staticmethod
+    def _expressions_without_pass_suffixes(expressions: list[str]) -> list[str]:
+        """Strip ``ammolite__var__passN`` back to ``ammolite__var`` for discovery."""
+        return [
+            _BOUND_AMMOLITE_PASS_RE.sub(r"\1", expression) for expression in expressions
+        ]
+
+    @staticmethod
+    def calc_pass_scoped_builtin_sys_info(
+        pmc_df: pd.DataFrame,
+        sys_info: dict,
+        pass_layout: PassLayout,
+        used_passes: set[str],
+        expressions: list[str],
+    ) -> dict[str, Any]:
+        """Compute pass-scoped built-ins for DB ``sys_info`` lookups.
+
+        Keys are ``{var}__pass{ordinal}`` so that bound ``ammolite__var__passN``
+        expressions resolve via ``sys_info["var__passN"]``.
+
+        ``expressions`` may already be pass-bound; builtin names are recovered via
+        ``extract_row_refs`` (strips ``__passN``). PER_XCD built-ins are evaluated
+        before dependents that reference them (same order as ``calc_builtin_vars``).
+        """
+        if not used_passes or not pass_layout.has_duplicates:
+            return {}
+
+        gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+        scoped = pass_scoped_builtins(pass_layout, gpu_series)
+        if not scoped:
+            return {}
+
+        # extract_row_refs strips __passN; extract_counters_and_variables does not.
+        expression_builtin_vars = extract_row_refs(expressions).builtin_vars
+        build_in_vars = {
+            key: value
+            for key, value in get_build_in_vars(gpu_series).items()
+            if key in expression_builtin_vars and key in scoped
+        }
+        if not build_in_vars:
+            return {}
+
+        results: dict[str, Any] = {}
+        for pass_key in sorted(used_passes, key=lambda key: pass_layout.ordinal(key)):
+            ordinal = pass_layout.ordinal(pass_key)
+            pass_locals: dict[str, Any] = {}
+            for variable_key, bound in ordered_scoped_builtin_bindings(
+                build_in_vars, pass_key, pass_layout, scoped
+            ):
+                pass_locals[f"{variable_key}__pass{ordinal}"] = db_analysis.evaluate(
+                    variable_key,
+                    bound,
+                    pmc_df,
+                    {**sys_info, **pass_locals},
+                    parse=False,
+                )
+            results.update(pass_locals)
+        return results
+
+    @staticmethod
     def calc_dataframe_expressions(
         pmc_df: pd.DataFrame,
         sys_info: dict,
         expression_df: pd.DataFrame,
         emit_variance_warnings: bool = False,
+        pass_layout: Optional[PassLayout] = None,
+        used_passes: Optional[set[str]] = None,
     ) -> pd.Series:
+        """Evaluate each expression row against ``pmc_df``.
+
+        When ``pass_layout`` / ``used_passes`` are set, pass-scoped built-ins are
+        merged into ``sys_info`` in place (caller should pass ``sys_info.copy()``).
+        """
+        expressions = [
+            value
+            for value in expression_df["value"].tolist()
+            if isinstance(value, str) and value and value != "None"
+        ]
+        # Bound expressions use ammolite__var__passN; strip for base builtin discovery.
         db_analysis.calc_builtin_vars(
             pmc_df,
             sys_info,
-            [
-                v
-                for v in expression_df["value"].tolist()
-                if isinstance(v, str) and v and v != "None"
-            ],
+            db_analysis._expressions_without_pass_suffixes(expressions),
         )
+        if (
+            pass_layout is not None
+            and used_passes
+            and pass_layout.has_duplicates
+            and not legacy_pass_merge_enabled()
+        ):
+            sys_info.update(
+                db_analysis.calc_pass_scoped_builtin_sys_info(
+                    pmc_df,
+                    sys_info,
+                    pass_layout,
+                    used_passes,
+                    expressions,
+                )
+            )
         return pd.Series(
             [
                 db_analysis.evaluate(
@@ -1120,12 +1222,26 @@ class db_analysis(OmniAnalyze_Base):
             pmc_df = self._pmc_df_per_workload[workload_path]
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
-            ]
+            ].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             for key, value in self._roofline_ceilings_per_workload.get(
                 workload_path, {}
             ).items():
                 sys_info[f"{key}_empirical_peak"] = value
+
+            pass_layout = self._pass_layout_per_workload.get(workload_path)
+            used_passes: set[str] = set()
+            if (
+                pass_layout is not None
+                and pass_layout.has_duplicates
+                and not legacy_pass_merge_enabled()
+            ):
+                gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
+                used_passes = bind_expression_dataframe(
+                    expression_template,
+                    pass_layout,
+                    gpu_series,
+                )
 
             metrics_info = self._metrics_info_data_per_workload.get(
                 workload_path, pd.DataFrame(columns=["pct_of_peak", "metric_id"])
@@ -1146,6 +1262,8 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     kernel_expression_df,
+                    pass_layout=pass_layout,
+                    used_passes=used_passes,
                 )
                 new_kernel_rows.extend(
                     db_analysis._derive_pct_of_peak_values(
@@ -1175,6 +1293,8 @@ class db_analysis(OmniAnalyze_Base):
                 sys_info.copy(),
                 workload_expression_df,
                 emit_variance_warnings=True,
+                pass_layout=pass_layout,
+                used_passes=used_passes,
             )
             print_noise_clamp_summary()
             db_analysis.validate_dual_issue_metrics(
