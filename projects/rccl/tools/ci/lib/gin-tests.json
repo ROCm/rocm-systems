@@ -1,10 +1,13 @@
 {
   "_comment": [
     "GIN / rocSHMEM test matrix for run-gin-ci.sh (baremetal translation of",
-    "docker_build_test.bash). Each test runs as:",
-    "  mpirun -np $NP <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
+    "docker_build_test.bash). Each mpirun kind runs as:",
+    "  mpirun -np <np or $NP> <mca> <-x env> -x LD_LIBRARY_PATH <bin> <args>",
+    "np: optional per-test rank count; empty means $NP.",
     "kind: 'rccl-tests' -> $RCCL_TESTS_BIN_DIR/<bin>;",
     "'fixtures' -> $RCCL_FIXTURES_BIN_DIR/<bin> (single-process gtest, no mpirun);",
+    "'mpi-fixtures' -> $RCCL_FIXTURES_BIN_DIR/<bin> under mpirun, with the RCCL build tree",
+    "first on LD_LIBRARY_PATH (e.g. rccl-UnitTestsMPI, which links librccl internals);",
     "'pytest' -> python3 -m pytest under $RCCL_TESTS_DIR/test/<bin> (opt-in rccl-tests",
     "regressions; exports RCCL_TESTS_GIN_SDMA_BCAST=1 and points BCAST_EXE at broadcast_perf)",
     "{E} is replaced with NP*MSG_SIZE bytes. Tests are non-gating for now.",
@@ -73,7 +76,16 @@
       "kind": "fixtures",
       "bin": "rccl-UnitTestsFixtures",
       "env": ["NCCL_DEBUG=WARN"],
-      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:GinAnvilIpcDeviceTest.*"
+      "args": "--gtest_filter=GinRocshmemGdaTemplateTest.*:GinAnvilSdmaTemplateTest.*:*GinAnvilSdmaStandaloneSignalQuietTest.*:*GinAnvilSdmaSignalFenceTest.*:GinAnvilIpcDeviceTest.*"
+    },
+    {
+      "_comment": "np 2: the BarrierFence fixtures pair one rank with one peer and assert an exact world size of 2.",
+      "name": "rccl-gin-mpi-barrier-fence",
+      "kind": "mpi-fixtures",
+      "bin": "rccl-UnitTestsMPI",
+      "np": 2,
+      "env": ["NCCL_CUMEM_ENABLE=1", "RCCL_ENABLE_INTRANET=1", "NCCL_DMABUF_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_MSCCL_ENABLE=0", "NCCL_GIN_ENABLE=1", "NCCL_GIN_TYPE=7", "NCCL_DEBUG=WARN"],
+      "args": "--gtest_filter=GinMPIDeviceTests.BarrierFence_*"
     },
     {
       "name": "rccl-gin-rocshmem-sdma-internal",
