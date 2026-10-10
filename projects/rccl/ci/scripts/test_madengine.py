@@ -83,6 +83,9 @@ CANDIDATE = "candidate"
 # live sbatch logs -- tarring a file that is still growing fails the build.
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
+# The maxtext family needs a second image: its A/B baseline cannot be the stock
+# registry tag, which carries no Primus. See build_maxtext_baseline_image().
+MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
 
 # TEMPORARY PIN — must move back to ROCm/madengine before this leaves draft.
 # The A/B below needs both runs in one allocation, which requires madengine to
@@ -91,8 +94,21 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
 MADENGINE_REF = "10a0414b644d204e45437ab01d9e795176e0ee4f"  # madengine#213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "07ecef61cecde466dd957974f6170269fceeff22"  # mad-rccl, MAD#271
+MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, MAD#280
 MAD_BRANCH = "mad-rccl"
+
+# Primus is not vendored in MAD; tools/fetch_primus.sh checks it out into
+# scripts/Primus, and the MaxText images COPY that tree in. Pinned rather than
+# left to the script's default so a default change cannot move the image under
+# the benchmark.
+#
+# v26.7.0 and not jax-maxtext-v26.8: both ship primus-cli and the MI355X 405B
+# config, but AMD-AGI/Primus#999 retired examples/run_pretrain.sh and v26.8 no
+# longer carries it.  We gate on primus-cli, which is in both (and ROCm/MAD#280
+# moved MAD's own overlay to the same check), so this pin is the only thing
+# tying us to v26.7.0.
+PRIMUS_URL = "https://github.com/AMD-AGI/Primus"
+PRIMUS_REF = "v26.7.0"
 
 WORKLOAD_CONFIGS = {
     "llama-3.1-70b-training": {
@@ -144,6 +160,69 @@ WORKLOAD_CONFIGS = {
             "--device=/dev/infiniband --cap-add IPC_LOCK "
             "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
+    # The first JAX workload here, and the first one whose base image is not
+    # rocm/primus. That drives the "family" dispatch in install_madengine(),
+    # build_rccl_overlay_image() and generate_manifest(): a different MAD
+    # script directory, a Primus checkout baked into both A/B images, and a
+    # launcher that takes a Primus config rather than a model repo name.
+    #
+    # Settings that look arbitrary are each a failure mode found during the MAD
+    # enabling (ROCm/MAD#228):
+    #   XLA_GPU_AUTOTUNE_LEVEL=0  Primus defaults to 4, which at 32 ranks
+    #       presents as a dead hang -- no steps, no NCCL output, one thread
+    #       spinning in libhsa-runtime64 -- rather than a slow start. The
+    #       MAD-native XLA_AUTOTUNE_LEVEL is a silent no-op here.
+    #   per_device_batch_size=1   the shipped config OOMs at 241.25 GiB for
+    #       jit_train_step at 4 nodes; that is activation memory and does not
+    #       move with the parallelism overrides.
+    #   nofile=1048576            a 32-device clique exhausts the default and
+    #       stalls silently at "Initialize clique".
+    "llama-3.1-405b-maxtext": {
+        "type": "training",
+        "family": "maxtext",
+        # MAD's models.json calls this "jax-maxtext/maxtext_MI355X_...", but the
+        # directory prefix must NOT travel into the manifest: madengine builds
+        # its sbatch script path as
+        #   <output_dir>/madengine_{model_info[name]}.sh
+        # (deployment/slurm.py), so a slash in the name points the write at a
+        # subdirectory that was never created and the whole deployment dies
+        # with "Failed to generate script: No such file or directory" before
+        # anything is submitted. Verified against the pinned madengine and
+        # v2.2.1 -- both carry that line. The name is only an identifier here;
+        # `scripts` is what actually locates run.sh.
+        "model_repo": "maxtext_MI355X_llama3.1_405B-fp8-pretrain",
+        "base_image": "rocm/jax-training:maxtext-v26.6",
+        "gpu_target": "gfx950",
+        "metric_key": "tokens_per_second_per_gpu",
+        # extract_maxtext_perf.py emits tok_per_s_per_gpu / TFLOPS_per_gpu /
+        # seconds_per_step; the first is already in _METRIC_ALIASES.
+        "multiple_results": "primus_perf_output.csv",
+        "training_precision": "fp8",
+        "primus_config": "examples/maxtext/configs/MI355X/llama3.1_405B-fp8-pretrain.yaml",
+        "model_args_extra": "per_device_batch_size=1",
+        "tags": ["maxtext", "jax", "MI355X", "llama3.1_405B-fp8-pretrain",
+                 "fp8", "training"],
+        "env_vars": {
+            "XLA_GPU_AUTOTUNE_LEVEL": "0",
+            # In MAD#228's validated template. The Megatron workloads are green
+            # without it on the same cluster, so this is "explicitly no plugin"
+            # rather than a known fix.
+            "NCCL_NET_PLUGIN": "none",
+        },
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        # MAD#228's template asks for 12:00:00 for a single run. 05:00:00 for
+        # the A/B pair instead: a 4-node exclusive request with a 12 h limit
+        # backfills badly on a shared partition, the measured 4N FP8 run is
+        # ~17 min of training (MAD#228 reports 17.40 s/step) plus prep, and
+        # 300 min stays inside the step's own 330 so the script still reports.
+        "time_limit": "05:00:00",
+        "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
+        "docker_run_options": "--privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK "
+            "--ulimit memlock=-1 --ulimit nofile=1048576 "
+            "-v /sys:/sys:ro -v /run/udev:/run/udev:ro",
+    },
 }
 
 CLUSTER_CONFIGS = {
@@ -168,7 +247,51 @@ CLUSTER_CONFIGS = {
 }
 
 
-def install_madengine(work_dir: Path) -> Path:
+def fetch_primus(mad_dir: Path) -> Path:
+    """Check Primus out into MAD's scripts/Primus and return the path.
+
+    Both MaxText images COPY this tree, so it has to exist before either build.
+    MAD ships tools/fetch_primus.sh for exactly this and it is idempotent, so
+    prefer it; the fallback only matters if the MAD pin predates the script.
+    """
+    primus_dir = mad_dir / "scripts" / "Primus"
+    fetch_script = mad_dir / "tools" / "fetch_primus.sh"
+
+    env = os.environ.copy()
+    env["PRIMUS_URL"] = PRIMUS_URL
+    env["PRIMUS_REF"] = PRIMUS_REF
+
+    if fetch_script.is_file():
+        log.info("Checking Primus out at %s via tools/fetch_primus.sh...", PRIMUS_REF)
+        subprocess.run(["bash", str(fetch_script)], check=True,
+                       cwd=str(mad_dir), env=env)
+    else:
+        log.info("No tools/fetch_primus.sh in this MAD pin; cloning Primus directly")
+        primus_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["git", "clone", "--depth=1", "--branch", PRIMUS_REF,
+             PRIMUS_URL, str(primus_dir)],
+            check=True,
+        )
+
+    # Checked here rather than four layers into a docker build, where it
+    # surfaces as a bare "no such file".
+    if not (primus_dir / "primus-cli").is_file():
+        raise RuntimeError(
+            f"Primus checkout at {primus_dir} has no primus-cli -- "
+            f"PRIMUS_REF={PRIMUS_REF} is wrong or the checkout failed"
+        )
+    config_rel = "examples/maxtext/configs/MI355X"
+    if not (primus_dir / config_rel).is_dir():
+        raise RuntimeError(
+            f"Primus checkout at {primus_dir} has no {config_rel} -- "
+            f"PRIMUS_REF={PRIMUS_REF} does not carry the MI355X MaxText configs"
+        )
+    log.info("Primus ready at %s (%s)", primus_dir, PRIMUS_REF)
+    return primus_dir
+
+
+def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
     """Clone and install madengine into the current Python environment."""
     madengine_dir = work_dir / "madengine"
     mad_dir = work_dir / "MAD"
@@ -222,16 +345,33 @@ def install_madengine(work_dir: Path) -> Path:
 
     log.info("madengine installed to: %s", madengine_dir)
 
-    scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
-    if not scripts_src.is_dir():
-        scripts_src = mad_dir / "scripts" / "primus" / "megatron-lm"
-    scripts_dst = work_dir / "scripts" / "primus_megatron-lm"
+    if family == "maxtext":
+        scripts_src = mad_dir / "scripts" / "jax-maxtext"
+        scripts_name = "jax-maxtext"
+    else:
+        scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
+        if not scripts_src.is_dir():
+            scripts_src = mad_dir / "scripts" / "primus" / "megatron-lm"
+        scripts_name = "primus_megatron-lm"
+
+    scripts_dst = work_dir / "scripts" / scripts_name
     if scripts_src.is_dir() and not scripts_dst.exists():
         scripts_dst.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
-        log.info("Copied MAD primus scripts to %s", scripts_dst)
+        log.info("Copied MAD %s scripts to %s", scripts_name, scripts_dst)
     elif not scripts_src.is_dir():
+        # Fatal for maxtext: the manifest points `scripts` at run.sh, and a
+        # missing one surfaces as a container-side "no such file" on every
+        # node instead of here. The megatron path keeps its historical warning.
+        if family == "maxtext":
+            raise RuntimeError(
+                f"MAD jax-maxtext scripts not found at {scripts_src} -- "
+                f"MAD pin {MAD_REF[:12]} predates ROCm/MAD#228"
+            )
         log.error("MAD primus scripts not found — expected at %s", scripts_src)
+
+    if family == "maxtext":
+        fetch_primus(mad_dir)
 
     result = subprocess.run(
         ["madengine", "--version"],
@@ -522,18 +662,217 @@ def _needed_sonames(lib: Path) -> list[str]:
     return [s for s in sonames if s.startswith("libamd_smi.")]
 
 
+def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
+    """A RUN layer installing /tmp/rccl_ci/librccl.so over every librccl on disk.
+
+    Ported from ROCm/MAD#228's primus_maxtext_rccl_overlay Dockerfile. Unlike
+    the hardcoded SDK-venv branch below it discovers its targets, which is what
+    makes it work on a base that is not the Primus image.
+
+    Two properties are load-bearing and easy to lose in a rewrite:
+
+    * **Each destination keeps its own RUNPATH**, including an empty one. A
+      librccl inside the ROCm pip wheels resolves libamd_smi through a RUNPATH
+      reaching a sibling wheel; the artifact carries a different one. Dropping
+      the bytes in verbatim leaves a library that cannot resolve its own
+      dependencies and init dies before step 0. Restoring an *empty* RUNPATH
+      matters for the same reason in reverse: that destination resolves through
+      the loader's search path, and leaving ours behind would silently change
+      where its dependencies come from.
+    * **The gate compares the SET of unresolved sonames** per target, before
+      and after. Counts are not enough -- dropping one missing soname while
+      introducing another leaves the count unchanged. An absolute "must resolve
+      everything" test would fail a good build instead: the pristine
+      _rocm_sdk_devel copy already reports unresolved deps because it is only
+      ever dlopen'd where they are already loaded. The rule is that the swap
+      must not make linkage worse than it found it.
+
+    *bridge* runs after the copy and before the post-swap measurement, so a
+    soname the artifact needs and the base predates (libamd_smi .27 against
+    .26) is reconciled rather than tripping the gate it would otherwise fail.
+    """
+    kpack_block = ""
+    if kpack:
+        # Generalises what the SDK-venv branch does for two known directories:
+        # every directory that received a library gets the kpack files too. A
+        # kpack librccl looks for them relative to its own location and we do
+        # not know which copy the runtime will load.
+        kpack_block = (
+            '    if ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\\n'
+            '      for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname | sort -u); do \\\n'
+            '        mkdir -p "$d/.kpack" && cp /tmp/rccl_ci/.kpack/*.kpack "$d/.kpack/"; \\\n'
+            '      done; \\\n'
+            '    fi; \\\n'
+        )
+    return f"""\
+RUN set -e; \\
+    SRC=/tmp/rccl_ci/librccl.so; \\
+    [ -s "$SRC" ] || {{ echo "GATE FAIL: no librccl staged at $SRC"; exit 1; }}; \\
+    canon_src="$(readlink -f "$SRC")"; \\
+    find / -xdev -type f -name 'librccl.so*' -not -path '/tmp/rccl_ci/*' \\
+      2>/dev/null > /opt/RCCL_TARGETS.txt || true; \\
+    [ -s /opt/RCCL_TARGETS.txt ] || {{ echo "GATE FAIL: no librccl found in base image"; exit 1; }}; \\
+    : > /opt/RCCL_PRESWAP.txt; \\
+    mkdir -p /tmp/rcclswap; n=0; \\
+    while read -r t; do \\
+      n=$((n+1)); \\
+      ldd "$t" 2>/dev/null | awk '/not found/ {{print $1}}' | sort -u > "/tmp/rcclswap/pre.$n"; \\
+      printf '%s\\t%s\\n' "$n" "$t" >> /opt/RCCL_PRESWAP.txt; \\
+    done < /opt/RCCL_TARGETS.txt; \\
+    while read -r t; do \\
+      [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \\
+      rp="$(patchelf --print-rpath "$t" 2>/dev/null || true)"; \\
+      echo "  overwrite: $t (rpath: ${{rp:-none}})"; \\
+      cp -fL --remove-destination "$SRC" "$t"; \\
+      if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \\
+        {{ echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }}; \\
+      else patchelf --remove-rpath "$t" || \\
+        {{ echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }}; fi; \\
+    done < /opt/RCCL_TARGETS.txt; \\
+{kpack_block}{bridge}    ldconfig || true; \\
+    while IFS="$(printf '\\t')" read -r n t; do \\
+      ldd "$t" 2>/dev/null | awk '/not found/ {{print $1}}' | sort -u > "/tmp/rcclswap/post.$n"; \\
+      newmiss="$(comm -13 "/tmp/rcclswap/pre.$n" "/tmp/rcclswap/post.$n")"; \\
+      echo "  unresolved sonames before=$(wc -l < "/tmp/rcclswap/pre.$n") after=$(wc -l < "/tmp/rcclswap/post.$n")  $t"; \\
+      if [ -n "$newmiss" ]; then \\
+        echo "GATE FAIL: the swap introduced unresolved sonames not present before on $t:"; \\
+        printf '    %s\\n' $newmiss; \\
+        echo "  The candidate was installed without the RUNPATH this location needs;"; \\
+        echo "  loading it would fail at import time, before any step runs."; exit 1; \\
+      fi; \\
+    done < /opt/RCCL_PRESWAP.txt; \\
+    rm -rf /tmp/rcclswap /tmp/rccl_ci; \\
+    echo "SWAP GATE PASS: $(wc -l < /opt/RCCL_TARGETS.txt) librccl replaced, no new unresolved sonames"
+"""
+
+
+# Both MaxText images share everything except the RCCL swap, so the baseline
+# is this prefix alone and the candidate is this plus the swap layer.
+MAXTEXT_PRIMUS_PAYLOAD = """\
+# patchelf carries each replaced library's own RUNPATH across the swap;
+# binutils/ldd back the soname gate. Installed in the baseline too, so the two
+# images differ by the swap and nothing else.
+RUN apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=5 update \\
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
+      binutils libatomic1 patchelf \\
+ && rm -rf /var/lib/apt/lists/*
+
+# The base may ship /workspace/Primus as a git clone, and COPY cannot replace
+# a .git directory with a plain tree.
+RUN rm -rf /workspace/Primus
+COPY Primus/ /workspace/Primus/
+
+# Gated on primus-cli, NOT examples/run_pretrain.sh as MAD#228's dockerfile
+# does: AMD-AGI/Primus#999 retired that file and scripts/jax-maxtext/run.sh
+# drives `primus-cli direct` instead.
+RUN test -f /workspace/Primus/primus-cli
+RUN test -f /workspace/Primus/requirements-jax.txt
+
+# Prove the base really carries MaxText, so a wrong base fails the build
+# instead of step 0 of a 4-node training run.
+RUN test -f /workspace/maxtext/pyproject.toml \\
+ || (echo "ERROR: no MaxText at /workspace/maxtext -- wrong base image" >&2 && exit 1)
+
+# Installed here, not per run: run.sh sets PRIMUS_SKIP_PIP=1 so a launch stays
+# off the network.
+RUN pip3 install --no-cache-dir -r /workspace/Primus/requirements-jax.txt
+
+ENV WORKSPACE_DIR=/workspace
+# The Primus repo root, not /workspace: run.sh resolves examples/ against it.
+ENV PRIMUS_ROOT=/workspace/Primus
+# Pin the base's tree; Primus would otherwise default to
+# $PRIMUS_ROOT/third_party/maxtext, which this image does not ship.
+ENV MAXTEXT_PATH=/workspace/maxtext
+WORKDIR /workspace
+
+# Same label as MAD's primus_maxtext, so madengine treats this image the same.
+LABEL mad.launcher=primus
+"""
+
+
+def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
+    """Copy the Primus tree into *ctx_dir* so both image builds can COPY it.
+
+    Copied rather than referenced in place because the manifest advertises the
+    Dockerfile to the compute nodes so they can rebuild the image themselves,
+    and their build context is this directory. .git is excluded: it is most of
+    the tree's size and nothing reads it.
+    """
+    ctx_primus = ctx_dir / "Primus"
+    if ctx_primus.exists():
+        return
+    log.info("Staging Primus into the build context...")
+    ctx_primus.mkdir(parents=True)
+    src = subprocess.Popen(
+        ["tar", "-C", str(primus_dir), "--exclude=.git", "-cf", "-", "."],
+        stdout=subprocess.PIPE,
+    )
+    subprocess.run(["tar", "-C", str(ctx_primus), "-xf", "-"],
+                   stdin=src.stdout, check=True)
+    src.stdout.close()
+    if src.wait() != 0:
+        raise RuntimeError(f"failed to stage Primus from {primus_dir}")
+
+
+def build_maxtext_baseline_image(
+    base_image: str,
+    work_dir: Path,
+    primus_dir: Path,
+) -> str:
+    """Build the A/B baseline for the MaxText family: Primus, stock RCCL.
+
+    The Megatron workloads use the stock registry image as their baseline, but
+    that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
+    Primus, so ``scripts/jax-maxtext/run.sh`` would not find ``primus-cli`` and
+    the baseline phase would die before step 0.
+
+    So the baseline is the base image plus the Primus payload and nothing else.
+    That makes the pair *tighter* than the Megatron A/B rather than looser: the
+    two images differ by the librccl swap alone, which is exactly the variable
+    the ratio is supposed to isolate.
+    """
+    tag = f"{base_image}-primus-{PRIMUS_REF}"
+    ctx_dir = work_dir / OVERLAY_CTX
+    ctx_dir.mkdir(exist_ok=True)
+    _stage_primus_context(ctx_dir, primus_dir)
+
+    dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
+    dockerfile.write_text(f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
+
+    exists = subprocess.run(
+        ["docker", "image", "inspect", tag], capture_output=True
+    ).returncode == 0
+    if exists:
+        log.info("MaxText baseline image already present: %s", tag)
+    else:
+        log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
+        subprocess.run(
+            ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
+            check=True,
+        )
+        log.info("MaxText baseline image built: %s", tag)
+    return tag
+
+
 def build_rccl_overlay_image(
     rccl_lib: Path,
     base_image: str,
     gpu_target: str,
     work_dir: Path,
     registry: str = "",
+    family: str = "megatron",
+    primus_dir: Path | None = None,
 ) -> str:
     """Build a Docker overlay image with the CI-built RCCL and push to registry.
 
     When a registry is provided, the image is tagged and pushed so that
     SLURM compute nodes can pull it automatically.  Returns the final
     image tag (registry-qualified if pushed).
+
+    *family* selects the recipe. ``megatron`` keeps the two layout-specific
+    branches that target the Primus image; ``maxtext`` layers the same Primus
+    payload as the baseline and then a discovery-based swap, because its base
+    has neither Primus nor the SDK venv paths those branches write to.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
@@ -573,6 +912,9 @@ def build_rccl_overlay_image(
     bridge_sdk = _soname_bridge('"$SDK_LIB" "$SDK_DEV"', rccl_needed)
     bridge_dep = _soname_bridge('"$DEP_DIR"', rccl_needed)
 
+    # Staged for every family: the maxtext swap places them next to each
+    # target it discovers rather than into two known directories.
+    has_kpack_files = False
     if uses_kpack:
         kpack_files = list(rccl_lib_dir.rglob("*.kpack"))
         if not kpack_files:
@@ -589,6 +931,30 @@ def build_rccl_overlay_image(
                      len(kpack_files), [f.name for f in kpack_files])
         else:
             log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+
+    if family == "maxtext":
+        if primus_dir is None or not (primus_dir / "primus-cli").is_file():
+            raise RuntimeError(
+                f"maxtext overlay needs a Primus checkout with primus-cli; got {primus_dir!r}"
+            )
+        _stage_primus_context(ctx_dir, primus_dir)
+        # Bridge over whatever directories the sweep discovers, not a fixed pair.
+        swap = _librccl_swap_snippet(
+            bridge=_soname_bridge(
+                '$(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname | sort -u)',
+                rccl_needed,
+            ),
+            kpack=has_kpack_files,
+        )
+        # The payload is byte-identical to the baseline's, so those layers come
+        # straight out of the cache and only the swap actually builds here.
+        # Staged AFTER it so anything those layers drop on disk -- a wheel
+        # vendoring its own librccl, say -- is caught by the sweep too.
+        dockerfile.write_text(
+            f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+        )
+    elif uses_kpack:
         log.info(
             "CI-built librccl.so uses kpack (%.1f MB .so). "
             "Building overlay with SDK venv layout for %s.",
@@ -663,6 +1029,7 @@ def generate_manifest(
     rccl_lib: Path | None = None,
     run_dir: Path | None = None,
     pull_only: bool = False,
+    dockerfile_name: str = OVERLAY_DOCKERFILE,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
 
@@ -696,9 +1063,24 @@ def generate_manifest(
     # is uploaded as a CI artifact and would leak the credential.
 
     model_repo = workload_config["model_repo"]
-    scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
-    if not scripts_dir.is_dir():
-        scripts_dir = work_dir / "scripts" / "primus" / "megatron-lm"
+    family = workload_config.get("family", "megatron")
+    if family == "maxtext":
+        scripts_dir = work_dir / "scripts" / "jax-maxtext"
+    else:
+        scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
+        if not scripts_dir.is_dir():
+            scripts_dir = work_dir / "scripts" / "primus" / "megatron-lm"
+
+    # Megatron's run.sh selects the model by repo name; MaxText's takes the
+    # Primus YAML plus any `key=value` overrides, which it strips from the
+    # --config_path position and forwards to primus-cli.
+    if family == "maxtext":
+        model_args = f"--config_path {workload_config['primus_config']}"
+        extra_args = workload_config.get("model_args_extra", "")
+        if extra_args:
+            model_args += f" {extra_args}"
+    else:
+        model_args = f"--model_repo {model_repo}"
 
     image_key = "overlay"
     gpu_indices = ",".join(str(i) for i in range(gpus_per_node))
@@ -737,6 +1119,17 @@ def generate_manifest(
     # files if present) over the container's copies so we actually
     # test the artifact, not the image default.
     if rccl_lib is not None:
+        # These are the Primus image's SDK venv paths. On the MaxText base they
+        # do not exist, and `docker run -v` CREATES a missing source as an empty
+        # root-owned directory rather than refusing -- so the run would look
+        # healthy while measuring the image's own RCCL. Refuse instead.
+        if family == "maxtext":
+            raise RuntimeError(
+                "--skip-overlay-build is not supported for the maxtext family: "
+                "the bind-mount targets are Primus-image paths absent from "
+                + workload_config["base_image"] + ", and Docker would silently "
+                "mount empty directories over nothing. Build the overlay."
+            )
         host_so = str(rccl_lib.resolve())
         sdk_lib = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"
         sdk_dev = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"
@@ -769,7 +1162,7 @@ def generate_manifest(
         "skip_gpus_directive": cluster_config.get("slurm_no_gres", False),
     }
 
-    overlay_dockerfile = work_dir / OVERLAY_CTX / OVERLAY_DOCKERFILE
+    overlay_dockerfile = work_dir / OVERLAY_CTX / dockerfile_name
 
     if pull_only:
         image_entry = {
@@ -814,9 +1207,9 @@ def generate_manifest(
                 "scripts": f"scripts/{scripts_dir.name}/run.sh",
                 "n_gpus": "-1",
                 "owner": "",
-                "training_precision": "",
+                "training_precision": workload_config.get("training_precision", ""),
                 "multiple_results": workload_config.get("multiple_results", ""),
-                "args": f"--model_repo {model_repo}",
+                "args": model_args,
                 "additional_docker_run_options": docker_run_opts,
                 "data": "",
                 "cred": "",
@@ -840,14 +1233,37 @@ def generate_manifest(
                 "backend": "nccl",
                 "port": 29500,
                 "nnodes": nodes,
+                # 8 even for JAX. Do not "fix" this to 1 on the theory that
+                # JAX runs one process per node: MAD#228's template is from
+                # validated 4N runs and uses 8.
                 "nproc_per_node": gpus_per_node,
+                # MaxText needs the launcher told which Primus config and
+                # backend to drive; the Megatron path carries neither.
+                **(
+                    {
+                        "primus": {
+                            "config_path": workload_config["primus_config"],
+                            "backend": "MaxText",
+                        }
+                    }
+                    if family == "maxtext"
+                    else {}
+                ),
             },
             "env_vars": {
                 **docker_env_vars,
-                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-                "TORCH_NCCL_HIGH_PRIORITY": "1",
                 "OMP_NUM_THREADS": "8",
-                "MIOPEN_FIND_MODE": "1",
+                # PyTorch/MIOpen knobs: inert under JAX, and leaving them out
+                # of the MaxText manifest avoids implying they do something.
+                **(
+                    {}
+                    if family == "maxtext"
+                    else {
+                        "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                        "TORCH_NCCL_HIGH_PRIORITY": "1",
+                        "MIOPEN_FIND_MODE": "1",
+                    }
+                ),
             },
             "debug": False,
             "docker_gpus": gpu_indices,
@@ -1456,9 +1872,12 @@ def main() -> None:
                  rccl_fingerprint["size"])
 
     # Step 2: Install madengine
-    madengine_dir = install_madengine(work_dir)
+    family = workload_config.get("family", "megatron")
+    madengine_dir = install_madengine(work_dir, family=family)
 
     patch_madengine_for_cluster(madengine_dir)
+
+    primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
     # Step 3: Build overlay image (or use pre-built)
     if args.skip_overlay_build:
@@ -1473,7 +1892,22 @@ def main() -> None:
             cluster_config["gpu_target"],
             work_dir,
             registry=args.registry,
+            family=family,
+            primus_dir=primus_dir,
         )
+
+    # The maxtext baseline cannot be the stock tag: that image ships MaxText
+    # but no Primus, so run.sh would not find primus-cli and the baseline
+    # phase would die before step 0. Build base + Primus instead, which also
+    # makes the pair differ by the RCCL swap and nothing else.
+    if family == "maxtext":
+        baseline_image = build_maxtext_baseline_image(
+            workload_config["base_image"], work_dir, primus_dir,
+        )
+        baseline_pull_only = False
+    else:
+        baseline_image = workload_config["base_image"]
+        baseline_pull_only = True
 
     # Step 4: Generate one manifest per A/B phase
     #
@@ -1501,7 +1935,7 @@ def main() -> None:
 
     phases: list[tuple[str, Path]] = []
     for phase, image, pull_only in (
-        (BASELINE, workload_config["base_image"], True),
+        (BASELINE, baseline_image, baseline_pull_only),
         (CANDIDATE, overlay_image, False),
     ):
         run_dir = prepare_phase_dir(work_dir, phase)
@@ -1520,6 +1954,16 @@ def main() -> None:
             ),
             run_dir=run_dir,
             pull_only=pull_only,
+            # A maxtext baseline is a locally built image, so its manifest is
+            # on the build-capable path and must advertise ITS OWN dockerfile.
+            # Left at the default it would hand a node the candidate recipe
+            # and have it rebuild the swapped image under the baseline tag --
+            # an A/B comparing the CI RCCL against itself.
+            dockerfile_name=(
+                MAXTEXT_BASELINE_DOCKERFILE
+                if family == "maxtext" and phase == BASELINE
+                else OVERLAY_DOCKERFILE
+            ),
         )
         phases.append((phase, run_dir))
 

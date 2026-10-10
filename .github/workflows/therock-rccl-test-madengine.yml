@@ -44,6 +44,7 @@ on:
         options:
           - llama-3.1-70b-training
           - gpt-oss-120b-training
+          - llama-3.1-405b-maxtext
         default: 'llama-3.1-70b-training'
       nodes:
         description: 'Number of SLURM nodes to allocate'
