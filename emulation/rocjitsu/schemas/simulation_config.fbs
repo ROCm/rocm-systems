@@ -107,6 +107,8 @@ table KfdDeviceInfo {
   // Engines and queues (from kfd_topology.c and amdgpu_amdkfd.c)
   num_sdma_engines: uint32 = 2;
   num_sdma_xgmi_engines: uint32 = 0;
+  // KFD-available CP queues after kernel reservations. 128 is a fallback for
+  // unspecified capacity, not a measured product value.
   num_cp_queues: uint32 = 128;
   max_engine_clk_fcompute: uint32 = 2100; // MHz
 

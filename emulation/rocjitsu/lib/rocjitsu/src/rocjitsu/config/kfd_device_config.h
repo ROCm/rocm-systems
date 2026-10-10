@@ -74,7 +74,8 @@ struct KfdDeviceConfig {
   uint32_t l2_assoc = 16;                    ///< L2 cache associativity.
   uint32_t num_sdma_engines = 0;             ///< SDMA engine count.
   uint32_t num_sdma_xgmi_engines = 0;        ///< XGMI SDMA engine count.
-  uint32_t num_cp_queues = 128;              ///< Hardware queue count.
+  /// KFD-available CP queues after kernel reservations; 128 is an unspecified-capacity fallback.
+  uint32_t num_cp_queues = 128;
   uint32_t max_engine_clk_fcompute = 2100;   ///< Maximum compute clock in MHz.
   uint32_t location_id = 0x0300;             ///< PCI BDF location id.
   uint64_t hive_id = 0;                      ///< XGMI hive id.
