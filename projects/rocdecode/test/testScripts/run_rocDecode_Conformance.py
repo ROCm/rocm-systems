@@ -22,12 +22,7 @@ from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 import argparse
 import os
-import shutil
 import sys
-import platform
-import glob
-import pandas as pd
-from pathlib import Path
 
 __license__ = "MIT"
 __version__ = "1.0"
@@ -111,8 +106,9 @@ else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
     exit()
 
-if os.path.exists(resultsPath+'/rocDecode_output.log'):
-    os.remove(resultsPath+'/rocDecode_output.log')
+outputLogPath = os.path.join(resultsPath, 'rocDecode_output.log')
+if os.path.exists(outputLogPath):
+    os.remove(outputLogPath)
 
 print("Starting conformance test .....................................\n")
 streamFileDir = filesDir + '/Streams/'
@@ -140,7 +136,9 @@ for i in range(streamListSize):
         cmd.append(bsReaderOption)
     cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
     logFilePath = resultsPath + '/rocDecode_output.log'
-    run_and_log(cmd, logFilePath)
+    returnCode = run_and_log(cmd, logFilePath)
+    if returnCode != 0:
+        sys.exit(returnCode)
     print("======================================================================================\n")
 
 fileString = 'Input file'
@@ -149,7 +147,7 @@ matchString = 'MD5 digest matches the reference MD5 digest'
 mismatchString = 'MD5 digest does not match the reference MD5 digest'
 passNum = 0
 failNum = 0
-with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+with open(outputLogPath, 'r') as logFile:
     resultFile = open(resultsPath + '/rocDecode_conformance.log', 'w')
     resultFile.write("=========================\n")
     resultFile.write("Conformance test results\n")
