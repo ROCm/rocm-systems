@@ -7683,6 +7683,11 @@ amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_hand
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_windows}
  *
+ *  @details On Linux with amdgpu, unsupported GPU metrics fall back to sysfs link data.
+ *  Missing, unreadable or invalid current link attributes remain unavailable without
+ *  discarding static information. Unavailable metric fields contain the maximum value
+ *  of their unsigned type, even when the query returns success.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to the PCIe information

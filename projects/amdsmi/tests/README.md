@@ -7,28 +7,25 @@ the full per-file reference, see
 
 ## Three test families
 
-```text
-                        AMD SMI test estate
-                                │
-        ┌───────────────────────┼───────────────────────────┐
-        │                       │                           │
-   ┌────▼─────┐         ┌───────▼────────┐         ┌────────▼─────────┐
-   │  C++     │         │    Python      │         │   Packaging /    │
-   │ amdsmitst│         │  3 runners     │         │   Build / ABI    │
-   │ (GTest)  │         │  (unittest)    │         │   (stdlib only)  │
-   └────┬─────┘         └───────┬────────┘         └────────┬─────────┘
-        │                       │                           │
- tests/amd_smi_test/     tests/python/            tests/abi_check/
-                                                  tests/amdsmi_build/
-                                                  tests/dme_integration/
-                                                  tests/python/test_*_guard.py
-                                                  tests/run_amdsmi_*.py
-```
+| Family | Runners | Location |
+| --- | --- | --- |
+| C++ | Two GTest executables | `tests/amd_smi_test/` |
+| Python | Three unittest runners | `tests/python/` |
+| Packaging / Build / ABI | Standalone checks and harnesses | `tests/abi_check/`, `tests/amdsmi_build/`, `tests/dme_integration/`, `tests/python/test_*_guard.py`, `tests/run_amdsmi_*.py` |
 
 Only the first two families touch hardware. The third is pure logic plus
 package-manager harnesses.
 
-## C++ — one binary, filtered by suite name
+## C++ executables, filtered by suite name
+
+| Executable | Coverage | Hardware |
+| --- | --- | --- |
+| `amdsmitst` | General unit and functional suites | Functional tests only |
+| `amdsmi_pcie_metrics_test` | PCIe metrics with controlled device I/O | None |
+
+The PCIe executable needs a static AMD SMI library, built by default with
+`BUILD_TESTS=ON`. Its linker-wrapped I/O must stay separate from the hardware tests.
+Both executables install under `<share>/amd_smi/tests/`.
 
 ```text
 tests/amd_smi_test/
@@ -58,18 +55,18 @@ tests/amd_smi_test/
     └── wsl/smi/                      only when ENABLE_WSL_BACKEND
 ```
 
-Nothing is listed by hand — CMake globs the tree:
+CMake globs the tree and builds the PCIe source separately:
 
 ```text
 CMakeLists.txt (root)
   └─ add_subdirectory(tests/amd_smi_test)
-        └─ file(GLOB_RECURSE ... CONFIGURE_DEPENDS unit/*.cc functional/*.cc)
-              └─ add_executable(amdsmitst  main.cc test_*.cc  ${globbed})
-                    ├─ links: libamd_smi, GTest::gtest, pthread
-                    └─ install → <share>/amd_smi/tests/
+        ├─ file(GLOB_RECURSE ... CONFIGURE_DEPENDS unit/*.cc functional/*.cc)
+        │     └─ amdsmitst (excluding unit/gpu/pcie_metrics_test.cc)
+        ├─ amdsmi_pcie_metrics_test (unit/gpu/pcie_metrics_test.cc)
+        └─ install both → <share>/amd_smi/tests/
 ```
 
-Suite names are the only selection mechanism — `<Component><Type>[<Operation>]`:
+Within each executable, select suites with `<Component><Type>[<Operation>]`:
 
 ```text
                  ┌──────────────── component ────────────────┐
@@ -150,10 +147,11 @@ The install target remaps the tree to the historical path:
 ## Selection matrix
 
 ```text
-  intent                 │ Python                       │ C++ (amdsmitst)
+  intent                 │ Python                       │ C++
   ───────────────────────┼──────────────────────────────┼──────────────────────────
-  list tests             │ <runner> -l                  │ --gtest_list_tests
-  unit only              │ unit_tests.py                │ --gtest_filter="*Unit*"
+  list tests             │ <runner> -l                  │ --gtest_list_tests on both binaries
+  unit only              │ unit_tests.py                │ amdsmitst --gtest_filter="*Unit*"
+                         │                              │ then amdsmi_pcie_metrics_test
   all functional         │ integration_test.py          │ "*Functional*"
   read-only / read-write │ ── not distinguished ──      │ "*FunctionalReadOnly*" /
                          │                              │ "*FunctionalReadWrite*"
@@ -166,6 +164,14 @@ The install target remaps the tree to the historical path:
 ```
 
 ## Auxiliary suites (no GPU)
+
+For all C++ unit tests, run both binaries from the build or installed tests directory:
+
+```sh
+./amdsmitst --gtest_filter="*Unit*" && ./amdsmi_pcie_metrics_test
+```
+
+For the PCIe suite alone, see the [scoped CTest command](../docs/conceptual/test-design.md#cmake-integration).
 
 ```text
 tests/
@@ -186,6 +192,7 @@ tests/
 
  CI (.github/workflows/)
    amdsmi-build.yml ──► run_amdsmi_build.py → build+install
+                        └─► ./amdsmi_pcie_metrics_test (log and XML artifacts)
                         └─► source amdsmitst.exclude; detect_asic_filter.sh
                             ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
                             ./integration_test.py -v
@@ -219,6 +226,7 @@ cd /opt/rocm/share/amd_smi/tests
 source amdsmitst.exclude
 source detect_asic_filter.sh
 sudo ./amdsmitst --gtest_filter="*Unit*.*-${GTEST_EXCLUDE}" -v 1 > _c_unit_test.log 2> _c_unit_test_err.log
+./amdsmi_pcie_metrics_test >> _c_unit_test.log 2>> _c_unit_test_err.log
 sudo ./amdsmitst --gtest_filter="*Functional*.*-${GTEST_EXCLUDE}" -v 1 > _c_func_test.log 2> _c_func_test_err.log
 sudo ./amdsmitst --gtest_filter="*Integration*.*-${GTEST_EXCLUDE}" -v 1 > _c_intg_test.log 2> _c_intg_test_err.log
 ```
@@ -240,6 +248,7 @@ To run without ASIC-specific exclusions (uses only the global blacklist):
 cd /opt/rocm/share/amd_smi/tests
 source amdsmitst.exclude
 sudo ./amdsmitst --gtest_filter="*Unit*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_unit_test.log 2> _c_unit_test_err.log
+./amdsmi_pcie_metrics_test >> _c_unit_test.log 2>> _c_unit_test_err.log
 sudo ./amdsmitst --gtest_filter="*Functional*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_func_test.log 2> _c_func_test_err.log
 sudo ./amdsmitst --gtest_filter="*Integration*.*-${BLACKLIST_ALL_ASICS}" -v 1 > _c_intg_test.log 2> _c_intg_test_err.log
 ```
