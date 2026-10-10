@@ -1025,7 +1025,7 @@ if(BUILD_TESTS)
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
       DdaFabricSimpleMPITests.cpp
-      DdaIpcReduceScatterMPITests.cpp
+      DdaIpcIndexDataMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
