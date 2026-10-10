@@ -8,18 +8,23 @@
 #include <rccl/rccl.h>
 #include <atomic>
 #include <new>
+#include <cerrno>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <vector>
 
+#include <signal.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "StandaloneUtils.hpp"
+#include "register.h"
 
 namespace RcclUnitTesting
 {
@@ -325,6 +330,7 @@ enum P2pCollChildExit {
     CHILD_OK   = 0,  // ran the full sequence, result correct
     CHILD_FAIL = 1,  // a HIP/NCCL error or a wrong AllReduce result
     CHILD_SKIP = 2,  // preconditions not met (too few GPUs / no direct P2P)
+    CHILD_SKIP_NO_IPC = 3,  // segReuseRunRank only: the buffer was not IPC-registered
 };
 
 // Runs entirely inside a forked child process — first HIP/NCCL call is here.
@@ -539,6 +545,128 @@ static void testP2pThenCollectiveSameBuffer()
     }
 }
 
+// Regression test for NCCL 2.32.3 (NVIDIA/nccl#2362): rank 0 sends from the first, then the second half of one
+// registered buffer, each half its own cuMem segment; before the fix the reused IPC import covered only the first.
+// numSegments == 1 is the control. One process per rank: a same-process multi-segment import hangs.
+static int segReuseRunRank(int rank, int numSegments, P2pCollShared* shared)
+{
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    // Rank 0 decides for both, as in p2pCollRunRank, so the ranks cannot disagree and leave one waiting in init.
+    if (rank == 0) {
+        int numDevices = 0;
+        CHILD_HC(hipGetDeviceCount(&numDevices));
+        const bool usable = numDevices >= 2 && deviceSupportsCuMemVmm(0) && deviceSupportsCuMemVmm(1);
+        if (usable) CHILD_NC(ncclGetUniqueId(&shared->id));
+        shared->state.store(usable ? P2pCollState::Ready : P2pCollState::Skip, std::memory_order_release);
+    }
+    P2pCollState st;
+    while ((st = shared->state.load(std::memory_order_acquire)) == P2pCollState::NotReady) { /* spin */ }
+    if (st == P2pCollState::Skip) {
+        printf("[rank %d] skip: needs 2 GPUs with cuMem VMM (gfx942, gfx950 or gfx1250)\n", rank);
+        return CHILD_SKIP;
+    }
+    CHILD_HC(hipSetDevice(rank));
+    // Init before the pageable H2D copy below: on ROCm 7.0.2 it can make init's 512 MiB cuMem allocation fail.
+    ncclComm_t comm;
+    CHILD_NC(ncclCommInitRank(&comm, 2, shared->id, rank));
+    hipMemAllocationProp prop = {};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location = {hipMemLocationTypeDevice, rank};
+    prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
+    size_t gran = 0;
+    CHILD_HC(hipMemGetAllocationGranularity(&gran, &prop, hipMemAllocationGranularityMinimum));
+    const size_t half = ((size_t(2) << 20) + gran - 1) / gran * gran, total = 2 * half, chunk = half / 2,
+                 segBytes = total / numSegments;
+    char* buf = nullptr;
+    CHILD_HC(hipMemAddressReserve(reinterpret_cast<void**>(&buf), total, 0, nullptr, 0));
+    for (int i = 0; i < numSegments; i++) {
+        hipMemGenericAllocationHandle_t handle;
+        CHILD_HC(hipMemCreate(&handle, segBytes, &prop, 0));
+        CHILD_HC(hipMemMap(buf + i * segBytes, segBytes, 0, handle, 0));
+    }
+    const hipMemAccessDesc access = {prop.location, hipMemAccessFlagsProtReadWrite};
+    CHILD_HC(hipMemSetAccess(buf, total, &access, 1));
+    // RCCL registers segment by segment only when the cuMem range at the buffer's start is shorter than the buffer
+    // (src/transport/p2p.cc); were it the whole reservation, the MultiSegment case would take the control's path.
+    void* rangeBase = nullptr;
+    size_t rangeSize = 0;
+    CHILD_HC(hipMemGetAddressRange(&rangeBase, &rangeSize, buf));
+    if (rangeBase != buf || rangeSize != segBytes) {
+        printf("[rank %d] cuMem range at the buffer is %zu bytes at %p, expected one %zu-byte segment at %p\n", rank,
+               rangeSize, rangeBase, segBytes, static_cast<void*>(buf));
+        return CHILD_FAIL;
+    }
+    std::vector<uint32_t> ramp(total / sizeof(uint32_t)), got(chunk / sizeof(uint32_t));
+    for (size_t i = 0; i < ramp.size(); i++) ramp[i] = static_cast<uint32_t>(i + 1);
+    CHILD_HC(rank == 0 ? hipMemcpy(buf, ramp.data(), total, hipMemcpyHostToDevice) : hipMemset(buf, 0, total));
+    hipStream_t stream;
+    void* reg = nullptr;
+    CHILD_HC(hipStreamCreate(&stream));
+    CHILD_NC(ncclCommRegister(comm, buf, total, &reg));
+    for (size_t off : {size_t(0), half}) {
+        CHILD_NC(rank == 0 ? ncclSend(buf + off, chunk, ncclChar, 1, comm, stream)
+                           : ncclRecv(buf + off, chunk, ncclChar, 0, comm, stream));
+        CHILD_HC(hipStreamSynchronize(stream));
+        CHILD_HC(hipMemcpy(got.data(), buf + off, chunk, hipMemcpyDeviceToHost));
+        if (memcmp(got.data(), &ramp[off / sizeof(uint32_t)], chunk) != 0) {
+            printf("[rank %d] chunk at offset %zu holds wrong data\n", rank, off);
+            return CHILD_FAIL;
+        }
+    }
+    const bool ipcReg = reg && (static_cast<ncclReg*>(reg)->state & IPC_REG_COMPLETE);
+    if (!ipcReg) {
+        // RCCL keeps cuMem on only with VMM support, a cuMem-capable HIP driver and Linux >= 6.8
+        // (src/misc/rocmwrap.cc). With all three in place, the transfer took no P2P read/write path.
+        int vmm = 0, driver = 0;
+        (void)hipDeviceGetAttribute(&vmm, hipDeviceAttributeVirtualMemoryManagementSupported, rank);
+        (void)hipDriverGetVersion(&driver);
+        utsname os = {};
+        (void)uname(&os);
+        printf("[rank %d] skip: buffer not IPC-registered; VMM attribute %d, HIP driver %d, kernel %s\n", rank, vmm,
+               driver, os.release);
+    }
+    CHILD_NC(ncclCommDestroy(comm));
+    return ipcReg ? CHILD_OK : CHILD_SKIP_NO_IPC;
+}
+
+static void testP2pIpcSegmentReuse(int numSegments)
+{
+    P2pCollShared* shared = static_cast<P2pCollShared*>(mmap(
+        nullptr, sizeof(P2pCollShared), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+    ASSERT_NE(shared, MAP_FAILED) << "mmap for shared bootstrap failed";
+    new (&shared->state) std::atomic<P2pCollState>(P2pCollState::NotReady);
+    fflush(NULL);
+    pid_t pids[2];
+    for (int r = 0; r < 2; r++) {
+        pids[r] = fork();
+        ASSERT_GE(pids[r], 0) << "fork() failed for rank " << r;
+        if (pids[r] == 0) _exit(segReuseRunRank(r, numSegments, shared));
+    }
+    bool noGpus = false, noIpc = false;
+    for (int n = 0; n < 2; n++) {
+        int status = 0;
+        const pid_t pid = waitpid(-1, &status, 0);
+        if (pid < 0) {
+            ADD_FAILURE() << "waitpid failed: " << strerror(errno);
+            break;
+        }
+        const int r = pid == pids[0] ? 0 : 1;
+        const int code = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+        noGpus |= code == CHILD_SKIP;
+        noIpc |= code == CHILD_SKIP_NO_IPC;
+        if (code == CHILD_OK || code == CHILD_SKIP || code == CHILD_SKIP_NO_IPC) continue;
+        ADD_FAILURE() << "Rank " << r << " failed with exit code " << code << " (128 + signal if killed)";
+        if (n == 0) kill(pids[1 - r], SIGKILL); // the peer of a faulted rank blocks in the transfer
+    }
+    munmap(shared, sizeof(P2pCollShared));
+    if (::testing::Test::HasFailure()) return;
+    if (noGpus) GTEST_SKIP() << "Needs 2 GPUs with cuMem VMM (gfx942, gfx950 or gfx1250).";
+    if (noIpc)
+        GTEST_SKIP() << "Buffer not IPC-registered: cuMem is off, or the transfer took no P2P read/write path. "
+                        "Each rank printed its VMM attribute, HIP driver version and kernel release.";
+}
+
 /**
  * @brief Test deregistering NULL handle (should succeed as no-op)
  */
@@ -671,6 +799,17 @@ TEST(Register, ProcessIsolatedRegisterTests)
         ProcessIsolatedTestRunner::TestConfig("WindowRegisterSingleRankNonSymTeardown", testWindowRegisterSingleRankNonSymTeardown)
             .withEnvironment({{"NCCL_CUMEM_ENABLE", "0"}, {"NCCL_LOCAL_REGISTER", "1"}})
     );
+}
+
+TEST(Register, P2pIpcSegmentReuse)
+{
+    auto config = [](const char* name, int numSegments) {
+        return makeEnabledConfig(name, [numSegments]() { testP2pIpcSegmentReuse(numSegments); })
+            .setVariable("NCCL_CUMEM_ENABLE", "1").setVariable("NCCL_MULTI_SEGMENT_REGISTER", "1")
+            .withNumGpus(2).withTimeout(std::chrono::seconds(120));
+    };
+    RUN_ISOLATED_TESTS(config("P2pIpcSegmentReuse_MultiSegment", 2),
+                       config("P2pIpcSegmentReuse_SingleSegment", 1));
 }
 
 } // namespace RcclUnitTesting
