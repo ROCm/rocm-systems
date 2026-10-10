@@ -3775,6 +3775,21 @@ if(RJ_ENABLE_HIP_TESTS)
             "HipVectorAddTest.CorrectResult"
             CONFIG ${RJ_HIP_TEST_CONFIG}
         )
+        if(RJ_HIP_TEST_ARCH MATCHES "^(gfx942|gfx950)$")
+            rj_add_hip_test(hip_instruction_failure_test ARCH ${RJ_HIP_TEST_ARCH})
+            rj_add_hip_test_case(
+                hip_instruction_failure_test
+                "HipInstructionFailureTest.UnsupportedInstructionExitsWithFailure"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                TIMEOUT 20
+            )
+            rj_add_hip_test_case(
+                hip_instruction_failure_test
+                "HipInstructionFailureTest.DecodeFailureExitsWithFailure"
+                CONFIG ${RJ_HIP_TEST_CONFIG}
+                TIMEOUT 20
+            )
+        endif()
 
         # --- Daemon RPC tests (gtest-driven) ---
         # A gtest fixture manages the daemon lifecycle: fork+exec the daemon in
@@ -3833,6 +3848,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_HIP_MEMCPY_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_memcpy_test"
                 RJ_HIP_RCCL_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_rccl_test"
                 RJ_INTERPOSER_DUP_BIN="$<TARGET_FILE:interposer_dup_test>"
+                RJ_HIP_INSTRUCTION_FAILURE_BIN="${CMAKE_CURRENT_BINARY_DIR}/hip_instruction_failure_test"
                 RJ_DAEMON_LOGGING_CONFIG="${CMAKE_CURRENT_BINARY_DIR}/daemon_logging_config.json"
                 RJ_DAEMON_LOGGING_SINK_TOKEN="__RJ_DAEMON_SINK_DIR__"
                 RJ_INSTALLED_DAEMON_BIN="${_rj_installed_rocjitsu_bin}"
@@ -3843,6 +3859,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RJ_INSTALLED_HIP_MEMCPY_BIN="hip_memcpy_test"
                 RJ_INSTALLED_HIP_RCCL_BIN="hip_rccl_test"
                 RJ_INSTALLED_INTERPOSER_DUP_BIN="interposer_dup_test"
+                RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN="hip_instruction_failure_test"
                 RJ_INSTALLED_DAEMON_LOGGING_CONFIG="${_rj_installed_daemon_logging_config}"
         )
         target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
@@ -3864,6 +3881,19 @@ if(RJ_ENABLE_HIP_TESTS)
             DaemonTest.HipMemcpyDeviceToDevice
             DaemonTest.TwoIndependentClients
         )
+        set(RJ_DAEMON_FAILURE_TESTS)
+        if(TARGET hip_instruction_failure_test_target)
+            target_compile_definitions(
+                daemon_test
+                PRIVATE RJ_HAS_INSTRUCTION_FAILURE_TEST
+            )
+            add_dependencies(daemon_test hip_instruction_failure_test_target)
+            set(RJ_DAEMON_FAILURE_TESTS
+                DaemonTest.HipUnsupportedInstructionExitsWithFailure
+                DaemonTest.HipDecodeFailureExitsWithFailure
+            )
+            list(APPEND RJ_DAEMON_HSA_TESTS ${RJ_DAEMON_FAILURE_TESTS})
+        endif()
         set(RJ_DAEMON_TESTS
             ${RJ_DAEMON_HSA_TESTS}
             DaemonTest.ForkserverChildrenInitializeIndependentBackends
@@ -3896,13 +3926,17 @@ if(RJ_ENABLE_HIP_TESTS)
         endif()
         foreach(TC IN LISTS RJ_DAEMON_TESTS)
             set(_daemon_test_env)
+            set(_daemon_test_timeout 120)
+            if(TC IN_LIST RJ_DAEMON_FAILURE_TESTS)
+                set(_daemon_test_timeout 20)
+            endif()
             if(TC IN_LIST RJ_DAEMON_HSA_TESTS)
                 list(APPEND _daemon_test_env ${RJ_HIP_ASAN_ENV})
             endif()
             rj_add_test(
                 NAME ${TC}
                 COMMAND daemon_test --gtest_filter=${TC}
-                TIMEOUT 120
+                TIMEOUT ${_daemon_test_timeout}
                 LABELS daemon
                 ENVIRONMENT ${_daemon_test_env}
                 INSTALL_COMMAND

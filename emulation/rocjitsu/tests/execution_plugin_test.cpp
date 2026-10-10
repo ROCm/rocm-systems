@@ -2429,6 +2429,38 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
   EXPECT_EQ(summary.mnemonic_executions, dispatch.mnemonic_executions);
 }
 
+TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutCompletingDispatch) {
+  PluginFixture f(/*num_wf_slots=*/1);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(
+      f.plugin_group_->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint32_t kSCbranchIFork = 0xB8000000u;
+  const uint32_t code[] = {S_NOP, kSCbranchIFork, S_ENDPGM};
+  f.run_kernel(code, std::size(code));
+  ASSERT_EQ(f.engine->last_exit().code, 1);
+  EXPECT_TRUE(f.cu()->is_idle());
+  f.shutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  const auto &summary = records.front();
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 0u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 2u);
+  EXPECT_EQ(summary.mnemonic_executions.count("s_endpgm"), 0u);
+  ASSERT_EQ(summary.mnemonic_executions.count("s_nop"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+  ASSERT_EQ(summary.mnemonic_executions.count("s_cbranch_i_fork"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_cbranch_i_fork"), 1u);
+}
+
 // The instruction-mix report is only joinable with the throughput report if
 // the two plugins agree on what family an instruction is in. They now classify
 // through one shared header (plugins/instruction_family.h) rather than through

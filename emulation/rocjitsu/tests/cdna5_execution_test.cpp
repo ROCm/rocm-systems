@@ -4642,8 +4642,8 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectsUnprovenShiftCountsBeforeAnyDestinati
 TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulatorFailure) {
   constexpr uint32_t kLiteral = 101u;
   // Public LLVM gfx1251_asm_vop3p.s encoding for
-  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. The s_endpgm must never
-  // be needed to retire the rejected instruction's workgroup.
+  // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]. Cancel the rejected
+  // dispatch without executing s_endpgm or publishing successful completion.
   constexpr std::array<uint32_t, 4> kCode{0xCC7E4004u, 0x1C41FF08u, kLiteral, S_ENDPGM_GFX12};
   constexpr uint64_t kSignalAddress = 0x20000;
   constexpr uint32_t kSignalValueOffset = 8;
@@ -4670,6 +4670,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   packet.completion_signal.handle = kSignalAddress;
   queue.submit(packet);
 
+  ASSERT_TRUE(sim.engine->step());
+  ASSERT_NE(sim.cu()->wf(0), nullptr);
+  const uint32_t dispatch_id = sim.cu()->wf(0)->dispatch_id();
+  ASSERT_TRUE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
   while (sim.engine->step()) {
   }
 
@@ -4678,8 +4682,10 @@ TEST(Gfx1251PackedU64ExecutionTest, RejectedCountTerminatesDispatchWithSimulator
   EXPECT_EQ(exit.code, 1);
   EXPECT_NE(exit.message.find("v_pk_lshl_add_u64"), std::string::npos);
   EXPECT_FALSE(sim.cu()->has_active_wfs());
-  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 0u)
-      << "the rejected dispatch must still publish its workgroup completion";
+  EXPECT_TRUE(sim.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(sim.cp()->has_dispatch_for_test(1, 0, dispatch_id));
+  EXPECT_EQ(sim.memory->read64(kSignalAddress + kSignalValueOffset), 1u)
+      << "the rejected dispatch must not publish successful completion";
 }
 
 TEST(Gfx1251PackedU64ExecutionTest, ExecutesEveryPublicLlvmSourceForm) {

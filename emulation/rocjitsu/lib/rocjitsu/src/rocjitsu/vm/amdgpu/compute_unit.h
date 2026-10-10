@@ -1309,6 +1309,9 @@ protected:
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
 
+  /// @brief Cancel an unhandled decode or execution failure without successful completion.
+  void handle_instruction_failure(Wavefront &wf, const std::string &failure);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
@@ -1317,13 +1320,17 @@ protected:
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
-  struct PendingVmFault {
+  struct PendingDispatchFailure {
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint32_t dispatch_id = 0;
-    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+    /// Empty for an instruction failure; a value preserves VM-fault reporting.
+    std::optional<VmAccessOutcome> vm_outcome;
   };
-  std::vector<PendingVmFault> pending_vm_faults_;
+  /// @brief Dispatch failures deferred until the wave-state lock is dropped.
+  /// @details Drained before workgroup completions so the CP marks failed
+  /// dispatches and queues before a completion can publish success.
+  std::vector<PendingDispatchFailure> pending_dispatch_failures_;
   /// @brief Runtime queue exceptions raised while the wave-state lock was held.
   /// @details Drained before workgroup completions so an error cannot race a
   /// successful completion from a later instruction.
