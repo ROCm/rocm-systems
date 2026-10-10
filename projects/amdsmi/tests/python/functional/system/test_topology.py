@@ -213,7 +213,7 @@ class TestSystemTopology(unittest.TestCase):
 
         for i, gpu in enumerate(self.common.processors):
             self.common.print_device_header(i)
-            msg = f"\t### amdsmi.amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_good_counter_types}):"
+            msg = f"\t### amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_good_counter_types}):"
             try:
                 util_count = amdsmi.amdsmi_get_utilization_count(gpu, util_good_counter_types)
                 self.common.print(msg, util_count)
@@ -223,7 +223,7 @@ class TestSystemTopology(unittest.TestCase):
                     self.raise_exception = e
 
             # With invalid entry
-            msg = f"\t### amdsmi.amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_bad_counter_types}):"
+            msg = f"\t### amdsmi_get_utilization_count(gpu={i}, utilization_counter_types={util_bad_counter_types}):"
             try:
                 util_count = amdsmi.amdsmi_get_utilization_count(gpu, util_bad_counter_types)
                 self.common.print(msg, util_count)
