@@ -393,6 +393,39 @@ TEST(WaitcheckStream, LegacyTargetsDecodeTheirOwnPackedWaitLayouts) {
   }
 }
 
+TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    // ds_read_b32 v0, v1 gds; s_waitcnt lgkmcnt(0); read v0; overwrite v1.
+    Program program{0xd86d0000u, 1u, 0xbf8cc07fu, v_mov(3, 0), v_mov(1, 2)};
+    const auto report = analyze(program, arch);
+    ASSERT_FALSE(report.incomplete);
+    EXPECT_EQ(report.instructions_analyzed, 4u);
+    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+      EXPECT_TRUE(report.diagnostics.empty());
+    } else {
+      ASSERT_EQ(report.diagnostics.size(), 1u);
+      EXPECT_EQ(report.diagnostics[0].counter, WaitCounterKind::Exp);
+      EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
+      EXPECT_EQ(report.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 1, 1}));
+      EXPECT_EQ(report.diagnostics[0].required_wait, "s_waitcnt expcnt(0)");
+      program.insert(program.end() - 1, 0xbf8ccf0fu); // s_waitcnt expcnt(0).
+      const auto waited = analyze(program, arch);
+      ASSERT_FALSE(waited.incomplete);
+      EXPECT_TRUE(waited.diagnostics.empty());
+    }
+  }
+
+  // Removing EXP must preserve the CDNA4 returned-value dependency on LGKM.
+  const auto missing_wait = analyze({0xd86d0000u, 1u, v_mov(3, 0)}, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_FALSE(missing_wait.incomplete);
+  ASSERT_EQ(missing_wait.diagnostics.size(), 1u);
+  EXPECT_EQ(missing_wait.diagnostics[0].counter, WaitCounterKind::Ds);
+  EXPECT_EQ(missing_wait.diagnostics[0].access, WaitcheckAccess::Read);
+  EXPECT_EQ(missing_wait.diagnostics[0].reg, (RegisterRef{RegClass::VGPR, 0, 1}));
+  EXPECT_EQ(missing_wait.diagnostics[0].required_wait, "s_waitcnt lgkmcnt(0)");
+}
+
 TEST(WaitcheckStream, CdnaPreservesCommittedAndLiveInGenerations) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     for (uint32_t establish : {v_mov(4, 2), v_mov(5, 4)}) {
