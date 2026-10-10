@@ -120,6 +120,7 @@ static int ibvSpeeds[] = {
   2500,  /* SDR */
   5000,  /* DDR */
   10000, /* QDR */
+  10000, /* FDR10 */
   14000, /* FDR */
   25000, /* EDR */
   50000, /* HDR */
@@ -138,6 +139,16 @@ static int IbCastWidth(int width) {
 static int IbCastSpeed(int speed) {
   return ibvSpeeds[firstBitSet(speed, sizeof(ibvSpeeds) / sizeof(int) - 1)];
 }
+
+extern "C" int ncclIbCastTestSpeed(int speed) { return IbCastSpeed(speed); }
+
+extern "C" ncclResult_t ncclIbCastTestSpeedSource(int dev, int* fromQuery) {
+  if (fromQuery == NULL || dev < 0 || dev >= IbCastNDevs) return ncclInvalidArgument;
+  *fromQuery = IbCastDevs[dev].speedFromQuery ? 1 : 0;
+  return ncclSuccess;
+}
+
+extern "C" int ncclIbCastTestGetNDevs(void) { return IbCastNDevs; }
 
 // Determine whether RELAXED_ORDERING is enabled and possible
 static int IbCastRelaxedOrderingCapable(void) {
@@ -501,12 +512,16 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].portAttr = portAttr;
             IbCastDevs[IbCastNDevs].portNum = port_num;
             IbCastDevs[IbCastNDevs].link = portAttr.link_layer;
-            if (portAttr.active_speed_ex) {
-              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
-              IbCastDevs[IbCastNDevs].speed =
-                IbCastSpeed(portAttr.active_speed_ex) * IbCastWidth(portAttr.active_width);
+            uint64_t querySpeed = 0;
+            if (wrap_ibv_query_port_speed(context, port_num, &querySpeed) == ncclSuccess && querySpeed != 0) {
+              // ibv_query_port_speed returns speed in granularity of 100 Mbps
+              IbCastDevs[IbCastNDevs].speed = querySpeed * 100;
+              IbCastDevs[IbCastNDevs].speedFromQuery = true;
             } else {
-              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portAttr.active_speed) * IbCastWidth(portAttr.active_width);
+              // A non-zero active_speed_ex indicates XDR rate (0x100) or higher
+              int portSpeed = portAttr.active_speed_ex ? portAttr.active_speed_ex : portAttr.active_speed;
+              IbCastDevs[IbCastNDevs].speed = IbCastSpeed(portSpeed) * IbCastWidth(portAttr.active_width);
+              IbCastDevs[IbCastNDevs].speedFromQuery = false;
             }
             IbCastDevs[IbCastNDevs].context = context;
             IbCastDevs[IbCastNDevs].pdRefs = 0;
@@ -716,11 +731,28 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
+  // IbCastInitDevices() increments netRefCount before it can fail, so any step below that fails
+  // must unwind what already succeeded itself: init()/finalize() is a strict pair in the net
+  // plugin contract, and finalize() is only ever called after a successful init().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
   // After IbCastInitDevices: the probe QPs must use the final IbCastUseInline, like the resiliency QPs.
-  NCCLCHECK(IbCastCapProbeDevices());
-  NCCLCHECK(IbCastPortRecoveryThreadStart());
-  NCCLCHECK(ncclCalloc(&netCommConfig, 1));
+  // IbCastCapProbeDevices() always returns ncclSuccess today (probe failures are cached per-device and
+  // WARN-logged, not propagated) and each probe fully tears down its own QP/MR/CQ/PD in its own cleanup
+  // path before returning, so finalize here never has to unwind a half-built per-port resource. This
+  // check is defensive: it stays correct if the probe ever gains a real failure path.
+  if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = IbCastPortRecoveryThreadStart()) != ncclSuccess) {
+    IbCastFinalizeDevices();
+    return ret;
+  }
+  if ((ret = ncclCalloc(&netCommConfig, 1)) != ncclSuccess) {
+    IbCastPortRecoveryThreadStop();
+    IbCastFinalizeDevices();
+    return ret;
+  }
   netCommConfig->trafficClass = config->trafficClass;
   *ctx = (void*)netCommConfig;
   return ret;

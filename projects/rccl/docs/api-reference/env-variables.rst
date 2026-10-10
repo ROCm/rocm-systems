@@ -316,13 +316,17 @@ in the following table.
         | See InfiniBand ``show_gids`` command for valid values
 
     * - | ``NCCL_IB_QUERY_PORT_SPEED``
-        | Controls whether RCCL queries the extended port speed
-          (``ibv_query_port`` active speed extension) for bandwidth reporting.
-          Disabling it falls back to the legacy ``active_speed``/
-          ``active_width`` computation and disables runtime speed-change
-          detection.
-      - | ``1``: Query the extended speed (default).
-        | ``0``: Use the legacy speed field only.
+        | Controls whether RCCL queries the port speed with
+          ``ibv_query_port_speed`` (``IBVERBS_1.16``) when it initializes
+          devices. Applies to both the ``IB`` and ``IB-CAST`` transports. If
+          the installed ``libibverbs`` does not export this function, or the
+          query fails, RCCL falls back to the port's ``active_speed_ex``
+          (for ``XDR`` or newer rates) or ``active_speed``, combined with
+          ``active_width``. Disabling it also turns off runtime speed-change
+          detection, which only the ``IB`` transport supports.
+      - | ``1``: Query the port speed (default).
+        | ``0``: Use ``active_speed_ex``/``active_speed`` and
+          ``active_width`` only.
 
     * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
         | Enables subnet-aware device selection.

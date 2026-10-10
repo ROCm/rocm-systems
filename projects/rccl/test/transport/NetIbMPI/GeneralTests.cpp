@@ -7,6 +7,9 @@
 #include "NetIbMPITestBase.hpp"
 #include <sstream>
 #include <array>
+#include <map>
+#include <string>
+#include <utility>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -75,6 +78,97 @@ TEST_F(NetIbMPITest, GetDevicePropertiesInvalidDevice) {
     // Invalid device ID (too large)
     ncclResult_t result = GetDeviceProperties(ndev + kInvalidDeviceOffset, &props);
     EXPECT_NE(result, ncclSuccess) << "Should fail for invalid device ID";
+}
+
+// NCCL_IB_QUERY_PORT_SPEED parity: IB and IB-CAST must derive the same port
+// speed, whether through ibv_query_port_speed (IBVERBS_1.16) or the
+// active_speed(_ex)/active_width fallback. Devices are matched by (name, port)
+// because the two plugins may enumerate a different set, and a multi-port HCA
+// reuses the same name across ports.
+TEST_F(NetIbMPITest, CastPortSpeedMatchesIb) {
+    SKIP_UNLESS_MPI_PREREQS(kMinProcessesForMPI, MPITestConstants::kNoProcessLimit,
+                                         kRequirePowerOfTwo, 1, kNoNodeLimit);
+
+    net_ = &ncclNetIb;
+    int ndevIb = 0;
+    AssertInitAndGetDevices(&ndevIb);
+
+    std::map<std::pair<std::string, int>, int> ibSpeeds;
+    for (int i = 0; i < ndevIb; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(GetDeviceProperties(i, &props), ncclSuccess) << "IB device " << i;
+        ibSpeeds[{props.name, props.port}] = props.speed;
+    }
+
+    void* castCtx = nullptr;
+    ncclNetCommConfig_t commConfig = {};
+    commConfig.trafficClass = NCCL_NET_TRAFFIC_CLASS_UNDEF;
+    bool localInitOk = netIbCast.init(&castCtx, 0, &commConfig, nullptr, nullptr) == ncclSuccess;
+    {
+        int localInitFailed = localInitOk ? 0 : 1, anyInitFailed = 0;
+        MPI_Allreduce(&localInitFailed, &anyInitFailed, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+        if (anyInitFailed) {
+            // IbCastInit() unwinds its own partial state on failure, so only a rank whose
+            // own init succeeded needs to finalize before skipping alongside a peer that failed.
+            if (localInitOk) netIbCast.finalize(castCtx);
+            GTEST_SKIP() << "IB-CAST plugin failed to initialize on at least one rank";
+        }
+    }
+    struct CastFinalizer {
+        void* ctx;
+        ~CastFinalizer() { netIbCast.finalize(ctx); }
+    } castFinalizer{castCtx};
+
+    // NCCL_IB_QUERY_PORT_SPEED=0 is the only deterministic guarantee the plugin makes: the
+    // query path is skipped entirely, so every raw device's speed must come from the
+    // active_speed(_ex)/active_width fallback. When the query path is enabled we do NOT assert
+    // fromQuery is set, since a verb error or a legitimate querySpeed==0 result also falls
+    // through to the fallback — that's not a bug, so probing for symbol availability and
+    // asserting against it would just make the test flaky.
+    const char* queryEnv = getenv("NCCL_IB_QUERY_PORT_SPEED");
+    bool queryDisabledByEnv = queryEnv && strcmp(queryEnv, "0") == 0;
+    if (queryDisabledByEnv) {
+        int nRawDevs = ncclIbCastTestGetNDevs();
+        for (int d = 0; d < nRawDevs; d++) {
+            int fromQuery = -1;
+            ASSERT_EQ(ncclIbCastTestSpeedSource(d, &fromQuery), ncclSuccess) << "raw device " << d;
+            EXPECT_EQ(fromQuery, 0)
+                << "raw device " << d << " used ibv_query_port_speed() despite NCCL_IB_QUERY_PORT_SPEED=0";
+        }
+    }
+
+    int ndevCast = 0;
+    ASSERT_EQ(netIbCast.devices(&ndevCast), ncclSuccess);
+
+    int matched = 0;
+    for (int i = 0; i < ndevCast; i++) {
+        ncclNetProperties_t props;
+        memset(&props, 0, sizeof(props));
+        ASSERT_EQ(netIbCast.getProperties(i, &props), ncclSuccess) << "IB-CAST device " << i;
+        EXPECT_GT(props.speed, 0) << "IB-CAST device " << props.name << " has invalid speed";
+        auto it = ibSpeeds.find({props.name, props.port});
+        // it->second == 0 means IB's own query returned 0 for this port; IB-CAST's querySpeed != 0
+        // guard (added by this PR) sends it down the non-zero fallback instead, so the two
+        // plugins deliberately diverge here rather than a mismatch worth failing on.
+        if (it == ibSpeeds.end() || it->second == 0) continue;
+        EXPECT_EQ(props.speed, it->second) << "Speed mismatch for " << props.name << " port " << props.port;
+        matched++;
+        if (MPIEnvironment::world_rank == 0) {
+            TEST_INFO("Device %s: IB speed=%d IB-CAST speed=%d", props.name, it->second, props.speed);
+        }
+    }
+
+    if (MPIEnvironment::world_rank == 0) {
+        const char* path = queryDisabledByEnv
+            ? "ibv_query_port_speed disabled (NCCL_IB_QUERY_PORT_SPEED=0), active_speed/active_width fallback"
+            : "ibv_query_port_speed enabled (default)";
+        TEST_INFO("Port speed source: %s; %d device(s) compared", path, matched);
+    }
+
+    int localNoMatch = (matched == 0) ? 1 : 0, anyNoMatch = 0;
+    MPI_Allreduce(&localNoMatch, &anyNoMatch, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (anyNoMatch) GTEST_SKIP() << "No device name common to IB and IB-CAST on at least one rank";
 }
 
 // Connection Setup Tests

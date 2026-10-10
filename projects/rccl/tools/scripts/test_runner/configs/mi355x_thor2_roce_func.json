@@ -321,6 +321,19 @@
           "name": "NetIB_Props_InvalidDevice",
           "description": "Test error handling when querying properties of invalid InfiniBand device",
           "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity",
+          "description": "IB and IB-CAST report the same per-device speed (ibv_query_port_speed when libibverbs exports it, else active_speed/active_width)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity_QueryDisabled",
+          "description": "IB and IB-CAST report the same per-device speed with NCCL_IB_QUERY_PORT_SPEED=0 (active_speed/active_width only)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb",
+          "env_variables": {
+            "NCCL_IB_QUERY_PORT_SPEED": "0"
+          }
         }
       ]
     },
@@ -1325,6 +1338,11 @@
           "name": "SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
         }
       ]
     },

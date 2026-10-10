@@ -135,6 +135,10 @@ struct alignas(64) ncclIbDev {
   int dmaBufSupported;
   int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
   int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
+  bool speedFromQuery;  // test-only: true if speed came from ibv_query_port_speed(), not the
+                        // active_speed(_ex)/active_width fallback. Lives here (not a shadow
+                        // array keyed by enumeration index) so it moves with the device when
+                        // qsort(IbCastDevs, ...) reorders devices by PCI order.
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
