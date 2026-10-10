@@ -884,7 +884,7 @@ set(_rj_l2_mutex_cases
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
-    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
 foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
     string(
@@ -895,10 +895,25 @@ endforeach()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test, plus the L2 mutex suite, are registered
-# separately so CTest can bound a deadlocked child process.
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit, SharedPool
+# handoff, concurrent-close, and L2 mutex tests are registered separately so
+# CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# Register separately to bound handoffs and shutdown with an external timeout.
+# The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while
+# joining issuers or destroying idle helpers.
+rj_add_test(
+    NAME "MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    RUN_SERIAL
+    TIMEOUT 40
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+)
 
 # A failed assertion cannot bound a blocked join or jthread destructor. Give
 # each L2 mutex case its own process timeout in build-tree and installed tests.
