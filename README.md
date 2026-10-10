@@ -13,7 +13,7 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Source of Truth | Migration Status | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|
-| `amdsmi`               | Public          | Completed        |                                       |
+| `amdsmi`               | Public          | Completed        | [![AMDSMI CI](https://github.com/ROCm/rocm-systems/actions/workflows/amdsmi-build.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/amdsmi-build.yml) |
 | `aqlprofile`           | Public          | Completed        | [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml) |
 | `clr`                  | Public          | Completed         |                                       |
 | `hip`                  | Public          | Completed         |                                       |
