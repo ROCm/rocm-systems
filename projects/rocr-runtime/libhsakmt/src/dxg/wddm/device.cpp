@@ -1263,7 +1263,6 @@ bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
 // ================================================================================================
 bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
                                   uint64_t fence_value) {
-#if defined(WIN32)
   int priv_size = Wkmi::GetAqlSubmitPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
@@ -1282,7 +1281,6 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
     pr_err("fail %x\n", ret);
     return false;
   }
-#endif
   return true;
 }
 

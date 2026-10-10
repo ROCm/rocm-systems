@@ -693,7 +693,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
 #ifdef __linux__
-  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+  // PM4 emulation remains the default on Linux, but is now selectable at
+  // runtime: ROCR_USE_PM4=0 enables native AQL submission.
+  dxg_runtime->use_pm4_ = safe_env_to_int(getenv("ROCR_USE_PM4"), 1);
 #endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
