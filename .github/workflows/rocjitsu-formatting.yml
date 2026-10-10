@@ -1,4 +1,4 @@
-# Formatting checks for the emulation/ subtrees.
+# Formatting checks for the emulation/ and projects/clr/ subtrees.
 name: "rocjitsu-formatting"
 
 on:
@@ -15,6 +15,7 @@ on:
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
+      - "projects/clr/**"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
 
@@ -38,6 +39,7 @@ jobs:
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
+            projects/clr
             .github
 
       - uses: actions/setup-python@v5
