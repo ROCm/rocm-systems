@@ -1,0 +1,859 @@
+{
+  "system_configurations": {
+    "name": "RCCL-MI350P-PCIe-8GPU-Func",
+    "description": "Single-node 8x MI350P PCIe (gfx950, 1002:75a8). Debug build so rccl-UnitTestsFixturesDebug exists. AllReduce covers {Simple,LL} x {SHM,IPC} x Ring, plus LL x {SHM,IPC} x Tree, at channel counts 1,2,4,8,16,32,64. Tree+Simple is omitted: the gfx950 single-node tuner skips it and NCCL_ALGO=Tree then falls back to Ring. AllGather, ReduceScatter, and Broadcast spot checks are Ring only. AllToAll does not set NCCL_ALGO. SHM sets NCCL_P2P_DISABLE=1. IPC sets NCCL_SHM_DISABLE=1 and NCCL_P2P_LEVEL=SYS (cross-socket P2P). A labeled pull request runs --scope smoke (channels 1, 4, 32 plus the topology test and spot checks). Manual dispatch runs every enabled suite. The topology unit test needs no GPU."
+  },
+  "paths": {
+    "workdir": "${WORKDIR:-$PWD}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-${RCCL_TESTS_DIR:-$HOME/rccl-tests}/build}"
+  },
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "INFO",
+    "NCCL_IGNORE_CPU_AFFINITY": "1"
+  },
+  "mpi_args": [
+    "--mca pml ob1",
+    "--mca btl ^openib",
+    "--bind-to none"
+  ],
+  "build_configuration": {
+    "install_flags": [
+      "--debug",
+      "-t",
+      "--enable-mpi-tests",
+      "--no_clean",
+      "-l"
+    ],
+    "cmake_options": "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DBITCODE_LIB_ARCH=gfx950",
+    "parallel_jobs": 64
+  },
+  "rccl_tests_build_configuration": {
+    "enabled": true,
+    "source_dir": "${RCCL_TESTS_DIR:-${WORKDIR}/../rccl-tests}",
+    "install_script": "install.sh",
+    "install_flags": [
+      "--mpi",
+      "--gpu_targets",
+      "gfx950"
+    ],
+    "env_variables": {}
+  },
+  "test_configurations": {
+    "mi350p_topo_unit": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "test_binary_dir": "${GTEST_BIN_DIR:-${WORKDIR:-$PWD}/build/debug/test}",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 0,
+      "timeout": 120,
+      "tests": [
+        {
+          "name": "Mi350pPcieTopo_EightGfx950GpusNoXgmi",
+          "description": "CPU-only load of topo_8p_950_pcie.xml. Checks 8 gfx950 GPUs, device 0x75a8, PEX890 switches, and no XGMI paths.",
+          "test_filter": "Mi350pPcieTopo.EightGfx950GpusNoXgmi"
+        }
+      ]
+    },
+    "func_base": {
+      "is_gtest": false,
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 600,
+      "command_args": "-b 8 -e 16M -f 4 -g 1 -c 1 -n 20 -w 5"
+    },
+    "allreduce_smoke": {
+      "extends": "func_base",
+      "binary": "all_reduce_perf",
+      "description": "AllReduce cells RCCL can select on this host, channels 1, 4, and 32.",
+      "tests": [
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch1",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch1",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch1",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch1",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch1",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch1",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=1.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "1",
+            "NCCL_MAX_NCHANNELS": "1",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch4",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch4",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch4",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch4",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch4",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch4",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=4.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch32",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch32",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch32",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch32",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch32",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch32",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=32.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "32",
+            "NCCL_MAX_NCHANNELS": "32",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "allreduce_extra": {
+      "extends": "func_base",
+      "binary": "all_reduce_perf",
+      "description": "Same AllReduce cells at channels 2, 8, 16, and 64. Not part of --scope smoke.",
+      "tests": [
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch2",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch2",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch2",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch2",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch2",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch2",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=2.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "2",
+            "NCCL_MAX_NCHANNELS": "2",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch8",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch8",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch8",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch8",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch8",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch8",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=8.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "8",
+            "NCCL_MAX_NCHANNELS": "8",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch16",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch16",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch16",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch16",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch16",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch16",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=16.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "16",
+            "NCCL_MAX_NCHANNELS": "16",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_SHM_Ring_ch64",
+          "description": "AllReduce correctness: Simple + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_Simple_IPC_Ring_ch64",
+          "description": "AllReduce correctness: Simple + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Ring_ch64",
+          "description": "AllReduce correctness: LL + SHM + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Ring_ch64",
+          "description": "AllReduce correctness: LL + IPC + Ring, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllReduce_LL_SHM_Tree_ch64",
+          "description": "AllReduce correctness: LL + SHM + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Tree"
+          }
+        },
+        {
+          "name": "AllReduce_LL_IPC_Tree_ch64",
+          "description": "AllReduce correctness: LL + IPC + Tree, NCCL_MIN_NCHANNELS=NCCL_MAX_NCHANNELS=64.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "64",
+            "NCCL_MAX_NCHANNELS": "64",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Tree",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "all_gather_perf": {
+      "extends": "func_base",
+      "binary": "all_gather_perf",
+      "description": "AllGather spot checks. Ring only, 4 channels.",
+      "tests": [
+        {
+          "name": "AllGather_Simple_SHM_Ring_ch4",
+          "description": "AllGather correctness: Simple + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllGather_LL_SHM_Ring_ch4",
+          "description": "AllGather correctness: LL + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "AllGather_Simple_IPC_Ring_ch4",
+          "description": "AllGather correctness: Simple + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "AllGather_LL_IPC_Ring_ch4",
+          "description": "AllGather correctness: LL + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "reduce_scatter_perf": {
+      "extends": "func_base",
+      "binary": "reduce_scatter_perf",
+      "description": "ReduceScatter spot checks. Ring only, 4 channels.",
+      "tests": [
+        {
+          "name": "ReduceScatter_Simple_SHM_Ring_ch4",
+          "description": "ReduceScatter correctness: Simple + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "ReduceScatter_LL_SHM_Ring_ch4",
+          "description": "ReduceScatter correctness: LL + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "ReduceScatter_Simple_IPC_Ring_ch4",
+          "description": "ReduceScatter correctness: Simple + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "ReduceScatter_LL_IPC_Ring_ch4",
+          "description": "ReduceScatter correctness: LL + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "broadcast_perf": {
+      "extends": "func_base",
+      "binary": "broadcast_perf",
+      "description": "Broadcast spot checks. Ring only, 4 channels.",
+      "tests": [
+        {
+          "name": "Broadcast_Simple_SHM_Ring_ch4",
+          "description": "Broadcast correctness: Simple + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "Broadcast_LL_SHM_Ring_ch4",
+          "description": "Broadcast correctness: LL + SHM + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1",
+            "NCCL_ALGO": "Ring"
+          }
+        },
+        {
+          "name": "Broadcast_Simple_IPC_Ring_ch4",
+          "description": "Broadcast correctness: Simple + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "Simple",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        },
+        {
+          "name": "Broadcast_LL_IPC_Ring_ch4",
+          "description": "Broadcast correctness: LL + IPC + Ring, 4 channels. Tree is not a selectable algorithm for this collective.",
+          "env_variables": {
+            "NCCL_PROTO": "LL",
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_ALGO": "Ring",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    },
+    "alltoall_perf": {
+      "extends": "func_base",
+      "binary": "alltoall_perf",
+      "description": "AllToAll SHM and IPC spot checks at 4 channels. Protocol follows the message size and NCCL_P2P_LL_THRESHOLD, not NCCL_PROTO.",
+      "tests": [
+        {
+          "name": "AllToAll_SHM_ch4",
+          "description": "AllToAll correctness: SHM, 4 channels. NCCL_PROTO is left unset; AllToAll does not read it.",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "0",
+            "NCCL_P2P_DISABLE": "1"
+          }
+        },
+        {
+          "name": "AllToAll_IPC_ch4",
+          "description": "AllToAll correctness: IPC, 4 channels. NCCL_PROTO is left unset; AllToAll does not read it.",
+          "env_variables": {
+            "NCCL_MIN_NCHANNELS": "4",
+            "NCCL_MAX_NCHANNELS": "4",
+            "NCCL_SHM_DISABLE": "1",
+            "NCCL_P2P_DISABLE": "0",
+            "NCCL_P2P_LEVEL": "SYS"
+          }
+        }
+      ]
+    }
+  },
+  "test_suites": [
+    {
+      "name": "MI350P PCIe topology unit",
+      "description": "Host topology model, no GPU",
+      "config": "mi350p_topo_unit",
+      "enabled": true,
+      "smoke": true
+    },
+    {
+      "name": "MI350P AllReduce smoke",
+      "description": "Selectable AllReduce cells at 1, 4, and 32 channels",
+      "config": "allreduce_smoke",
+      "enabled": true,
+      "smoke": true
+    },
+    {
+      "name": "MI350P AllReduce extra channels",
+      "description": "Selectable AllReduce cells at 2, 8, 16, and 64 channels",
+      "config": "allreduce_extra",
+      "enabled": true,
+      "smoke": false
+    },
+    {
+      "name": "MI350P AllGather spot checks",
+      "description": "AllGather representative cells",
+      "config": "all_gather_perf",
+      "enabled": true,
+      "smoke": true
+    },
+    {
+      "name": "MI350P ReduceScatter spot checks",
+      "description": "ReduceScatter representative cells",
+      "config": "reduce_scatter_perf",
+      "enabled": true,
+      "smoke": true
+    },
+    {
+      "name": "MI350P Broadcast spot checks",
+      "description": "Broadcast representative cells",
+      "config": "broadcast_perf",
+      "enabled": true,
+      "smoke": true
+    },
+    {
+      "name": "MI350P AllToAll spot checks",
+      "description": "AllToAll representative cells",
+      "config": "alltoall_perf",
+      "enabled": true,
+      "smoke": true
+    }
+  ]
+}

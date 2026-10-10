@@ -51,6 +51,7 @@ test_categories:
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
       - "TopoTest.*"
+      - "Mi350pPcieTopo.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
