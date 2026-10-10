@@ -119,14 +119,7 @@ add_to_config(_versionInfo HIP_VERSION_GITHASH)
 # Enable preprocessed hiprtc-builtins library
 include(HIPRTC RESULT_VARIABLE HIPRTC_CMAKE)
 # Set binary roots to <PackageName>_ROOT cmake and environment variables similar to CMP0074
-# to allow find_program to use LLVM_ROOT and Clang_ROOT
-if(DEFINED ENV{LLVM_ROOT})
-    set(ENV_LLVM_BIN $ENV{LLVM_ROOT}/bin)
-endif()
-if(DEFINED LLVM_ROOT)
-    set(LLVM_BIN ${LLVM_ROOT}/bin)
-endif()
-
+# to allow find_program to use Clang_ROOT
 if(DEFINED ENV{Clang_ROOT})
     set(ENV_Clang_BIN $ENV{Clang_ROOT}/bin)
 endif()
@@ -134,9 +127,8 @@ endif()
 if(DEFINED Clang_ROOT)
     set(Clang_BIN ${Clang_ROOT}/bin)
 endif()
-# Requires clang and llvm-mc to create this library.
+# Requires clang to create this library.
 find_program(clang clang HINTS ${Clang_BIN} ${ENV_Clang_BIN} ${ROCM_PATH}/llvm/bin ${ROCM_PATH})
-find_program(llvm-mc llvm-mc HINTS ${LLVM_BIN} ${ENV_LLVM_BIN} ${ROCM_PATH}/llvm/bin ${ROCM_PATH})
 set(HIPRTC_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/hip_rtc_gen")
 set(HIPRTC_GEN_HEADER "${HIPRTC_GEN_DIR}/hipRTC_header.h")
 set(HIPRTC_GEN_MCIN "${HIPRTC_GEN_DIR}/hipRTC_header.mcin")
@@ -206,8 +198,8 @@ add_custom_command(
   DEPENDS ${clang} ${HIPRTC_GEN_HEADER})
 add_custom_command(
   OUTPUT ${HIPRTC_GEN_OBJ}
-  COMMAND ${llvm-mc} -o ${HIPRTC_GEN_OBJ} ${HIPRTC_GEN_MCIN} --filetype=obj
-  DEPENDS ${llvm-mc} ${HIPRTC_GEN_PREPROCESSED} ${HIPRTC_GEN_MCIN})
+  COMMAND ${clang} -o ${HIPRTC_GEN_OBJ} -x assembler ${HIPRTC_GEN_MCIN} -c
+  DEPENDS ${clang} ${HIPRTC_GEN_PREPROCESSED} ${HIPRTC_GEN_MCIN})
 
 # Create hiprtc-builtins library.
 add_library(hiprtc-builtins ${HIPRTC_GEN_OBJ})
