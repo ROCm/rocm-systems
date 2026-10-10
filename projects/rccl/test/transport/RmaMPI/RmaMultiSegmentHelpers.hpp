@@ -26,8 +26,7 @@ using RCCLTestHelpers::FreeMultiSegmentVmm;
 using RCCLTestHelpers::MultiSegmentVmmBuffer;
 using RCCLTestHelpers::ReleaseMappedVmm;
 
-// AllocDeepEpElasticVmm lives in HybridVmmHelpers.hpp so UBR and RMA share one
-// HIP sequence. Include that header after this one; it fills MultiSegmentVmmBuffer.
+// AllocDeepEpElasticVmm lives in HybridVmmHelpers.hpp so UBR and RMA share one HIP sequence.
 
 } // namespace RCCLRmaTests
 
