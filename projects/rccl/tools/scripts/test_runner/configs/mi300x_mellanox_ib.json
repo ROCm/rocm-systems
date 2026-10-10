@@ -1002,6 +1002,7 @@
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
         {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
         {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
@@ -1066,7 +1067,6 @@
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
       ]
     },
-
     "rma_external_plugin_put_signal": {
       "extends": "default",
       "is_gtest": true,
@@ -3091,6 +3091,15 @@
           "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
           "env_variables": {
             "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
+          "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
+          "test_filter": "HostApiTest.DenseAllToAllPutSignal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1",
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
           }
         }
       ]
