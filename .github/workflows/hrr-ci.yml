@@ -506,13 +506,21 @@ jobs:
       # find_package(hsa-runtime64) finds this install first via
       # CMAKE_PREFIX_PATH below. The SDK still supplies the compiler, comgr
       # and device libraries.
+      #
+      # libdrm, libdrm_amdgpu, libnuma and libelf come from the SDK's bundled
+      # sysdeps (soname librocm_sysdeps_*), not the apt packages above. The GPU
+      # machines and the no-ROCm container do not have the system ones, so a
+      # ROCr linked against them fails to load there (libdrm.so.2). The SDK's
+      # own ROCr links these same sysdeps.
       - name: Build ROCr from this tree
         run: |
+          sysdeps="${ROCM_SDK}/lib/rocm_sysdeps"
+          export PKG_CONFIG_PATH="${sysdeps}/lib/pkgconfig"
           cmake -S projects/rocr-runtime -B build/rocr -GNinja -Wno-dev \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${ROCM_SDK}" \
+            -DCMAKE_PREFIX_PATH="${sysdeps};${ROCM_SDK}" \
             "-DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/build/rocr-install"
           cmake --build build/rocr -j
           cmake --install build/rocr
@@ -998,7 +1006,9 @@ jobs:
           # amdhip64 was compiled against; it must precede the SDK's ROCr.
           # Keep the runner's existing path: setup-python puts libpython there,
           # and replacing it makes python3 fail to start on some GPU machines.
-          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          # rocm_sysdeps/lib holds the librocm_sysdeps_* libraries that rocr-install's
+          # libhsa-runtime64 links (drm, numa, elf); it has no RUNPATH of its own.
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           # A labelled runner with no visible device is an infrastructure miss.
           # Skip the suite and leave a skipped result so the check stays green.
           # Exit 1 is "confirmed no device". Any other probe failure (broken
