@@ -136,6 +136,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     before validation. Its raw-byte fixture reproduces the enum UBSan failure;
     enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
     sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `rasnet-test.cc`); suite
+    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
+    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
