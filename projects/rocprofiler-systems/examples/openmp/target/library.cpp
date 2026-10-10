@@ -29,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 constexpr float  EPS_FLOAT  = 1.0e-7f;
 constexpr double EPS_DOUBLE = 1.0e-15;
@@ -63,11 +64,13 @@ run_impl()
 
     constexpr int N  = 100000;
     constexpr int Nc = N / 100;
-    int           a_i[N], b_i[N], c_i[N], validate_i[N];
-    float         a_f[N], b_f[N], c_f[N], validate_f[N];
-    double        a_d[N], b_d[N], c_d[N], validate_d[N];
-    int           N_errors = 0;
-    bool          flag     = false;
+    // Use heap allocation to avoid exhausting OMP worker thread stacks (~4-8 MB)
+    // when run_impl() is called from within #pragma omp parallel in run().
+    std::vector<int>    a_i(N), b_i(N), c_i(N), validate_i(N);
+    std::vector<float>  a_f(N), b_f(N), c_f(N), validate_f(N);
+    std::vector<double> a_d(N), b_d(N), c_d(N), validate_d(N);
+    int                 errors = 0;
+    bool                flag   = false;
 
 #pragma omp parallel for schedule(dynamic, Nc)
     for(int i = 0; i < N; ++i)
@@ -83,16 +86,16 @@ run_impl()
 
     for(int i = 0; i < 2; ++i)
     {
-        vmul(a_i, b_i, c_i, N);
-        vmul(a_f, b_f, c_f, N);
-        vmul(a_d, b_d, c_d, N);
+        vmul(a_i.data(), b_i.data(), c_i.data(), N);
+        vmul(a_f.data(), b_f.data(), c_f.data(), N);
+        vmul(a_d.data(), b_d.data(), c_d.data(), N);
     }
 
     for(int i = 0; i < N; i++)
     {
         if(c_i[i] != validate_i[i])
         {
-            ++N_errors;
+            ++errors;
             //       print 1st bad index
             if(!flag)
             {
@@ -107,7 +110,7 @@ run_impl()
     {
         if(fabs(c_f[i] - validate_f[i]) > EPS_FLOAT)
         {
-            ++N_errors;
+            ++errors;
             //      print 1st bad index
             if(!flag)
             {
@@ -123,7 +126,7 @@ run_impl()
     {
         if(fabs(c_d[i] - validate_d[i]) > EPS_DOUBLE)
         {
-            ++N_errors;
+            ++errors;
             //      print 1st bad index
             if(!flag)
             {
