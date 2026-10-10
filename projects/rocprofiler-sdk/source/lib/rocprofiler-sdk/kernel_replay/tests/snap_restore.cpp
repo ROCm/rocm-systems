@@ -42,8 +42,10 @@
 #include <hip/hip_runtime.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 using namespace rocprofiler;
@@ -122,6 +124,34 @@ inventory_contains(void* p, hsa_agent_t agent)
 {
     auto inv = mt::snap_inventory(agent);
     return inv.find(p) != inv.end();
+}
+
+std::optional<msnp::capture_context_t>
+capture_context(hsa_agent_t agent, msnp::capture_mode mode, bool gpu_backend_available = true)
+{
+    auto cache = rocprofiler::agent::get_agent_cache(agent);
+    if(!cache) return std::nullopt;
+    return msnp::capture_context_t{
+        agent,
+        cache->get_rocp_agent()->id,
+        cache->near_cpu(),
+        cache->gpu_pool(),
+        cache->cpu_pool(),
+        mode,
+        gpu_backend_available,
+    };
+}
+
+void
+record_for_snapshot_test(void* ptr, size_t size, hsa_agent_t agent)
+{
+    mt::inventory().wlock([&](auto& map) { map[ptr] = mt::alloc_info_t{size, agent}; });
+}
+
+void
+unrecord_for_snapshot_test(void* ptr)
+{
+    mt::inventory().wlock([&](auto& map) { map.erase(ptr); });
 }
 
 std::vector<float>
@@ -247,6 +277,239 @@ TEST(kernel_replay_snapshot, restore_reverts_device_memory)
             ASSERT_FLOAT_EQ(a[i], 1.0f + i) << "post-restore elem " << i;
     }
 
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, forced_gpu_arena_restores_device_memory)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_gpu);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 7.0f, n);
+
+    auto snapshot = msnp::snap(*ctx);
+    ASSERT_TRUE(snapshot.complete());
+    ASSERT_EQ(snapshot.storage(), msnp::storage_kind::gpu_local);
+
+    launch_fill(buffer, 19.0f, n);
+    bool batch_called = false;
+    ASSERT_TRUE(msnp::restore(snapshot, [&](const auto& gpu_regions) {
+        batch_called = true;
+        EXPECT_FALSE(gpu_regions.empty());
+        for(const auto& copy : gpu_regions)
+        {
+            EXPECT_GT(copy.size, 0);
+            EXPECT_NE(copy.source, nullptr);
+            EXPECT_NE(copy.dest, nullptr);
+            const auto status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(status != HSA_STATUS_SUCCESS) return status;
+        }
+        return HSA_STATUS_SUCCESS;
+    }));
+    EXPECT_TRUE(batch_called);
+    const auto restored = read_device(buffer, n);
+    for(const auto value : restored)
+        EXPECT_FLOAT_EQ(value, 7.0f);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, unavailable_gpu_backend_falls_back_to_one_pinned_arena)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    ASSERT_NE(agent.handle, 0U);
+    const auto ctx =
+        capture_context(agent, msnp::capture_mode::automatic, /*gpu_backend_available=*/false);
+    ASSERT_TRUE(ctx.has_value());
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 11.0f, n);
+
+    auto snapshot = msnp::snap(*ctx);
+    ASSERT_TRUE(snapshot.complete());
+    ASSERT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
+    ASSERT_EQ(snapshot.segments.size(), 1);
+
+    launch_fill(buffer, 23.0f, n);
+    bool continuation_called = false;
+    ASSERT_TRUE(msnp::restore(snapshot, [&](const auto& gpu_regions) {
+        EXPECT_TRUE(gpu_regions.empty());
+        continuation_called = true;
+        return HSA_STATUS_SUCCESS;
+    }));
+    EXPECT_TRUE(continuation_called);
+    const auto restored = read_device(buffer, n);
+    for(const auto value : restored)
+        EXPECT_FLOAT_EQ(value, 11.0f);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, failed_gpu_materialization_replans_all_regions_for_pinned_host)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+    launch_fill(buffer, 13.0f, n);
+
+    auto ctx = capture_context(agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+    ctx->gpu_pool.handle = 0;
+
+    auto snapshot =
+        msnp::snap(*ctx, msnp::storage_budgets_t{64U * 1024U * 1024U, 512U * 1024U * 1024U});
+    ASSERT_TRUE(snapshot.complete());
+    EXPECT_EQ(snapshot.storage(), msnp::storage_kind::pinned_host);
+    ASSERT_EQ(snapshot.segments.size(), 1);
+
+    launch_fill(buffer, 31.0f, n);
+    ASSERT_TRUE(msnp::restore(snapshot));
+    const auto restored = read_device(buffer, n);
+    for(const auto value : restored)
+        EXPECT_FLOAT_EQ(value, 13.0f);
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
+}
+
+TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_arenas)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int              n     = 2 * 1024 * 1024;
+    constexpr size_t           bytes = static_cast<size_t>(n) * sizeof(float);
+    std::array<float*, 3>      buffers{};
+    const std::array<float, 3> original = {3.0f, 5.0f, 7.0f};
+
+    hsa_agent_t agent{.handle = 0};
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        ASSERT_EQ(hipMalloc(&buffers[i], bytes), hipSuccess);
+        const auto allocation = mt::query_alloc(buffers[i]);
+        ASSERT_TRUE(allocation.trackable);
+        if(agent.handle == 0) agent = allocation.agent;
+        ASSERT_EQ(allocation.agent.handle, agent.handle);
+        record_for_snapshot_test(buffers[i], bytes, agent);
+        launch_fill(buffers[i], original[i], n);
+    }
+
+    auto ctx = capture_context(agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+
+    auto snapshot =
+        msnp::snap(*ctx, msnp::storage_budgets_t{10U * 1024U * 1024U, 512U * 1024U * 1024U});
+    ASSERT_TRUE(snapshot.complete());
+    ASSERT_EQ(snapshot.storage(), msnp::storage_kind::mixed);
+    ASSERT_EQ(snapshot.segments.size(), 2);
+
+    size_t              gpu_extents  = 0;
+    size_t              host_extents = 0;
+    std::array<bool, 3> pinned_buffers{};
+    for(const auto& extent : snapshot.extents)
+    {
+        const auto kind = snapshot.segments.at(extent.segment_index).backing.kind();
+        if(kind == msnp::storage_kind::gpu_local)
+            ++gpu_extents;
+        else if(kind == msnp::storage_kind::pinned_host)
+        {
+            ++host_extents;
+            const auto* live = snapshot.regions.at(extent.region_index).live_address;
+            for(size_t i = 0; i < buffers.size(); ++i)
+                if(live == buffers[i]) pinned_buffers[i] = true;
+        }
+    }
+    EXPECT_GT(gpu_extents, 0);
+    EXPECT_GT(host_extents, 0);
+    EXPECT_TRUE(
+        std::any_of(pinned_buffers.begin(), pinned_buffers.end(), [](bool v) { return v; }));
+
+    for(auto* buffer : buffers)
+        launch_fill(buffer, 29.0f, n);
+
+    size_t callback_count = 0;
+    ASSERT_TRUE(msnp::restore(snapshot, [&](const auto& gpu_regions) {
+        ++callback_count;
+        EXPECT_EQ(gpu_regions.size(), gpu_extents);
+        // Pinned extents must be restored synchronously before the GPU batch/target continuation.
+        for(size_t i = 0; i < buffers.size(); ++i)
+        {
+            if(!pinned_buffers[i]) continue;
+            const auto sample = read_device(buffers[i], 64);
+            for(const auto value : sample)
+                EXPECT_FLOAT_EQ(value, original[i]);
+        }
+        for(const auto& copy : gpu_regions)
+        {
+            const auto status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(status != HSA_STATUS_SUCCESS) return status;
+        }
+        return HSA_STATUS_SUCCESS;
+    }));
+    EXPECT_EQ(callback_count, 1);
+
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        const auto restored = read_device(buffers[i], n);
+        for(const auto value : restored)
+            ASSERT_FLOAT_EQ(value, original[i]);
+        unrecord_for_snapshot_test(buffers[i]);
+        ASSERT_EQ(hipFree(buffers[i]), hipSuccess);
+    }
+}
+
+TEST(kernel_replay_snapshot, unavailable_gpu_and_pinned_arenas_decline_capture)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int n      = 4096;
+    float*        buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    const auto agent = allocation.agent;
+    record_for_snapshot_test(buffer, n * sizeof(float), agent);
+
+    const auto* rocp_agent = rocprofiler::agent::get_rocprofiler_agent(agent);
+    ASSERT_NE(rocp_agent, nullptr);
+    const auto snapshot = msnp::snap(msnp::capture_context_t{
+        agent,
+        rocp_agent->id,
+        hsa_agent_t{.handle = 0},
+        hsa_amd_memory_pool_t{.handle = 0},
+        hsa_amd_memory_pool_t{.handle = 0},
+        msnp::capture_mode::automatic,
+        false,
+    });
+
+    EXPECT_FALSE(snapshot.complete());
+    EXPECT_EQ(snapshot.status, msnp::capture_status::unavailable);
+    EXPECT_TRUE(snapshot.segments.empty());
+    EXPECT_TRUE(snapshot.extents.empty());
+
+    unrecord_for_snapshot_test(buffer);
     ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
