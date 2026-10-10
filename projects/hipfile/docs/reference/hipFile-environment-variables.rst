@@ -36,3 +36,7 @@ The following environment variables affect the hipFile runtime.
    * - ``HIPFILE_ASYNC_BUFFER_SIZE``
      - | Controls the size of the host bounce buffer allocated for asynchronous fallback I/O.
        | Default size is 16 MiB. Setting to 0 will use the default size.
+   * - ``HIPFILE_HOST``
+     - | Controls whether transfers from device memory to host memory are enabled.
+       | Host memory regions must be registered prior to starting any transfers involving them.
+       | Default is ``true``. Setting to ``false`` disables this feature.
