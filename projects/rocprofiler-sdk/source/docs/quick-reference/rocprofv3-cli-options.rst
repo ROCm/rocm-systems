@@ -194,7 +194,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                 </tr>
                 <tr>
                     <td>--kernel-replay-beta-enabled [BOOL]</td>
-                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
+                    <td>(beta) Acknowledge that --replay-mode kernel is a beta feature. Required when --replay-mode kernel is specified, and rejected on its own because it does not select kernel replay. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-kernel-replay-rocprofv3.html">Read more...</a></td>
                 </tr>
                 <tr>
                     <th rowspan="4">Post-processing tracing</th>

@@ -10,6 +10,7 @@
 import argparse
 import contextlib
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -241,6 +242,119 @@ def test_replay_without_counter_collection_is_rejected():
         raise AssertionError(
             "replay without counter collection should have been rejected"
         )
+
+
+def test_beta_acknowledgement_without_replay_mode_is_rejected():
+    """The flag's name reads as if it enabled replay. Accepting it alone would hand back
+    application replay to someone who believes they are running kernel replay, and the counter
+    values they get are indistinguishable from replayed ones."""
+    try:
+        launched_runs("--pmc", "SQ_WAVES", "--kernel-replay-beta-enabled")
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError(
+            "--kernel-replay-beta-enabled without --replay-mode kernel should have been rejected"
+        )
+
+
+def test_run_rejects_beta_acknowledgement_without_replay_mode_with_diagnostic():
+    module = rocprofv3()
+    cmd_args, app_args = module.parse_arguments(
+        ["--pmc", "SQ_WAVES", "--kernel-replay-beta-enabled", "--", "/bin/true"]
+    )
+    args = module.get_args(cmd_args, module.dotdict({}))
+    original_resolve_library_path = module.resolve_library_path
+    module.resolve_library_path = lambda path, *_args, **_kwargs: path
+    stderr = io.StringIO()
+    try:
+        try:
+            with contextlib.redirect_stderr(stderr):
+                module.run(app_args, args)
+        except SystemExit as exc:
+            assert exc.code != 0
+        else:
+            raise AssertionError("run() should reject the unaccompanied acknowledgement")
+    finally:
+        module.resolve_library_path = original_resolve_library_path
+
+    assert (
+        "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
+        "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
+        "acknowledgement to use application replay"
+    ) in stderr.getvalue()
+
+
+def test_beta_acknowledgement_is_accepted_for_an_input_file_job_that_asks_for_replay():
+    """The acknowledgement can only be given on the command line, so a job that selects replay
+    from an input file has to be able to claim it."""
+    runs = launched_runs(
+        "--kernel-replay-beta-enabled",
+        jobs=[{"pmc": ["SQ_WAVES"], "replay_mode": "kernel"}],
+    )
+    assert [itr.pmc for itr in runs] == [["SQ_WAVES"]]
+
+
+def test_mixed_input_jobs_are_validated_before_any_run_starts():
+    module = rocprofv3()
+    started_runs = []
+    original_run = module.run
+    scenarios = [
+        (
+            ["--kernel-replay-beta-enabled"],
+            [
+                {"pmc": ["SQ_WAVES"], "replay_mode": "kernel"},
+                {"pmc": ["GRBM_COUNT"]},
+            ],
+            "--kernel-replay-beta-enabled acknowledges",
+        ),
+        (
+            [],
+            [
+                {"pmc": ["GRBM_COUNT"]},
+                {"pmc": ["SQ_WAVES"], "replay_mode": "kernel"},
+            ],
+            "--replay-mode kernel requires acknowledgement",
+        ),
+        (
+            ["--kernel-replay-beta-enabled"],
+            [
+                {"pmc": ["GRBM_COUNT"], "replay_mode": "kernel"},
+                {"pmc": [], "replay_mode": "kernel"},
+            ],
+            "--replay-mode kernel requires counter collection",
+        ),
+    ]
+
+    def record(app_args, args, **kwargs):
+        started_runs.append(args)
+        return 0
+
+    module.run = record
+    try:
+        for cli_args, jobs, diagnostic in scenarios:
+            started_runs.clear()
+            stderr = io.StringIO()
+            with input_file(jobs) as path:
+                try:
+                    with contextlib.redirect_stderr(stderr):
+                        module.main([*cli_args, "-i", path, "--", "/bin/true"])
+                except SystemExit as exc:
+                    assert exc.code != 0
+                else:
+                    raise AssertionError(
+                        "a mixed input file should reject invalid replay configuration"
+                    )
+            assert started_runs == []
+            assert diagnostic in stderr.getvalue()
+    finally:
+        module.run = original_run
+
+
+def test_application_replay_is_unaffected_without_the_acknowledgement():
+    # Confirms the rejection above is about the unaccompanied flag, not about --pmc.
+    runs = launched_runs("--pmc", "SQ_WAVES")
+    assert [itr.pmc for itr in runs] == [["SQ_WAVES"]]
 
 
 def service_conflicts(environ=None, **attrs):
