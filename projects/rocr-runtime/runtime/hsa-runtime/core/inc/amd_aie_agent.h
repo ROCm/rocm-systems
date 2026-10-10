@@ -43,8 +43,11 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_AGENT_H_
 
+#include <atomic>
+#include <cstdint>
+#include <string_view>
+
 #include "core/inc/agent.h"
-#include "core/inc/runtime.h"
 
 namespace rocr {
 namespace AMD {
@@ -100,6 +103,27 @@ public:
  /// @brief Getter for the AIE node properties.
  const HsaNodeProperties& properties() const { return node_props_; }
 
+ /// @brief Architecture name accepted in AIE hsaco section names.
+ std::string_view arch_name() const { return arch_name_; }
+
+ /// @brief Number of array columns a hardware context on this agent can be given.
+ uint32_t num_cols() const { return node_props_.NumArrays; }
+
+ /// @brief Number of core tiles in each column.
+ uint32_t num_core_rows() const { return node_props_.NumCUPerArray; }
+
+ /// @brief Number of code objects destroyed on this agent that had placed PdiInsts PDIs.
+ ///
+ /// A queue's PDI cache names PDIs by BO handle, and the driver reuses the handles of freed BOs, so
+ /// once such a code object is destroyed a cached handle may name a freed BO or a new, unrelated
+ /// one. Each queue records the value its cache was filled under and empties the cache when it has
+ /// moved.
+ uint64_t PdiReleaseEpoch() const { return pdi_release_epoch_.load(std::memory_order_seq_cst); }
+
+ /// @brief Records that a code object's PdiInsts PDIs are about to be freed. Called before the
+ /// BOs are freed, so that no queue can see their handles reused under the old epoch.
+ void ReleasePdis() { pdi_release_epoch_.fetch_add(1, std::memory_order_seq_cst); }
+
 private:
   /// @brief Query the driver to get the region list owned by this agent.
   void InitRegionList();
@@ -112,7 +136,6 @@ private:
                        core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
 
-
   std::function<void(void*)> system_deallocator_;
 
   const hsa_profile_t profile_ = HSA_PROFILE_BASE;
@@ -121,6 +144,10 @@ private:
   const uint32_t max_queues_ = 1;
 
   const HsaNodeProperties node_props_;
+  /// @brief node_props_.AMDName for use as the agent's hsaco arch name.
+  std::string_view arch_name_;
+  /// @brief Number of code objects destroyed on this agent.
+  std::atomic<uint64_t> pdi_release_epoch_{0};
 };
 
 } // namespace AMD
