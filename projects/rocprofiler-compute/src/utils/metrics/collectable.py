@@ -1,8 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Collectables and composite metric evaluation graph (Layer 1.5 analyze path)."""
+"""Collectables and composite metric evaluation graph (Layer 1.5 analyze path).
 
+Cross-run rule: only addition, or scaling by a constant, may combine values
+from different passes. A COLLECT_RATIO whose pieces sit on different passes,
+or a COLLECT_SUM that subtracts a piece from another pass, stays unset.
+"""
+
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
@@ -19,7 +25,10 @@ from utils.metrics.expression import (
     is_composite_avg_formula,
 )
 from utils.metrics.metric_evaluator import MetricEvaluator
-from utils.metrics.pass_provenance import resolve_weight_counter_column
+from utils.metrics.pass_provenance import (
+    bound_pass_for_metric,
+    resolve_weight_counter_column,
+)
 
 if TYPE_CHECKING:
     from utils.metrics.pass_provenance import PassLayout
@@ -32,6 +41,9 @@ COLLECT_RATIO_SPECS_ATTR = "collect_ratio_specs"
 WEIGHTED_AVG_ATTR = "weighted_avg_specs"
 WEIGHTED_AVG_SUBS_ATTR = "weighted_avg_subs"
 METRIC_NAME_COLUMN = "Metric"
+
+# A leading or parenthesized unary minus marks a piece that subtracts.
+_NEGATED_PIECE_RE = re.compile(r"(^|[(,])\s*-")
 
 
 class CompositeKind(str, Enum):
@@ -326,6 +338,11 @@ def _lookup_collectable_built_avg(
     return built
 
 
+def _built_avg_for_ref(df: pd.DataFrame, ref_name: str, avg_col: str) -> str:
+    lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
+    return _lookup_collectable_built_avg(df, lookup_name, avg_col) or ""
+
+
 def _collectable_series(
     df: pd.DataFrame,
     ref_name: str,
@@ -346,6 +363,29 @@ def _collectable_series(
     if negate:
         return -series
     return series
+
+
+def _piece_pass(df: pd.DataFrame, ref_name: str) -> Optional[str]:
+    """Pass same-pass bind chose for one collectable ref, if any."""
+    lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
+    return bound_pass_for_metric(df, lookup_name)
+
+
+def pieces_share_one_pass(df: pd.DataFrame, refs: List[str]) -> bool:
+    """True when every bound piece reads the same pass.
+
+    A piece with no bound pass reads no pass data, so it fits any pass.
+    """
+    passes = {_piece_pass(df, ref_name) for ref_name in refs}
+    passes.discard(None)
+    return len(passes) <= 1
+
+
+def is_negated_piece(ref_name: str, built_expr: str) -> bool:
+    """True when a COLLECT_SUM piece subtracts rather than adds."""
+    if ref_name.strip().startswith("-"):
+        return True
+    return bool(_NEGATED_PIECE_RE.search(built_expr.strip()))
 
 
 def _evaluate_weighted_composite(
@@ -422,6 +462,17 @@ def _evaluate_collect_sum_composite(
     if avg_col is None:
         return "N/A"
 
+    if not pieces_share_one_pass(df, composite.refs) and any(
+        is_negated_piece(ref_name, _built_avg_for_ref(df, ref_name, avg_col))
+        for ref_name in composite.refs
+    ):
+        console_warning(
+            "metrics",
+            f"COLLECT_SUM: {composite.metric_name or composite.metric_id} "
+            "subtracts a piece from another pass; leaving the composite unset",
+        )
+        return "N/A"
+
     series_list: List[pd.Series] = []
     for ref_name in composite.refs:
         series = _collectable_series(
@@ -452,6 +503,13 @@ def _evaluate_collect_ratio_composite(
     dens = composite.weight_meta.get("denominator")
     if not isinstance(nums, list) or not isinstance(dens, list):
         console_warning("COLLECT_RATIO: missing numerator/denominator metadata.")
+        return "N/A"
+    if not pieces_share_one_pass(df, list(nums) + list(dens)):
+        console_warning(
+            "metrics",
+            f"COLLECT_RATIO: {composite.metric_name or composite.metric_id} "
+            "divides pieces from different passes; leaving the composite unset",
+        )
         return "N/A"
 
     num_series: List[pd.Series] = []
