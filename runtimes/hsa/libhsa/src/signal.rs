@@ -1072,7 +1072,7 @@ pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: Sign
             if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_DOORBELL {
                 let address = signal.value.load(Ordering::Relaxed) as usize;
                 // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                rocddi::gpu::queue::ring_doorbell(address, value as u64);
+                rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
             } else {
                 signal.value.store(value, Ordering::Relaxed);
             }
@@ -1101,7 +1101,7 @@ pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: Si
                 fence(Ordering::Release);
                 let address = signal.value.load(Ordering::Relaxed) as usize;
                 // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                rocddi::gpu::queue::ring_doorbell(address, value as u64);
+                rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
             } else {
                 signal.value.store(value, Ordering::Release);
             }
