@@ -1026,6 +1026,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDdaIpcInit
 # ---------------------------------------------------------------------------
+# hipify_all writes device_buffer.cc at build time, so a fresh configure must not look for it yet.
+set_source_files_properties(${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
+  PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcInit
   SOURCES ${TEST_MICRO_DDA_IPC_INIT_SOURCE_FILES}
   EXTRA_DEFS
