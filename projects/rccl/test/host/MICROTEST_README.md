@@ -43,8 +43,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
-    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
-    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
+    `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
+    `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
+    `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`, `GroupJobUnlinkCommsTest.*`,
+    `JobFreeCallbacksTest.*`, `MgmtTaskJobFuncTest.*`,
+    `CommGroupRegisterSymmetricCeInitTest.*`, `GroupCleanupTest.*`,
+    `AsyncJobLaunchDirectTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not

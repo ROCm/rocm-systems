@@ -99,6 +99,14 @@ void ResetGroupThreadLocals() {
   ncclProfilerApiState = {};
 }
 
+// Releases whatever a test left queued. Call from TearDown: an ASSERT_* in the test body would skip it.
+template <typename T, T* T::*next, typename Release>
+void DrainQueue(struct ncclIntruQueue<T, next>* queue, Release release) {
+  while (!ncclIntruQueueEmpty(queue)) {
+    release(ncclIntruQueueDequeue(queue));
+  }
+}
+
 // Cannot fire today (thread create and nonBlockingInit=true are consecutive in group.cc, and the
 // create-failure path deletes groupJob before either runs): forward defence only. Even if it did
 // fire, it only half-mitigates: the follow-up ncclGroupJobComplete/Abort call gates its own body,
@@ -334,7 +342,9 @@ TEST_F(GroupEndInternalTest, GroupErrorSet_PropagatesAndRunsFailCleanup) {
   EXPECT_EQ(ncclSystemError, ncclGroupEndInternal());
 
   EXPECT_EQ(0, ncclGroupDepth);
-  EXPECT_TRUE(ncclIntruQueueEmpty(&ncclAsyncJobs)) << "fail: path's groupCleanup must drain the queued job";
+  // Not ncclAsyncJobs emptiness: groupLocalResetJobState reconstructs that queue on every fail: exit anyway.
+  EXPECT_EQ(std::vector<AsyncState>({{comm_.get(), ncclSystemError}}), asyncStates_)
+    << "fail: path's groupCleanup must flag the queued job's non-blocking comm";
 }
 
 // Drives ncclGroupEndInternal through ncclGroupCommHead[type] directly (never exercised at this
@@ -350,7 +360,7 @@ class GroupCommHeadChainTest : public GroupEndInternalTest {
   uint32_t commXAbortFlag_ = 0, commXAbortFlagDev_ = 0, commYAbortFlag_ = 0, commYAbortFlagDev_ = 0;
   // Fixture member, not test-local: commY_->groupJob can still point at this when an early
   // ASSERT_* exits the test body, and TearDown dereferences it (ForceJoin/Abort) before the test
-  // ever reaches its own reset line -- a test-local here would make that a dangling-pointer read.
+  // ever reaches its own reset line. A test-local here would make that a dangling-pointer read.
   struct ncclGroupJob otherGroupJob_ {};
   // Fixture member, not test-local: TearDown's ncclGroupJobAbort calls can still be joining
   // background threads that could call ncclCeInit; a test-local ScopedHook would restore the
@@ -988,9 +998,7 @@ class ArgsGlobalCheckTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    while (!ncclIntruQueueEmpty(&comm_->argsInfoQueue)) {
-      free(ncclIntruQueueDequeue(&comm_->argsInfoQueue));
-    }
+    DrainQueue(&comm_->argsInfoQueue, free);
     ResetCollectiveStubs();
   }
 
@@ -1144,6 +1152,10 @@ class MgmtTaskJobFuncTest : public ::testing::Test {
     job_.base.isThreadMain = true;
   }
 
+  void TearDown() override {
+    DrainQueue(&comm_->mgmtTaskQueue, [](struct ncclAsyncJob* task) { delete static_cast<RecordingTask*>(task); });
+  }
+
   // Each queued task records into callOrder_ via its own func/destructor; funcResult_ controls
   // what the func returns (only meaningful for the task built with FailingFunc below).
   ncclResult_t funcResult_ = ncclSuccess;
@@ -1199,11 +1211,7 @@ TEST_F(MgmtTaskJobFuncTest, DestroyFlag_DequeuesAndRunsExactlyOneTask) {
 
   EXPECT_EQ(std::vector<std::string>({"first:func", "first:destructor"}), callOrder_)
     << "destroyFlag must dequeue and run only the head task, leaving the rest queued";
-  ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->mgmtTaskQueue));
-  while (!ncclIntruQueueEmpty(&comm_->mgmtTaskQueue)) {
-    auto* leftover = static_cast<RecordingTask*>(ncclIntruQueueDequeue(&comm_->mgmtTaskQueue));
-    delete leftover;
-  }
+  EXPECT_FALSE(ncclIntruQueueEmpty(&comm_->mgmtTaskQueue));
 }
 
 TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructor) {
@@ -1216,10 +1224,7 @@ TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructo
   EXPECT_EQ(ncclSystemError, ncclMgmtTaskJobFunc(&job_.base));
 
   EXPECT_EQ(std::vector<std::string>({"failing:func", "failing:destructor"}), callOrder_);
-  ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->mgmtTaskQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->mgmtTaskQueue));
-  ncclIntruQueueDequeue(&comm_->mgmtTaskQueue);
-  delete neverReached;
 }
 
 // ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch. rmaCeInitTaskQueue is not
@@ -1245,6 +1250,7 @@ class CommGroupRegisterSymmetricCeInitTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    DrainQueue(&comm_->ceInitTaskQueue, free);
     ResetCeFakes();
   }
 };
@@ -1283,10 +1289,8 @@ TEST_F(CommGroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequ
   EXPECT_EQ(ncclSystemError, ncclCommGroupRegisterSymmetric(&job_.base));
 
   EXPECT_EQ(1, hook.calls);
-  ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->ceInitTaskQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->ceInitTaskQueue));
-  free(ncclIntruQueueDequeue(&comm_->ceInitTaskQueue));
-  // `failing` leaks by design (LSan-visible): production's fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
+  // `failing` leaks (LSan-visible), a production bug: the fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
 }
 
 // groupCleanup: the fail-path unwind for a group that never launched. Walks groupCommHeadPtr per

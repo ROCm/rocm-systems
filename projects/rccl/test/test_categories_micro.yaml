@@ -67,11 +67,18 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
+      - "GroupCommHeadChainTest.*"
       - "ReclaimPlannerStateTest.*"
       - "AsyncLaunchTest.*"
       - "GroupJobAbortTest.*"
       - "GroupApiWrapperTest.*"
       - "ArgsGlobalCheckTest.*"
+      - "GroupJobUnlinkCommsTest.*"
+      - "JobFreeCallbacksTest.*"
+      - "MgmtTaskJobFuncTest.*"
+      - "CommGroupRegisterSymmetricCeInitTest.*"
+      - "GroupCleanupTest.*"
+      - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
