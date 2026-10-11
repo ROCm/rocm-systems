@@ -281,8 +281,8 @@ TEST_F(GinHostFinalizeTest, ResetsHostStateButKeepsBackendRecords) {
   EXPECT_TRUE(gs->finalized);
 }
 
-// commFree ignores this result until ncclGinFinalize and the frees have run, so
-// one failing handle must not leak the others or skip the reset.
+// commFree records this result and returns it after ncclGinFinalize and the
+// frees, so one failing handle must not leak the others or skip the reset.
 TEST_F(GinHostFinalizeTest, CloseCollFailure_ClosesEveryHandleResetsAndReturnsError) {
   fake_.closeCollFailOn = ginComm0_;
   ginState()->proxyNthreads = 2;

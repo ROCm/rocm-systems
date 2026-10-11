@@ -592,19 +592,20 @@ static ncclResult_t commFree(ncclComm_t comm) {
   if (comm->doneEvent != NULL) CUDACHECK(hipEventDestroy(comm->doneEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
-  // A closeColl error is returned only after ncclGinFinalize, the refcount drop and the frees below.
-  ncclResult_t ginHostFinalizeRet = ncclSuccess;
-  NCCLCHECKIGNORE(ncclGinHostFinalize(comm), ginHostFinalizeRet);
+  // closeColl and last-ref plugin-finalize errors are recorded here and returned
+  // after the sharedRes frees. The first of those two wins. ncclRmaProxyFinalize
+  // still returns immediately: a proxy failure aborts the rest of commFree.
+  ncclResult_t ginTeardownRet = ncclSuccess;
+  NCCLCHECKIGNORE(ncclGinHostFinalize(comm), ginTeardownRet);
   NCCLCHECK(ncclRmaProxyFinalize(comm));
 
   int sharedResRefCount = 0;
   if (comm->sharedRes) {
     sharedResRefCount = ncclAtomicRefCountDecrement(&comm->sharedRes->refCount);
     if (sharedResRefCount == 0) {
-      // Last-ref plugin finalize; errors are ignored so the sharedRes frees below still run.
-      ncclResult_t ginFinalizeRet = ncclSuccess;
-      NCCLCHECKIGNORE(ncclGinFinalize(comm), ginFinalizeRet);
-      (void)ginFinalizeRet;
+      // Last-ref plugin finalize. Keep ginTeardownRet when host finalize already
+      // failed; otherwise record this error. The sharedRes frees below still run.
+      NCCLCHECKIGNORE(ncclGinFinalize(comm), ginTeardownRet);
       for (int c = 0; c < MAXCHANNELS; c++) {
         if (comm->sharedRes->peers[c]) free(comm->sharedRes->peers[c]);
         if (comm->sharedRes->devPeers[c]) ncclCudaFree(comm->sharedRes->devPeers[c], comm->memManager);
@@ -682,7 +683,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
   }
   free(comm);
 
-  return ginHostFinalizeRet;
+  return ginTeardownRet;
 }
 
 ncclResult_t ncclUncapturedStreamPoolAcquire(struct ncclUncapturedStreamPool* pool, cudaStream_t* stream) {
