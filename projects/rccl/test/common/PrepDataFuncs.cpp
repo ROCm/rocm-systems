@@ -6,18 +6,28 @@
 
 #include "CollectiveArgs.hpp"
 #include "PrepDataFuncs.hpp"
+#include "ResourceGuards.hpp"
+#include "VerifiableData.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <vector>
 #include <hip/hip_runtime.h>
 
 namespace RcclUnitTesting
 {
+
   // Byte written into expectedGpu[0] by the UT_DEVICE_DATA_FAULT negative control.
   static constexpr int kDeviceDataFaultByte = 0xFF;
 
+  static bool IsFp8(ncclDataType_t const dataType)
+  {
+    return dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2;
+  }
+
   // Negative control: when UT_DEVICE_DATA_FAULT is set to a non-zero value, corrupt one
   // expected element so a correct collective output must mismatch (proves device validate
-  // is not a no-op). No-op when the var is unset or "0".
+  // is not a no-op). No-op when the var is unset or "0". FP8 reductions on the verifiable
+  // path flip an output byte instead (VerifiableValidate).
   static ErrCode MaybeInjectDeviceDataFault(CollectiveArgs& collArgs)
   {
     char const* faultEnv = getenv("UT_DEVICE_DATA_FAULT");
@@ -34,6 +44,23 @@ namespace RcclUnitTesting
 
   ErrCode DefaultPrepareDataFunc(CollectiveArgs &collArgs)
   {
+    // Run on the collective's device, then restore the caller's device.
+    int callerDeviceId = 0;
+    (void)hipGetDevice(&callerDeviceId);
+    bool const switchDevice = (callerDeviceId != collArgs.deviceId);
+    if (switchDevice) (void)hipSetDevice(collArgs.deviceId);
+    SCOPE_EXIT(if (switchDevice) (void)hipSetDevice(callerDeviceId));
+    if (UseVerifiableData(collArgs))
+    {
+      CHECK_CALL(CheckAllocation(collArgs));
+      return VerifiablePrepData(collArgs);
+    }
+    if (IsFp8(collArgs.dataType) && CollectiveArgs::UsesReduce(collArgs.funcType))
+    {
+      TEST_ERROR("FP8 reductions with custom scalars, bias or constant input are not supported: "
+                 "the verifiable generator cannot model them");
+      return TEST_FAIL;
+    }
     switch (collArgs.funcType)
     {
     case ncclCollBroadcast:     return DefaultPrepData_Broadcast(collArgs);
@@ -139,7 +166,7 @@ namespace RcclUnitTesting
       CHECK_CALL(collArgs.inputGpu.FillPatternDevice(collArgs.dataType, collArgs.numInputElements,
                                                      collArgs.globalRank, 0));
       CHECK_CALL(collArgs.expectedGpu.FillReducedPatternDevice(collArgs.dataType, collArgs.numInputElements,
-                                                               collArgs.totalRanks, collArgs.options.redOp));
+                                                               collArgs.totalRanks, collArgs.options.redOp, 0));
       CHECK_CALL(MaybeInjectDeviceDataFault(collArgs));
       collArgs.expectedOnDevice = true;
       return TEST_SUCCESS;

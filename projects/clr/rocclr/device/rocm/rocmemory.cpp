@@ -8,6 +8,8 @@
 #include <unistd.h>
 #endif
 
+#include <cinttypes>
+
 #include "CL/cl_ext.h"
 
 #include "utils/util.hpp"
@@ -1274,8 +1276,15 @@ bool Buffer::ExportHandle(void* handle) const {
 }
 
 // ================================================================================================
-bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                               unsigned long long flags) {
+static amd::HandleExportResult MapHsaExportError(hsa_status_t status) {
+  return (status == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+      ? amd::HandleExportResult::kNotSupported
+      : amd::HandleExportResult::kError;
+}
+
+// ================================================================================================
+amd::HandleExportResult Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm,
+                                                  void* handle, unsigned long long flags) {
   int dmabuffd = -1;
   size_t offset = 0;
 
@@ -1291,9 +1300,9 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
     hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr);
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+      LogPrintfError("Cannot retain alloc handle for dev_ptr: %p hsa returned status: %d",
                      dev_ptr, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
@@ -1306,20 +1315,21 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     hsa_status_t release_status = Hsa::vmem_handle_release(mem_handle);
 
     if (hsa_status != HSA_STATUS_SUCCESS) {
-      LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
-                     mem_handle, hsa_status);
-      return false;
+      LogPrintfError("Cannot get shareable handle for mem_handle: %" PRIu64
+                     ", hsa returned status: %d",
+                     mem_handle.handle, hsa_status);
+      return MapHsaExportError(hsa_status);
     }
     if (release_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot release retained alloc handle for dev_ptr: 0x%x hsa returned status: %d",
+          "Cannot release retained alloc handle for dev_ptr: %p hsa returned status: %d",
           dev_ptr, release_status);
       // The retained handle could not be balanced after a successful export. Don't hand back
       // a fd whose backing allocation's reference count is now in an unknown state.
 #if !IS_WINDOWS
       close(dmabuffd);
 #endif
-      return false;
+      return amd::HandleExportResult::kError;
     }
   } else {
     // Retrieve a shareable handle for the device ptr.
@@ -1327,20 +1337,20 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
                                                              &offset, dmabuf_mapping_type);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError(
-          "Cannot export a portable fd for dev_ptr: 0x%x with size: %lu,"
+          "Cannot export a portable fd for dev_ptr: %p with size: %zu, "
           "hsa returned status: %d",
           dev_ptr, size, hsa_status);
-      return false;
+      return MapHsaExportError(hsa_status);
     }
   }
   if (dmabuffd <= 0) {
     LogPrintfError("Invalid file descriptor handle: %d returned", dmabuffd);
-    return false;
+    return amd::HandleExportResult::kError;
   }
 
   // As per spec, handle passed through HIP API is ptr to int.
   *(reinterpret_cast<int*>(handle)) = dmabuffd;
-  return true;
+  return amd::HandleExportResult::kSuccess;
 }
 
 // ======================================= roc::Image =============================================

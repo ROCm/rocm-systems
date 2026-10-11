@@ -8,6 +8,7 @@
 #include "os.h"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/ScopedEnv.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
 #include <cstdlib>
@@ -1621,24 +1622,9 @@ TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
   // Save/restore the process-global env this test touches so we neither pin the
   // auto-selection path to a user-forced interface/family nor leak state into
   // other tests in the same binary.
-  struct EnvGuard {
-    const char* name;
-    std::string saved;
-    bool had;
-    explicit EnvGuard(const char* n) : name(n) {
-      const char* v = getenv(n);
-      had = (v != nullptr);
-      if (had) saved = v;
-      unsetenv(n);
-    }
-    ~EnvGuard() {
-      if (had) setenv(name, saved.c_str(), 1);
-      else unsetenv(name);
-    }
-  };
-  EnvGuard guardIfname("NCCL_SOCKET_IFNAME");
-  EnvGuard guardCommId("NCCL_COMM_ID");
-  EnvGuard guardFamily("NCCL_SOCKET_FAMILY");
+  ScopedEnv guardIfname("NCCL_SOCKET_IFNAME", nullptr);
+  ScopedEnv guardCommId("NCCL_COMM_ID", nullptr);
+  ScopedEnv guardFamily("NCCL_SOCKET_FAMILY", nullptr);
 
   // Resolve the socket family only after NCCL_SOCKET_FAMILY has been cleared, so
   // the probes are not forced to IPv6 -- which can legitimately return zero
