@@ -22,14 +22,17 @@ SRC_DIR = os.path.join(RCCL_ROOT, "src")
 # Longest-match first so -MMD is not read as -MM or -M, and -MD / -MM are
 # not read as -M. -march and friends fail the trailing boundary.
 DEP_FLAG_RE = re.compile(r"(?<!\S)(-MMD|-MM|-MD|-MF|-MG|-MP|-MT|-MQ|-M)(?=\s|$)")
+# GNU make mid-line comment: unescaped whitespace then #.
+_COMMENT_RE = re.compile(r"(?<!\\)[ \t]#")
 
 # -MM / -MMD omit system headers. -M / -MD include them (the #1806 bug).
 USER_ONLY = frozenset({"-MM", "-MMD"})
 SYSTEM_INCLUSIVE = frozenset({"-M", "-MD"})
 
 # Files that carry the NCCL #1806 recipes (plus the RCCL diagnostics copy).
+# kinds are literal substrings of the depgen line (same check for all of them).
 REQUIRED = (
-    ("Makefile", ("d_tmp",), 2),
+    ("Makefile", (".d.tmp",), 2),
     (os.path.join("device", "Makefile"), ("DEPENDS.cu", "DEPENDS.cc"), 2),
     (os.path.join("diagnostics", "device", "Makefile"), ("DEPENDS.cu",), 1),
 )
@@ -56,12 +59,18 @@ def _join_continued_lines(text):
     return logical
 
 
+def _strip_make_comment(line):
+    m = _COMMENT_RE.search(line)
+    return line[:m.start()] if m else line
+
+
 def _dep_flags(line):
-    return tuple(DEP_FLAG_RE.findall(line))
+    return tuple(DEP_FLAG_RE.findall(_strip_make_comment(line)))
 
 
 def _is_depgen_line(line):
     """True for a compiler dep-tracking recipe, not a later sed of .d.tmp."""
+    line = _strip_make_comment(line)
     if not line or line.lstrip().startswith("#"):
         return False
     flags = _dep_flags(line)
@@ -124,6 +133,19 @@ class TestMakefileDepFlags(unittest.TestCase):
         )
         self.assertEqual(depgen_sites(text), [])
 
+    def test_parser_ignores_mm_without_depgen_marker(self):
+        # Has a -M* token, so this reaches the .d.tmp / DEPENDS. gate and
+        # must still be rejected (unlike the sed fixture, which exits earlier).
+        self.assertEqual(depgen_sites("\t$(CXX) -MM $< -o /dev/null\n"), [])
+
+    def test_parser_ignores_dash_m_in_trailing_comment(self):
+        sites = depgen_sites(
+            "DEPENDS.cu = $(NVCC) $(NVCUFLAGS) -MM -dc $1  # was -M before #1806\n"
+        )
+        self.assertEqual(len(sites), 1)
+        self.assertEqual(sites[0][2], ("-MM",))
+        self.assertEqual(site_errors(sites[0][2]), [])
+
     def test_parser_does_not_treat_march_as_dep_flag(self):
         sites = depgen_sites(
             "\t$(CXX) -march=native -MM $< > foo.d.tmp\n"
@@ -170,10 +192,6 @@ class TestMakefileDepFlags(unittest.TestCase):
                     % (rel, min_sites, len(sites))
                 )
             for kind in kinds:
-                if kind == "d_tmp":
-                    if not any(".d.tmp" in line for _, line, _ in sites):
-                        failures.append("%s: no .d.tmp -MM recipe" % rel)
-                    continue
                 if not any(kind in line for _, line, _ in sites):
                     failures.append("%s: no %s recipe" % (rel, kind))
             for lineno, line, flags in sites:
