@@ -29,7 +29,7 @@
 
 #include "virtgpu_drm.h"
 
-#define VIRGL_RENDERER_CAPSET_HSAKMT 8
+#define VIRGL_RENDERER_CAPSET_HSAKMT 10
 #define VIRTGPU_DRM_CONTEXT_AMDGPU 1
 #define VHSA_MAX_DEVICES 10
 
