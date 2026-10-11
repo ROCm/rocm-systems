@@ -3,6 +3,7 @@
 
 import pytest
 
+from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
@@ -10,7 +11,6 @@ from rocprof_compute_soc.counter_grouping_buckets import (
     iter_metric_groups,
     rebuild_counter_file,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from tests.unit.rocprof_compute_soc.test_soc_base import PERFMON_CONFIG
 
 
