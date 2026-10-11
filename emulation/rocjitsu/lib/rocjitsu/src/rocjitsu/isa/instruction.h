@@ -81,7 +81,15 @@ enum InstFlags : uint64_t {
   /// @brief Memory result lanes depend on controls beyond EXEC and issue masking.
   CONDITIONAL_MEMORY_LANES = (1ULL << 24),
   /// @brief Matrix execution accesses register lanes independently of EXEC.
-  MATRIX_REGISTER_ACCESSES = (1ULL << 25)
+  MATRIX_REGISTER_ACCESSES = (1ULL << 25),
+  /// @brief Decoded MFMA broadcast size exceeds its architectural block count.
+  INVALID_MFMA_BROADCAST = (1ULL << 26),
+  /// @brief Decoded VOPD operands violate a qualified bank or source restriction.
+  INVALID_VOPD_OPERANDS = (1ULL << 27),
+  /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
+  INVALID_IU_MODIFIERS = (1ULL << 28),
+  /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
+  MISALIGNED_SCALAR_DATA = (1ULL << 29)
 };
 
 class BasicBlock;

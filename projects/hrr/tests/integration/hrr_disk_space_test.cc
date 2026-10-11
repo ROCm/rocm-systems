@@ -57,6 +57,12 @@
 // 32-bit targets.
 static_assert(sizeof(void*) == 8, "the statvfs fake assumes an LP64 target");
 
+// Set by a workload in another file of this binary. Each statvfs and statvfs64
+// call runs it first, faked or not. The capture writer reads free space on its
+// pid-<pid> directory while it opens the archive, after it has removed a stale
+// active marker and before it creates its own.
+std::atomic<void (*)(const char*)> g_hrr_statvfs_hook{nullptr};
+
 namespace {
 
 constexpr uint64_t kBlock = 4096;
@@ -147,6 +153,7 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
 }
 
 int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+  if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
   if (!is_faked(path)) {
     using Fn = int (*)(const char*, struct statvfs*);
     static Fn real[2] = {reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs")),
@@ -351,12 +358,18 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, 1u << 20));
   // Larger than the interval, so it is checked and the count starts from zero.
   copy_to_device(dev, 100, 1u << 20);
+  const fs::path active =
+      fs::path(fake_root()) / ("pid-" + std::to_string(getpid())) / "active";
+  REQUIRE(fs::exists(active));
 
   const int64_t headroom = 2 << 20;
   arm_shrinking(headroom);
   for (int i = 0; i < kStepCount; ++i) copy_to_device(dev, 200 + i, kStepCopy);
   const uint64_t used = used_bytes() - g_used_base.load();
   disarm();
+
+  // Stopped while the program runs on, so producers must stop writing sidecars.
+  CHECK_FALSE(fs::exists(active));
 
   // The capture went no further into the reserve than one check interval.
   INFO("used " << used << " headroom " << headroom << " interval " << interval);
