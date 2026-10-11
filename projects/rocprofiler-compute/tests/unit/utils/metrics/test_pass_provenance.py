@@ -93,7 +93,13 @@ def test_load_df_pmc_no_duplicates_matches_unique_columns(tmp_path) -> None:
     assert not layout.has_duplicates
     assert df["SQ_WAVES"].iloc[0] == 4
     assert df["SQ_BUSY_CYCLES"].iloc[0] == 100
-    assert not any("@pass:" in column for column in df.columns)
+    shadow = {column for column in df.columns if "@pass:" in column}
+    assert shadow == {
+        "Start_Timestamp@pass:pmc_perf_0",
+        "End_Timestamp@pass:pmc_perf_0",
+        "Start_Timestamp@pass:pmc_perf_1",
+        "End_Timestamp@pass:pmc_perf_1",
+    }
 
 
 def test_load_df_pmc_legacy_shape_for_iteration_multiplexing(tmp_path) -> None:
@@ -211,9 +217,75 @@ def test_normalization_fallback_reports_failure_when_formula_still_spans_passes(
     assert not relaxed
 
 
-def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
-    monkeypatch,
-) -> None:
+def _two_pass_long_df(
+    counters: list, values: list, passes: list, starts: list, ends: list
+) -> pd.DataFrame:
+    rows = len(counters)
+    return pd.DataFrame({
+        "GPU_ID": [0] * rows,
+        "Dispatch_ID": [0] * rows,
+        "Grid_Size": [256] * rows,
+        "Workgroup_Size": [64] * rows,
+        "LDS_Per_Workgroup": [0] * rows,
+        "Scratch_Per_Workitem": [0] * rows,
+        "Arch_VGPR": [8] * rows,
+        "Accum_VGPR": [0] * rows,
+        "SGPR": [16] * rows,
+        "Kernel_Name": ["k"] * rows,
+        "Start_Timestamp": starts,
+        "End_Timestamp": ends,
+        "Kernel_ID": [0] * rows,
+        "Counter_Name": counters,
+        "Counter_Value": values,
+        "Pass_Key": passes,
+    })
+
+
+def _eval_sys_info() -> pd.Series:
+    return pd.Series({
+        "ip_blocks": "standard",
+        "gpu_arch": "gfx942",
+        "se_per_gpu": 4,
+        "sa_per_se": 1,
+        "pipes_per_gpu": 4,
+        "cu_per_gpu": 38,
+        "simd_per_cu": 4,
+        "sqc_per_gpu": 16,
+        "lds_banks_per_cu": 32,
+        "cur_sclk": 1800.0,
+        "cur_mclk": 1200.0,
+        "max_sclk": 2100.0,
+        "max_mclk": 1600.0,
+        "max_waves_per_cu": 32,
+        "num_memory_channels": 4,
+        "total_l2_chan": 16,
+        "num_xcd": 1,
+        "wave_size": 64,
+    })
+
+
+def _eval_one_metric(long_df: pd.DataFrame, expr: str) -> pd.DataFrame:
+    layout = build_pass_layout(long_df)
+    raw_pmc_df = process_rocpd_csv(long_df, pass_layout=layout)
+    metric_df = pd.DataFrame({
+        "Metric_ID": ["9.9.9"],
+        "Metric": ["m"],
+        "Avg": [expr],
+    }).set_index("Metric_ID")
+    eval_metric(
+        {1: metric_df},
+        {1: "metric_table"},
+        {1: [expr]},
+        _eval_sys_info(),
+        pd.DataFrame(),
+        raw_pmc_df,
+        debug=False,
+        pass_layout=layout,
+    )
+    return metric_df
+
+
+def test_process_rocpd_csv_keeps_counters_bare_without_duplicates() -> None:
     long_df = pd.DataFrame({
         "GPU_ID": [0, 0],
         "Dispatch_ID": [0, 0],
@@ -234,18 +306,12 @@ def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
     })
     layout = build_pass_layout(long_df)
 
-    def fail_provenance_merge(*_args, **_kwargs):
-        raise AssertionError
-
-    monkeypatch.setattr(
-        "utils.utils_analysis._merge_counters_with_pass_provenance",
-        fail_provenance_merge,
-    )
-
     result = process_rocpd_csv(long_df, pass_layout=layout)
 
     assert result["SQ_WAVES"].iloc[0] == 4
     assert result["TA_BUSY"].iloc[0] == 50
+    assert "SQ_WAVES@pass:pmc_perf_0" not in result.columns
+    assert result["End_Timestamp@pass:pmc_perf_1"].iloc[0] == 20
 
 
 def test_bind_expression_dataframe_groups_by_metric_id() -> None:
@@ -429,7 +495,7 @@ def test_weight_only_in_another_pass_is_not_the_bare_column() -> None:
     assert bound == "TCC_EA0_RDREQ_sum@pass:pmc_perf_1"
 
 
-def test_bind_strips_timestamps_before_choosing_a_pass() -> None:
+def test_bind_moves_timestamps_onto_the_pmc_chosen_pass() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
@@ -452,6 +518,60 @@ def test_bind_strips_timestamps_before_choosing_a_pass() -> None:
     )
     bound = df.at[0, "Avg"]
     assert "TCP_TOTAL_CACHE_ACCESSES_sum@pass:pmc_perf_0" in bound
-    assert "End_Timestamp@pass" not in bound
-    assert "raw_pmc_df['End_Timestamp']" in bound
-    assert "raw_pmc_df['Start_Timestamp']" in bound
+    assert "raw_pmc_df['End_Timestamp@pass:pmc_perf_0']" in bound
+    assert "raw_pmc_df['Start_Timestamp@pass:pmc_perf_0']" in bound
+
+
+def test_eval_metric_rate_divides_by_the_selected_pass_duration() -> None:
+    """TCP is only in pass 1 (duration 50); pass 0 lasted 10."""
+    long_df = _two_pass_long_df(
+        counters=["SQ_WAVES", "TCP_TOTAL_CACHE_ACCESSES_sum"],
+        values=[4, 100],
+        passes=["pmc_perf_0", "pmc_perf_1"],
+        starts=[10, 100],
+        ends=[20, 150],
+    )
+    expr = (
+        "to_sum(raw_pmc_df['TCP_TOTAL_CACHE_ACCESSES_sum']) / "
+        "to_sum(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp'])"
+    )
+
+    metric_df = _eval_one_metric(long_df, expr)
+
+    # Pass-1 duration: 100 / 50 = 2. Pass-0 timestamps would give 100 / 10.
+    assert float(metric_df.at["9.9.9", "Avg"]) == 2.0
+
+
+def test_eval_metric_leaves_a_metric_unset_when_no_pass_holds_its_counters() -> None:
+    long_df = _two_pass_long_df(
+        counters=["TA_BUSY", "TD_BUSY"],
+        values=[50, 25],
+        passes=["pmc_perf_0", "pmc_perf_1"],
+        starts=[10, 10],
+        ends=[20, 20],
+    )
+    expr = "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"
+
+    metric_df = _eval_one_metric(long_df, expr)
+
+    assert metric_df.at["9.9.9", "Avg"] == ""
+
+
+def test_bind_expression_dataframe_unsets_a_metric_that_spans_passes() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"TD_BUSY"}),
+        },
+        duplicated=frozenset(),
+    )
+    expression_df = pd.DataFrame({
+        "metric_id": ["9.9.9"],
+        "value_name": ["Avg"],
+        "value": ["to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
+    })
+
+    bind_expression_dataframe(expression_df, layout, "MI300")
+
+    assert expression_df.at[0, "value"] == "None"

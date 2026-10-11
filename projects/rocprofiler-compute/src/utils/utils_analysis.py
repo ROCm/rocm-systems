@@ -4,7 +4,7 @@
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -750,16 +750,18 @@ def process_rocpd_csv(
     Merge counters across unique dispatches from the
     input dataframe and return processed dataframe.
 
-    When ``pass_layout`` is provided and the long frame has ``Pass_Key``,
-    duplicated counters keep a base column (first pass in natural order)
-    plus per-pass shadow columns ``{counter}@pass:{pass_key}``.
+    When ``pass_layout`` spans several passes and the long frame has
+    ``Pass_Key``, duplicated counters keep a base column (first pass in natural
+    order) plus per-pass shadow columns ``{counter}@pass:{pass_key}``. Start and
+    end timestamps always get per-pass columns, because each pass is its own
+    replay of the dispatch.
     """
     if df.empty:
         return df
 
     use_provenance = (
         pass_layout is not None
-        and pass_layout.has_duplicates
+        and pass_layout.is_multi_pass
         and "Pass_Key" in df.columns
     )
 
@@ -788,6 +790,7 @@ def process_rocpd_csv(
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
         if use_provenance:
+            row.update(_timestamps_by_pass(group_df, pass_layout))
             row.update(_merge_counters_with_pass_provenance(group_df, pass_layout))
         else:
             # Each counter will become its own column (last write wins).
@@ -799,6 +802,19 @@ def process_rocpd_csv(
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
+
+
+def _timestamps_by_pass(
+    group_df: pd.DataFrame,
+    pass_layout: "PassLayout",
+) -> Dict[str, Any]:
+    """Per-pass Start/End timestamp columns for one dispatch group."""
+    columns: Dict[str, Any] = {}
+    for pass_key, pass_rows in group_df.groupby("Pass_Key", sort=False):
+        for column in ("Start_Timestamp", "End_Timestamp"):
+            qualified = pass_layout.qualified_column(column, str(pass_key))
+            columns[qualified] = pass_rows[column].iloc[0]
+    return columns
 
 
 def _merge_counters_with_pass_provenance(
