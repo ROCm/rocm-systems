@@ -1698,16 +1698,14 @@ TEST_F(GinMPIDeviceTests, WaitCounter_Local) {
 
 // Every thread of the CTA puts to one peer at once, each put bumping a local
 // counter, so the proxy finds several GFDs queued and drains them per
-// GIN_PROXY_POLL_BATCH.
+// GIN_PROXY_POLL_BATCH. Launched as a single CTA, which waits for all nPuts.
 __global__ void putBurstLocalCounterKernel(
     ncclWindow_t srcWin, ncclWindow_t dstWin, size_t bytes, int nPuts,
     ncclGinCounter_t cntIdx, int peer, struct ncclDevComm devComm) {
   ncclGin gin{devComm, /*ginContext=*/0};
-  if (blockIdx.x == 0) {
-    for (int i = threadIdx.x; i < nPuts; i += blockDim.x) {
-      gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, bytes,
-              ncclGin_None{}, ncclGin_CounterInc{cntIdx});
-    }
+  for (int i = threadIdx.x; i < nPuts; i += blockDim.x) {
+    gin.put(ncclTeamWorld(devComm), peer, dstWin, 0, srcWin, 0, bytes,
+            ncclGin_None{}, ncclGin_CounterInc{cntIdx});
   }
   gin.waitCounter(ncclCoopCta(), cntIdx, /*least=*/nPuts);
 }
