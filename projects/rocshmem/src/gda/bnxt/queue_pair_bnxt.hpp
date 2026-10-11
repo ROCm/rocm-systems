@@ -410,23 +410,22 @@ __device__ inline __noinline__ void QueuePairBNXT::quiet_single() {
 }
 
 __device__ __forceinline__ uint64_t QueuePairBNXT::quiet_target_single() {
-  return __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
+  return __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 }
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
-// The tail wraps at the queue depth. If more than a full queue is posted after target, this can report
-// pending until the queue drains.
 __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64_t target) {
   struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
   uint32_t sq_depth = sq.depth;
 
   uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
 
-  uint32_t sq_tail = __scoped_atomic_load_n(&sq.tail, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
+  // Derive the tail from posted so both come from one read
+  uint64_t posted  = __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
+  uint32_t sq_tail = static_cast<uint32_t>(posted % sq_depth);
 
-  uint32_t in_flight    = (sq_tail - sq_head + sq_depth) % sq_depth;
-  uint32_t since_target = (sq_tail - static_cast<uint32_t>(target) + sq_depth) % sq_depth;
-  return in_flight <= since_target;
+  uint32_t in_flight = (sq_tail - sq_head + sq_depth) % sq_depth;
+  return posted - in_flight >= target;
 }
 
 // precondition: called with all active lanes using different QPs
@@ -536,6 +535,7 @@ __device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
 
 __device__ __forceinline__ void QueuePairBNXT::incr_tail(
     bnxt_device_sq& sq, uint8_t cnt) {
+  sq.posted += cnt;
   sq.tail += cnt;
   if (sq.tail >= sq.depth) {
     sq.tail %= sq.depth;
