@@ -52,6 +52,10 @@ import shlex
 import pytest
 
 from .gin_sdma_harness import (
+    BCAST_OOB_RE as _OOB_RE,
+    _NUM,
+    _WRONG,
+    bcast_wrong_count as _wrong_count,
     detect_ngpus,
     env_int,
     gin_env_xflags,
@@ -76,16 +80,18 @@ DEVTIME_LINE_RE = re.compile(
     r"#\[a2a-devtime\].*?\bdevtime\s+([0-9]+(?:\.[0-9]+)?)\s+us")
 
 # Release alltoall_perf prints a results row, not the DEBUG_PRINT `#wrong=`
-# line in common.cu. Root is -1 (AlltoAllRunTest). The first #wrong column is
+# line in common.cu. Root is -1 (AlltoAllRunTest), so BCAST_ROW_RE, which
+# captures root as (\d+), cannot match it. The first #wrong column is
 # out-of-place; in-place is N/A because alltoall.cu sets reportErrors = 0 there.
-_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
-_WRONG = r"(?:{}|N/A)".format(_NUM)
+# Both #wrong groups are required, as in BCAST_ROW_RE: a skipped out-of-place
+# row (writeBenchMarkLineNullBody pads it with spaces) then does not match,
+# instead of capturing the in-place #wrong as out-of-place.
 _A2A_OOP_WRONG_RE = re.compile(
     r"^\s*\d+\s+\d+\s+\S+\s+\S+\s+-?\d+"
-    r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG),
+    r"\s+{n}\s+{n}\s+{n}\s+({w})"
+    r"\s+{n}\s+{n}\s+{n}\s+{w}".format(n=_NUM, w=_WRONG),
     re.M,
 )
-_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
 
 
 # detect_ngpus() raises when rocminfo is missing. Only call it when this module
@@ -103,14 +109,6 @@ _gpu = pytest.mark.skipif(
     not _enabled,
     reason="GIN AllToAll devtime smoke tests are opt-in; set "
            "RCCL_TESTS_GIN_SDMA_DEVTIME=1 on a GIN-capable node to enable.")
-
-
-def _wrong_count(field):
-    """Numeric #wrong, or None when the column is N/A because checks were off."""
-    try:
-        return float(field)
-    except ValueError:
-        return None
 
 
 def _assert_datacheck_clean(out):
@@ -208,9 +206,11 @@ def test_AllToAllDevtimeMode2DeviceOnly(request):
     """Mode 2: reported metric is in-kernel device latency (no host graph loop)."""
     rc, out = _run_devtime(request, device_timing_mode=2)
     assert rc == 0, "alltoall_perf exited {} (mode -B 2)".format(rc)
-    _assert_datacheck_clean(out)
+    # Check this before the datacheck: a skipped out-of-place row leaves no
+    # #wrong row to match, and this warning names the real cause.
     assert "WARN --device_timing=2: no in-kernel device-time" not in out, (
         "device-time-only mode produced no valid measurement:\n{}".format(out[-2000:]))
+    _assert_datacheck_clean(out)
 
 
 @_gpu
@@ -272,8 +272,18 @@ def test_AllToAllDevtimeDatacheckRejectsNonzeroWrongColumn():
 
 
 def test_AllToAllDevtimeDatacheckRejectsUncheckedNa():
-    with pytest.raises(pytest.fail.Exception, match="N/A"):
+    with pytest.raises(pytest.fail.Exception, match="data check never ran"):
         _assert_datacheck_clean(_sample_output(oop_wrong="N/A"))
+
+
+def test_AllToAllDevtimeDatacheckSkippedOutOfPlaceRowDoesNotMatch():
+    """A skipped out-of-place row must not shift onto the in-place #wrong."""
+    row = (
+        "      131072         32768     int32    none      -1"
+        + " " * 32
+        + "     12.34   1.00   1.00     N/A\n"
+    )
+    assert _A2A_OOP_WRONG_RE.findall(row) == []
 
 
 def test_AllToAllDevtimeDatacheckIgnoresColumnHeader():
