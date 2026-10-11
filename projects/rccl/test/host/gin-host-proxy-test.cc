@@ -121,7 +121,7 @@ class GinHostProxyBatchTest : public ::testing::Test {
     ctx_.nRanks = nRanks;
     ctx_.nContexts = 1;
     ctx_.hostGpuCtx = &hostGpuCtx_;
-    ctx_.nSignalsPerContext = 1;
+    ctx_.nSignalsPerContext = 2;
     ctx_.pollBatch = pollBatch;
   }
 
