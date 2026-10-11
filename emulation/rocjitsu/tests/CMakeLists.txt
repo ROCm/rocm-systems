@@ -2,7 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
-include(rj_find_amdcxx)
+include(rj_configure_device_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME cmake.hip_toolchain_failure
+        COMMAND
+            ${CMAKE_COMMAND} "-DRJ_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DRJ_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/hip_toolchain_failure"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}"
+            "-DFLATBUFFERS_SOURCE_DIR=${flatbuffers_SOURCE_DIR}" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hip_toolchain_failure.cmake
+    )
+endif()
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -21,6 +35,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_instruction_mix
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -423,6 +438,16 @@ rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -581,9 +606,12 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
+    l2_maintenance_mutex_test.cpp
+    l2_shard_epoch_test.cpp
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
@@ -661,6 +689,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -841,16 +870,50 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+set(_rj_l2_mutex_cases
+    ReaderRechecksAdmissionAfterWriterEnters
+    WriterWaitsAgainAfterNonzeroCounterWake
+    CoherenceDomainWritersUnderOuterLocks
+    FailedWriterTryReopensReaderAdmission
+    WriterExcludesReadersAndOtherWriters
+    ConcurrentReadersObserveCompleteWriterUpdates
+    PendingWriterClosesAdmissionAndWakesAfterLastReader
+    CollidingReadersOverlapAndWriterWaitsForTheLastOwner
+    ExclusiveUnlockWakesBlockingReaders
+)
+# Exclude exactly the cases registered below, so future cases still participate
+# in normal discovery until they receive an explicit timeout registration.
+set(_rj_gtest_exclusions
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    string(
+        APPEND _rj_gtest_exclusions
+        ":L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
+
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
 # ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test are registered separately so CTest can
-# bound a deadlocked child process.
-rj_add_gtest_tests(
-    rocjitsu_tests
-    TEST_FILTER
-        "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
-)
+# and the concurrent-close wait test, plus the L2 mutex suite, are registered
+# separately so CTest can bound a deadlocked child process.
+rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# A failed assertion cannot bound a blocked join or jthread destructor. Give
+# each L2 mutex case its own process timeout in build-tree and installed tests.
+foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
+    rj_add_test(
+        NAME "L2MaintenanceMutexTest.${_l2_mutex_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=L2MaintenanceMutexTest.${_l2_mutex_case}"
+    )
+endforeach()
 
 # GoogleTest registers every parameter before applying its filter. Keep the FP
 # matrices in their own executable so unrelated tests do not pay that cost.
@@ -1385,6 +1448,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1396,6 +1460,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
@@ -3431,7 +3496,6 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
@@ -3456,6 +3520,9 @@ endfunction()
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (HIP compilation probe failed)")
 elseif(NOT HSA_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")

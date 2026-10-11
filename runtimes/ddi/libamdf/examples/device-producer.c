@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* GFX1201 AMDF qualification for same-device GPU-produced SDMA and AQL queues.
@@ -41,7 +42,7 @@
 enum { BUFFER_BYTES = 65536, SLOT_WORDS = 32, ITERATIONS = 64 };
 static const uint64_t timeout_ns = UINT64_C(5000000000);
 static const amdf_queue_format_features_t required_format_features =
-    AMDF_GPU_SDMA_FORMAT_FEATURE_GCR |
+    AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR |
     AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
 
 struct buffer {

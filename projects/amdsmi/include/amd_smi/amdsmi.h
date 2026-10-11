@@ -2731,6 +2731,18 @@ typedef struct {
 } amdsmi_npm_info_t;
 
 /**
+ * @brief NPM balancing mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NPM_BALANCING_MODE_INVALID = 0,  //!< Invalid/unavailable (e.g. unreadable sysfs value)
+  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,      //!< Power Balancing (PB), the default mode
+  AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,  //!< Frequency Balancing (FB)
+  AMDSMI_NPM_BALANCING_MODE_MAX = 3  //!< Not a valid mode; bounds the defined enum range
+} amdsmi_npm_balancing_mode_t;
+
+/**
  * @brief Compute tray type
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3206,7 +3218,8 @@ typedef struct {
  *
  *  @details This function initializes the library and the internal data structures,
  *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  Singleton Design, requires the same number of inits as shutdowns. Threads may call
+ *  ::amdsmi_init and ::amdsmi_shut_down concurrently; the calls are serialized.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -3232,7 +3245,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *
  *  @details This function shuts down the library and internal data structures and
  *  performs any necessary clean ups. Singleton Design, requires the same number
- *  of inits as shutdowns.
+ *  of inits as shutdowns. The call that releases the last reference frees every
+ *  handle, so no other thread may still be using one.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -7729,6 +7743,75 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
  */
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* info);
+
+/**
+ * @brief Retrieves the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Queries whether the node is currently operating in Power Balancing (PB) or Frequency
+ * Balancing (FB) mode. This call is not gated on NPM enablement: it reports the last-selected
+ * mode regardless of whether NPM is currently enabled or disabled on the node.
+ * ::AMDSMI_STATUS_NOT_SUPPORTED is returned, and @p mode left unset, if the underlying sysfs
+ * value is missing or unreadable. If the sysfs value is present but cannot be decoded,
+ * ::AMDSMI_STATUS_UNEXPECTED_DATA is returned instead.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] mode Pointer to amdsmi_npm_balancing_mode_t to receive the current balancing mode.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs value is
+ * missing or unreadable. ::AMDSMI_STATUS_UNEXPECTED_DATA if the sysfs value is present but not
+ * decodable. Non-zero on other failures.
+ */
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode);
+
+/**
+ * @brief Sets the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Sets the node to Power Balancing (PB) or Frequency Balancing (FB) mode. This is an
+ * AMD-SMI only operation; it is not exposed via BMC Redfish/APML. Requires elevated privileges.
+ *
+ * @param[in] node_handle Handle to the Node to configure.
+ * @param[in] mode Requested balancing mode (::AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING or
+ *            ::AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING).
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if NPM is disabled on
+ * the node (no write is attempted). ::AMDSMI_STATUS_SETTING_UNAVAILABLE if the requested mode is
+ * not present in this platform's supported balancing modes (see
+ * ::amdsmi_get_npm_supported_balancing_modes). ::AMDSMI_STATUS_NO_PERM if the caller lacks
+ * elevation.
+ */
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode);
+
+/**
+ * @brief Retrieves the set of NPM balancing modes supported by this node's platform/ASIC,
+ * independent of current NPM enablement.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @note Bit N of *supported_modes corresponds to enum value N of ::amdsmi_npm_balancing_mode_t.
+ * Decoding should iterate the full defined enum range (up to ::AMDSMI_NPM_BALANCING_MODE_MAX) so
+ * that modes added in the future are picked up without caller changes. Not gated on NPM enablement.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] supported_modes Pointer to amdsmi_bit_field_t to receive the supported-modes bitmask.
+ *             Must be allocated by the user.
+ *
+ * @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ */
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes);
 
 /**
  * @brief Retrieves compute-tray type and accelerator count for the specified node.

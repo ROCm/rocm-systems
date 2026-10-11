@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Rust implementation of the pinned AMDF native C ABI.
@@ -40,7 +41,7 @@ pub unsafe extern "C" fn amdf_query_api(
         if minimum > maximum {
             return Err(INVALID);
         }
-        if minimum > AMDF_ABI_VERSION_3 || maximum < AMDF_ABI_VERSION_3 {
+        if minimum > AMDF_ABI_VERSION_5 || maximum < AMDF_ABI_VERSION_5 {
             return Err(VERSION);
         }
         // SAFETY: The checked output slot receives a library-lifetime table.
@@ -71,11 +72,11 @@ pub(crate) unsafe extern "C" fn query_extension(
     })
 }
 
-// Both imported v3 table sizes fit the u32 ABI extent field.
+// Both imported table sizes fit the u32 ABI extent field.
 #[allow(clippy::cast_possible_truncation)]
 static API: amdf_api_t = amdf_api_t {
     structure_size: size_of::<amdf_api_t>() as u32,
-    abi_version: AMDF_ABI_VERSION_3,
+    abi_version: AMDF_ABI_VERSION_5,
     instance_create: Some(instance::create),
     instance_destroy: Some(instance::destroy),
     endpoint_enumerate: Some(instance::enumerate),
@@ -114,6 +115,8 @@ static API: amdf_api_t = amdf_api_t {
     user_queue_destroy: Some(queue::destroy),
     memory_query_address: Some(memory::address),
     memory_scope_query_pair_info: Some(memory::scope_pair_info),
+    kernel_queue_refresh_status: Some(kernel_queue::refresh_status),
+    kernel_queue_request_notification: Some(kernel_queue::request_notification),
 };
 
 #[allow(clippy::cast_possible_truncation)]
