@@ -2422,6 +2422,9 @@ TEST_F(NetIbMPITest, PostRecoveryPingPongHoldsSync) {
     int totalDevs = 0;
     AssertInitAndGetDevices(&totalDevs);
 
+    RECOVERY_UD_OR_SKIP();
+    FAILOVER_RDMA_READ_OR_SKIP();
+
     int mergedDev = CreateMergedDeviceForFailover(net_, totalDevs);
     if (mergedDev < 0) {
         GTEST_SKIP() << "Requires NIC Fusion (ndevs >= 2). Found " << totalDevs
