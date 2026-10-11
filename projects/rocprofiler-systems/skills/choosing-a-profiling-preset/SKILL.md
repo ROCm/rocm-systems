@@ -93,9 +93,6 @@ require the user to name a runtime such as MPI before a step applies.
    - Anything else, or a good default for general profiling (profile output, rocPD
      output, call-stack sampling and GPU metrics, no Perfetto trace) → `balanced`.
 
-If the user's need doesn't fit neatly, default to `balanced` and mention that
-domain flags can extend it (see below).
-
 ## Confirm with `--explain`
 
 The presets are compiled into the installed binary, so `--explain` matches the user's
@@ -128,17 +125,17 @@ sampling and the preset does not already enable it:
 rocprof-sys-sample --preset=<name> -- ./myapp
 ```
 
-State in one line what the recommended preset turns on and what it leaves off, so the
-user knows what they gain and give up. Keep the terms apart: the Perfetto trace output,
-the rocPD output and call-stack sampling are separate from ROCm API tracing. For example,
-`profile-only` writes a flat profile with no Perfetto trace file, no rocPD database and no
-call-stack sampling, while ROCm API calls and kernels still appear in the profile.
+State in one line what the recommended preset turns on and what it leaves off, using the
+terms above, so the user knows what they gain and give up. For example, `profile-only`
+writes a flat profile with no Perfetto trace file, no rocPD database and no call-stack
+sampling, while ROCm API calls and kernels still appear in the profile.
 
 Mention, if relevant:
 
 - Domain flags (`--gpu`, `--rocm`, `--cpu`, `--parallel`) can layer on top of
   any preset to add/override specific metrics, e.g.
-  `rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp`.
+  `rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp`. Use this when the
+  user's need doesn't fit a preset neatly: start from `balanced` and extend it.
 - `--explain=<name>` and `--list-presets` let the user verify the choice themselves.
 - `--export-config=<file>.json` freezes the resolved preset+overrides into a
   reusable JSON config — this is the supported way to customize a preset, not
