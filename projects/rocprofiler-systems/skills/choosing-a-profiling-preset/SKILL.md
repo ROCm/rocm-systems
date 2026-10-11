@@ -111,11 +111,20 @@ build exactly and the table above can lag behind it. Once you have a candidate:
 
 ## Output
 
-Return the exact invocation, e.g.:
+Return the exact invocation. Default to `rocprof-sys-run`:
 
 ```bash
 rocprof-sys-run --preset=<name> -- ./myapp
-# or, for sampling-based profiling:
+```
+
+Both tools take the same `--preset`, and a preset that sets `sampling.enabled` overrides
+either one: `balanced` samples at 50 Hz on both, and `profile-only` leaves call-stack
+sampling off on both. The tools differ only when the preset says nothing about sampling
+(for example `trace-gpu`): `rocprof-sys-sample` turns call-stack sampling on and
+`rocprof-sys-run` leaves it off. So use `rocprof-sys-sample` when the user wants call-stack
+sampling and the preset does not already enable it:
+
+```bash
 rocprof-sys-sample --preset=<name> -- ./myapp
 ```
 
