@@ -2477,10 +2477,10 @@ TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnl
   ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
   ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
   ScopedHook ginReg(g_devrGinRegister,
-                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                       return ncclSuccess;
                     });
-  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[], uint32_t const[]) { return ncclSuccess; });
   ScopedHook rmaReg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
   ScopedHook rmaDereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
 
