@@ -18,14 +18,24 @@
 #     ./scripts/run_spp_health_local_driver.sh --fetch --report
 #
 # 500-iter medians are the default ITERS=500, including gfx942. There is no
-# separate 500med script. A legacy --compare flag is ignored; median CSV and
-# markdown come from tools/compare_spp_legacy_medians.py:
+# separate 500med script.
 #
-#   python3 tools/compare_spp_legacy_medians.py \
-#     --artifacts validation-artifacts/spp-health-261001-gfx942-500med \
-#     --tag 261001-gfx942-500med
+# The report compares two artifact directories from two separate runs. Make
+# the baseline with a rocprofiler-compute-develop checkout as PROFILER_ROOT
+# (path on the GPU host) and RUN=develop, then fetch it:
 #
-# --report calls tools/generate_metric_health_report.py.
+#   ARCH=gfx942 TAG=261011-gfx942-500-develop RUN=develop \
+#     PROFILER_ROOT=/path/on/host/develop/projects/rocprofiler-compute \
+#     ./scripts/run_spp_health_local_driver.sh --wait --fetch
+#
+# Then report this branch's run against it:
+#
+#   ARCH=gfx942 TAG=261011-gfx942-500 \
+#     BASELINE=validation-artifacts/spp-health-261011-gfx942-500-develop \
+#     ./scripts/run_spp_health_local_driver.sh --report
+#
+# --report calls tools/generate_metric_health_report.py with
+# --candidate "$ARTIFACTS" --baseline "$BASELINE".
 
 set -euo pipefail
 
@@ -35,7 +45,7 @@ Usage: ARCH=<gfx942|gfx950|gfx90a|gfx908|gfx1151> $(basename "$0") [--wait] [--f
        $(basename "$0") <arch> [--wait] [--fetch] [--report]
 
 Env: TAG ITERS NO_ROOF THEROCK ARTIFACTS HOST NODE PARTITION GRES
-     --compare is ignored; use tools/compare_spp_legacy_medians.py
+     RUN PROFILER_ROOT BASELINE BASELINE_RUN
 EOF
 }
 
@@ -49,9 +59,6 @@ while [[ $# -gt 0 ]]; do
     --wait) DO_WAIT=true ;;
     --fetch) DO_FETCH=true ;;
     --report) DO_REPORT=true ;;
-    --compare)
-      echo "NOTE: --compare deprecated here; use tools/compare_spp_legacy_medians.py" >&2
-      ;;
     -h|--help) usage; exit 0 ;;
     gfx*)
       if [[ -n "$ARCH_ARG" ]]; then
@@ -78,6 +85,8 @@ fi
 
 ITERS=${ITERS:-500}
 NO_ROOF=${NO_ROOF:-1}
+RUN=${RUN:-spp}
+BASELINE_RUN=${BASELINE_RUN:-develop}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 apply_driver_profile() {
@@ -292,7 +301,11 @@ launch_ssh() {
     "HIP_VISIBLE_DEVICES='0'"
     "ITERS='${ITERS}'"
     "NO_ROOF='${NO_ROOF}'"
+    "RUN='${RUN}'"
   )
+  if [[ -n "${PROFILER_ROOT:-}" ]]; then
+    env_parts+=("PROFILER_ROOT='${PROFILER_ROOT}'")
+  fi
   if [[ "$PASS_MEGA_BATCH" == "1" ]]; then
     env_parts+=("MEGA_BATCH='${MEGA_BATCH}'")
   fi
@@ -345,12 +358,16 @@ export ROCM_ROOT='${THEROCK}'
 export LOG='${REMOTE_LOG}'
 export ITERS='${ITERS}'
 export NO_ROOF='${NO_ROOF}'
+export RUN='${RUN}'
 export FORCE_NO_NATIVE_TOOL=1
 export ROCR_VISIBLE_DEVICES=0
 export HIP_VISIBLE_DEVICES=0
 SBATCH
   if [[ "$SITE_ROCM_IN_LAUNCH" == "1" ]]; then
     echo "export SITE_ROCM_CORE=/opt/rocm" >>"$dest"
+  fi
+  if [[ -n "${PROFILER_ROOT:-}" ]]; then
+    echo "export PROFILER_ROOT='${PROFILER_ROOT}'" >>"$dest"
   fi
   cat >>"$dest" <<'SBATCH'
 chmod +x "${ROOT}/scripts/run_spp_health.sh"
@@ -527,57 +544,41 @@ fetch_results() {
 generate_report() {
   local logs="${ARTIFACTS}/logs/${ARCH}"
   local reports="${ARTIFACTS}/reports"
-  mkdir -p "$reports"
-  local spp_args=() base_args=() wl_dir_args=() name mode wl_root sys
-  for name in vcopy nbody mega_kernel; do
-    if [[ ! -f "${logs}/${name}_spp.log" ]]; then
-      if [[ "$REPORT_MISSING" == "warn" ]]; then
-        echo "WARN: missing ${logs}/${name}_spp.log — skipping that workload in report" >&2
-        continue
-      fi
-      echo "ERROR: missing ${logs}/${name}_spp.log" >&2
-      exit 1
-    fi
-    spp_args+=("${name}:${logs}/${name}_spp.log")
-    if [[ -f "${logs}/${name}_legacy.log" ]]; then
-      base_args+=("${name}:${logs}/${name}_legacy.log")
-    fi
-    for mode in spp legacy; do
-      wl_root="${ARTIFACTS}/${ARCH}/${name}_${TAG}_${mode}"
-      if [[ -d "$wl_root" ]]; then
-        sys=$(find "$wl_root" -maxdepth 3 -type f -name sysinfo.csv 2>/dev/null | head -1 || true)
-        if [[ -n "$sys" ]]; then
-          wl_dir_args+=("${name}_${mode}:$(dirname "$sys")")
-        fi
-      fi
-    done
-  done
-  if [[ "$REPORT_MISSING" == "warn" && ${#spp_args[@]} -eq 0 ]]; then
-    echo "ERROR: no SPP analyze logs under ${logs}" >&2
+  if [[ -z "${BASELINE:-}" ]]; then
+    echo "ERROR: --report needs BASELINE=<artifact dir of a rocprofiler-compute-develop run>" >&2
     exit 1
   fi
+  if [[ ! -d "$BASELINE" ]]; then
+    echo "ERROR: baseline artifact directory not found: ${BASELINE}" >&2
+    exit 1
+  fi
+  mkdir -p "$reports"
+  local name
+  for name in vcopy nbody mega_kernel; do
+    if [[ ! -f "${logs}/${name}_${RUN}.log" ]]; then
+      if [[ "$REPORT_MISSING" == "warn" ]]; then
+        echo "WARN: missing ${logs}/${name}_${RUN}.log — skipping that workload in report" >&2
+        continue
+      fi
+      echo "ERROR: missing ${logs}/${name}_${RUN}.log" >&2
+      exit 1
+    fi
+  done
   local iters="${ITERS}"
   if [[ -f "${logs}/run_meta.env" ]]; then
     iters=$(grep -E '^ITERS=' "${logs}/run_meta.env" | cut -d= -f2- || echo "$ITERS")
   fi
-  local cmd=(
-    python3 "${REPO_ROOT}/tools/generate_metric_health_report.py"
-    --arch "$ARCH"
-    --out "${reports}/${ARCH}_health_spp.html"
-    --host "${REPORT_HOST}"
-    --baseline-label "legacy heuristic"
-    --iterations "${iters}"
+  python3 "${REPO_ROOT}/tools/generate_metric_health_report.py" \
+    --arch "$ARCH" \
+    --candidate "$ARTIFACTS" \
+    --candidate-run "$RUN" \
+    --baseline "$BASELINE" \
+    --baseline-run "$BASELINE_RUN" \
+    --out "${reports}/${ARCH}_health_vs_develop.html" \
+    --host "${REPORT_HOST}" \
+    --iterations "${iters}" \
     --stat Median
-    "${spp_args[@]}"
-  )
-  if ((${#base_args[@]})); then
-    cmd+=(--baseline "${base_args[@]}")
-  fi
-  if ((${#wl_dir_args[@]})); then
-    cmd+=(--workload-dir "${wl_dir_args[@]}")
-  fi
-  "${cmd[@]}"
-  echo "Report: ${reports}/${ARCH}_health_spp.html"
+  echo "Report: ${reports}/${ARCH}_health_vs_develop.html"
 }
 
 if ! "${DO_WAIT}" && ! "${DO_FETCH}" && ! "${DO_REPORT}"; then
