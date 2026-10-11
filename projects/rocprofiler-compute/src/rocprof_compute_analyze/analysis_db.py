@@ -1183,7 +1183,7 @@ class db_analysis(OmniAnalyze_Base):
             sys_info,
             strip_bound_builtin_suffixes(expressions),
         )
-        if pass_layout is not None and used_passes and pass_layout.has_duplicates:
+        if pass_layout is not None and used_passes and pass_layout.is_multi_pass:
             sys_info.update(
                 db_analysis.calc_pass_scoped_builtin_sys_info(
                     pmc_df,
@@ -1282,7 +1282,7 @@ class db_analysis(OmniAnalyze_Base):
             if ceilings:
                 peaks_df = pd.DataFrame([ceilings])
             used_passes: set[str] = set()
-            if pass_layout is not None and pass_layout.has_duplicates:
+            if pass_layout is not None and pass_layout.is_multi_pass:
                 gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
                 used_passes = bind_expression_dataframe(
                     expression_template,
@@ -1642,19 +1642,9 @@ class db_analysis(OmniAnalyze_Base):
                 "hbm_cache_data": "AI HBM",
                 "lds_cache_data": "AI LDS",
             }
-<<<<<<< HEAD
             pass_layout = getattr(self, "_pass_layout_per_workload", {}).get(
                 workload_path
             )
-=======
-            pass_layout = self._pass_layout_per_workload.get(workload_path)
-            peaks_df = pd.DataFrame()
-            ceilings = self._roofline_ceilings_per_workload.get(workload_path, {})
-            if ceilings:
-                peaks_df = pd.DataFrame([ceilings])
-            roofline_tables = {402: roofline_data_df}
-            roofline_types = {402: "metric_table"}
->>>>>>> 6fe70a0bf3f ([rocprofiler-compute] Keep composite metrics on one pass and one sample)
 
             # Calculate kernel-level roofline data
             top_kernels = (
@@ -1669,26 +1659,10 @@ class db_analysis(OmniAnalyze_Base):
                 {
                     "kernel_name": kernel_name,
                     **_roofline_point_values(
-<<<<<<< HEAD
                         roofline_data_expressions,
                         pmc_df[pmc_df["Kernel_Name"] == kernel_name],
                         sys_info,
                         pass_layout,
-=======
-                        roofline_data_df,
-                        roofline_names,
-                        roofline_data_expressions,
-                        evaluate_metric_composites(
-                            roofline_tables,
-                            roofline_types,
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            pd.Series(sys_info),
-                            peaks_df,
-                            pass_layout,
-                        ),
-                        pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                        sys_info,
->>>>>>> 6fe70a0bf3f ([rocprofiler-compute] Keep composite metrics on one pass and one sample)
                     ),
                 }
                 for kernel_name in top_kernels

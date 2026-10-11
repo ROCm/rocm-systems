@@ -191,27 +191,29 @@ def expand_required_counters(
     return frozenset(required)
 
 
+# Every pass is its own replay, so a bound expression reads the duration of
+# its own pass from these per-pass columns.
+TIMESTAMP_COLUMNS = frozenset({"Start_Timestamp", "End_Timestamp"})
+
+
 def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> FrozenSet[str]:
-    """Built-ins whose formulas touch a duplicated counter."""
-    if not layout.has_duplicates:
+    """Built-ins whose formulas touch a duplicated counter or a timestamp."""
+    if not layout.is_multi_pass:
         return frozenset()
     scoped: Set[str] = set()
     for var_name, formula in get_build_in_vars(gpu_series).items():
         hw, _ = extract_counters_and_variables(
             formula, gpu_series, include_supported_denom=False
         )
-        if hw & layout.duplicated:
+        reads_timestamp = any(column in formula for column in TIMESTAMP_COLUMNS)
+        if hw & layout.duplicated or reads_timestamp:
             scoped.add(var_name)
     return frozenset(scoped)
 
 
 # Column names that are not perfmon counters. PassLayout records Counter_Name
 # only, so timestamps and the per-kernel unit must not decide the pass.
-_NON_PMC_BIND_NAMES = frozenset({
-    "Start_Timestamp",
-    "End_Timestamp",
-    UNIT_COUNTER,
-})
+_NON_PMC_BIND_NAMES = TIMESTAMP_COLUMNS | {UNIT_COUNTER}
 
 
 def hardware_counters_for_pass_select(
@@ -336,14 +338,18 @@ def bind_expression(
     layout: PassLayout,
     scoped_builtins: FrozenSet[str],
 ) -> str:
-    """Rewrite duplicated counters and pass-scoped built-ins onto ``pass_key``.
+    """Rewrite duplicated counters, timestamps and scoped built-ins onto ``pass_key``.
 
-    Idempotent: a name that already ends in ``__passN``, or that merely shares
-    a prefix with a scoped built-in, is left unchanged.
+    Timestamps move to the pass columns so a duration is the duration of that
+    pass. Idempotent: a name that already ends in ``__passN``, or that merely
+    shares a prefix with a scoped built-in, is left unchanged.
     """
 
     def _replace_counter(match: Match[str]) -> str:
         counter = match.group(1)
+        if counter in TIMESTAMP_COLUMNS and layout.is_multi_pass:
+            qualified = layout.qualified_column(counter, pass_key)
+            return f"raw_pmc_df['{qualified}']"
         if counter in layout.duplicated and counter in layout.counters_by_pass.get(
             pass_key, frozenset()
         ):
@@ -407,7 +413,7 @@ def evaluate_pass_scoped_builtins(
     string and the values already computed for that pass. Result keys are
     key_prefix + name + "__passN".
     """
-    if not used_passes or not layout.has_duplicates:
+    if not used_passes or not layout.is_multi_pass:
         return {}
     scoped = pass_scoped_builtins(layout, gpu_series)
     build_in_vars = _referenced_builtins(scoped, gpu_series, expressions)
@@ -427,6 +433,16 @@ def evaluate_pass_scoped_builtins(
     return results
 
 
+def _needs_one_pass(required: FrozenSet[str], gpu_series: str) -> bool:
+    """True when the expression reads hardware counters, so it needs one pass."""
+    return bool(hardware_counters_for_pass_select(required, gpu_series))
+
+
+def _reads_pass_data(expr: str) -> bool:
+    refs = extract_row_refs([expr])
+    return bool(refs.direct_counters or refs.builtin_vars)
+
+
 def bind_metric_tables_to_passes(
     dfs: dict,
     dfs_type: dict,
@@ -438,11 +454,12 @@ def bind_metric_tables_to_passes(
 
     Mutates ``dfs`` in place. Evaluation then stores numeric results in those
     same frames, so callers pass the live workload tables. A second bind of a
-    still-string formula is idempotent.
+    still-string formula is idempotent. A row whose PMC set fits no pass is
+    left unset: its counter expressions are cleared, not read across passes.
 
     Returns the set of pass keys that were selected for at least one row.
     """
-    if not pass_layout.has_duplicates:
+    if not pass_layout.is_multi_pass:
         return set()
 
     scoped = pass_scoped_builtins(pass_layout, gpu_series)
@@ -473,8 +490,8 @@ def bind_metric_tables_to_passes(
     if unbound:
         console_warning(
             "pass_provenance",
-            f"same-pass bind: {unbound} metric row(s) left unset "
-            "(counters do not share a pass)",
+            f"same-pass bind: {unbound} metric row(s) fit no single pass and "
+            "are left unset",
         )
     return used_passes
 
@@ -492,7 +509,7 @@ def bind_expression_dataframe(
 
     Returns the set of pass keys selected for at least one metric.
     """
-    if expression_df.empty or not pass_layout.has_duplicates:
+    if expression_df.empty or not pass_layout.is_multi_pass:
         return set()
     if "metric_id" not in expression_df.columns or "value" not in expression_df.columns:
         return set()
@@ -521,8 +538,8 @@ def bind_expression_dataframe(
     if unbound:
         console_warning(
             "pass_provenance",
-            f"same-pass bind (DB): {unbound} metric(s) left unset "
-            "(counters do not share a pass)",
+            f"same-pass bind (DB): {unbound} metric(s) fit no single pass and "
+            "are left unset",
         )
     return used_passes
 
@@ -542,7 +559,7 @@ def resolve_weight_counter_column(
     """
     if pass_layout is None or not pass_layout.pass_keys:
         return weight_counter
-    pass_key = _bound_pass_for_sub_metric(df, sub_metric_name)
+    pass_key = bound_pass_for_metric(df, sub_metric_name)
     if pass_key is None:
         console_warning(
             "pass_provenance",
@@ -563,11 +580,11 @@ def resolve_weight_counter_column(
     return weight_counter
 
 
-def _bound_pass_for_sub_metric(
+def bound_pass_for_metric(
     df: pd.DataFrame,
     sub_metric_name: str,
 ) -> Optional[str]:
-    """Pass key same-pass bind stored for the sub-metric row."""
+    """Pass key same-pass bind stored for the named metric row."""
     row_pass = df.attrs.get(METRIC_ROW_PASS_ATTR, {})
     if not isinstance(row_pass, dict) or "Metric" not in df.columns:
         return None
@@ -596,7 +613,9 @@ def _bind_metric_values(
     pass_key, unset = _choose_metric_pass(label, expressions, layout, gpu_series)
     if unset:
         rewritten = [
-            _UNSET_EXPRESSION if _is_metric_expression(value) else value
+            _UNSET_EXPRESSION
+            if _is_metric_expression(value) and _reads_pass_data(value)
+            else value
             for value in values
         ]
         return _MetricBinding(None, rewritten, True)
@@ -619,21 +638,12 @@ def _choose_metric_pass(
 ) -> Tuple[Optional[str], bool]:
     """Pick the one pass a metric reads its counters from.
 
-    Returns (pass_key, unset). A counter collected in one pass has one value,
-    so a metric that reads no duplicated counter keeps its base columns even
-    when its counters span passes. Only a metric that reads a duplicated
-    counter and fits no single pass is left unset.
+    Returns (pass_key, unset). Every pass is its own replay, so a metric
+    that reads hardware counters and fits no single pass is left unset.
     """
     required = expand_required_counters(extract_row_refs(expressions), gpu_series)
-    pmc_required = hardware_counters_for_pass_select(required, gpu_series)
-    if not pmc_required:
+    if not _needs_one_pass(required, gpu_series):
         return None, False
-    if not pmc_required & layout.duplicated:
-        fits, _ = select_pass_with_normalization_fallback(
-            pmc_required, layout, gpu_series
-        )
-        if fits is None:
-            return None, False
     chosen = choose_metric_pass(required, layout, gpu_series, label)
     return chosen, chosen is None
 
