@@ -26,12 +26,23 @@
 #   ARCH=gfx90a  THEROCK=/opt/rocm-7.2.0 bash scripts/run_spp_health.sh
 #   ARCH=gfx950  THEROCK=/opt/rocm-7.1.0 bash scripts/run_spp_health.sh
 #
-# 500-iter medians are ITERS=500, including gfx942. Median CSV is
-# tools/compare_spp_legacy_medians.py, not a separate worker.
+# 500-iter medians are ITERS=500, including gfx942.
+#
+# One invocation profiles one build of rocprof-compute. The health report
+# compares two separate runs: this branch and rocprofiler-compute-develop.
+#   RUN            name in output paths (default spp). Use RUN=develop for the
+#                  baseline run.
+#   PROFILER_ROOT  rocprofiler-compute checkout whose src/rocprof-compute runs
+#                  profile and analyze (default ROOT). For the baseline, point
+#                  it at a rocprofiler-compute-develop checkout. Samples still
+#                  build from ROOT so both runs profile the same binaries.
+#
+#   RUN=develop PROFILER_ROOT=/path/to/develop/projects/rocprofiler-compute \
+#     ARCH=gfx942 TAG=261011-gfx942-500-develop bash scripts/run_spp_health.sh
 #
 # Produces under $ROOT/workloads/:
-#   {vcopy,nbody,mega_kernel}_${TAG}_{spp,legacy}/
-#   logs_${ARCH}_${TAG}/*.log
+#   {vcopy,nbody,mega_kernel}_${TAG}_${RUN}/
+#   logs_${ARCH}_${TAG}/{vcopy,nbody,mega_kernel}_${RUN}.log
 #   logs_${ARCH}_${TAG}/run_meta.env
 # Ends with ALL_DONE in $LOG.
 
@@ -42,7 +53,7 @@ usage() {
 Usage: ARCH=<gfx> [ITERS=500] [NO_ROOF=1] [THEROCK=...] bash $(basename "$0")
        bash $(basename "$0") <gfx942|gfx950|gfx90a|gfx908|gfx1151>
 
-Env: TAG ITERS NO_ROOF MEGA_BATCH THEROCK LOG ROOT
+Env: TAG ITERS NO_ROOF MEGA_BATCH THEROCK LOG ROOT RUN PROFILER_ROOT
      FORCE_NO_NATIVE_TOOL (site arches default 1)
 EOF
 }
@@ -143,6 +154,8 @@ apply_worker_profile
 
 TAG=${TAG:-$(date +%y%m%d)-${ARCH}-500}
 ROOT=${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+PROFILER_ROOT=${PROFILER_ROOT:-$ROOT}
+RUN=${RUN:-spp}
 ITERS=${ITERS:-500}
 NO_ROOF=${NO_ROOF:-1}
 MEGA_BATCH=${MEGA_BATCH:-$MEGA_BATCH_DEFAULT}
@@ -189,7 +202,7 @@ fi
 : >"$LOG"
 exec >>"$LOG" 2>&1
 
-echo "=== START $(date -u) tag=$TAG arch=$ARCH iters=$ITERS no_roof=$NO_ROOF root=$ROOT therock=$THEROCK ==="
+echo "=== START $(date -u) tag=$TAG arch=$ARCH run=$RUN iters=$ITERS no_roof=$NO_ROOF root=$ROOT profiler_root=$PROFILER_ROOT therock=$THEROCK ==="
 if [[ "$META_SITE" == "1" ]]; then
   echo "host=$(hostname) ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-} HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-}"
 else
@@ -213,7 +226,7 @@ export_rocm_common() {
   export HIP_PATH="${THEROCK}"
   export ROCR_VISIBLE_DEVICES=${ROCR_VISIBLE_DEVICES:-0}
   export HIP_VISIBLE_DEVICES=${HIP_VISIBLE_DEVICES:-0}
-  export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH="${PROFILER_ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
   export CMAKE_PREFIX_PATH="${THEROCK}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
   if [[ -d "${THEROCK}/lib/rocm_sysdeps/lib/pkgconfig" ]]; then
     export PKG_CONFIG_PATH="${THEROCK}/lib/rocm_sysdeps/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
@@ -431,6 +444,8 @@ write_run_meta() {
   {
     echo "TAG=${TAG}"
     echo "ARCH=${ARCH}"
+    echo "RUN=${RUN}"
+    echo "PROFILER_ROOT=${PROFILER_ROOT}"
     echo "ITERS=${ITERS}"
     echo "NO_ROOF=${NO_ROOF}"
     if [[ "$META_SITE" == "1" ]]; then
@@ -499,18 +514,13 @@ run_one() {
   t0=$(date +%s)
 
   echo "--- PROFILE mode=$mode name=$name iters=$ITERS cmd=$* ---"
-  unset ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC || true
-  unset ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE || true
-  if [[ "$mode" == "legacy" ]]; then
-    export ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1
-  fi
 
   set +e
   "${PROFILE[@]}" -n "$wl_name" -- "$@"
   local prc=$?
   if [[ $prc -ne 0 && "$USE_NATIVE_TOOL" == true ]]; then
     echo "WARN: native-tool profile $wl_name failed rc=$prc — retrying with --no-native-tool"
-    local retry=(python3 src/rocprof-compute profile --overwrite --no-native-tool)
+    local retry=(python3 "${PROFILER_ROOT}/src/rocprof-compute" profile --overwrite --no-native-tool)
     if [[ "$NO_ROOF" == "1" ]]; then
       retry+=(--no-roof)
     fi
@@ -530,7 +540,7 @@ run_one() {
   if [[ -n "$wl_dir" ]]; then
     echo "--- ANALYZE $wl_dir ---"
     set +e
-    python3 src/rocprof-compute analyze -p "$wl_dir" -k 0 --view table \
+    python3 "${PROFILER_ROOT}/src/rocprof-compute" analyze -p "$wl_dir" -k 0 --view table \
       >"${LOGDIR}/${name}_${mode}.log" 2>&1
     local arc=$?
     set -e
@@ -563,17 +573,15 @@ prepare_mega
 build_apps
 write_run_meta
 
-PROFILE=(python3 src/rocprof-compute profile --overwrite "${PROFILE_EXTRA[@]}")
+PROFILE=(python3 "${PROFILER_ROOT}/src/rocprof-compute" profile --overwrite "${PROFILE_EXTRA[@]}")
 
-for mode in spp legacy; do
-  run_one "$mode" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
-  run_one "$mode" nbody ./sample/mini-nbody-block 131072 "$ITERS"
-  if [[ "$SKIP_MEGA" != "1" ]]; then
-    run_one "$mode" mega_kernel \
-      "./sample/mega_kernel/mega_kernel_test_${ARCH}" -b "$MEGA_BATCH" -n "$ITERS"
-  else
-    echo "WORKLOAD_DONE name=mega_kernel mode=$mode profile=SKIP analyze=SKIP duration_s=0 iters=$ITERS"
-  fi
-done
+run_one "$RUN" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
+run_one "$RUN" nbody ./sample/mini-nbody-block 131072 "$ITERS"
+if [[ "$SKIP_MEGA" != "1" ]]; then
+  run_one "$RUN" mega_kernel \
+    "./sample/mega_kernel/mega_kernel_test_${ARCH}" -b "$MEGA_BATCH" -n "$ITERS"
+else
+  echo "WORKLOAD_DONE name=mega_kernel mode=$RUN profile=SKIP analyze=SKIP duration_s=0 iters=$ITERS"
+fi
 
 echo "ALL_DONE $(date -u) tag=$TAG iters=$ITERS"
