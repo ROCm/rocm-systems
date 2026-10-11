@@ -30,6 +30,24 @@ A working `rocprof-sys-avail` binary, built/installed alongside
 | What CLI flags does `rocprof-sys-run` have for topic X? | `rocprof-sys-run --help=<topic>` | topics: `preset, general, tracing, profiling, output, sampling, process, counters, backend, execution, debug, misc, gpu, cpu, rocm, parallel` |
 | How do I persist chosen settings across runs? | `rocprof-sys-avail -G ~/.rocprof-sys.cfg [--all]` then `export ROCPROFSYS_CONFIG_FILE=~/.rocprof-sys.cfg` | `--all` includes descriptions/categories in the generated file; formats are txt (default), json, xml via `-F` |
 
+## Terminology
+
+"Trace" and "tracing" overlap in the output, so map the name you see to what it
+controls before answering:
+
+| Name you see | What it controls |
+| --- | --- |
+| `ROCPROFSYS_TRACE`, `settings::trace` and `--help=tracing` (its tuning options) | Perfetto trace output |
+| `ROCPROFSYS_USE_ROCPD` | rocPD output |
+| `ROCPROFSYS_PROFILE`, `--help=profiling` | timemory profile output |
+| `ROCPROFSYS_USE_SAMPLING`, `--help=sampling` | call-stack sampling |
+| `ROCPROFSYS_ROCM_DOMAINS`, `--help=rocm` | ROCm API tracing |
+| `ROCPROFSYS_USE_MPIP`, `_RCCLP`, `_OMPT`, `_KOKKOSP` | MPI, RCCL, OpenMP and Kokkos API tracing |
+
+"Tracing" means API tracing (recording the calls of one API); "trace output" means the
+Perfetto file. A question like "what tracing options are there?" usually means the ROCm
+domains, so ask or answer both if it is unclear.
+
 ## How to answer a discovery question
 
 1. Identify which axis the question is about: settings/env-vars, Timemory
