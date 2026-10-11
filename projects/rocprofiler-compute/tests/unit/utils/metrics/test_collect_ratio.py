@@ -15,6 +15,13 @@ from utils.metrics.aggregation import (
     merge_dispatch_collect_ratio,
     merge_dispatch_collect_sum,
 )
+from utils.metrics.collectable import (
+    COLLECT_RATIO_SPECS_ATTR,
+    COLLECT_SUM_SPECS_ATTR,
+    COLLECTABLE_EXPR_CACHE_ATTR,
+    apply_composite_metrics,
+    is_negated_piece,
+)
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
     build_metric_value_string,
@@ -22,6 +29,7 @@ from utils.metrics.expression import (
     parse_collect_ratio_parts,
     parse_collect_sum_submetrics,
 )
+from utils.metrics.pass_provenance import METRIC_ROW_PASS_ATTR
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_dfs
 from vendored import yaml
@@ -198,4 +206,99 @@ def test_gfx950_ipc_fits_one_bucket_and_is_not_rewritten():
     assert counters_fit_one_bucket(
         frozenset(["SQ_INSTS", "SQ_BUSY_CU_CYCLES"]),
         perfmon_config,
+    )
+
+
+def _two_piece_table(
+    composite_attr: str,
+    composite_spec: object,
+    piece_exprs: dict,
+    piece_passes: tuple,
+) -> pd.DataFrame:
+    """Two collectable rows and one composite parent, with the bound passes."""
+    table = pd.DataFrame(
+        {"Metric": ["first", "second", "parent"], "Avg": ["", "", ""]},
+        index=["1", "2", "3"],
+    )
+    table.attrs[composite_attr] = {"3": composite_spec}
+    table.attrs[COLLECTABLE_EXPR_CACHE_ATTR] = piece_exprs
+    table.attrs[METRIC_ROW_PASS_ATTR] = {"1": piece_passes[0], "2": piece_passes[1]}
+    return table
+
+
+def _evaluate_parent(table: pd.DataFrame) -> object:
+    raw = pd.DataFrame({"Dispatch_ID": [1], "A": [10.0], "B": [5.0]})
+    apply_composite_metrics({1: table}, {1: "metric_table"}, raw, {}, {})
+    return table.at["3", "Avg"]
+
+
+_RATIO_SPEC = {"numerator": ["first"], "denominator": ["second"]}
+_ABSOLUTE_PIECES = {
+    "first": "to_sum(raw_pmc_df['A'])",
+    "second": "to_sum(raw_pmc_df['B'])",
+}
+
+
+@pytest.mark.misc
+def test_collect_ratio_across_passes_stays_unset():
+    table = _two_piece_table(
+        COLLECT_RATIO_SPECS_ATTR,
+        _RATIO_SPEC,
+        _ABSOLUTE_PIECES,
+        ("pmc_perf_0", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == "N/A"
+
+
+@pytest.mark.misc
+def test_collect_ratio_on_one_pass_evaluates():
+    table = _two_piece_table(
+        COLLECT_RATIO_SPECS_ATTR,
+        _RATIO_SPEC,
+        _ABSOLUTE_PIECES,
+        ("pmc_perf_1", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == pytest.approx(2.0)
+
+
+@pytest.mark.misc
+def test_collect_sum_of_absolute_pieces_across_passes_evaluates():
+    table = _two_piece_table(
+        COLLECT_SUM_SPECS_ATTR,
+        ["first", "second"],
+        _ABSOLUTE_PIECES,
+        ("pmc_perf_0", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == pytest.approx(15.0)
+
+
+@pytest.mark.misc
+def test_collect_sum_subtracting_a_piece_from_another_pass_stays_unset():
+    table = _two_piece_table(
+        COLLECT_SUM_SPECS_ATTR,
+        ["first", "second"],
+        {"first": "to_sum(raw_pmc_df['A'])", "second": "to_sum(-(raw_pmc_df['B']))"},
+        ("pmc_perf_0", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == "N/A"
+
+
+@pytest.mark.misc
+def test_collect_sum_subtracting_on_one_pass_evaluates():
+    table = _two_piece_table(
+        COLLECT_SUM_SPECS_ATTR,
+        ["first", "second"],
+        {"first": "to_sum(raw_pmc_df['A'])", "second": "to_sum(-(raw_pmc_df['B']))"},
+        ("pmc_perf_1", "pmc_perf_1"),
+    )
+    assert _evaluate_parent(table) == pytest.approx(5.0)
+
+
+@pytest.mark.misc
+def test_is_negated_piece_reads_unary_minus_only():
+    assert is_negated_piece("-x", "to_sum(raw_pmc_df['A'])")
+    assert is_negated_piece("x", "-100 * to_sum(raw_pmc_df['A'])")
+    assert is_negated_piece("x", "to_sum(-(raw_pmc_df['A'] + raw_pmc_df['B']))")
+    assert not is_negated_piece(
+        "x", "to_sum(raw_pmc_df['A'] - (raw_pmc_df['B'] + raw_pmc_df['C']))"
     )
