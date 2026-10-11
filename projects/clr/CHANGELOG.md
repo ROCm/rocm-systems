@@ -11,10 +11,16 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
 * Disable HRR capture feature
+* Support for recovering the allocation properties of an imported virtual memory handle. `hipMemGetAllocationPropertiesFromHandle()` now reports `hipMemLocationTypeHost` for a host-backed allocation obtained from `hipMemImportFromShareableHandle()`, instead of always reporting device memory. For a device-backed allocation it reports the owning device rather than whichever device was current when the handle was imported.
 
 ### Resolved issues
+
 * A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 * Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
+
+### Changed
+
+* Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
 
 ## HIP 7.16.0 for ROCm 10.1.0
 

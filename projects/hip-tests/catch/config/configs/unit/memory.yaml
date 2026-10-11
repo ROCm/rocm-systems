@@ -850,6 +850,12 @@ memory:
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Misaligned:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Swap_Offsets:
+    <<: *level_2
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Multicast:
     <<: *level_default
     tags: [transfer]
@@ -910,6 +916,16 @@ memory:
   Unit_hipMemcpyBatchAsync_ExtOp_Negative:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_TooLarge:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled:
+    <<: *level_2
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_Indirect_SdmaDisabled_Child:
+    <<: *level_2
+    tags: [transfer]
+    disabled: [amd_wsl, amd_linux, nvidia_windows, nvidia_linux, amd_windows]
   Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect:
     <<: *level_default
     tags: [transfer]
@@ -2399,6 +2415,9 @@ memory:
   Unit_hipMallocAsync_DefaultStreams_Concurrent:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipMallocAsync_InteriorPointer_Memcpy2DAsync:
+    <<: *level_2
+    tags: [alloc, transfer, P1]
   Unit_hipStreamAttachMemAsync_Positive_Basic:
     <<: *level_default
     tags: [query, P1, managed_memory]
