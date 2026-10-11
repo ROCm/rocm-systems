@@ -73,19 +73,52 @@ def find_build_dir(workdir, build_dir_override=None):
     return os.path.join(workdir, "build")
 
 
+def _resolve_extends(cfg_name, all_configs, _seen=None):
+    """Return a config dict with 'extends' chains fully resolved (binary + test_filter only).
+
+    Mirrors test_runner's combine_configs merging rules: child fields win over
+    parent fields, env_variables merge (child wins), tests merge by name.
+    """
+    if _seen is None:
+        _seen = set()
+    if cfg_name in _seen:
+        return dict(all_configs.get(cfg_name, {}))
+    _seen.add(cfg_name)
+
+    from copy import deepcopy
+    cfg = deepcopy(all_configs.get(cfg_name, {}))
+    parent_name = cfg.pop("extends", None)
+    if not parent_name:
+        return cfg
+
+    parents = parent_name if isinstance(parent_name, list) else [parent_name]
+    for pname in parents:
+        if pname not in all_configs:
+            continue
+        parent = _resolve_extends(pname, all_configs, _seen)
+        for key, val in parent.items():
+            if key not in cfg or cfg[key] == "" or cfg[key] is None:
+                cfg[key] = val
+    return cfg
+
+
+def _resolved_configs(config):
+    """Return {name: resolved_cfg} for all test_configurations."""
+    all_configs = config.get("test_configurations", {})
+    return {name: _resolve_extends(name, all_configs) for name in all_configs}
+
+
 def collect_binaries_from_config(config, build_dir):
     """Return {binary_name: full_path} for every unique binary in the config."""
     binaries = {}
-    for _cfg_name, cfg in config.get("test_configurations", {}).items():
+    for _cfg_name, cfg in _resolved_configs(config).items():
         binary = cfg.get("binary", "")
         if binary and binary not in binaries:
-            full = os.path.join(build_dir, binary)
-            binaries[binary] = full
+            binaries[binary] = os.path.join(build_dir, binary)
         for test in cfg.get("tests", []):
-            binary = test.get("binary", binary)
-            if binary and binary not in binaries:
-                full = os.path.join(build_dir, binary)
-                binaries[binary] = full
+            tb = test.get("binary", binary)
+            if tb and tb not in binaries:
+                binaries[tb] = os.path.join(build_dir, tb)
     return binaries
 
 
@@ -172,7 +205,7 @@ def filter_matches(full_name, filter_str):
 def collect_filters(config, restrict_binaries=None):
     """Return {binary_name: [filter_str, ...]} from all enabled test configs."""
     filters = defaultdict(list)
-    for _cfg_name, cfg in config.get("test_configurations", {}).items():
+    for _cfg_name, cfg in _resolved_configs(config).items():
         if cfg.get("enabled") is False:
             continue
         binary = cfg.get("binary", "")
@@ -180,7 +213,6 @@ def collect_filters(config, restrict_binaries=None):
             continue
         if restrict_binaries and binary not in restrict_binaries:
             continue
-        # Suite-level filter (if any)
         suite_filter = cfg.get("test_filter", "")
         for test in cfg.get("tests", []):
             test_binary = test.get("binary", binary)
@@ -189,7 +221,6 @@ def collect_filters(config, restrict_binaries=None):
             f = test.get("test_filter", suite_filter)
             if f:
                 filters[test_binary].append(f)
-            # A test with no filter and no suite filter covers everything in that binary
             elif not suite_filter:
                 filters[test_binary].append("*")
     return filters
