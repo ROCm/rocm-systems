@@ -27,7 +27,7 @@ struct roctx_client_config
     bool        use_perfetto{ false };
     bool        use_timemory{ false };
     bool        perfetto_annotations{ false };
-    std::string selected_trace_regions{};
+    std::string selected_trace_regions;
 };
 
 template <typename MarkerWriterPolicy = default_marker_policy>

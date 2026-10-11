@@ -34,8 +34,6 @@ void VCmpFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -70,8 +68,6 @@ void VCmpLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -106,8 +102,6 @@ void VCmpEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -142,8 +136,6 @@ void VCmpLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -178,8 +170,6 @@ void VCmpGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -214,8 +204,6 @@ void VCmpLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -250,8 +238,6 @@ void VCmpGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -286,8 +272,6 @@ void VCmpOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -322,8 +306,6 @@ void VCmpUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -358,8 +340,6 @@ void VCmpNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -394,8 +374,6 @@ void VCmpNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -430,8 +408,6 @@ void VCmpNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -466,8 +442,6 @@ void VCmpNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -502,8 +476,6 @@ void VCmpNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -538,8 +510,6 @@ void VCmpNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -574,8 +544,6 @@ void VCmpTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTruF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -617,8 +585,6 @@ void VCmpxFF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -656,12 +622,14 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -670,8 +638,6 @@ void VCmpxLtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -688,12 +654,14 @@ RJ_NOINLINE void VCmpxLtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -712,12 +680,14 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -726,8 +696,6 @@ void VCmpxEqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -744,12 +712,14 @@ RJ_NOINLINE void VCmpxEqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 == s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Eq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -768,12 +738,14 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -782,8 +754,6 @@ void VCmpxLeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -800,12 +770,14 @@ RJ_NOINLINE void VCmpxLeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 <= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Le>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -824,12 +796,14 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -838,8 +812,6 @@ void VCmpxGtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -856,12 +828,14 @@ RJ_NOINLINE void VCmpxGtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Gt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -880,12 +854,14 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -894,8 +870,6 @@ void VCmpxLgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -912,12 +886,14 @@ RJ_NOINLINE void VCmpxLgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Lg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -936,12 +912,14 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -950,8 +928,6 @@ void VCmpxGeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -968,12 +944,14 @@ RJ_NOINLINE void VCmpxGeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 >= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -992,12 +970,14 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1006,8 +986,6 @@ void VCmpxOF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1024,12 +1002,14 @@ RJ_NOINLINE void VCmpxOF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::O>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1048,12 +1028,14 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1062,8 +1044,6 @@ void VCmpxUF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1080,12 +1060,14 @@ RJ_NOINLINE void VCmpxUF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::U>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1104,12 +1086,14 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 >= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1118,8 +1102,6 @@ void VCmpxNgeF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1136,12 +1118,14 @@ RJ_NOINLINE void VCmpxNgeF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 >= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1160,12 +1144,14 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1174,8 +1160,6 @@ void VCmpxNlgF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1192,12 +1176,14 @@ RJ_NOINLINE void VCmpxNlgF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1216,12 +1202,14 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1230,8 +1218,6 @@ void VCmpxNgtF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1248,12 +1234,14 @@ RJ_NOINLINE void VCmpxNgtF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Ngt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1272,12 +1260,14 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 <= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1286,8 +1276,6 @@ void VCmpxNleF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1304,12 +1292,14 @@ RJ_NOINLINE void VCmpxNleF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 <= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nle>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1328,12 +1318,14 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1342,8 +1334,6 @@ void VCmpxNeqF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1360,12 +1350,14 @@ RJ_NOINLINE void VCmpxNeqF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Neq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1384,12 +1376,14 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1398,8 +1392,6 @@ void VCmpxNltF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1416,12 +1408,14 @@ RJ_NOINLINE void VCmpxNltF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f32());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane));
-    if (!(s0 < s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F32, amdgpu::comparison::Nlt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1451,8 +1445,6 @@ void VCmpxTruF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTruF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1561,12 +1553,14 @@ void VCmpxFF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 < s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1575,12 +1569,14 @@ void VCmpxLtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 == s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Eq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1589,12 +1585,14 @@ void VCmpxEqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 <= s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Le>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1603,12 +1601,14 @@ void VCmpxLeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 > s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Gt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1617,12 +1617,14 @@ void VCmpxGtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 < s1 || s0 > s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Lg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1631,12 +1633,14 @@ void VCmpxLgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 >= s1)
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1645,12 +1649,14 @@ void VCmpxGeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::O>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1659,12 +1665,14 @@ void VCmpxOF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (std::isnan(s0) || std::isnan(s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::U>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1673,12 +1681,14 @@ void VCmpxUF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 >= s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1687,12 +1697,14 @@ void VCmpxNgeF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 < s1 || s0 > s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1701,12 +1713,14 @@ void VCmpxNlgF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 > s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Ngt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1715,12 +1729,14 @@ void VCmpxNgtF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 <= s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nle>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1729,12 +1745,14 @@ void VCmpxNleF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Neq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1743,12 +1761,14 @@ void VCmpxNeqF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
 void VCmpxNltF64Vopc::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    double s0 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(src0, lane));
-    double s1 = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane));
-    if (!(s0 < s1))
+    const uint64_t s0 = amdgpu::RegisterAccess(wf).read_lane64(src0, lane);
+    const uint64_t s1 = amdgpu::RegisterAccess(wf).read_lane64(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F64, amdgpu::comparison::Nlt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -1776,8 +1796,6 @@ void VCmpFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1812,8 +1830,6 @@ void VCmpLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1848,8 +1864,6 @@ void VCmpEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1884,8 +1898,6 @@ void VCmpLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1920,8 +1932,6 @@ void VCmpGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1956,8 +1966,6 @@ void VCmpNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -1992,8 +2000,6 @@ void VCmpGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2028,8 +2034,6 @@ void VCmpTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2064,8 +2068,6 @@ void VCmpClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2100,8 +2102,6 @@ void VCmpLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2136,8 +2136,6 @@ void VCmpEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2172,8 +2170,6 @@ void VCmpLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2208,8 +2204,6 @@ void VCmpGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2244,8 +2238,6 @@ void VCmpNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2280,8 +2272,6 @@ void VCmpGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2316,8 +2306,6 @@ void VCmpClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2359,8 +2347,6 @@ void VCmpxFI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2412,8 +2398,6 @@ void VCmpxLtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2468,8 +2452,6 @@ void VCmpxEqI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2524,8 +2506,6 @@ void VCmpxLeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2580,8 +2560,6 @@ void VCmpxGtI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2636,8 +2614,6 @@ void VCmpxNeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2692,8 +2668,6 @@ void VCmpxGeI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2745,8 +2719,6 @@ void VCmpxTI32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTI32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2821,8 +2793,6 @@ void VCmpxClassF32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxClassF32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2900,8 +2870,6 @@ void VCmpxLtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -2956,8 +2924,6 @@ void VCmpxEqI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3012,8 +2978,6 @@ void VCmpxLeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3068,8 +3032,6 @@ void VCmpxGtI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3124,8 +3086,6 @@ void VCmpxNeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3180,8 +3140,6 @@ void VCmpxGeI16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeI16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3265,8 +3223,6 @@ void VCmpxClassF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxClassF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3376,8 +3332,6 @@ void VCmpLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3412,8 +3366,6 @@ void VCmpEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3448,8 +3400,6 @@ void VCmpLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3484,8 +3434,6 @@ void VCmpGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3520,8 +3468,6 @@ void VCmpNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3556,8 +3502,6 @@ void VCmpGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3747,8 +3691,6 @@ void VCmpxLtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3803,8 +3745,6 @@ void VCmpxEqU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3859,8 +3799,6 @@ void VCmpxLeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3915,8 +3853,6 @@ void VCmpxGtU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -3971,8 +3907,6 @@ void VCmpxNeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4027,8 +3961,6 @@ void VCmpxGeU16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeU16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4073,8 +4005,6 @@ void VCmpFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4109,8 +4039,6 @@ void VCmpLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4145,8 +4073,6 @@ void VCmpEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4181,8 +4107,6 @@ void VCmpLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4217,8 +4141,6 @@ void VCmpGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4253,8 +4175,6 @@ void VCmpNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4289,8 +4209,6 @@ void VCmpGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4325,8 +4243,6 @@ void VCmpTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4361,8 +4277,6 @@ void VCmpFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpFF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4397,8 +4311,6 @@ void VCmpLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4433,8 +4345,6 @@ void VCmpEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4469,8 +4379,6 @@ void VCmpLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4505,8 +4413,6 @@ void VCmpGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4541,8 +4447,6 @@ void VCmpLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4577,8 +4481,6 @@ void VCmpGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4613,8 +4515,6 @@ void VCmpOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4656,8 +4556,6 @@ void VCmpxFU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4709,8 +4607,6 @@ void VCmpxLtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4765,8 +4661,6 @@ void VCmpxEqU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4821,8 +4715,6 @@ void VCmpxLeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4877,8 +4769,6 @@ void VCmpxGtU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4933,8 +4823,6 @@ void VCmpxNeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -4989,8 +4877,6 @@ void VCmpxGeU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5042,8 +4928,6 @@ void VCmpxTU32Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTU32Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5092,8 +4976,6 @@ void VCmpxFF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxFF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5131,14 +5013,14 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5147,8 +5029,6 @@ void VCmpxLtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5165,14 +5045,14 @@ RJ_NOINLINE void VCmpxLtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5191,14 +5071,14 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 == s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5207,8 +5087,6 @@ void VCmpxEqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5225,14 +5103,14 @@ RJ_NOINLINE void VCmpxEqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 == s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Eq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5251,14 +5129,14 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 <= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5267,8 +5145,6 @@ void VCmpxLeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5285,14 +5161,14 @@ RJ_NOINLINE void VCmpxLeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 <= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Le>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5311,14 +5187,14 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5327,8 +5203,6 @@ void VCmpxGtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5345,14 +5219,14 @@ RJ_NOINLINE void VCmpxGtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Gt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5371,14 +5245,14 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1 || s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5387,8 +5261,6 @@ void VCmpxLgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5405,14 +5277,14 @@ RJ_NOINLINE void VCmpxLgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 < s1 || s0 > s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Lg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5431,14 +5303,14 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 >= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5447,8 +5319,6 @@ void VCmpxGeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5465,14 +5335,14 @@ RJ_NOINLINE void VCmpxGeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 >= s1)
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5491,14 +5361,14 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5507,8 +5377,6 @@ void VCmpxOF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5525,14 +5393,14 @@ RJ_NOINLINE void VCmpxOF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!std::isnan(s0) && !std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::O>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5587,8 +5455,6 @@ void VCmpUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5623,8 +5489,6 @@ void VCmpNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5659,8 +5523,6 @@ void VCmpNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5695,8 +5557,6 @@ void VCmpNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5731,8 +5591,6 @@ void VCmpNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5767,8 +5625,6 @@ void VCmpNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5803,8 +5659,6 @@ void VCmpNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5839,8 +5693,6 @@ void VCmpTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpTruF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -5977,14 +5829,14 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -5993,8 +5845,6 @@ void VCmpxUF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6011,14 +5861,14 @@ RJ_NOINLINE void VCmpxUF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::U>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6037,14 +5887,14 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 >= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6053,8 +5903,6 @@ void VCmpxNgeF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6071,14 +5919,14 @@ RJ_NOINLINE void VCmpxNgeF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 >= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nge>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6097,14 +5945,14 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1 || s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6113,8 +5961,6 @@ void VCmpxNlgF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6131,14 +5977,14 @@ RJ_NOINLINE void VCmpxNlgF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1 || s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlg>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6157,14 +6003,14 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6173,8 +6019,6 @@ void VCmpxNgtF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6191,14 +6035,14 @@ RJ_NOINLINE void VCmpxNgtF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 > s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Ngt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6217,14 +6061,14 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 <= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6233,8 +6077,6 @@ void VCmpxNleF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6251,14 +6093,14 @@ RJ_NOINLINE void VCmpxNleF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 <= s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nle>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6277,14 +6119,14 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6293,8 +6135,6 @@ void VCmpxNeqF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6311,14 +6151,14 @@ RJ_NOINLINE void VCmpxNeqF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (s0 != s1 || std::isnan(s0) || std::isnan(s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Neq>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6337,14 +6177,14 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
   }
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6353,8 +6193,6 @@ void VCmpxNltF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());
@@ -6371,14 +6209,14 @@ RJ_NOINLINE void VCmpxNltF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   uint64_t exec = wf.exec();
   uint64_t result = 0;
+  const auto compare_policy = amdgpu::comparison::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    float s0 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-    float s1 =
-        util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)));
-    if (!(s0 < s1))
+    const uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
+    const uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane);
+    if (amdgpu::comparison::evaluate<amdgpu::comparison::F16, amdgpu::comparison::Nlt>(
+            s0, s1, compare_policy))
       result |= (1ULL << lane);
   }
   wf.set_exec(result);
@@ -6408,8 +6246,6 @@ void VCmpxTruF16Vopc::execute_impl(amdgpu::Wavefront &wf) {
 RJ_NOINLINE void VCmpxTruF16Vopc::execute_modifier_impl(amdgpu::Wavefront &wf) {
   std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
-  amdgpu::ScopedMemoryWaitVccWriteSuppression sdwa_vcc_write_(inst_.src0 == amdgpu::SRC_SDWA &&
-                                                              sdwa_sd_);
   uint64_t dpp_old_vcc_ = wf.vcc();
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0))
     throw util::UnimplementedInst(mnemonic());

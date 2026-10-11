@@ -33,6 +33,13 @@ THE SOFTWARE.
 
 #define AVC_MAX_REF_FRAME_NUM                           16
 #define AVC_MAX_REF_PICTURE_NUM                         32
+// At most num_ref_idx_lX_active_minus1 + 1 (<= 32) modification entries, plus the terminating
+// entry with modification_of_pic_nums_idc equal to 3.
+#define AVC_MAX_REF_LIST_MOD_NUM                        (AVC_MAX_REF_PICTURE_NUM + 1)
+// Each of the up to 32 reference fields can be marked unused for reference (operation 1 or 2) and
+// be assigned a long term frame index (operation 3 or 6), plus one operation 4, one operation 5,
+// and the terminating operation 0.
+#define AVC_MAX_MMCO_NUM                                (2 * AVC_MAX_REF_PICTURE_NUM + 3)
 #define AVC_MAX_DPB_FRAMES                              16
 #define AVC_MAX_DPB_FIELDS                              AVC_MAX_DPB_FRAMES * 2
 
@@ -261,9 +268,9 @@ typedef struct {
 
 typedef struct {
 	uint32_t        ref_pic_list_modification_flag_l0;                  // u(1)
-	AvcListMod      modification_l0[AVC_MAX_REF_PICTURE_NUM];
+	AvcListMod      modification_l0[AVC_MAX_REF_LIST_MOD_NUM];
 	uint32_t        ref_pic_list_modification_flag_l1;                  // u(1)
-	AvcListMod      modification_l1[AVC_MAX_REF_PICTURE_NUM];
+	AvcListMod      modification_l1[AVC_MAX_REF_LIST_MOD_NUM];
 } AvcRefPicListMod;
 
 // Prediction weight table syntax. AVC spec. 7.3.3.2.
@@ -301,7 +308,7 @@ typedef struct {
     uint32_t    no_output_of_prior_pics_flag;                           // u(1)
     uint32_t    long_term_reference_flag;                               // u(1)
     uint32_t    adaptive_ref_pic_marking_mode_flag;                     // u(1)
-    AvcMmco	    mmco[AVC_MAX_REF_PICTURE_NUM];
+    AvcMmco	    mmco[AVC_MAX_MMCO_NUM];
     uint32_t    mmco_count;
 } AvcDecRefPicMarking;
 

@@ -12,7 +12,7 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to ROCm/TheRock commit e0e238c0323f76aeabdd348cfd3798a653820fdc.
+# TheRock ref: pinned to ROCm/TheRock commit 05add1921fd03b0649f054ec2a7c54d162c0cd99.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -106,8 +106,11 @@ jobs:
       changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
       skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
+      test_type: ${{ steps.configure-pr.outputs.test_type || steps.configure-manual.outputs.test_type }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
+      # "none" when every changed project is Linux-only, else empty (use default).
+      windows_amdgpu_families: ${{ steps.build_stages.outputs.windows_amdgpu_families }}
     steps:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -121,7 +124,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
           path: _therock
           # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
           # build_tools/project_mappings.json are needed to map changed projects
@@ -154,11 +157,13 @@ jobs:
           echo "changed_projects=" >> "${GITHUB_OUTPUT}"
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
           echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
+          echo "test_type=quick" >> "${GITHUB_OUTPUT}"
 
       # Map the changed projects to the minimal allowlist of TheRock build
       # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
       # this only reads it). Empty output = build all (fan-out / unknown project
-      # / run_all_tests CI-infra change).
+      # / run_all_tests CI-infra change). Also skips Windows when every changed
+      # project is disabled on Windows in the topology.
       - name: Compute build-stage allowlist
         id: build_stages
         run: |
@@ -169,13 +174,13 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || needs.configure.outputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
       # Per-PR selective build: the configure job maps the changed projects to
@@ -195,7 +200,7 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+      ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -223,19 +228,19 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
+      test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+      ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
     permissions:
       contents: read
       id-token: write
@@ -249,17 +254,17 @@ jobs:
         needs.setup.outputs.enable_build_jobs == 'true' &&
         needs.configure.outputs.skip_tests != 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.setup.outputs.test_type }}
+      test_type: ${{ needs.configure.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+      ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
     permissions:
       contents: read
       id-token: write
@@ -278,7 +283,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
+          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

@@ -43,8 +43,8 @@ struct experiment
         sample() = default;
         sample(const base_type&, std::uint64_t);
 
-        mutable std::uint64_t               count   = 0;
-        std::vector<binary::inlined_symbol> inlines = {};
+        mutable std::uint64_t               count = 0;
+        std::vector<binary::inlined_symbol> inlines;
 
         bool        operator==(const sample&) const;
         bool        operator<(const sample&) const;
@@ -58,10 +58,10 @@ struct experiment
 
     struct record
     {
-        std::int64_t            startup     = 0;
-        std::uint64_t           runtime     = 0;
-        std::vector<experiment> experiments = {};
-        std::vector<sample>     samples     = {};
+        std::int64_t            startup = 0;
+        std::uint64_t           runtime = 0;
+        std::vector<experiment> experiments;
+        std::vector<sample>     samples;
 
         template <typename ArchiveT>
         void serialize(ArchiveT& ar, const unsigned);
@@ -118,7 +118,7 @@ struct experiment
     std::uint64_t     global_delay    = 0;
     double            delay_scaling   = 0.0;  /// virtual_speedup / 100.
     selected_entry    selection       = {};   /// which line was selected
-    progress_points_t init_progress   = {};   /// progress points at start
-    progress_points_t fini_progress   = {};   /// progress points at end
+    progress_points_t init_progress;          /// progress points at start
+    progress_points_t fini_progress;          /// progress points at end
 };
 }  // namespace rocprofsys::causal

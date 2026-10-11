@@ -45,9 +45,9 @@ struct code_coverage
 
     struct data
     {
-        int_set_t addresses = {};
-        str_set_t modules   = {};
-        str_set_t functions = {};
+        int_set_t addresses;
+        str_set_t modules;
+        str_set_t functions;
 
         data& operator+=(const data& rhs);
         data  operator+(const data& rhs) const;
@@ -127,12 +127,12 @@ struct coverage_data
     bool           operator>(const coverage_data& rhs) const;
     bool           operator>=(const coverage_data& rhs) const;
 
-    size_t      count    = 0;
-    size_t      address  = 0;
-    size_t      line     = 0;
-    std::string module   = {};
-    std::string function = {};
-    std::string source   = {};
+    size_t      count   = 0;
+    size_t      address = 0;
+    size_t      line    = 0;
+    std::string module;
+    std::string function;
+    std::string source;
 };
 //
 template <typename ArchiveT>

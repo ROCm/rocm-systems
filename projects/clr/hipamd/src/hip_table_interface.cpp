@@ -3192,6 +3192,11 @@ HIP_PUBLIC_API hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLi
   return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetModule_fn(pMod, library);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   TRY;
@@ -3364,5 +3369,12 @@ hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int nu
                                        hipModule_t mod) {
   TRY;
   return hip::GetHipDispatchTable()->hipModuleEnumerateFunctions_fn(functions, numFunctions, mod);
+  CATCH;
+}
+
+hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
+                                             hipFlushGPUDirectRDMAWritesScope scope) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceFlushGPUDirectRDMAWrites_fn(target, scope);
   CATCH;
 }

@@ -161,3 +161,13 @@ target group mixes HIP-backed and pure simulator cases, while LeakSanitizer's
 stop-the-world scan stalls on HIP's multi-gigabyte mappings. The current corpus
 wrapper cannot vary that setting per individual case; ASan and UBSan remain
 enabled throughout.
+
+## Temporarily disabled gfx1250 integer and memory CTS tests
+
+`gfx1250_skip_tests.json` excludes all 22 integer CTS cases added by
+[rocjitsu-test-corpus#41](https://github.com/ROCm/rocjitsu-test-corpus/pull/41)
+and all 15 memory CTS cases added by
+[rocjitsu-test-corpus#42](https://github.com/ROCm/rocjitsu-test-corpus/pull/42),
+including their linked-image coverage checks.
+
+Reason: These tests are really slow and haven't been verified for their usefulness. Someone needs to investigate these before they are enabled

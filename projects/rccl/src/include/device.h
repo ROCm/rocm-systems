@@ -91,6 +91,8 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define NCCL_CUDA_ARCH_SPECIFIC 1010
 #elif __CUDA_ARCH_HAS_FEATURE__(SM120_ALL)
 #define NCCL_CUDA_ARCH_SPECIFIC 1200
+#elif __CUDA_ARCH_HAS_FEATURE__(RUBIN_ALL)
+#define NCCL_CUDA_ARCH_SPECIFIC 1070
 #else
 #define NCCL_CUDA_ARCH_SPECIFIC 0
 #endif
@@ -182,7 +184,7 @@ static_assert(alignof(union ncclLLFifoLine) == 16, "ncclLLFifoLine must stay 16-
 #define CHANNELS_PER_MASK_WORD 64
 #define CHANNEL_LIMIT 16 // this is used to limit channels for pre MI3xx GPUs
 #define NCCL_MAX_CGA_CLUSTER_SIZE 8
-#define NCCL_MAX_LOCAL_RANKS 72
+#define NCCL_MAX_LOCAL_RANKS 144
 #define NCCL_MIN_NTHREADS (4 * WARP_SIZE)
 #define NCCL_SIMPLE_MAX_NTHREADS NCCL_MAX_NTHREADS
 #define NCCL_SIMPLE_EXTRA_GROUP_IF_NTHREADS_GE (3 * WARP_SIZE)
@@ -245,7 +247,15 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_P2P_WRITE 0x01
 #define NCCL_P2P_READ 0x02
 #define NCCL_DIRECT_NIC 0x04
+#define NCCL_GPU_PRODUCER 0x40 // RCCL: a peer GPU kernel publishes this conn's head/tail steps, not a proxy or copy engine
 #define NCCL_NVLS_MIN_POLL 0x80
+static_assert((NCCL_GPU_PRODUCER & (NCCL_P2P_WRITE | NCCL_P2P_READ | NCCL_DIRECT_NIC | NCCL_NVLS_MIN_POLL)) == 0,
+              "NCCL_GPU_PRODUCER must not share a bit with another conn flag");
+
+// RCCL: gfx950 Simple polls a head/tail step with a sys-scope acquire unless a peer GPU kernel publishes it.
+__host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
+  return (connFlags & NCCL_GPU_PRODUCER) == 0;
+}
 
 #define NCCL_REGULAR_BUFFER 0x00
 #define NCCL_IPC_REG_BUFFER 0x01
@@ -523,7 +533,7 @@ struct alignas(16) ncclDevWorkBcast {
   void* recvbuff;
   size_t bytes;
   size_t bytes_done;
-  uint8_t pad[8];
+  // Compiler will add any necessary padding at the end to ensure 16-byte size granularity.
 };
 
 __device__ constexpr int ncclProtoGrainSize(int proto) {
@@ -596,14 +606,28 @@ __host__ __device__ constexpr int ncclMaxDevWorkBatchBytes(int cudaArch = NCCL_C
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES / sizeof(ncclDevWorkColl))
 #define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
 #define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
+// RCCL: funcId needs 15 bits for the generated device function count (NCCL uses
+// 11). func carries the progress-counter slot so it arrives with the batch
+// descriptor the kernel already loads rather than costing a lookup in device
+// memory; RCCL's ncclNumFuncs + 1 slots need 5 bits. To keep the batch at 16
+// bytes, nextJump is narrowed to NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, which only
+// has to span the batches that fit in the kernel args (asserted below).
+constexpr int NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS = 9;
+constexpr int NCCL_DEV_WORK_BATCH_FUNC_ID_BITS = 15;
+constexpr int NCCL_DEV_WORK_BATCH_FUNC_BITS = 5;
+static_assert(NCCL_NUM_PROGRESS_COUNTERS <= (1 << NCCL_DEV_WORK_BATCH_FUNC_BITS),
+              "Progress-counter slots must fit in ncclDevWorkBatch::func");
 struct alignas(16) ncclDevWorkBatch {
   union {
     struct {
       // nextExtends: should next one be merged into this one.
       // nextJump=0: end of this channel's batch list
       // nextJump>0: batches[thisIndex+nextJump] is next batch in this list
-      uint32_t nextJump:14, nextExtends:1;
-      uint32_t workType:2, funcId:15;
+      uint32_t nextJump : NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS, nextExtends:1;
+      // func is the ncclFunc_t this batch's completions are counted under; the
+      // device would otherwise have to translate funcId through a table in
+      // global memory on the batch-entry path.
+      uint32_t workType:2, funcId : NCCL_DEV_WORK_BATCH_FUNC_ID_BITS, func : NCCL_DEV_WORK_BATCH_FUNC_BITS;
     };
     // Unioning bitfields with underlying type hints compiler to emit the best
     // SASS LD/ST accesses.
@@ -663,6 +687,14 @@ struct ncclDevProfilerPhases {
   } data[MAX_PROFILER_EVENTS_PER_CHANNEL];
 };
 
+// Shared layout for device progress counters and their pinned host mirror.
+// Each channel owns one active-slot bitmask to avoid inter-channel atomics.
+struct ncclProgressCountersBlock {
+  uint64_t completedWorkCount[NCCL_NUM_PROGRESS_COUNTERS];
+  uint64_t completedTimeNs[NCCL_NUM_PROGRESS_COUNTERS];
+  uint64_t collOpActive[MAXCHANNELS];
+};
+
 struct ncclKernelComm {
   int rank;
   int nRanks;
@@ -694,7 +726,9 @@ struct ncclKernelComm {
   // Profiler counters
   struct ncclDevProfiler* workStarted /*[MAXCHANNELS]*/;
   struct ncclDevProfiler* workCompleted /*[MAXCHANNELS]*/;
-  struct ncclDevProfilerPhases* workPhases /*[MAXCHANNELS]*/;
+
+  // GPU-resident progress-counter block; null when GPU progress counters are disabled.
+  struct ncclProgressCountersBlock* progressCounters;
 
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
@@ -768,6 +802,9 @@ __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
   return sizeof(ncclDevKernelArgsDefaultStorage);
 }
+static_assert(ncclMaxKernelArgsSize() / sizeof(struct ncclDevWorkBatch) <= (1 << NCCL_DEV_WORK_BATCH_NEXT_JUMP_BITS),
+              "ncclDevWorkBatch::nextJump must span every batch that fits in the kernel args");
+static_assert(sizeof(struct ncclDevWorkBatch) == 16, "ncclDevWorkBatch must stay 16 bytes");
 
 template <typename T>
 __host__ __device__ constexpr T min_constexpr(T a) {
@@ -862,7 +899,8 @@ extern bool const ncclDevKernelForFuncIsSpecialized[/*funcIndex*/];
 
 // Launch a one-rank reduction on stream.
 ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct ncclDevRedOpFull redOp,
-                               ncclDataType_t type, cudaStream_t stream, void const* acc = nullptr);
+                               ncclDataType_t type, cudaStream_t stream, cudaEvent_t launchCompletionEvent,
+                               void const* acc = nullptr);
 
 // `ncclNvlsSupported()` needs to be in sync with "func_valid" in "src/device/generate.py"
 inline bool ncclNvlsSupported(int devRedOp, int type) {
@@ -958,8 +996,10 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
 }
 
 // Selects the SendRecv kernel variant: useLL128 -> the LL128 latency kernel (reg=1,
-// activated on gfx942/gfx950 only), otherwise the legacy LL kernel (reg=0). Keep in sync with
-// reg_values_of("SendRecv") in the device codegen.
+// gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS, gfx1250 via NCCL_P2P_LL128_ENABLE=1),
+// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
+// otherwise the legacy LL kernel (reg=0). Keep in sync with reg_values_of("SendRecv")
+// in the device codegen.
 inline int ncclDevFuncId_P2p(bool useLL128 = false) {
   static int ncclDevFuncIdP2pLL =
     ncclDevFuncId(ncclFuncSendRecv, -1, -1, NCCL_ALGO_UNDEF, NCCL_PROTO_UNDEF, 0, 0, /*reg=*/0);

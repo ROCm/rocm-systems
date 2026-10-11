@@ -426,25 +426,40 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map_f16 = {
-            'rcp': '1.0f / s',
-            'sqrt': 'std::sqrt(s)',
-            'rsq': '1.0f / std::sqrt(s)',
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'std::exp2(s)',
-            'log2': 'std::log2(s)',
-            'sin': 'std::sin(s * 6.2831853071795864f)',
-            'cos': 'std::cos(s * 6.2831853071795864f)',
+            'exp2': 'amdgpu::transcendental::log_exp_f16<false>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_exp_f16<true>(s, '
+            'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'abs': 'std::fabs(s)',
             'neg': '-s',
         }
+        for half_op in ('rcp', 'rsq', 'sqrt', 'sin', 'cos'):
+            math_map_f16[half_op] = (
+                f'amdgpu::transcendental::map_f16<amdgpu::transcendental::HalfOperation::{half_op.upper()}>('
+                's, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
+                'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+            )
         expr = math_map_f16.get(op, f's /* TODO: {op} */')
         if is_vop3:
             L.append(f'    float result = {expr};')
-            L.extend(vop3_dst_mod('result', omod_result_type='f16'))
+            if op in ('log2', 'exp2', 'rcp', 'rsq', 'sqrt', 'sin', 'cos'):
+                L.extend(
+                    [
+                        '    const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod('
+                        'wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false, inst_.omod);',
+                        '    result = amdgpu::fp_mode::apply_omod_f16(result, effective_omod, wf.fp16_ovfl());',
+                        '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);',
+                    ]
+                )
+            else:
+                L.extend(vop3_dst_mod('result', omod_result_type='f16'))
             L.append(
                 '    uint32_t result_bits = util::f32_to_f16_mode(result, wf.fp16_ovfl());'
             )
@@ -463,19 +478,26 @@ def gen_vector_unary(
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
         math_map = {
-            'rcp': 'amdgpu::transcendental::rcp_f32(s)',
+            'rcp': 'amdgpu::transcendental::rcp_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'rcp_iflag': 'amdgpu::transcendental::rcp_f32(s)',
-            'sqrt': 'amdgpu::transcendental::sqrt_f32(s)',
-            'rsq': 'amdgpu::transcendental::rsq_f32(s)',
+            'sqrt': 'amdgpu::transcendental::sqrt_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'rsq': 'amdgpu::transcendental::rsq_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'floor': 'std::floor(s)',
             'ceil': 'std::ceil(s)',
             'trunc': 'std::trunc(s)',
             'rndne': 'util::rndne_scalar(s)',
             'fract': 's - std::floor(s)',
-            'exp2': 'amdgpu::transcendental::exp_f32(s)',
-            'log2': 'amdgpu::transcendental::log_f32(s)',
-            'sin': 'amdgpu::transcendental::sin_f32(s)',
-            'cos': 'amdgpu::transcendental::cos_f32(s)',
+            'exp2': 'amdgpu::transcendental::exp_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'log2': 'amdgpu::transcendental::log_f32(s, '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'sin': 'amdgpu::transcendental::sin_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
+            'cos': 'amdgpu::transcendental::cos_f32(s, wf.fp_denorm_mode_f32(), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))',
             'abs': 'std::fabs(s)',
             'neg': '-s',
         }

@@ -34,8 +34,8 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, i
 extern std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel;
 
 // enqueue.cc's ncclAddWorkBatchToPlan: default is a no-op observer.
-extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int,
-                          int, bool)>
+extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t,
+                          int, int, bool)>
     g_addWorkBatchToPlan;
 
 // enqueue.cc's ncclAddProxyOpIfNeeded: default accepts every proxy op.

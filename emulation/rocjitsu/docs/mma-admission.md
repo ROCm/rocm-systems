@@ -55,10 +55,9 @@ to the CU.
 
 ## Configuration
 
-Server presets add 2, 4, 8 or 16 helpers above the existing 32-thread
-engine/dispatch allocation, selected automatically when CPU affinity permits.
-The largest preset uses 48 total threads. Set `async_helper_threads: 0` to
-keep execution synchronous, or `cpu_thread_budget: 32` to limit the total.
+Server presets select shared MMA helpers from their execution-thread budget.
+See the [thread policy](async-instructions.md#thread-policy) for allocations.
+Set `async_helper_threads: 0` to keep execution synchronous.
 
 Every selected CDNA4 MFMA and CDNA5 WMMA family requires cached admission,
 including dense K32 and scaled 16x16x128 WMMA. Lookahead inspects at most eight

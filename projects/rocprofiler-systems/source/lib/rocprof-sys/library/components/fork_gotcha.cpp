@@ -50,7 +50,7 @@ prefork_setup()
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     if(state::process::get() < state::process::Active &&

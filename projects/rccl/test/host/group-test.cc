@@ -39,7 +39,7 @@
 #include "fakes/recorder_fakes.h"  // g_recorderResult, shared with the other micro binaries
 #include "fakes/nccl_fakes.h"    // g_loadParam, used by param_redirect.h
 #include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
-#include "fakes/ce_fakes.h"      // g_ncclCeInit
+#include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
@@ -1673,6 +1673,94 @@ TEST_F(AsyncJobLaunchDirectTest, DestroyFlagJobIsNeverToldToAbort) {
   EXPECT_EQ(1u, failing.abortFlag);
   EXPECT_EQ(0u, destroying.abortFlag) << "destroyFlag must gate out the abort-forwarding branch entirely";
   EXPECT_EQ(0u, destroying.abortFlagDev);
+}
+
+// ncclCommGroupRegisterSymmetric runs once per comm on its own thread, so the collective CE staging setup lives here.
+class GroupRegisterSymmetricTest : public ::testing::Test {
+ protected:
+  std::unique_ptr<ncclComm> comm_;
+  struct ncclGroupSymmetricJob job_{};
+
+  void SetUp() override {
+    ResetCeFakes();
+    ResetGroupThreadLocals();
+    comm_ = std::make_unique<ncclComm>();
+    job_.comm = comm_.get();
+  }
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&comm_->ceInitTaskQueue)) {
+      free(ncclIntruQueueDequeue(&comm_->ceInitTaskQueue));
+    }
+    ResetGroupThreadLocals();
+    ResetCeFakes();
+  }
+};
+
+TEST_F(GroupRegisterSymmetricTest, StagingPending_SetsUpOnceAndClearsTheFlag) {
+  comm_->ceColl.stagingPending = true;
+  ScopedHook staging(g_ncclCeEnsureAllReduceStaging, [&](struct ncclComm* c) {
+    EXPECT_EQ(comm_.get(), c);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(1, staging.calls);
+  EXPECT_FALSE(comm_->ceColl.stagingPending);
+}
+
+TEST_F(GroupRegisterSymmetricTest, NothingPending_SkipsStagingSetup) {
+  ScopedHook staging(g_ncclCeEnsureAllReduceStaging, [](struct ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(0, staging.calls);
+}
+
+TEST_F(GroupRegisterSymmetricTest, StagingSetupFails_PropagatesAndStillClearsTheFlag) {
+  comm_->ceColl.stagingPending = true;
+  ScopedHook staging(g_ncclCeEnsureAllReduceStaging, [](struct ncclComm*) { return ncclSystemError; });
+
+  EXPECT_EQ(ncclSystemError, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(1, staging.calls);
+  EXPECT_FALSE(comm_->ceColl.stagingPending);
+}
+
+TEST_F(GroupRegisterSymmetricTest, CeInitQueued_RunsBeforeStagingSetup) {
+  comm_->ceColl.stagingPending = true;
+  auto* ceTask = static_cast<struct ncclCeInitTask*>(calloc(1, sizeof(struct ncclCeInitTask)));
+  ceTask->comm = comm_.get();
+  ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, ceTask);
+  std::vector<std::string> order;
+  ScopedHook init(g_ncclCeInit, [&](struct ncclComm*) {
+    order.push_back("init");
+    return ncclSuccess;
+  });
+  ScopedHook staging(g_ncclCeEnsureAllReduceStaging, [&](struct ncclComm*) {
+    order.push_back("staging");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(std::vector<std::string>({"init", "staging"}), order);
+}
+
+// A group that fails before its SymRegister job runs must not leave the flag for an unrelated later group.
+TEST_F(GroupRegisterSymmetricTest, GroupCleanup_ClearsPendingStagingOfSymRegisterComms) {
+  comm_->config.blocking = 1;
+  for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+    comm_->groupNext[type] = reinterpret_cast<struct ncclComm*>(NCCL_COMM_GROUP_INVALID);
+  }
+  comm_->ceColl.stagingPending = true;
+  ncclGroupCommJoin(comm_.get(), ncclGroupTaskTypeSymRegister);
+  ASSERT_EQ(comm_.get(), ncclGroupCommHead[ncclGroupTaskTypeSymRegister]);
+
+  groupCleanup(ncclGroupCommHead, &ncclAsyncJobs, ncclSystemError);
+
+  EXPECT_FALSE(comm_->ceColl.stagingPending);
+  EXPECT_EQ(nullptr, ncclGroupCommHead[ncclGroupTaskTypeSymRegister]);
 }
 
 }  // namespace

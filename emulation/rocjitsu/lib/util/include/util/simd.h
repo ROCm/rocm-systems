@@ -4,6 +4,11 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
+#include "util/amdgpu_exp.h"
+#include "util/amdgpu_log.h"
+#include "util/amdgpu_rcp.h"
+#include "util/amdgpu_rsq.h"
+#include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
 
 #include <bit>
@@ -903,11 +908,7 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Flush f32 denormals to sign-preserving zero (FTZ). Branchless vector port of
-/// `amdgpu::transcendental::flush_denorm_f32`: a lane with biased exponent 0 and
-/// nonzero mantissa becomes ±0 (sign preserved); every other lane (normal, Inf,
-/// NaN, ±0) passes through unchanged. AMD transcendental micro-ops always run in
-/// FTZ mode, so the f32 rcp/rsq/exp/log SIMD ports below funnel through this.
+/// Flush F32 subnormals to signed zero without host floating-point arithmetic.
 inline native<float> flush_denorm_f32_simd(native<float> v) {
   using U = native<uint32_t>;
   U b = std::bit_cast<U>(v);
@@ -915,57 +916,30 @@ inline native<float> flush_denorm_f32_simd(native<float> v) {
   return std::bit_cast<native<float>>(b);
 }
 
-/// Vector ports of `amdgpu::transcendental::*_f32`, mirroring the scalar
-/// reference body bit-for-bit so the VOP1 SIMD fast path agrees with the
-/// forced-scalar path on every lane. RCP, RSQ, LOG and EXP use shared integer
-/// hardware mappings; SQRT uses host arithmetic with explicit NaN and FTZ handling.
-/// F16 operations use promoted inputs; RSQ additionally applies the F16 input-denormal mode.
-// Canonical positive quiet-NaN (f32), broadcast across the vector. Shared by
-// the transcendental fast paths below, which blend it into out-of-domain
-// SQRT lanes to match the scalar reference.
-inline const native<float> kQNaN = std::bit_cast<native<float>>(native<uint32_t>(0x7FC00000u));
-
-inline native<float> rcp_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / x);
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+/// Native-width adapters for the shared integer transcendental mappings.
+inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
 }
 
-inline native<float> rsq_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(native<float>(1.0f) / stdx::sqrt(x));
-  stdx::where(x < native<float>(0.0f), r) = kQNaN; // negatives incl -Inf -> qNaN
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
 }
 
-inline native<float> sqrt_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = stdx::sqrt(x);
-  stdx::where(x < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
 }
 
-inline native<float> log_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = stdx::log2(x); // input-flush only; scalar log_f32 has no out-flush
-  stdx::where(x < native<float>(0.0f), r) = kQNaN;
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
 }
 
-inline native<float> exp_f32_simd(native<float> a) {
-  native<float> x = flush_denorm_f32_simd(a);
-  native<float> r = flush_denorm_f32_simd(stdx::exp2(x));
-  stdx::where(stdx::isnan(a), r) =
-      std::bit_cast<native<float>>(std::bit_cast<native<uint32_t>>(a) | 0x00400000u);
-  return r;
+inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
+  return map_native_convert_scalar<float, float>(
+      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
 }
 
 /// Branchless SWAR population count over a uint32 vector. Each lane holds

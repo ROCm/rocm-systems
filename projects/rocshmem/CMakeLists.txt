@@ -47,7 +47,7 @@ option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
-option(USE_SDMA "Enable SDMA transport (MI300X+)" OFF)
+option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
@@ -241,30 +241,57 @@ if(GPU_TARGETS)
   list(REMOVE_DUPLICATES GPU_TARGETS)
 endif()
 
-if(COMMAND rocm_check_target_ids)
+include(cmake/AsanGpuTargets.cmake)
+
+# GPU_TARGETS is FORCE-written from SUPPORTED_GPUS below, so the policy would
+# otherwise feed on its own output and a later -DASAN=OFF would never bring
+# back the dropped families. Re-derive from the request instead; still matching
+# what we wrote last time means nobody edited it.
+if(DEFINED ROCSHMEM_GPU_TARGETS_DERIVED AND GPU_TARGETS STREQUAL ROCSHMEM_GPU_TARGETS_DERIVED)
+  set(GPU_TARGETS "${ROCSHMEM_GPU_TARGETS_REQUESTED}")
+else()
+  set(ROCSHMEM_GPU_TARGETS_REQUESTED "${GPU_TARGETS}" CACHE INTERNAL
+      "GPU_TARGETS as requested, before ASAN normalisation and validation")
+endif()
+
+if(ASAN)
   if(GPU_TARGETS)
-    message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
+    rocshmem_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
   else()
-    message(STATUS "Checking for ROCm support for GPU targets: " "${DEFAULT_GPU_TARGETS}")
-    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${DEFAULT_GPU_TARGETS})
+    rocshmem_asan_adjust_gpu_targets(DEFAULT_GPU_TARGETS ${DEFAULT_GPU_TARGETS})
   endif()
+endif()
+
+if(GPU_TARGETS)
+  set(_requested_gpus ${GPU_TARGETS})
+else()
+  set(_requested_gpus ${DEFAULT_GPU_TARGETS})
+endif()
+
+if(COMMAND rocm_check_target_ids)
+  message(STATUS "Checking for ROCm support for GPU targets: " "${_requested_gpus}")
+  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${_requested_gpus})
 else()
   message(WARNING "Unable to check for supported GPU targets.")
-  if(GPU_TARGETS)
-    set(SUPPORTED_GPUS ${GPU_TARGETS})
-  else()
-    set(SUPPORTED_GPUS ${DEFAULT_GPU_TARGETS})
-  endif()
+  set(SUPPORTED_GPUS ${_requested_gpus})
+endif()
+
+# The ASAN policy already failed if it kept nothing; this catches the compiler
+# rejecting everything it kept, e.g. because of conflicting CXXFLAGS.
+if(ASAN AND NOT SUPPORTED_GPUS)
+  message(FATAL_ERROR
+    "ASAN requires a GPU target that supports xnack, but none of the "
+    "requested GPU targets passed rocm_check_target_ids: ${_requested_gpus}")
 endif()
 
 # GPU_TARGETS_FULL: validated arch strings with feature suffixes intact.
 # Consumed by DeviceBitcode.cmake to embed correct amdhsa.target metadata in
 # the device bitcode — HIP error 209 occurs if the suffix in the bitcode
 # metadata does not match the active feature configuration of the GPU.
-# Explicitly cleared when GPU_TARGETS is not set so a stale cached value from a
-# previous -DGPU_TARGETS=... configure run cannot persist into the defaults path.
-if(GPU_TARGETS)
+# Keyed on whether SUPPORTED_GPUS carries a suffix, not on whether the user set
+# GPU_TARGETS: under ASAN the defaults path produces :xnack+ too. Cleared
+# otherwise, which costs nothing since the fallback is the same bare list.
+if(SUPPORTED_GPUS MATCHES ":")
   set(GPU_TARGETS_FULL "${SUPPORTED_GPUS}" CACHE STRING
     "Validated GPU arch strings with feature suffixes (consumed by DeviceBitcode.cmake)" FORCE)
 else()
@@ -272,6 +299,8 @@ else()
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU architectures to compile for" FORCE)
+set(ROCSHMEM_GPU_TARGETS_DERIVED "${GPU_TARGETS}" CACHE INTERNAL
+    "Last value written to GPU_TARGETS above, so the next configure can tell a user edit from this project's own output")
 
 message(STATUS "Compiling for ${GPU_TARGETS}")
 
@@ -338,62 +367,35 @@ if (NOT BUILD_TESTS_ONLY)
     endif()
   endif()
 
-  if (ASAN)
-    message(STATUS "Removing xnack- entries from GPU_TARGETS because they are invalid with AddressSanitizer (ASAN)")
-    list(FILTER GPU_TARGETS EXCLUDE REGEX ".*:xnack-$")
-    if(GPU_TARGETS_FULL)
-      list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX ".*:xnack-$")
-    endif()
-
-    # RDNA archs (gfx11xx/gfx12xx) have no xnack+ variant at all, so device
-    # ASAN can never be enabled for them - clang just ignores
-    # -fsanitize=address for that offload arch with a warning. Drop them
-    # instead of leaving a target in GPU_TARGETS that silently gets no
-    # instrumentation.
-    set(_ASAN_INCOMPATIBLE_ARCHS gfx1100 gfx1201 gfx1250 gfx1250-strict)
-    foreach(_asan_incompatible_arch ${_ASAN_INCOMPATIBLE_ARCHS})
-      list(FILTER GPU_TARGETS EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
-      if(GPU_TARGETS_FULL)
-        list(FILTER GPU_TARGETS_FULL EXCLUDE REGEX "^${_asan_incompatible_arch}(:.*)?$")
-      endif()
-    endforeach()
-
-    if(NOT GPU_TARGETS)
-      message(FATAL_ERROR "ASAN requires a GPU target that supports xnack+ (e.g. gfx90a, gfx942, gfx950). "
-        "None of the requested/default GPU_TARGETS support it.")
-    endif()
-
-    # CDNA archs (gfx90a/gfx942/gfx950) only get ASAN instrumentation with the
-    # xnack+ feature explicitly enabled; a bare arch name compiles without it.
-    # Force :xnack+ onto any entry that doesn't already request it.
-    set(_ASAN_GPU_TARGETS "")
-    foreach(_asan_target ${GPU_TARGETS})
-      if(NOT _asan_target MATCHES "xnack\\+")
-        message(STATUS "ASAN: appending :xnack+ to GPU target '${_asan_target}'")
-        set(_asan_target "${_asan_target}:xnack+")
-      endif()
-      list(APPEND _ASAN_GPU_TARGETS "${_asan_target}")
-    endforeach()
-    set(GPU_TARGETS "${_ASAN_GPU_TARGETS}")
-
-    if(GPU_TARGETS_FULL)
-      set(_ASAN_GPU_TARGETS_FULL "")
-      foreach(_asan_target ${GPU_TARGETS_FULL})
-        if(NOT _asan_target MATCHES "xnack\\+")
-          set(_asan_target "${_asan_target}:xnack+")
-        endif()
-        list(APPEND _ASAN_GPU_TARGETS_FULL "${_asan_target}")
-      endforeach()
-      set(GPU_TARGETS_FULL "${_ASAN_GPU_TARGETS_FULL}")
-    endif()
-  endif()
-
   # hip-config-amd.cmake caches GPU_BUILD_TARGETS without FORCE, so on a
   # reconfigure of an existing build directory it can retain a stale value
   # (e.g. from before ASAN was enabled, or from a previous GPU_TARGETS) even
   # though GPU_TARGETS itself was correctly refreshed above. Force it to match
   # on every configure so hip::device's --offload-arch flags stay in sync.
   set(GPU_BUILD_TARGETS "${GPU_TARGETS}" CACHE STRING "GPU targets to compile for" FORCE)
+
+  # DeviceBitcode.cmake caches this without FORCE too, so it goes stale the
+  # same way in both directions: a pre-ASAN directory loses the :xnack+, and
+  # without the else arm a suffixed value outlives a bare-arch configure.
+  if(GPU_TARGETS_FULL)
+    set(BITCODE_GPU_ARCHS_FULL "${GPU_TARGETS_FULL}" CACHE STRING
+      "Full GPU arch strings with feature suffixes for device bitcode" FORCE)
+  else()
+    unset(BITCODE_GPU_ARCHS_FULL CACHE)
+  endif()
+
+  # Same staleness, and this is the list DeviceBitcode.cmake iterates: a
+  # pre-ASAN directory keeps the dropped families and builds them instrumented.
+  set(_bitcode_archs "")
+  foreach(_target ${GPU_TARGETS})
+    string(REGEX REPLACE ":.*" "" _bare "${_target}")
+    list(APPEND _bitcode_archs "${_bare}")
+  endforeach()
+  if(_bitcode_archs)
+    list(REMOVE_DUPLICATES _bitcode_archs)
+    set(BITCODE_GPU_ARCHS "${_bitcode_archs}" CACHE STRING
+      "GPU architectures for device bitcode (semicolon-separated)" FORCE)
+  endif()
 
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)

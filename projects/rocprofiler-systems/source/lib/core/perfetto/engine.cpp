@@ -81,7 +81,7 @@ public:
 
     static void OnTracePacket(InterceptorContext context)
     {
-        auto& tls = context.GetThreadLocalState();
+        auto const& tls = context.GetThreadLocalState();
         if(tls.engine == nullptr || tls.collect == nullptr)
         {
             return;
@@ -277,7 +277,7 @@ perfetto_sdk_backend::init_sdk(const engine_config& cfg) const
 perfetto_sdk_backend::session_ptr
 perfetto_sdk_backend::start_cached_session(const engine_config& cfg) const
 {
-    auto            trace_cfg = make_trace_config(cfg);
+    auto const      trace_cfg = make_trace_config(cfg);
     session_backend backend{};
     auto            session =
         start_tracing_session(backend, trace_cfg, -1, make_tracing_error_callback());
@@ -304,7 +304,7 @@ set_emitting_pid(int pid) noexcept
         const std::lock_guard<std::mutex> lk{ g_pid_owner_mutex };
         if(t_emitting_pid >= 0)
         {
-            auto it = g_pid_owner_tids.find(t_emitting_pid);
+            auto const it = g_pid_owner_tids.find(t_emitting_pid);
             if(it != g_pid_owner_tids.end() && it->second == self)
             {
                 g_pid_owner_tids.erase(it);

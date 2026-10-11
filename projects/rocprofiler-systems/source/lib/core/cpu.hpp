@@ -16,8 +16,8 @@ struct cpu_info
     long        physical_id = -1;
     long        core_id     = -1;
     long        apicid      = -1;
-    std::string vendor_id   = {};
-    std::string model_name  = {};
+    std::string vendor_id;
+    std::string model_name;
 };
 
 std::vector<cpu_info>

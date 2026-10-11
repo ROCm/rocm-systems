@@ -46,6 +46,39 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
+ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm);
+
+// Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
+// makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
+//
+// The prologue also offers comm->doneEvent on the communicator, for the launch's last kernel to carry as its
+// stopEvent via rcclTakeAddonStopEvent() instead of paying for a standalone record. A launch that never takes
+// it, because its last stream operation is not a kernel or because it returned early, gets the record from the
+// epilogue.
+struct rcclAddonLaunchState {
+  int savedDev;
+  // Whether the prologue offered the stop event, which is what lets the epilogue tell a taken event from one
+  // that was never on offer. False while capturing, where a fused stop event is not bound.
+  bool eventOffered;
+  bool capturing;
+  struct ncclCudaGraph graph;
+  // Set once sharedRes->deviceStream is acquired; the epilogue must release it on every path.
+  bool deviceStreamAcquired;
+  cudaStream_t deviceStream;
+};
+
+ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, struct rcclAddonLaunchState* state);
+ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
+                                const struct rcclAddonLaunchState& state, ncclResult_t launchRes);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, LaunchFn&& launch) {
+  struct rcclAddonLaunchState state = {-1, false};
+  ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &state);
+  if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
+  return rcclAddonLaunchEnd(comm, stream, state, launch());
+}
+
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
@@ -61,6 +94,11 @@ static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count
 rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks * count : count;
 }
+// Match the public AllGather in-place convention: each rank's input aliases
+// its own slice of the aggregate receive buffer.
+static inline bool ncclAllGatherIsInPlace(const void* sendbuff, const void* recvbuff, int rank, size_t perRankBytes) {
+  return (uintptr_t)sendbuff == (uintptr_t)recvbuff + size_t(rank) * perRankBytes;
+}
 
 ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
@@ -68,8 +106,8 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, i
 bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
 
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
-                            enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch = -1,
-                            int p2pRound = -1, bool newBatch = false);
+                            enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
+                            int p2pEpoch = -1, int p2pRound = -1, bool newBatch = false);
 
 // RCCL-only shim: sets plan->kernelFn / kernelSpecialized using the file-local
 // ncclKerns table in enqueue.cc, for upstream-style schedulers (e.g.
