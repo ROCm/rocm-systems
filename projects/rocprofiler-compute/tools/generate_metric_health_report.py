@@ -3,7 +3,18 @@
 # SPDX-License-Identifier:  MIT
 # ruff: noqa: E501
 
-"""Generate metric health HTML report from rocprof-compute analyze logs.
+"""Generate a metric health HTML report that compares two health runs.
+
+The report reads two completed artifact directories written by
+scripts/run_spp_health_local_driver.sh --fetch:
+
+* `--candidate`: a run of this branch.
+* `--baseline`: a separate run of rocprofiler-compute-develop.
+
+Each directory holds `logs/<arch>/<workload>_<run>.log` (analyze output) and
+`<arch>/<workload>_<tag>_<run>/.../sysinfo.csv` (the profiled workload). `<run>`
+is `--candidate-run` / `--baseline-run`. The two runs are never produced or
+re-profiled by this tool, and nothing here switches allocator modes.
 
 Analyze logs must be produced with `--view table` so chart-only panels (roofline,
 memory charts, etc.) are emitted as plain metric tables. Default TTY output omits
@@ -12,13 +23,10 @@ metrics and yields incomplete coverage.
 Primary statistic is **Median** (not Avg):
 
 * Prefer the Median column when present in `--view table` output.
-* Else recompute Median from per-dispatch data via `--workload-dir` (same
-  `MEDIAN(<min-inner>)` path as `tools/compare_spp_legacy_medians.py`).
+* Else recompute Median from the run's per-dispatch data (`MEDIAN` of the Min
+  formula inner). Both runs are recomputed with the evaluator in this tree.
 * Else, if Min==Max, treat that value as the Median.
 * Value-only panels (no Avg/Min/Max/Median) use the single Value column.
-
-Workloads are passed as `name:path` pairs. Optional `--baseline` logs enable
-SPP-vs-legacy overflow improvements and value-delta tables.
 
 Arch → analysis_configs mapping (`--arch`):
 
@@ -29,7 +37,7 @@ Arch → analysis_configs mapping (`--arch`):
 
 import argparse
 import html
-import importlib.util
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -77,6 +85,12 @@ DELTA_REL_THRESHOLD = 0.05
 DELTA_HIGHLIGHT_THRESHOLD = 1.0
 # Baselines below this make |rel| undefined; those pairs are skipped.
 DELTA_NEAR_ZERO = 1e-12
+
+DEFAULT_WORKLOADS: Tuple[str, ...] = ("vcopy", "nbody", "mega_kernel")
+DEFAULT_CANDIDATE_LABEL = "this branch"
+DEFAULT_BASELINE_LABEL = "rocprofiler-compute-develop"
+DEFAULT_CANDIDATE_RUN = "spp"
+DEFAULT_BASELINE_RUN = "develop"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 ROW_RE = re.compile(
@@ -188,6 +202,16 @@ class ParsedLog:
     metrics: Dict[str, MetricValue] = field(default_factory=dict)
     suppressed: List[str] = field(default_factory=list)
     dispatch_count: Optional[int] = None
+
+
+@dataclass
+class RunArtifacts:
+    """Analyze logs and workload dirs of one health run, keyed by workload."""
+
+    label: str
+    artifact_dir: Path
+    logs: Dict[str, Path] = field(default_factory=dict)
+    workload_dirs: Dict[str, Path] = field(default_factory=dict)
 
 
 def strip_ansi(text: str) -> str:
@@ -380,61 +404,209 @@ def parse_log(path: Path) -> ParsedLog:
     return result
 
 
-def _load_median_helpers():  # noqa: ANN202
-    """Lazy-load median recompute helpers from compare_spp_legacy_medians."""
-    helper_path = ROOT / "tools" / "compare_spp_legacy_medians.py"
-    spec = importlib.util.spec_from_file_location(
-        "compare_spp_legacy_medians", helper_path
+def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
+    """Rewrite a Min formula into a Median expression.
+
+    Handles `MIN(x)` and `c * MIN(x)` / `MIN(x) * c` patterns that
+    appear in analysis_configs.
+    """
+    formula = min_formula.strip()
+    if not formula or formula == "None":
+        return None
+
+    if formula.startswith("MIN("):
+        depth = 0
+        for index, ch in enumerate(formula):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    if index != len(formula) - 1:
+                        break
+                    return f"MEDIAN{formula[3 : index + 1]}"
+        return None
+
+    factored = re.fullmatch(r"(.+?)\s*\*\s*(MIN\(.+\))", formula)
+    if factored:
+        left, min_call = factored.group(1).strip(), factored.group(2)
+        median_call = min_formula_to_median_expr(min_call)
+        if median_call:
+            return f"{left} * {median_call}"
+    factored = re.fullmatch(r"(MIN\(.+\))\s*\*\s*(.+)", formula)
+    if factored:
+        min_call, right = factored.group(1), factored.group(2).strip()
+        median_call = min_formula_to_median_expr(min_call)
+        if median_call:
+            return f"{median_call} * {right}"
+    return None
+
+
+def compute_medians_for_workload(
+    wl_dir: Path,
+    metric_keys: List[str],
+) -> Dict[str, Optional[float]]:
+    """Recompute Median for metrics that have a Min formula, via analyze path."""
+    del metric_keys  # compute all Min-backed rows; keys unused
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+
+    import pandas as pd
+
+    import config
+    from utils import file_io, parser, schema
+    from utils.metrics.evaluation_pipeline import eval_metric
+    from utils.metrics.expression import build_metric_value_string
+    from utils.utils_common import canonical_config_arch
+
+    sys_info = pd.read_csv(wl_dir / "sysinfo.csv")
+    arch = str(sys_info.iloc[0]["gpu_arch"])
+    config_arch = canonical_config_arch(arch) or arch
+    config_dir = (
+        config.rocprof_compute_home
+        / "rocprof_compute_soc"
+        / "analysis_configs"
+        / config_arch
     )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {helper_path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+
+    arch_config = schema.ArchConfig()
+    arch_config.panel_configs = file_io.load_panel_configs([str(config_dir)])
+    profiling_config = file_io.load_profiling_config(str(wl_dir))
+
+    parser.build_dfs(
+        arch_configs=arch_config,
+        filter_metrics=None,
+        sys_info=sys_info.iloc[0],
+        profiling_config=profiling_config,
+        arch=arch,
+    )
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Min" not in frame.columns or "Median" in frame.columns:
+            continue
+        medians: List[Optional[str]] = []
+        for _, row in frame.iterrows():
+            min_expr = row.get("Min")
+            if not isinstance(min_expr, str) or not min_expr or min_expr == "None":
+                medians.append(None)
+                continue
+            medians.append(min_formula_to_median_expr(min_expr))
+        frame["Median"] = medians
+
+    build_metric_value_string(arch_config.dfs, arch_config.dfs_type, "per_kernel")
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns or "Min" not in frame.columns:
+            continue
+        for row_id, row in frame.iterrows():
+            median_expr = row.get("Median")
+            min_expr = row.get("Min")
+            if (not isinstance(median_expr, str) or not median_expr) and isinstance(
+                min_expr, str
+            ):
+                if "to_min(" in min_expr:
+                    frame.at[row_id, "Median"] = min_expr.replace(
+                        "to_min(", "to_median(", 1
+                    )
+
+    workload = schema.Workload()
+    workload.sys_info = sys_info
+    workload.roofline_peaks = pd.DataFrame()
+    workload.filter_gpu_ids = None
+    workload.filter_kernel_ids = None
+    workload.filter_dispatch_ids = None
+    workload.raw_pmc = file_io.create_df_pmc(str(wl_dir), verbose=0)
+
+    filtered = parser.apply_filters(
+        workload,
+        str(wl_dir),
+        debug=False,
+    )
+
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns:
+            continue
+        exprs = arch_config.dfs_expressions.setdefault(df_id, [])
+        for _, row in frame.iterrows():
+            median_expr = row.get("Median")
+            if (
+                isinstance(median_expr, str)
+                and median_expr
+                and median_expr not in exprs
+            ):
+                exprs.append(median_expr)
+
+    eval_metric(
+        arch_config.dfs,
+        arch_config.dfs_type,
+        arch_config.dfs_expressions,
+        sys_info.iloc[0],
+        workload.roofline_peaks,
+        filtered,
+        debug=False,
+    )
+
+    skip_cols = {
+        "Avg",
+        "Min",
+        "Max",
+        "Median",
+        "Unit",
+        "Peak",
+        "Percent of Peak",
+        "Description",
+        "Value",
+    }
+    out: Dict[str, Optional[float]] = {}
+    for df_id, frame in arch_config.dfs.items():
+        if arch_config.dfs_type.get(df_id) != "metric_table":
+            continue
+        if "Median" not in frame.columns:
+            continue
+        name_col = "Metric" if "Metric" in frame.columns else None
+        if name_col is None:
+            for col in frame.columns:
+                if col not in skip_cols:
+                    name_col = col
+                    break
+        if name_col is None:
+            continue
+        for row_id, row in frame.iterrows():
+            key = f"{row_id}|{row[name_col]}"
+            median_value = row.get("Median")
+            if median_value is None or (
+                isinstance(median_value, float) and math.isnan(median_value)
+            ):
+                out[key] = None
+            elif isinstance(median_value, str):
+                out[key] = to_float(median_value)
+            else:
+                try:
+                    out[key] = float(median_value)
+                except (TypeError, ValueError):
+                    out[key] = None
+    return out
 
 
 def apply_recomputed_medians(
     parsed: Dict[str, ParsedLog],
     workload_dirs: Dict[str, Path],
 ) -> None:
-    """Fill missing Medians from per-dispatch re-eval when dirs are provided.
-
-    `workload_dirs` keys are `{name}_spp` / `{name}_legacy` or plain
-    `name` (applied to the matching parsed SPP log only).
-    """
-    if not workload_dirs:
-        return
-    helpers = _load_median_helpers()
-    compute = helpers.compute_medians_for_workload
-
-    for dir_key, wl_dir in workload_dirs.items():
-        if dir_key.endswith("_legacy"):
-            continue  # baseline filled separately in build_report
-        if dir_key.endswith("_spp"):
-            wl_name = dir_key[: -len("_spp")]
-        else:
-            wl_name = dir_key
+    """Fill missing Medians from per-dispatch re-eval of each workload dir."""
+    for wl_name, wl_dir in workload_dirs.items():
         log = parsed.get(wl_name)
         if log is None:
             continue
-        need = [k for k, mv in log.metrics.items() if mv.value is None]
-        # Also recompute when only minmax_eq / absent median for Avg/Min/Max
-        # panels — prefer true Median over Min==Max coincidence.
-        need_all = [
-            k
-            for k, mv in log.metrics.items()
-            if mv.source in {"", "minmax_eq"} or mv.value is None
-        ]
-        keys = need_all or need
-        if not keys:
-            # Still recompute all Min-backed rows to upgrade Avg/Min/Max panels
-            # that had no Median column (source empty after Value-only skip).
-            keys = list(log.metrics)
         try:
-            medians = compute(wl_dir, keys)
-        except Exception as exc:  # noqa: BLE001 — report soft-fail in HTML
-            print(f"WARN: median recompute failed for {dir_key}: {exc}")
+            medians = compute_medians_for_workload(wl_dir, list(log.metrics))
+        except Exception as exc:  # noqa: BLE001 - report soft-fail in HTML
+            print(f"WARN: median recompute failed for {wl_dir}: {exc}")
             continue
         for key, med in medians.items():
             if med is None:
@@ -450,38 +622,71 @@ def apply_recomputed_medians(
                 existing.source = "recomputed"
 
 
-def apply_recomputed_medians_for_map(
-    metrics_by_wl: Dict[str, Dict[str, MetricValue]],
-    workload_dirs: Dict[str, Path],
-    mode_suffix: str,
-) -> None:
-    """Recompute medians into a flat wl→metrics map (for baseline)."""
-    if not workload_dirs:
-        return
-    helpers = _load_median_helpers()
-    compute = helpers.compute_medians_for_workload
-    for wl_name, metrics in metrics_by_wl.items():
-        dir_key = f"{wl_name}{mode_suffix}"
-        wl_dir = workload_dirs.get(dir_key) or workload_dirs.get(wl_name)
-        if wl_dir is None:
+def select_workload_log(workload: str, run: str, log_names: List[str]) -> Optional[str]:
+    """Return the analyze log name for one workload of one run, if present."""
+    wanted = f"{workload}_{run}.log"
+    return wanted if wanted in log_names else None
+
+
+def select_workload_dir(
+    workload: str, run: str, sysinfo_parents: List[Path]
+) -> Optional[Path]:
+    """Return the profiled workload dir `<workload>_<tag>_<run>/...` if present.
+
+    `sysinfo_parents` are relative to `<artifact_dir>/<arch>`.
+    """
+    for parent in sorted(sysinfo_parents):
+        top = parent.parts[0] if parent.parts else ""
+        if top.startswith(f"{workload}_") and top.endswith(f"_{run}"):
+            return parent
+    return None
+
+
+def discover_run_artifacts(
+    artifact_dir: Path,
+    arch: str,
+    run: str,
+    label: str,
+    workloads: List[str],
+) -> RunArtifacts:
+    """Find each workload's analyze log and profiled dir in one artifact dir.
+
+    Exits with a clear error when the directory or all of its logs are missing.
+    """
+    if not artifact_dir.is_dir():
+        raise SystemExit(f"{label} artifact directory not found: {artifact_dir}")
+    log_dir = artifact_dir / "logs" / arch
+    log_names = (
+        sorted(path.name for path in log_dir.glob("*.log")) if log_dir.is_dir() else []
+    )
+    workload_root = artifact_dir / arch
+    sysinfo_parents = [
+        path.parent.relative_to(workload_root)
+        for path in workload_root.glob("**/sysinfo.csv")
+    ]
+    artifacts = RunArtifacts(label=label, artifact_dir=artifact_dir)
+    for workload in workloads:
+        log_name = select_workload_log(workload, run, log_names)
+        if log_name is None:
+            print(f"WARN: {label}: no {workload}_{run}.log under {log_dir}")
             continue
-        try:
-            medians = compute(wl_dir, list(metrics))
-        except Exception as exc:  # noqa: BLE001
-            print(f"WARN: median recompute failed for {dir_key}: {exc}")
-            continue
-        for key, med in medians.items():
-            if med is None:
-                continue
-            existing = metrics.get(key)
-            if existing is None:
-                metrics[key] = MetricValue(
-                    value=med, raw=f"{med:g}", source="recomputed"
-                )
-            elif existing.source != "median":
-                existing.value = med
-                existing.raw = f"{med:g}"
-                existing.source = "recomputed"
+        artifacts.logs[workload] = log_dir / log_name
+        wl_dir = select_workload_dir(workload, run, sysinfo_parents)
+        if wl_dir is not None:
+            artifacts.workload_dirs[workload] = workload_root / wl_dir
+    if not artifacts.logs:
+        raise SystemExit(
+            f"{label} artifact directory has no *_{run}.log analyze logs under "
+            f"{log_dir}"
+        )
+    return artifacts
+
+
+def load_run_logs(run: RunArtifacts) -> Dict[str, ParsedLog]:
+    """Parse every analyze log of one run and fill Medians from its own data."""
+    parsed = {wl: parse_log(path) for wl, path in run.logs.items()}
+    apply_recomputed_medians(parsed, run.workload_dirs)
+    return parsed
 
 
 def classify_metrics(
@@ -722,28 +927,21 @@ def _iteration_banner(
 
 
 def build_report(
-    workloads: Dict[str, Path],
+    candidate: RunArtifacts,
+    parsed_logs: Dict[str, ParsedLog],
+    baseline: RunArtifacts,
+    baseline_logs: Dict[str, ParsedLog],
     formulas: Dict[str, Tuple[str, str, bool]],
-    baseline_logs: Optional[Dict[str, Path]],
     out_path: Path,
     report_date: str,
-    baseline_label: str,
     host_label: str,
-    branch_label: Optional[str],
     arch: str,
     config_arch: str,
     iterations: Optional[int],
     stat_label: str,
-    workload_dirs: Optional[Dict[str, Path]],
 ) -> None:
-    wl_names = list(workloads.keys())
-    parsed_logs: Dict[str, ParsedLog] = {}
-    for wl, log_path in workloads.items():
-        parsed_logs[wl] = parse_log(log_path)
-
-    if workload_dirs:
-        apply_recomputed_medians(parsed_logs, workload_dirs)
-
+    wl_names = list(parsed_logs.keys())
+    baseline_label = baseline.label
     parsed: Dict[str, Dict[str, MetricValue]] = {
         wl: log.metrics for wl, log in parsed_logs.items()
     }
@@ -830,59 +1028,55 @@ def build_report(
 
     improve_rows: List[str] = []
     delta_rows: List[str] = []
-    if baseline_logs:
-        base_parsed: Dict[str, Dict[str, MetricValue]] = {
-            wl: parse_log(path).metrics for wl, path in baseline_logs.items()
-        }
-        if workload_dirs:
-            apply_recomputed_medians_for_map(base_parsed, workload_dirs, "_legacy")
-        classify_metrics(base_parsed, metric_units, metric_formulas)
-        for key in all_keys:
-            mid, name = key.split("|", 1)
-            unit = formulas.get(key, ("", "", False))[1]
-            for wl in wl_names:
-                old = base_parsed.get(wl, {}).get(key)
-                new = parsed.get(wl, {}).get(key)
-                if not old or not new:
-                    continue
-                if old.cls in {"overflow", "formula_overflow"} and new.cls not in {
-                    "overflow",
-                    "formula_overflow",
-                }:
-                    improve_rows.append(
-                        f"<tr><td>{html.escape(wl)}</td>"
-                        f"<td class='mid'>{html.escape(mid)}</td>"
-                        f"<td>{html.escape(name)}</td>"
-                        f"<td style='background:#ffcdd2;font-weight:bold'>"
-                        f"{html.escape(fmt_value(old, unit))}</td>"
-                        f"<td style='background:#c8e6c9;font-weight:bold'>"
-                        f"{html.escape(fmt_value(new, unit))}</td>"
-                        f"<td>{html.escape(unit)}</td></tr>"
-                    )
-                if old.value is None or new.value is None:
-                    continue
-                # |rel| with old≈0 is undefined — skip (no huge % highlights).
-                rel = relative_abs_delta(old.value, new.value)
-                if rel is None or rel < DELTA_REL_THRESHOLD:
-                    continue
-                rel_pct = rel * 100.0
-                hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
-                row_cls = " class='delta-ge-100'" if hi else ""
-                rel_cell = (
-                    f"<td style='background:#ffe082;font-weight:bold'>"
-                    f"{rel_pct:.1f}%</td>"
-                    if hi
-                    else f"<td>{rel_pct:.1f}%</td>"
-                )
-                delta_rows.append(
-                    f"<tr{row_cls}><td>{html.escape(wl)}</td>"
+    base_parsed: Dict[str, Dict[str, MetricValue]] = {
+        wl: log.metrics for wl, log in baseline_logs.items()
+    }
+    classify_metrics(base_parsed, metric_units, metric_formulas)
+    for key in all_keys:
+        mid, name = key.split("|", 1)
+        unit = formulas.get(key, ("", "", False))[1]
+        for wl in wl_names:
+            old = base_parsed.get(wl, {}).get(key)
+            new = parsed.get(wl, {}).get(key)
+            if not old or not new:
+                continue
+            if old.cls in {"overflow", "formula_overflow"} and new.cls not in {
+                "overflow",
+                "formula_overflow",
+            }:
+                improve_rows.append(
+                    f"<tr><td>{html.escape(wl)}</td>"
                     f"<td class='mid'>{html.escape(mid)}</td>"
                     f"<td>{html.escape(name)}</td>"
-                    f"<td>{html.escape(fmt_value(old, unit))}</td>"
-                    f"<td>{html.escape(fmt_value(new, unit))}</td>"
-                    f"{rel_cell}"
+                    f"<td style='background:#ffcdd2;font-weight:bold'>"
+                    f"{html.escape(fmt_value(old, unit))}</td>"
+                    f"<td style='background:#c8e6c9;font-weight:bold'>"
+                    f"{html.escape(fmt_value(new, unit))}</td>"
                     f"<td>{html.escape(unit)}</td></tr>"
                 )
+            if old.value is None or new.value is None:
+                continue
+            # |rel| with old≈0 is undefined — skip (no huge % highlights).
+            rel = relative_abs_delta(old.value, new.value)
+            if rel is None or rel < DELTA_REL_THRESHOLD:
+                continue
+            rel_pct = rel * 100.0
+            hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
+            row_cls = " class='delta-ge-100'" if hi else ""
+            rel_cell = (
+                f"<td style='background:#ffe082;font-weight:bold'>{rel_pct:.1f}%</td>"
+                if hi
+                else f"<td>{rel_pct:.1f}%</td>"
+            )
+            delta_rows.append(
+                f"<tr{row_cls}><td>{html.escape(wl)}</td>"
+                f"<td class='mid'>{html.escape(mid)}</td>"
+                f"<td>{html.escape(name)}</td>"
+                f"<td>{html.escape(fmt_value(old, unit))}</td>"
+                f"<td>{html.escape(fmt_value(new, unit))}</td>"
+                f"{rel_cell}"
+                f"<td>{html.escape(unit)}</td></tr>"
+            )
 
     sup_rows = []
     for wl in wl_names:
@@ -996,10 +1190,12 @@ def build_report(
             "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
         )
 
-    if branch_label:
-        branch_html = f" | <b>Branch:</b> {html.escape(branch_label)}"
-    else:
-        branch_html = ""
+    runs_html = (
+        f" | <b>Candidate:</b> {html.escape(candidate.label)} "
+        f"(<code>{html.escape(str(candidate.artifact_dir))}</code>)"
+        f" | <b>Baseline:</b> {html.escape(baseline.label)} "
+        f"(<code>{html.escape(str(baseline.artifact_dir))}</code>)"
+    )
 
     doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>{html.escape(arch_title)} — Metric Health {html.escape(report_date)}</title>
@@ -1039,7 +1235,7 @@ tr.row-overflow{{box-shadow:inset 0 0 0 2px #c62828}}
 <h1>{html.escape(arch_title)} — Metric Health Report</h1>
 <p style="margin:2px 0;color:#607d8b;font-size:12px"><b>Date:</b> {html.escape(report_date)}
  | <b>Host:</b> {html.escape(host_label)}
-{branch_html}
+{runs_html}
  | <b>Arch:</b> {html.escape(arch)}
  | <b>Workloads:</b> {html.escape(", ".join(wl_names))}</p>
 {iter_banner}
@@ -1179,31 +1375,49 @@ def merge_formulas_from_logs(
     return formulas
 
 
-def _parse_name_path_pairs(specs: List[str]) -> Dict[str, Path]:
-    result: Dict[str, Path] = {}
-    for spec in specs:
-        name, path = spec.split(":", 1)
-        result[name] = Path(path)
-    return result
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument(
         "--arch",
         required=True,
         choices=sorted(ARCH_CONFIG_DIR),
-        help="GPU arch (selects analysis_configs dir)",
+        help="GPU arch (selects analysis_configs dir and logs/<arch>)",
+    )
+    parser.add_argument(
+        "--candidate",
+        type=Path,
+        required=True,
+        help="Artifact directory of the run under test (this branch)",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        required=True,
+        help="Artifact directory of a separate rocprofiler-compute-develop run",
+    )
+    parser.add_argument("--candidate-label", default=DEFAULT_CANDIDATE_LABEL)
+    parser.add_argument("--baseline-label", default=DEFAULT_BASELINE_LABEL)
+    parser.add_argument(
+        "--candidate-run",
+        default=DEFAULT_CANDIDATE_RUN,
+        help="Run name in the candidate file names, <workload>_<run>.log",
+    )
+    parser.add_argument(
+        "--baseline-run",
+        default=DEFAULT_BASELINE_RUN,
+        help="Run name in the baseline file names, <workload>_<run>.log",
+    )
+    parser.add_argument(
+        "--workloads",
+        nargs="+",
+        default=list(DEFAULT_WORKLOADS),
+        help="Workload names to compare (default: vcopy nbody mega_kernel)",
     )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--date", default=date.today().isoformat())
-    parser.add_argument("--baseline-label", default="legacy heuristic")
     parser.add_argument("--host", default="unknown")
-    parser.add_argument(
-        "--branch",
-        default=None,
-        help="Branch label shown in the report header",
-    )
     parser.add_argument(
         "--iterations",
         type=int,
@@ -1215,46 +1429,41 @@ def main() -> None:
         default="Median",
         help="Primary statistic label for the report (default: Median)",
     )
-    parser.add_argument(
-        "--workload-dir",
-        nargs="*",
-        default=[],
-        help=(
-            "Optional name_mode:path dirs for Median recompute "
-            "(e.g. vcopy_spp:/path/to/MI300X_A1)"
-        ),
-    )
-    parser.add_argument("workload_log", nargs="+", help="name:path pairs (SPP)")
-    parser.add_argument(
-        "--baseline",
-        nargs="*",
-        default=[],
-        help="baseline workload logs as name:path (e.g. legacy)",
-    )
-    args = parser.parse_args()
+    return parser
 
+
+def main() -> None:
+    args = _build_arg_parser().parse_args()
     config_arch = ARCH_CONFIG_DIR[args.arch]
-    workloads = _parse_name_path_pairs(args.workload_log)
-    baseline_logs = _parse_name_path_pairs(args.baseline) if args.baseline else None
-    workload_dirs = (
-        _parse_name_path_pairs(args.workload_dir) if args.workload_dir else None
+    candidate = discover_run_artifacts(
+        args.candidate,
+        args.arch,
+        args.candidate_run,
+        args.candidate_label,
+        args.workloads,
+    )
+    baseline = discover_run_artifacts(
+        args.baseline,
+        args.arch,
+        args.baseline_run,
+        args.baseline_label,
+        args.workloads,
     )
 
-    formulas = merge_formulas_from_logs(workloads, config_arch)
+    formulas = merge_formulas_from_logs(candidate.logs, config_arch)
     build_report(
-        workloads,
+        candidate,
+        load_run_logs(candidate),
+        baseline,
+        load_run_logs(baseline),
         formulas,
-        baseline_logs,
         args.out,
         args.date,
-        args.baseline_label,
         args.host,
-        args.branch,
         args.arch,
         config_arch,
         args.iterations,
         args.stat,
-        workload_dirs,
     )
     print(f"Wrote {args.out}")
 
