@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* CPU CREATE/REGISTER and explicit subrange mapping; optional GPU allocation.

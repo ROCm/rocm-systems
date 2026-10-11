@@ -650,10 +650,17 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return result;
   }
 
-  if (field_aliases_scc(wf, desc->state, decoded))
-    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1});
   value = (raw_value >> decoded.offset) & decoded.mask;
   return HwregAccessResult::Success;
+}
+
+bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write) {
+  const auto decoded = decode_hwreg(hwreg);
+  const auto *desc = find_descriptor(wf.cu().arch(), decoded.id);
+  if (!desc || !field_aliases_scc(wf, desc->state, decoded))
+    return false;
+  return !write || (desc->write_policy != HwregWritePolicy::ReadOnly &&
+                    (desc->write_policy != HwregWritePolicy::Privileged || wf.in_trap_handler()));
 }
 
 HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
@@ -694,8 +701,6 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
       wf.arm_setreg_vgpr_msb_hazard();
   }
 
-  if (field_aliases_scc(wf, desc->state, decoded))
-    wf.check_scalar_memory_wait({RegClass::SCC, 0, 1}, true);
   return write_raw_hwreg(wf, desc->state, updated);
 }
 

@@ -165,7 +165,7 @@ _CONTEXT_READS: dict[str, str] = {
     'SCC': 'wf.read_scc()',
     'VCC': 'wf.vcc_mask()',
     'EXEC': 'wf.exec()',
-    'EXEC_RAW': 'wf.read_exec()',
+    'EXEC_RAW': 'wf.exec_raw()',
     'EXEC_LO': 'static_cast<uint32_t>(wf.exec())',
     'M0': 'wf.m0()',
     'laneId': 'lane',
@@ -1237,7 +1237,7 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
     # Bit index (VCC/EXEC bitmask access)
     if array_node.kind == SemaNodeKind.ID and array_node.id_name == 'VCC':
-        vcc_read = ctx.vcc_read or f'wf.vcc_mask(uint64_t{{1}} << {index_expr})'
+        vcc_read = ctx.vcc_read or f'wf.vcc_mask()'
         return f'(({vcc_read} >> {index_expr}) & 1)'
     return f'(({array_expr} >> {index_expr}) & 1)'
 

@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # AMDF validation
@@ -14,7 +15,7 @@ python3 ddi/libamdf/tests/abi/check_layout.py
 
 The ABI probe compares independently compiled C and Rust layouts against the
 vendored AMDF headers. Those headers and the upstream CTS are pinned to
-`hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461`.
+`hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d`.
 
 On a Linux x86-64 host with an accessible GFX1201 GPU, run the opt-in
 [cross-frontend queue fault probes](../../rocddi/tests/gpu/README.md):
