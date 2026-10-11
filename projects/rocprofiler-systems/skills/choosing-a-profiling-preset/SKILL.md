@@ -10,9 +10,9 @@ described workload, and returns the exact command to run it.
 
 ## Prerequisites
 
-None to make the recommendation — this skill only reasons over static preset
-metadata. Running the recommended command requires an installed or built
-`rocprof-sys-run` / `rocprof-sys-sample` binary.
+None to make a first recommendation from the table below. To confirm what a preset
+sets (see "Confirm with `--explain`"), and to run the command, `rocprof-sys-run` or
+`rocprof-sys-sample` must be installed or built.
 
 ## Terminology
 
@@ -39,19 +39,22 @@ preset "has tracing off" without saying which of these you mean.
 
 ## Preset reference
 
+A routing aid only: it says which preset fits which need, not exactly what each one sets.
+The installed binary is the source of truth for that (see "Confirm with `--explain`").
+
 | Preset | Category | Use case |
 | --- | --- | --- |
-| `balanced` | general | Recommended default: moderate overhead; profile output, 50 Hz call-stack sampling, GPU metrics and rocPD output on, Perfetto trace output off |
-| `profile-only` | general | Lowest overhead flat profile (production, minimal impact); Perfetto trace output, rocPD output and call-stack sampling are off, ROCm API tracing stays on |
-| `detailed` | general | Deep bottleneck analysis: Perfetto trace output, profile output, call-stack sampling and GPU metrics all on |
-| `trace-gpu` | gpu | GPU activity timeline: Perfetto trace output with ROCm API tracing (HIP runtime, kernel dispatch, memory copy) and GPU metrics; profile output off |
-| `trace-hw-counters` | gpu | GPU hardware counters (Occupancy, VALUUtilization) |
-| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads: Perfetto trace output (2GB buffer) and rocPD output on, MPI and RCCL API tracing |
-| `trace-hpc` | hpc | Compute-intensive HPC apps: Perfetto trace output, MPI/OpenMP/Kokkos/RCCL API tracing, PAPI counter events set |
-| `trace-openmp` | hpc | OpenMP GPU target-offload apps: Perfetto trace output with OpenMP API tracing and ROCm API tracing (HSA API excluded) |
-| `profile-mpi` | hpc | MPI communication latency: flat profile with MPI API tracing and wall-clock per rank; no Perfetto trace or rocPD output |
-| `sys-trace` | tracing | Perfetto trace output with the widest ROCm API tracing (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
-| `runtime-trace` | tracing | Perfetto trace output with ROCm runtime API tracing only (excludes HSA/compiler APIs) |
+| `balanced` | general | Recommended default, moderate overhead |
+| `profile-only` | general | Lowest overhead flat profile (production) |
+| `detailed` | general | Maximum depth, high overhead |
+| `trace-gpu` | gpu | GPU activity timeline (kernel dispatch, memory copies) |
+| `trace-hw-counters` | gpu | GPU hardware counters (occupancy, VALU utilization) |
+| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads |
+| `trace-hpc` | hpc | Compute-intensive MPI/OpenMP/Kokkos/RCCL apps, with CPU counters (PAPI) |
+| `trace-openmp` | hpc | OpenMP GPU target-offload apps |
+| `profile-mpi` | hpc | MPI communication latency, flat profile, no Perfetto trace |
+| `sys-trace` | tracing | Debugging runtime-layer interactions, widest ROCm API tracing (HIP, HSA, ROCTx, RCCL) |
+| `runtime-trace` | tracing | Same as `sys-trace` without HSA/compiler APIs |
 
 ## How to choose
 
@@ -89,6 +92,19 @@ Resolve these in order; the first question that narrows to a single preset wins.
 If the user's need doesn't fit neatly, default to `balanced` and mention that
 domain flags can extend it (see below).
 
+## Confirm with `--explain`
+
+The presets are compiled into the installed binary, so `--explain` matches the user's
+build exactly and the table above can lag behind it. Once you have a candidate:
+
+1. Run `rocprof-sys-run --explain=<name>` (or `rocprof-sys-sample --explain=<name>`) as a
+   single command, with no `command -v` check or `&&` chain in front of it. Use its
+   `ROCPROFSYS_*` list as the facts about the preset. Quote the settings that matter to
+   the user's goal, and if they contradict the table or your first choice, follow
+   `--explain`.
+2. If the command is not found or cannot run, use the table and say that the settings
+   are unconfirmed.
+
 ## Output
 
 Return the exact invocation, e.g.:
@@ -110,14 +126,12 @@ Mention, if relevant:
 - Domain flags (`--gpu`, `--rocm`, `--cpu`, `--parallel`) can layer on top of
   any preset to add/override specific metrics, e.g.
   `rocprof-sys-run --preset=balanced --gpu=temp,power -- ./myapp`.
-- `--explain=<name>` and `--list-presets` let the user self-serve verify the
-  choice before running.
+- `--explain=<name>` and `--list-presets` let the user verify the choice themselves.
 - `--export-config=<file>.json` freezes the resolved preset+overrides into a
   reusable JSON config — this is the supported way to customize a preset, not
   hand-editing the shipped JSON files.
-- `rocprof-sys-run --explain=<name>` prints exactly which `ROCPROFSYS_*`
-  settings a preset applies. The full file format for custom presets is the JSON
-  schema installed at `<install-prefix>/share/rocprofiler-systems/presets/schema.json`.
+- The file format for custom presets is the JSON schema installed at
+  `<install-prefix>/share/rocprofiler-systems/presets/schema.json`.
 
 ## Common Mistakes
 
