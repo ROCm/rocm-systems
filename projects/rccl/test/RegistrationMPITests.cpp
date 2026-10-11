@@ -431,8 +431,10 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
 // coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite with
 // --gtest_filter=GdrFlush_CuMem.* without the gdr_flush_cumem_multinode env.
 // Opt the suite in itself so the regression guard actually runs. NCCL_PARAM
-// caches per process, so this only reaches the library when no earlier suite
-// has already latched CUMEM=0; MpiEnvGuard restores the launcher env afterward.
+// caches per process on first read, so this only reaches the library when no
+// earlier suite has already latched CUMEM=0. MpiEnvGuard restores getenv; it
+// cannot un-latch the library, so a filter that runs this suite first leaves
+// cuMem on for later suites in the same process.
 class GdrFlush_CuMem : public RegistrationTestBase {
 protected:
     std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
@@ -459,20 +461,21 @@ TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
         GTEST_SKIP() << "Requires 2+ nodes (cross-node NET/IB GDR path)";
     }
 
-    ASSERT_TRUE(isCuMemEnabled())
-        << "NCCL_CUMEM_ENABLE must be set to 1 (exercises the cuMem GDR flush path)";
-
-    // getenv can be 1 after SetUp while ncclParamCuMemEnable is still 0 from an
-    // earlier communicator in this process. Skip that case; do not skip when the
-    // runtime itself cannot enable cuMem (e.g. kernel < 6.8), where the flush is
-    // a no-op and AllGather should still complete. Coordinate so one rank skipping
-    // cannot leave the others blocked in ncclAllGather.
-    if (auto reason = mpiCoordinatedSkipReason(
-            !ncclCuMemEnable() && ncclCuMemRuntimeSupported(),
-            "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
-            "communicator in this process; run with --gtest_filter=GdrFlush_CuMem.* "
-            "or launch with NCCL_CUMEM_ENABLE=1");
-        !reason.empty()) {
+    // Gate on the library, not getenv: SetUp always writes NCCL_CUMEM_ENABLE=1,
+    // and ncclCuMemEnable() is already 0 when the param was latched off or the
+    // runtime has no dma-buf cuMem. Coordinate so one rank skipping cannot leave
+    // the others blocked in ncclAllGather.
+    const bool noCuMem = !ncclCuMemEnable();
+    const char* cuMemSkipWhy =
+        !noCuMem ? nullptr
+                 : (ncclCuMemRuntimeSupported()
+                        ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                          "communicator in this process; run with "
+                          "--gtest_filter=GdrFlush_CuMem.* or launch with "
+                          "NCCL_CUMEM_ENABLE=1"
+                        : "Requires a kernel/runtime that can enable cuMem "
+                          "(dma-buf, kernel >= 6.8)");
+    if (auto reason = mpiCoordinatedSkipReason(noCuMem, cuMemSkipWhy); !reason.empty()) {
         GTEST_SKIP() << reason;
     }
 
