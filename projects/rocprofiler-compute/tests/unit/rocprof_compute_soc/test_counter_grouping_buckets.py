@@ -5,13 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
     count_multi_bucket_metrics,
     count_single_pass_metrics_split_across_buckets,
     counters_fit_one_bucket,
     rebuild_counter_file,
 )
-from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
 from tests.unit.rocprof_compute_soc.test_soc_base import PERFMON_CONFIG
 
 
