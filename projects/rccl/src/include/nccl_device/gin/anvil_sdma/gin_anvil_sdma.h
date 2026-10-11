@@ -165,11 +165,14 @@ NCCL_DEVICE_INLINE bool skipFenceBeforeSignal(bool needSdmaQuiet, bool hasSignal
   return !needSdmaQuiet && hasSignal && !hasCounter;
 }
 
-// A strong signal must not be observed before any earlier put to the peer has
-// landed, whichever channel queue it went to. sdmaDirty cannot answer that: a
-// re-mark racing Flush's clear is lost (see quietOwnedSdmaDirtyBits), so every
-// queue to the peer is drained unconditionally. This also covers the queue
-// this call just posted to.
+// Per-call path: no coop.sync() runs before this signal, so sdmaDirty cannot
+// answer "every earlier put to this peer" here. A re-mark racing Flush's clear
+// is lost (see quietOwnedSdmaDirtyBits), and another thread's put is not in
+// this thread's bits. Drain every queue to the peer, including the one this
+// call just posted. The barrier does not use this path. It reports no
+// strong-signal support, so fenceFlush (quietOwnedSdmaDirtyBits, then
+// coop.sync()) plus a weak signal is the equivalent the barrier contract
+// requires.
 NCCL_DEVICE_INLINE void quietPeerQueues(ncclGinAnvilSdmaGPUContext* rsCtx, int peer) {
   auto** handles = (::sdma_anvil::SdmaQueueDeviceHandle**)loadConst(&rsCtx->queueHandles);
   if (handles == nullptr) return;
@@ -186,9 +189,9 @@ NCCL_DEVICE_INLINE void maybeFenceBeforeSignal(ncclGinAnvilSdmaGPUContext* rsCtx
                                                bool issuedSdmaThisCall, bool hasSignal, bool hasCounter,
                                                bool strongSignal) {
   if (hasSignal && strongSignal) {
+    // signalPeer releases before the atomic. A fence here would only duplicate
+    // that, and when the signal address is missing no signal is sent at all.
     quietPeerQueues(rsCtx, peer);
-    // Earlier IPC stores to the peer are part of what a strong signal promises.
-    NCCL_GIN_THREADFENCE_SYSTEM();
     return;
   }
   bool needSdmaQuiet = needSdmaQuietBeforeSignal(rsCtx, peer, blockId, handle, issuedSdmaThisCall);
@@ -289,7 +292,9 @@ struct ncclGinApi_Put<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::signalPeer;
     using nccl::gin::anvil::ipcPut;
     using nccl::utility::loadConst;
-    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
+    // Indexed only. A VA descriptor shares this union, so reading
+    // indexedSignal.signalId from it aliases a window pointer.
+    bool hasSignal = signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED;
     bool strongSignal = hasSignal && signal.isStrong;
 
     if (coop.thread_rank() != 0) return;
@@ -402,7 +407,9 @@ struct ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
     using nccl::gin::anvil::detail::signalPeer;
     using nccl::gin::anvil::ipcPutScalar;
     using nccl::utility::loadConst;
-    bool hasSignal = signal.type != NCCL_GIN_SIGNAL_TYPE_NONE;
+    // Indexed only. A VA descriptor shares this union, so reading
+    // indexedSignal.signalId from it aliases a window pointer.
+    bool hasSignal = signal.type == NCCL_GIN_SIGNAL_TYPE_INDEXED;
     bool strongSignal = hasSignal && signal.isStrong;
 
     if (coop.thread_rank() != 0) return;
@@ -654,9 +661,11 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   }
 };
 
-// Strong signals are honoured per call (quietPeerQueues), but this reports
-// false so a Put-fenced barrier does one fenceFlush and sends weak signals,
-// rather than draining every queue again inside each strong signal.
+// Strong signals are honoured per call (quietPeerQueues). This still reports
+// false: a Put-fenced barrier does one fenceFlush, whose drain is
+// quietOwnedSdmaDirtyBits, then sends weak signals. That is the
+// flush-plus-weak equivalent of a strong signal, and it avoids draining every
+// queue again inside each barrier signal.
 template <>
 struct ncclGinApi_SupportsStrongSignal<NCCL_NET_DEVICE_GIN_ANVIL_SDMA> {
   NCCL_DEVICE_INLINE static bool call(ncclGinCtx) {

@@ -38,6 +38,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
 ### Resolved issues
+* Anvil SDMA (`NCCL_GIN_TYPE=7`) honours strong GIN signals. A strong signal drains every SDMA queue to that peer before it is sent, including puts that are no longer marked dirty. Legacy `ncclGin_SignalInc` is strong by default, so a caller that only needs to order the put it just issued should use `ncclGin_WeakSignalInc`. A barrier on this backend still flushes once and sends weak signals.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
@@ -82,7 +83,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * CE-2-Shot AllReduce size cap is now resolved at runtime via `rcclCeAr2ShotMax()` (env var wins, then arch table `ceNonRegMax[AR]`, then the 256 MiB `NCCL_CE_AR_TMPBUF_DEFAULT_BYTES` fallback) rather than from a compile-time constant.
 * `RCCL_FORCE_CE_ALLREDUCE=1` no longer overrides the CE AllReduce 2-shot selector cap. It bypasses the `CTA_POLICY_ZERO` check only; the selector cap is enforced regardless.
 * `tuning_model_11` registered for gfx1250 single-node; gfx1250 added to the AINIC tuning index map.
-* Extended `ncclFunc_t` enum in rccl-tests `common.h` to match the librccl internal ABI: renumbered existing values and added `ncclFuncAlltoAll` (8), `ncclFuncScatter` (9), `ncclFuncGather` (10), `ncclFuncAllToAllPivot` (11), `ncclFuncAlltoAllGda` (12), `ncclFuncAlltoAllvGda` (13), `ncclFuncAllGatherV` (14), `ncclFuncPutSignal` (15), `ncclFuncSignal` (16), `ncclFuncWaitSignal` (17), `ncclFuncAlltoAllv` (18); `ncclNumFuncs` updated to 19. 
+* Extended `ncclFunc_t` enum in rccl-tests `common.h` to match the librccl internal ABI: renumbered existing values and added `ncclFuncAlltoAll` (8), `ncclFuncScatter` (9), `ncclFuncGather` (10), `ncclFuncAllToAllPivot` (11), `ncclFuncAlltoAllGda` (12), `ncclFuncAlltoAllvGda` (13), `ncclFuncAllGatherV` (14), `ncclFuncPutSignal` (15), `ncclFuncSignal` (16), `ncclFuncWaitSignal` (17), `ncclFuncAlltoAllv` (18); `ncclNumFuncs` updated to 19.
 * AlltoAll index variables in `alltoall_dda.h` and `alltoall_dda_fabric.h` widened from `int` to `size_t` to prevent overflow on large message sizes.
 * DDA fabric and IPC AlltoAll launchers refactored to derive launch geometry from a single inline helper (`ddaAllToAllFabricGeom`, `ddaAllToAllFabricLLGeom`, `ddaAllToAllFabricLL128Geom`, `ddaAllToAllIpcGeom`) shared between the dispatch path and the new block-count query functions.
 * `rcclGetCollImplInfo` now covers ReduceScatter and AlltoAll (previously both fell back to `rcclGetAlgoInfo()`); rccl-tests reports accurate algo/proto for all four collective types.
