@@ -153,18 +153,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
     of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
-  - `ras/client_support.cc` (`CLIENT_SUPPORT_CC_PATH`, from
-    `client-support-test.cc`); suites `RasClientSupportMicrotest.*` and
-    `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket
-    I/O is redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query
-    through `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
-    `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
-    scaling. Inclusion-time symbol renames allow this TU to
-    share `rccl-UnitTestsMicro` with `ras-test.cc` and the RAS fakes; preserve
-    that isolation when adding collaborators. The guard-less positional pair
-    `libc_seam.h` / `libc_seam_undef.h` must bracket the production source
-    include, after system headers and before test helpers. CMake pins the
-    copied `ncclFuncStr` table to `src/init.cc`.
   - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras-param-test.cc`); suite
     `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
     cached parameter reads, and nanosecond/second scaling. The test includes the
@@ -207,6 +195,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
   `CeCollMicrotest.*`. Its own binary because every other target links
   `fakes/ce_fakes.cc`, which fakes the symbols this file defines.
+- **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
+  `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
+  `RasClientSupportMicrotest.*` and
+  `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
+  redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query through
+  `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
+  `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
+  scaling. Its own binary: this file's inline stand-ins for
+  `ncclSocketsSameNode`/`rasPeerInfoToString`/`rasPeerToString` (its callees
+  into `ras/peers.cc`) collide with the REAL `peers.cc` that
+  `rccl-UnitTestsMicro` links for `ras-peers-test.cc`, which conversely needs
+  those three real and this file's own `ncclSocketToHost`/`rasGpuDevsToString`
+  faked -- the opposite split, so the two cannot share a binary. The
+  guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
+  the production source include, after system headers and before test
+  helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,

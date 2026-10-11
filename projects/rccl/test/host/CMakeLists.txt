@@ -95,7 +95,6 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
-    client-support-test.cc               # src/ras/client_support.cc
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
@@ -269,6 +268,23 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroClientSupport -- src/ras/client_support.cc. Its own binary: this test's
+  # inline stand-ins for ncclSocketsSameNode/rasPeerInfoToString/rasPeerToString (client_support.cc's
+  # callees into src/ras/peers.cc) collide with the REAL peers.cc compiled into rccl-UnitTestsMicro
+  # for ras-peers-test.cc, which in turn needs those 3 real and client_support.cc's own
+  # ncclSocketToHost/rasGpuDevsToString faked -- the opposite split. The two can't share a binary.
+  set(TEST_MICRO_CLIENT_SUPPORT_SOURCE_FILES
+    client-support-test.cc               # src/ras/client_support.cc
+    fakes/hip_fakes.cc
+    fakes/env_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/ras_fakes.cc
+    fakes/ras_param_fakes.cc
+    fakes/nccl_fakes.cc                  # ncclDebugLog/ncclDebugMask (checks.h logging macros)
+    fakes/collectives_fakes.cc           # ncclFuncToString
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -835,7 +851,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
     RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
-    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
     RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
@@ -957,6 +972,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCe
     ${_MICRO_AMDSMI_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
     CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroClientSupport
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
+  SOURCES ${TEST_MICRO_CLIENT_SUPPORT_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
