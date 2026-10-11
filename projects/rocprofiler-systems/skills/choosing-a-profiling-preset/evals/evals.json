@@ -21,7 +21,7 @@
         {
             "expected_behavior": [
                 "recommends the workload-trace preset",
-                "mentions it enables MPI/RCCL tracing with a large trace buffer"
+                "mentions it enables MPI/RCCL API tracing with a large Perfetto trace buffer"
             ],
             "id": "aiml-training-preset-recommendation",
             "prompt": "Recommend a rocprofiler-systems preset for profiling a long-running AI/ML training job on GPUs.",

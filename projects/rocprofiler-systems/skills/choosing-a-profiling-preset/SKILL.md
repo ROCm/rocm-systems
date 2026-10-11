@@ -14,21 +14,44 @@ None to make the recommendation — this skill only reasons over static preset
 metadata. Running the recommended command requires an installed or built
 `rocprof-sys-run` / `rocprof-sys-sample` binary.
 
+## Terminology
+
+"Trace" and "tracing" mean two different things here. Keep them apart in every answer.
+
+| Term | Meaning | Setting |
+| --- | --- | --- |
+| Perfetto trace output | Writes a timeline file in Perfetto format | `ROCPROFSYS_TRACE` |
+| rocPD output | Writes a rocPD database | `ROCPROFSYS_USE_ROCPD` |
+| Profile output | Writes timemory profile files (flat or call-stack based) | `ROCPROFSYS_PROFILE` |
+| Call-stack sampling | Samples the CPU call stack at a fixed frequency | `ROCPROFSYS_USE_SAMPLING` |
+| API tracing | Intercepts and records the calls of one API | see below |
+
+API tracing is chosen per API: ROCm (`ROCPROFSYS_ROCM_DOMAINS`), MPI
+(`ROCPROFSYS_USE_MPIP`), RCCL (`ROCPROFSYS_USE_RCCLP`), OpenMP (`ROCPROFSYS_USE_OMPT`)
+and Kokkos (`ROCPROFSYS_USE_KOKKOSP`). ROCm API tracing is on in every built-in preset,
+by default for the HIP runtime API, ROCTx markers, kernel dispatches, memory copies and
+scratch memory. A preset may narrow or widen that set, and `--rocm=<domains>` overrides it.
+
+API tracing is separate from output selection. A preset's `tracing.enabled: false` (or
+`ROCPROFSYS_TRACE=false`) turns Perfetto trace output off, not API tracing. The collected
+data goes to whichever outputs are on: Perfetto, rocPD or profile files. Never say a
+preset "has tracing off" without saying which of these you mean.
+
 ## Preset reference
 
 | Preset | Category | Use case |
 | --- | --- | --- |
-| `balanced` | general | Recommended default: moderate overhead; profiling, 50 Hz call-stack sampling, GPU metrics and rocPD output on, Perfetto trace output off |
+| `balanced` | general | Recommended default: moderate overhead; profile output, 50 Hz call-stack sampling, GPU metrics and rocPD output on, Perfetto trace output off |
 | `profile-only` | general | Lowest overhead flat profile (production, minimal impact); Perfetto trace output, rocPD output and call-stack sampling are off, ROCm API tracing stays on |
-| `detailed` | general | Full trace+profile+system metrics, deep bottleneck analysis |
-| `trace-gpu` | gpu | GPU device activity + kernel dispatch tracing |
+| `detailed` | general | Deep bottleneck analysis: Perfetto trace output, profile output, call-stack sampling and GPU metrics all on |
+| `trace-gpu` | gpu | GPU activity timeline: Perfetto trace output with ROCm API tracing (HIP runtime, kernel dispatch, memory copy) and GPU metrics; profile output off |
 | `trace-hw-counters` | gpu | GPU hardware counters (Occupancy, VALUUtilization) |
-| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads (MPI+RCCL+rocPD, 2GB trace buffer) |
-| `trace-hpc` | hpc | MPI/OpenMP/Kokkos/RCCL tracing with PAPI counter events set, compute-intensive HPC apps |
-| `trace-openmp` | hpc | OpenMP GPU target-offload apps (kernel/memcpy trace, HSA API excluded) |
-| `profile-mpi` | hpc | MPI communication latency: flat profile with wall-clock per rank, no Perfetto trace or rocPD output |
-| `sys-trace` | tracing | Full system API trace (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
-| `runtime-trace` | tracing | Runtime API trace only (excludes HSA/compiler-API noise) |
+| `workload-trace` | gpu | AI/ML training, long-running GPU/HPC workloads: Perfetto trace output (2GB buffer) and rocPD output on, MPI and RCCL API tracing |
+| `trace-hpc` | hpc | Compute-intensive HPC apps: Perfetto trace output, MPI/OpenMP/Kokkos/RCCL API tracing, PAPI counter events set |
+| `trace-openmp` | hpc | OpenMP GPU target-offload apps: Perfetto trace output with OpenMP API tracing and ROCm API tracing (HSA API excluded) |
+| `profile-mpi` | hpc | MPI communication latency: flat profile with MPI API tracing and wall-clock per rank; no Perfetto trace or rocPD output |
+| `sys-trace` | tracing | Perfetto trace output with the widest ROCm API tracing (HIP + HSA + ROCTx + RCCL) for debugging runtime-layer interactions |
+| `runtime-trace` | tracing | Perfetto trace output with ROCm runtime API tracing only (excludes HSA/compiler APIs) |
 
 ## How to choose
 
@@ -40,25 +63,27 @@ Resolve these in order; the first question that narrows to a single preset wins.
    compiler-level noise should be excluded).
 
 2. **Does the workload have a dominant parallel runtime?**
-   - MPI communication latency is the *only* concern, no trace file needed →
+   - MPI communication latency is the *only* concern, no Perfetto trace file needed →
      `profile-mpi`.
    - OpenMP GPU target-offload kernels → `trace-openmp`.
    - MPI/OpenMP/Kokkos/RCCL HPC application, compute-intensive → `trace-hpc`.
-     It enables tracing and sets CPU hardware-counter events (PAPI); if you want
-     neither, `profile-mpi` or `balanced` run without tracing.
+     It writes a Perfetto trace, traces those runtimes' APIs and sets CPU
+     hardware-counter events (PAPI); if you want neither the trace file nor the
+     counters, `profile-mpi` or `balanced` write no Perfetto trace.
    - AI/ML training or a long-running GPU-accelerated HPC job needing MPI+RCCL
-     and durable trace capacity → `workload-trace`.
+     API tracing and a large Perfetto trace buffer → `workload-trace`.
 
 3. **Is the focus purely the GPU device itself** (not a parallel runtime)?
-   - Kernel dispatch / device activity tracing → `trace-gpu`.
+   - GPU activity timeline (kernel dispatch, memory copies) → `trace-gpu`.
    - Specific hardware counters (occupancy, VALU utilization) → `trace-hw-counters`.
 
 4. **Otherwise, general-purpose application profiling** — pick by overhead
    tolerance and depth:
    - Lowest overhead, quick flat profile (e.g. production) → `profile-only`; it turns
-     off Perfetto trace and rocPD output and call-stack sampling, but ROCm API calls and
-     kernels still appear in the flat profile.
-   - Balanced tracing+sampling+GPU metrics, good default → `balanced`.
+     off Perfetto trace output, rocPD output and call-stack sampling, but ROCm API calls
+     and kernels still appear in the flat profile.
+   - Good default for general profiling: profile output, rocPD output, 50 Hz call-stack
+     sampling and GPU metrics, no Perfetto trace → `balanced`.
    - Maximum depth, willing to accept high overhead → `detailed`.
 
 If the user's need doesn't fit neatly, default to `balanced` and mention that
