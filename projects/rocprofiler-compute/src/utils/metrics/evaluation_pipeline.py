@@ -307,12 +307,7 @@ def evaluate_metric_composites(
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
     gpu_arch = str(sys_info.get("gpu_arch", ""))
     used_passes: set[str] = set()
-    if (
-        pass_layout is not None
-        and pass_layout.has_duplicates
-        and gpu_arch
-        and not legacy_pass_merge_enabled()
-    ):
+    if pass_layout is not None and pass_layout.is_multi_pass and gpu_arch:
         gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
         used_passes = bind_metric_tables_to_passes(
             copies,
@@ -418,7 +413,7 @@ def eval_metric(
     ]
 
     used_passes: set[str] = set()
-    if pass_layout is not None and pass_layout.has_duplicates:
+    if pass_layout is not None and pass_layout.is_multi_pass:
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
         used_passes = bind_metric_tables_to_passes(
             dfs,

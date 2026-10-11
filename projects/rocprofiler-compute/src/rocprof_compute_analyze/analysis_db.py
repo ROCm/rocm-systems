@@ -1149,7 +1149,7 @@ class db_analysis(OmniAnalyze_Base):
         numActiveCUs is named. PER_XCD built-ins are evaluated before
         dependents that reference them (same order as calc_builtin_vars).
         """
-        if not used_passes or not pass_layout.has_duplicates:
+        if not used_passes or not pass_layout.is_multi_pass:
             return {}
 
         gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
@@ -1216,7 +1216,7 @@ class db_analysis(OmniAnalyze_Base):
             sys_info,
             db_analysis._expressions_without_pass_suffixes(expressions),
         )
-        if pass_layout is not None and used_passes and pass_layout.has_duplicates:
+        if pass_layout is not None and used_passes and pass_layout.is_multi_pass:
             sys_info.update(
                 db_analysis.calc_pass_scoped_builtin_sys_info(
                     pmc_df,
@@ -1315,7 +1315,7 @@ class db_analysis(OmniAnalyze_Base):
             if ceilings:
                 peaks_df = pd.DataFrame([ceilings])
             used_passes: set[str] = set()
-            if pass_layout is not None and pass_layout.has_duplicates:
+            if pass_layout is not None and pass_layout.is_multi_pass:
                 gpu_series = mi_gpu_specs.get_gpu_series(sys_info["gpu_arch"])
                 used_passes = bind_expression_dataframe(
                     expression_template,
