@@ -9,8 +9,8 @@
 // group-debug args check, comm-chain unlink/cleanup on the fail path, the job-free callbacks,
 // the management-task drain, and the symmetric-register CE-init branch. Non-blocking groups
 // must hand pending init work to a background thread and return ncclInProgress immediately,
-// never run it synchronously on the caller -- that's the guarantee
-// ncclCommInitRankConfig(blocking=0) relies on to poll/timeout/abort.
+// never run it synchronously on the caller; ncclCommInitRankConfig(blocking=0) relies on that
+// to poll/timeout/abort.
 //
 // Compiles the hipified src/group.cc directly (GROUP_CC_PATH) so file-static helpers are
 // reachable; external symbols come from fakes/ (comm_fakes, collective_stubs, ...). No GPU,
@@ -22,6 +22,7 @@
 #include <chrono>
 #include <climits>
 #include <cstdlib>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -171,6 +172,26 @@ class GroupEndInternalTest : public ::testing::Test {
     ncclGroupBlocking = blocking;
     ncclIntruQueueEnqueue(&ncclAsyncJobs, job_.get());
   }
+
+  // Unlinks and aborts each distinct groupJob once. All ForceJoins precede any abort: an abort can delete its groupJob.
+  void AbortLinkedGroupJobs(std::initializer_list<struct ncclComm*> comms) {
+    std::vector<struct ncclGroupJob*> groupJobs;
+    for (struct ncclComm* comm : comms) {
+      if (comm == nullptr || comm->groupJob == nullptr) {
+        continue;
+      }
+      if (std::find(groupJobs.begin(), groupJobs.end(), comm->groupJob) == groupJobs.end()) {
+        groupJobs.push_back(comm->groupJob);
+      }
+      comm->groupJob = nullptr;
+    }
+    for (struct ncclGroupJob* groupJob : groupJobs) {
+      ForceJoinIfNonBlockingInitGateIsBroken(groupJob);
+    }
+    for (struct ncclGroupJob* groupJob : groupJobs) {
+      ncclGroupJobAbort(groupJob);
+    }
+  }
 };
 
 // A non-blocking group with pending init work must return ncclInProgress (handing off to a
@@ -290,19 +311,11 @@ TEST_F(GroupEndInternalTest, InvalidGroupBlockingSentinel_ReturnsInternalError) 
   ncclGroupBlocking = -2;  // neither 0 nor 1: EnterGroupWithOnePendingJob's own value overridden
 
   EXPECT_EQ(ncclInternalError, ncclGroupEndInternal());
-  // Enters at depth 0 (SetUp's default): pins the `> 0` guard on the decrement itself, which
-  // ProfilerGroupDepthAboveZero_IsDecremented (entering at 2) can't -- 2->1 happens whether or
-  // not the guard exists, so a mutant deleting it still passes that test alone.
-  EXPECT_EQ(0, ncclProfilerApiState.profilerGroupDepth);
+  // Entered at depth 0, so this pins the "> 0" guard; the depth-2 test above passes with it deleted.
+  EXPECT_EQ(0, ncclProfilerApiState.profilerGroupDepth) << "the > 0 guard must skip the decrement at depth 0";
 }
 
-// A nested ncclGroupEnd (depth still above 1 after the decrement) must return immediately with
-// success, never touching ncclGroupError or anything past it -- only the outermost call runs
-// the real dispatch. ncclGroupError is deliberately poisoned: if the early exit were ever lost,
-// execution would fall through to the ncclGroupError check right below it and return
-// ncclSystemError instead -- with ncclGroupError left at its default ncclSuccess, both the
-// early-exit and fall-through paths would return ncclSuccess and this test couldn't tell them
-// apart.
+// Only the outermost ncclGroupEnd dispatches; ncclGroupError is poisoned so a lost early exit returns ncclSystemError.
 TEST_F(GroupEndInternalTest, NestedGroupDepthAboveOne_DecrementsAndReturnsSuccessImmediately) {
   ncclGroupDepth = 2;
   ncclGroupError = ncclSystemError;
@@ -312,13 +325,7 @@ TEST_F(GroupEndInternalTest, NestedGroupDepthAboveOne_DecrementsAndReturnsSucces
   EXPECT_EQ(1, ncclGroupDepth);
 }
 
-// ncclGroupError is set by a failing collective call *inside* the group (not exercised here,
-// just its effect on ncclGroupEnd); the outermost call must propagate it and still run the
-// fail-path cleanup instead of proceeding to allocate a groupJob. A queued job (not just bare
-// depth/error) is what makes this mutation-provable: with nothing queued, skipping this guard
-// still returns ncclGroupError unchanged (an equivalent mutant, verified by hand). With a real
-// pending job, skipping it instead dispatches that job for real and returns ncclInProgress --
-// an observably different, wrong result.
+// The queued job is load-bearing: with nothing queued, skipping the ncclGroupError guard still returns it unchanged.
 TEST_F(GroupEndInternalTest, GroupErrorSet_PropagatesAndRunsFailCleanup) {
   EnterGroupWithOnePendingJob(/*blocking=*/0);
   job_->func = FakeInitJobSucceeds;
@@ -356,30 +363,7 @@ class GroupCommHeadChainTest : public GroupEndInternalTest {
   }
 
   void TearDown() override {
-    struct ncclGroupJob* groupJob1 = comm_ ? comm_->groupJob : nullptr;
-    struct ncclGroupJob* groupJob2 = commX_ ? commX_->groupJob : nullptr;
-    struct ncclGroupJob* groupJob3 = commY_ ? commY_->groupJob : nullptr;
-    if (comm_) {
-      comm_->groupJob = nullptr;
-    }
-    if (commX_) {
-      commX_->groupJob = nullptr;
-    }
-    if (commY_) {
-      commY_->groupJob = nullptr;
-    }
-    ForceJoinIfNonBlockingInitGateIsBroken(groupJob1);
-    ForceJoinIfNonBlockingInitGateIsBroken(groupJob2);
-    ForceJoinIfNonBlockingInitGateIsBroken(groupJob3);
-    if (groupJob1) {
-      ncclGroupJobAbort(groupJob1);
-    }
-    if (groupJob2 && groupJob2 != groupJob1) {
-      ncclGroupJobAbort(groupJob2);
-    }
-    if (groupJob3 && groupJob3 != groupJob1 && groupJob3 != groupJob2) {
-      ncclGroupJobAbort(groupJob3);
-    }
+    AbortLinkedGroupJobs({comm_.get(), commX_.get(), commY_.get()});
     GroupEndInternalTest::TearDown();
   }
 };
@@ -421,14 +405,10 @@ TEST_F(GroupCommHeadChainTest, LinksEachCommAndIncrementsRefCount) {
   struct ncclGroupJob* groupJob = comm_->groupJob;
   EXPECT_EQ(groupJob, commX_->groupJob) << "the chain's head must adopt the new groupJob";
   EXPECT_EQ(&otherGroupJob_, commY_->groupJob) << "an already-owned comm must not be silently re-adopted";
-  // ASSERT, not EXPECT: if this is actually 1 (a regression), the abort call below deletes
-  // groupJob, and every line after it -- including TearDown's own read of comm_->groupJob --
-  // dereferences freed memory instead of just failing this one assertion cleanly.
+  // ASSERT: at refcount 1 the abort below deletes groupJob, so every later read (TearDown's too) would be a UAF.
   ASSERT_EQ(2, groupJob->groupRefCount) << "job_'s comm plus commX_ only; commY_ already owned elsewhere";
   EXPECT_EQ(nullptr, ncclGroupCommHead[type]);
-  // The type-loop's ncclCommSetAsyncError call runs synchronously on this thread, before the
-  // background thread is even spawned, so no lock/join is needed to observe it here -- unlike
-  // groupJob->base.result below, which genuinely does need the join first.
+  // The type-loop records these on this thread before the spawn, so no join is needed; the lock covers the meta thread.
   {
     std::lock_guard<std::mutex> lock(asyncStatesMutex_);
     EXPECT_NE(asyncStates_.end(),
@@ -836,28 +816,8 @@ class GroupJobAbortTest : public GroupEndInternalTest {
   uint32_t abortFlagStorage2_ = 0, abortFlagDevStorage2_ = 0;
 
   void TearDown() override {
-    // One abort call per comm guarantees its join; not looping to drain groupRefCount fully
-    // (that would trust a possibly-broken refcount to say how many calls are safe), so an early
-    // ASSERT_* can leak a groupJob (LSan-visible) rather than risk touching freed memory. Both
-    // comms are read and aborted independently rather than assuming they share one groupJob.
-    struct ncclGroupJob* groupJob1 = comm_ ? comm_->groupJob : nullptr;
-    struct ncclGroupJob* groupJob2 = comm2_ ? comm2_->groupJob : nullptr;
-    if (comm_) {
-      comm_->groupJob = nullptr;
-    }
-    if (comm2_) {
-      comm2_->groupJob = nullptr;
-    }
-    // Both ForceJoins must run before either abort call: an abort can delete its groupJob, and
-    // a later ForceJoin on the same object would dereference freed memory.
-    ForceJoinIfNonBlockingInitGateIsBroken(groupJob1);
-    ForceJoinIfNonBlockingInitGateIsBroken(groupJob2);
-    if (groupJob1) {
-      ncclGroupJobAbort(groupJob1);
-    }
-    if (groupJob2 && groupJob2 != groupJob1) {
-      ncclGroupJobAbort(groupJob2);
-    }
+    // One abort per distinct groupJob, never a refcount drain: an early ASSERT_* may leak (LSan-visible), not UAF.
+    AbortLinkedGroupJobs({comm_.get(), comm2_.get()});
     GroupEndInternalTest::TearDown();
   }
 };
@@ -1155,10 +1115,7 @@ TEST(JobFreeCallbacksTest, MgmtTaskJobFreeDoesNotCrash) {
 
 TEST(JobFreeCallbacksTest, PreconnectJobFreeDoesNotCrash) {
   auto* job = new ncclPreconnectJob();
-  // A real allocation, not nullptr: production's own ncclCollPreconnectFunc frees this field
-  // separately after the job itself is freed (group.cc), so ncclPreconnectJobFree must NOT also
-  // free it. Freeing it here ourselves, after the call, is what would catch that regression as an
-  // ASan double-free -- a null field can't distinguish "not owned" from "already a no-op".
+  // Real storage, not nullptr: ncclCollPreconnectFunc owns and frees it; a destructor that also did would double-free.
   job->algoNeedConnect = new bool[1];
   bool* algoNeedConnect = job->algoNeedConnect;  // save before job itself is freed below
   ncclPreconnectJobFree(job);
@@ -1265,18 +1222,13 @@ TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructo
   delete neverReached;
 }
 
-// ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch is covered here. The other five
-// while-loops (rmaCeInitTaskQueue/regTaskQueue/commCreateTaskQueue/suspendTaskQueue/resumeTaskQueue)
-// are deferred to a later PR: rmaCeInitTaskQueue needs the dev_runtime fixture (this binary links
-// the real src/rma/rma_ce.cc via rma-ce-test.cc's #include RMA_CE_CC_PATH, whose ncclRmaCeInit
-// calls the real ncclDevrInitOnce, not the always-succeeds stub in fakes/nccl_stubs.cc an earlier
-// plan assumed would win the link), and the rest need either that same fixture or new fake seams.
+// ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch. rmaCeInitTaskQueue is not
+// covered because this binary links the real src/rma/rma_ce.cc, whose ncclRmaCeInit needs the
+// dev_runtime fixture; the other four queues need that fixture or new seams. Deferred.
 class CommGroupRegisterSymmetricCeInitTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_;
-  // Deliberately distinct from comm_/job_.comm: production calls ncclCeInit(task->comm), not
-  // ncclCeInit(job's comm), and a regression to the latter is invisible if these two match.
-  std::unique_ptr<ncclComm> taskComm_;
+  std::unique_ptr<ncclComm> taskComm_;  // deliberately distinct from comm_/job_.comm; see task1->comm below.
   struct ncclGroupSymmetricJob job_ {};
 
   void SetUp() override {
@@ -1299,10 +1251,10 @@ class CommGroupRegisterSymmetricCeInitTest : public ::testing::Test {
 
 TEST_F(CommGroupRegisterSymmetricCeInitTest, DrainsCeInitTaskQueueCallingHookPerEntry) {
   auto* task1 = static_cast<struct ncclCeInitTask*>(calloc(1, sizeof(struct ncclCeInitTask)));
+  // Not job_.comm: production calls ncclCeInit(task->comm), and a regression to the job's comm hides if they match.
   task1->comm = taskComm_.get();
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, task1);
-  // A second task on a second comm: with only one entry, "while(!empty)" and "if(!empty)" are
-  // indistinguishable -- a regression that only drains the head task would still pass.
+  // A second task on a second comm: with one entry, a drain loop and a single dequeue are indistinguishable.
   auto secondTaskComm = std::make_unique<ncclComm>();
   auto* task2 = static_cast<struct ncclCeInitTask*>(calloc(1, sizeof(struct ncclCeInitTask)));
   task2->comm = secondTaskComm.get();
@@ -1334,9 +1286,7 @@ TEST_F(CommGroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequ
   ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->ceInitTaskQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->ceInitTaskQueue));
   free(ncclIntruQueueDequeue(&comm_->ceInitTaskQueue));
-  // `failing` is deliberately left unfreed here: production's fail: path (group.cc) dequeues it
-  // without freeing, same shape as ArgsGlobalCheckTest's documented leak above. Guessing that a
-  // future production fix means this test should free it instead would double-free today.
+  // `failing` leaks by design (LSan-visible): production's fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
 }
 
 // groupCleanup: the fail-path unwind for a group that never launched. Walks groupCommHeadPtr per
@@ -1412,13 +1362,15 @@ TEST_F(GroupCleanupTest, CollectiveType_ReclaimsPlannerAndSetsAsyncErrorOnlyForN
 TEST_F(GroupCleanupTest, RawTaskType_DrainsRawTaskQueueAndResetsClassifiedQueues) {
   const int type = ncclGroupTaskTypeRawTask;
   ncclComm* comm = MakeJoinedComm(type, /*blocking=*/0);
-  // Two entries on genericQueue (not one): with only one, "while(!empty)" and "if(!empty)" are
-  // indistinguishable -- a regression draining only the head task would still leave it empty.
-  struct ncclRawTask* generic = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+  // Two entries on genericQueue: with one, a drain loop and a single dequeue are indistinguishable.
+  struct ncclRawTask* generic =
+    ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
   ncclIntruQueueEnqueue(&comm->rawTaskQueue.genericQueue, generic);
-  struct ncclRawTask* generic2 = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+  struct ncclRawTask* generic2 =
+    ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
   ncclIntruQueueEnqueue(&comm->rawTaskQueue.genericQueue, generic2);
-  struct ncclRawTask* bcast = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
+  struct ncclRawTask* bcast =
+    ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
   ncclIntruQueueEnqueue(&comm->rawTaskQueue.bcastQueue, bcast);
   // All six share the same element type (ncclTaskTuningInfo). Populate every one so the "reset"
   // assertions below prove something drained, rather than asserting an already-empty precondition.
@@ -1532,7 +1484,32 @@ TEST_F(GroupCleanupTest, AsyncJobsPtrDrain_DestructsAllAndSetsAsyncErrorOnlyForN
 // no fake seam, and there is no safe way to make a just-created joinable thread's join() throw.
 class AsyncJobLaunchDirectTest : public ::testing::Test {
  protected:
-  void SetUp() override { ResetGroupThreadLocals(); }
+  // One job plus its own abort-flag storage. Flags precede job so ~ncclAsyncJob joins a live thread before they die.
+  // Every job asyncJobLaunch touches needs real abortFlag/abortFlagDev: only childAbortFlag is null-checked.
+  struct FlaggedJob {
+    uint32_t abortFlag = 0;
+    uint32_t abortFlagDev = 0;
+    uint32_t childAbortFlag = 0;
+    uint32_t childAbortFlagDev = 0;
+    ncclAsyncJob job{};
+
+    explicit FlaggedJob(ncclResult_t (*func)(struct ncclAsyncJob*)) {
+      job.func = func;
+      job.state = ncclGroupJobRunning;
+      job.destroyFlag = 0;
+      job.abortFlag = &abortFlag;
+      job.abortFlagDev = &abortFlagDev;
+    }
+    FlaggedJob(const FlaggedJob&) = delete;
+    FlaggedJob& operator=(const FlaggedJob&) = delete;
+  };
+
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> jobs_;
+
+  void SetUp() override {
+    ResetGroupThreadLocals();
+    ncclIntruQueueConstruct(&jobs_);
+  }
   void TearDown() override { ResetGroupThreadLocals(); }
 };
 
@@ -1540,162 +1517,86 @@ class AsyncJobLaunchDirectTest : public ::testing::Test {
 // them in one test would race (whichever branch a background thread happens to reach first wins),
 // so each gets its own deterministic test instead.
 TEST_F(AsyncJobLaunchDirectTest, FailingJobPropagatesResultAsRet) {
-  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> jobs;
-  ncclIntruQueueConstruct(&jobs);
-
-  // Every job asyncJobLaunch touches needs real abortFlag/abortFlagDev storage, even one this
-  // test does not assert on: production's abort-forwarding block writes through both
-  // unconditionally (only childAbortFlag is null-checked), matching how ncclAsyncLaunch always
-  // populates them from a real comm's abortFlag/abortFlagDev before a job reaches this queue.
-  uint32_t failingAbortFlag = 0, failingAbortFlagDev = 0;
-  ncclAsyncJob failing{};
-  failing.func = FakeInitJobFails;
-  failing.state = ncclGroupJobRunning;
-  failing.destroyFlag = 0;
-  failing.abortFlag = &failingAbortFlag;
-  failing.abortFlagDev = &failingAbortFlagDev;
-
-  uint32_t otherAbortFlag = 0, otherAbortFlagDev = 0;
-  ncclAsyncJob other{};  // a second, normal job: forces the multi-job (real thread) branch
-  other.func = FakeInitJobSucceeds;
-  other.state = ncclGroupJobRunning;
-  other.destroyFlag = 0;
-  other.abortFlag = &otherAbortFlag;
-  other.abortFlagDev = &otherAbortFlagDev;
-
-  ncclIntruQueueEnqueue(&jobs, &failing);
-  ncclIntruQueueEnqueue(&jobs, &other);
+  FlaggedJob failing(FakeInitJobFails);
+  FlaggedJob other(FakeInitJobSucceeds);  // a second, normal job: forces the multi-job (real thread) branch
+  ncclIntruQueueEnqueue(&jobs_, &failing.job);
+  ncclIntruQueueEnqueue(&jobs_, &other.job);
   volatile bool groupAbortFlag = false;
 
-  ncclResult_t ret = asyncJobLaunch(&jobs, &groupAbortFlag);
+  ncclResult_t ret = asyncJobLaunch(&jobs_, &groupAbortFlag);
 
   EXPECT_EQ(ncclSystemError, ret);
-  EXPECT_EQ(ncclGroupJobJoined, failing.state);
-  EXPECT_EQ(ncclGroupJobJoined, other.state);
+  EXPECT_EQ(ncclGroupJobJoined, failing.job.state);
+  EXPECT_EQ(ncclGroupJobJoined, other.job.state);
   // The job-failure branch must trip errorJobAbortFlag, which forwards the abort back onto this
   // same job (and, transitively, every other non-destroyFlag job still in the queue). Without
   // this, ret/state above still look right but a failing init never actually unwinds its siblings.
-  EXPECT_EQ(1u, failingAbortFlag);
-  EXPECT_EQ(1u, failingAbortFlagDev);
+  EXPECT_EQ(1u, failing.abortFlag);
+  EXPECT_EQ(1u, failing.abortFlagDev);
 }
 
 TEST_F(AsyncJobLaunchDirectTest, UnexpectedStateJobTripsInternalErrorAndForwardsAbort) {
-  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> jobs;
-  ncclIntruQueueConstruct(&jobs);
-
-  uint32_t otherAbortFlag = 0, otherAbortFlagDev = 0;
-  ncclAsyncJob other{};  // a second, normal job: forces the multi-job (real thread) branch
-  other.func = FakeInitJobSucceeds;
-  other.state = ncclGroupJobRunning;
-  other.destroyFlag = 0;
-  other.abortFlag = &otherAbortFlag;
-  other.abortFlagDev = &otherAbortFlagDev;
-
-  // Declared before `spinning`, not after: this is the one test in this fixture where
-  // asyncJobLaunch can genuinely return while spinning's real background thread is still running
-  // (see the comment below), so these must be destroyed AFTER that thread is joined. Reverse
-  // declaration order gives reverse destruction order, and ~ncclAsyncJob (spinning's destructor)
-  // is what performs that join -- swap this block below `spinning` and the thread reads freed
-  // stack storage. Do not reorder these two blocks.
-  uint32_t abortFlag = 0, abortFlagDev = 0, childAbortFlag = 0, childAbortFlagDev = 0;
-  ncclAsyncJob spinning{};
+  FlaggedJob other(FakeInitJobSucceeds);  // a second, normal job: forces the multi-job (real thread) branch
+  FlaggedJob spinning(SpinUntilAbortFlagObserved);
   // An invalid sentinel: neither Running, Done, nor Joined. The real background thread (below)
   // has not yet observed abortFlag, so this state is genuinely still stale at the first poll.
-  spinning.state = static_cast<ncclGroupJobState_t>(3);
-  spinning.func = SpinUntilAbortFlagObserved;
-  spinning.destroyFlag = 0;
-  spinning.abortFlag = &abortFlag;
-  spinning.abortFlagDev = &abortFlagDev;
-  spinning.childAbortFlag = &childAbortFlag;
-  spinning.childAbortFlagDev = &childAbortFlagDev;
-
-  ncclIntruQueueEnqueue(&jobs, &other);
-  ncclIntruQueueEnqueue(&jobs, &spinning);
+  spinning.job.state = static_cast<ncclGroupJobState_t>(3);
+  spinning.job.childAbortFlag = &spinning.childAbortFlag;
+  spinning.job.childAbortFlagDev = &spinning.childAbortFlagDev;
+  ncclIntruQueueEnqueue(&jobs_, &other.job);
+  ncclIntruQueueEnqueue(&jobs_, &spinning.job);
   volatile bool groupAbortFlag = false;
 
-  ncclResult_t ret = asyncJobLaunch(&jobs, &groupAbortFlag);
+  ncclResult_t ret = asyncJobLaunch(&jobs_, &groupAbortFlag);
 
   EXPECT_EQ(ncclInternalError, ret);
-  EXPECT_EQ(ncclGroupJobJoined, other.state);
-  // spinning.state is deliberately not asserted here: the unexpected-state branch does not clear
+  EXPECT_EQ(ncclGroupJobJoined, other.job.state);
+  // spinning.job.state is deliberately not asserted here: the unexpected-state branch does not clear
   // jobsDone for that job, so asyncJobLaunch can return in the same pass it aborts spinning,
   // before its real background thread has had a chance to observe abortFlag and finish (that
   // thread does still get safely joined moments later, by ~ncclAsyncJob's own destructor).
-  EXPECT_EQ(1u, abortFlag) << "the unexpected-state branch forwards the shared abort";
-  EXPECT_EQ(1u, abortFlagDev);
-  EXPECT_EQ(1u, childAbortFlag) << "childAbortFlag must also be forwarded when non-null";
-  EXPECT_EQ(1u, childAbortFlagDev);
+  EXPECT_EQ(1u, spinning.abortFlag) << "the unexpected-state branch forwards the shared abort";
+  EXPECT_EQ(1u, spinning.abortFlagDev);
+  EXPECT_EQ(1u, spinning.childAbortFlag) << "childAbortFlag must also be forwarded when non-null";
+  EXPECT_EQ(1u, spinning.childAbortFlagDev);
 }
 
 TEST_F(AsyncJobLaunchDirectTest, GroupAbortFlagAloneForwardsToAJobWithNoFailure) {
-  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> jobs;
-  ncclIntruQueueConstruct(&jobs);
-
-  uint32_t abortFlag = 0, abortFlagDev = 0;
-  ncclAsyncJob spinning{};
-  spinning.state = ncclGroupJobRunning;
-  spinning.func = SpinUntilAbortFlagObserved;
-  spinning.destroyFlag = 0;
-  spinning.abortFlag = &abortFlag;
-  spinning.abortFlagDev = &abortFlagDev;
-  spinning.childAbortFlag = nullptr;  // null: the childAbortFlag branch must not fire for this job
-
+  FlaggedJob spinning(SpinUntilAbortFlagObserved);
+  spinning.job.childAbortFlag = nullptr;  // null: the childAbortFlag branch must not fire for this job
   // A second job forces the multi-job (real background thread) branch: with only one job queued,
   // asyncJobLaunch takes its single-job fast path and runs func synchronously on this thread,
   // never reaching the abort-forwarding block at all, which would leave spinning spinning forever.
-  uint32_t otherAbortFlag = 0, otherAbortFlagDev = 0;
-  ncclAsyncJob other{};
-  other.state = ncclGroupJobRunning;
-  other.func = FakeInitJobSucceeds;
-  other.destroyFlag = 0;
-  other.abortFlag = &otherAbortFlag;
-  other.abortFlagDev = &otherAbortFlagDev;
-
-  ncclIntruQueueEnqueue(&jobs, &spinning);
-  ncclIntruQueueEnqueue(&jobs, &other);
+  FlaggedJob other(FakeInitJobSucceeds);
+  ncclIntruQueueEnqueue(&jobs_, &spinning.job);
+  ncclIntruQueueEnqueue(&jobs_, &other.job);
   volatile bool groupAbortFlag = true;  // set from the start, not derived from a job failure
 
-  ncclResult_t ret = asyncJobLaunch(&jobs, &groupAbortFlag);
+  ncclResult_t ret = asyncJobLaunch(&jobs_, &groupAbortFlag);
 
   EXPECT_EQ(ncclSuccess, ret) << "no job failed, so a group-level abort alone must not poison ret";
-  EXPECT_EQ(ncclGroupJobJoined, spinning.state);
-  EXPECT_EQ(1u, abortFlag);
-  EXPECT_EQ(1u, abortFlagDev);
+  EXPECT_EQ(ncclGroupJobJoined, spinning.job.state);
+  EXPECT_EQ(1u, spinning.abortFlag);
+  EXPECT_EQ(1u, spinning.abortFlagDev);
 }
 
 TEST_F(AsyncJobLaunchDirectTest, DestroyFlagJobIsNeverToldToAbort) {
-  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> jobs;
-  ncclIntruQueueConstruct(&jobs);
-
-  uint32_t failingAbortFlag = 0, failingAbortFlagDev = 0;
-  ncclAsyncJob failing{};
-  failing.func = FakeInitJobFails;
-  failing.state = ncclGroupJobRunning;
-  failing.destroyFlag = 0;
-  failing.abortFlag = &failingAbortFlag;
-  failing.abortFlagDev = &failingAbortFlagDev;
-
-  uint32_t abortFlag = 0, abortFlagDev = 0;
-  ncclAsyncJob destroying{};
-  destroying.state = ncclGroupJobRunning;
-  destroying.func = FakeInitJobSucceeds;
-  destroying.destroyFlag = 1;  // must never be told to abort, even once errorJobAbortFlag trips
-  destroying.abortFlag = &abortFlag;
-  destroying.abortFlagDev = &abortFlagDev;
-
-  ncclIntruQueueEnqueue(&jobs, &failing);
-  ncclIntruQueueEnqueue(&jobs, &destroying);
+  FlaggedJob failing(FakeInitJobFails);
+  FlaggedJob destroying(FakeInitJobSucceeds);
+  destroying.job.destroyFlag = 1;  // must never be told to abort, even once errorJobAbortFlag trips
+  ncclIntruQueueEnqueue(&jobs_, &failing.job);
+  ncclIntruQueueEnqueue(&jobs_, &destroying.job);
   volatile bool groupAbortFlag = false;
 
-  ncclResult_t ret = asyncJobLaunch(&jobs, &groupAbortFlag);
+  ncclResult_t ret = asyncJobLaunch(&jobs_, &groupAbortFlag);
 
   EXPECT_EQ(ncclSystemError, ret);
   // Positive control: the abort-forwarding mechanism itself is alive (failing gets it), so
   // destroying's 0 below proves destroyFlag excludes it specifically, not that forwarding never
   // fired at all.
-  EXPECT_EQ(1u, failingAbortFlag);
-  EXPECT_EQ(0u, abortFlag) << "destroyFlag must gate out the abort-forwarding branch entirely";
-  EXPECT_EQ(0u, abortFlagDev);
+  EXPECT_EQ(1u, failing.abortFlag);
+  EXPECT_EQ(0u, destroying.abortFlag) << "destroyFlag must gate out the abort-forwarding branch entirely";
+  EXPECT_EQ(0u, destroying.abortFlagDev);
 }
 
 }  // namespace
