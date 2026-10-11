@@ -58,36 +58,40 @@ The installed binary is the source of truth for that (see "Confirm with `--expla
 
 ## How to choose
 
-Resolve these in order; the first question that narrows to a single preset wins.
+Resolve these in order; the first question that narrows to a single preset wins. Do not
+require the user to name a runtime such as MPI before a step applies.
 
-1. **Is this a debugging/troubleshooting question about API interactions**
-   (e.g. "why is my HIP call behaving oddly", "what's HSA doing under the
-   hood")? → `sys-trace` (full API visibility) or `runtime-trace` (if HSA/
-   compiler-level noise should be excluded).
+1. **API tracing or debugging.** Questions about HIP, HSA or runtime-layer behavior (e.g.
+   "why is my HIP call behaving oddly", "what's HSA doing under the hood") →
+   `sys-trace` (full ROCm API tracing), or `runtime-trace` when HSA and compiler API
+   noise should be left out.
 
-2. **Does the workload have a dominant parallel runtime?**
+2. **One named measurement.**
+   - GPU hardware counters such as occupancy or VALU utilization → `trace-hw-counters`.
    - MPI communication latency is the *only* concern, no Perfetto trace file needed →
      `profile-mpi`.
    - OpenMP GPU target-offload kernels → `trace-openmp`.
-   - MPI/OpenMP/Kokkos/RCCL HPC application, compute-intensive → `trace-hpc`.
-     It writes a Perfetto trace, traces those runtimes' APIs and sets CPU
-     hardware-counter events (PAPI); if you want neither the trace file nor the
-     counters, `profile-mpi` or `balanced` write no Perfetto trace.
-   - AI/ML training or a long-running GPU-accelerated HPC job needing MPI+RCCL
-     API tracing and a large Perfetto trace buffer → `workload-trace`.
 
-3. **Is the focus purely the GPU device itself** (not a parallel runtime)?
-   - GPU activity timeline (kernel dispatch, memory copies) → `trace-gpu`.
-   - Specific hardware counters (occupancy, VALU utilization) → `trace-hw-counters`.
+3. **Long-running GPU work.** AI/ML training, or a long-running GPU-accelerated HPC job
+   that needs MPI and RCCL API tracing and a large Perfetto trace buffer →
+   `workload-trace`. A training job qualifies even if it never mentions MPI, and it wins
+   over step 4 when the prompt also names MPI or OpenMP.
 
-4. **Otherwise, general-purpose application profiling** — pick by overhead
-   tolerance and depth:
+4. **HPC runtimes.** A compute-intensive MPI, OpenMP, Kokkos or RCCL application →
+   `trace-hpc`. It writes a Perfetto trace, traces those runtimes' APIs and sets CPU
+   hardware-counter events (PAPI). If the user wants neither the trace file nor the
+   counters, `profile-mpi` or `balanced` write no Perfetto trace.
+
+5. **GPU activity.** Kernel dispatch or device activity (a GPU activity timeline), with
+   none of the goals above stated → `trace-gpu`.
+
+6. **General-purpose profiling.** Pick by overhead tolerance and depth:
    - Lowest overhead, quick flat profile (e.g. production) → `profile-only`; it turns
      off Perfetto trace output, rocPD output and call-stack sampling, but ROCm API calls
      and kernels still appear in the flat profile.
-   - Good default for general profiling: profile output, rocPD output, 50 Hz call-stack
-     sampling and GPU metrics, no Perfetto trace → `balanced`.
    - Maximum depth, willing to accept high overhead → `detailed`.
+   - Anything else, or a good default for general profiling (profile output, rocPD
+     output, call-stack sampling and GPU metrics, no Perfetto trace) → `balanced`.
 
 If the user's need doesn't fit neatly, default to `balanced` and mention that
 domain flags can extend it (see below).
