@@ -51,7 +51,7 @@ namespace
 constexpr int     kRank       = 0;
 constexpr int     kPeerRank   = 1;
 constexpr int     kProxyRank  = 1; // PATH_PXN intermediate GPU
-constexpr int     kNetDev     = 0;
+constexpr int     kNetDev     = 3; // non-zero: keep netDev distinct from a packed id's local id of 0
 constexpr int64_t kGpuLocalId = 0x100; // keep GPU local id distinct from NET's kNetDev
 constexpr float   kNetBw      = 25.0f;
 constexpr float   kRemoteBw   = 12.0f;
@@ -118,13 +118,7 @@ struct PackedNetComm
 
     PackedNetComm(int systemId, int nRanks, int pathType)
     {
-        system = static_cast<struct ncclTopoSystem*>(calloc(1, sizeof(struct ncclTopoSystem)));
-        if (system == nullptr) abort();
-        system->systemId    = systemId;
-        system->nHosts      = systemId + 1;
-        system->nRanks      = nRanks;
-        system->inter       = (nRanks > 1) ? 1 : 0;
-        system->netGdrLevel = -2;
+        allocSystem(systemId, /*nHosts=*/systemId + 1, nRanks, /*gpuCount=*/1);
 
         system->nodes[GPU].count = 1;
         fillGpu(&system->nodes[GPU].nodes[0], systemId, kGpuLocalId, /*dev=*/0, kRank);
@@ -141,16 +135,14 @@ struct PackedNetComm
     explicit PackedNetComm(MnnvlPxn)
     {
         constexpr int kSystemId = 1;
+        constexpr int kGpuCount = 2;
+        // ComputePaths sets inter = (gpuCount == nRanks) ? 0 : 1. Two local GPUs
+        // with nRanks == 2 would force inter == 0 and skip GetPxnRanks' loop.
+        constexpr int kNRanks   = 2 * kGpuCount;
 
-        system = static_cast<struct ncclTopoSystem*>(calloc(1, sizeof(struct ncclTopoSystem)));
-        if (system == nullptr) abort();
-        system->systemId    = kSystemId;
-        system->nHosts      = 2;
-        system->nRanks      = 2;
-        system->inter       = 1;
-        system->netGdrLevel = -2;
+        allocSystem(kSystemId, /*nHosts=*/2, kNRanks, kGpuCount);
 
-        system->nodes[GPU].count = 2;
+        system->nodes[GPU].count = kGpuCount;
         fillGpu(&system->nodes[GPU].nodes[0], kSystemId, kGpuLocalId, /*dev=*/0, kRank);
         fillGpu(&system->nodes[GPU].nodes[1], kSystemId, kGpuLocalId + 1, /*dev=*/1, kProxyRank);
 
@@ -177,7 +169,9 @@ struct PackedNetComm
         system->nodes[GPU].nodes[0].paths[CPU][0].count = 2;
         system->nodes[GPU].nodes[1].paths[CPU][0].count = 2;
 
-        bindComm(/*nRanks=*/2);
+        bindComm(kNRanks);
+        // LEVEL=1 uses the peer's preferred local device; gpu.dev == 1 is kProxyRank.
+        peerInfo[kProxyRank].nvmlDev = 1;
     }
 
     ~PackedNetComm()
@@ -206,6 +200,18 @@ struct PackedNetComm
     }
 
 private:
+    // Match ncclTopoComputePaths: inter is 0 only when every rank is a local GPU.
+    void allocSystem(int systemId, int nHosts, int nRanks, int gpuCount)
+    {
+        system = static_cast<struct ncclTopoSystem*>(calloc(1, sizeof(struct ncclTopoSystem)));
+        if (system == nullptr) abort();
+        system->systemId    = systemId;
+        system->nHosts      = nHosts;
+        system->nRanks      = nRanks;
+        system->inter       = (gpuCount == nRanks) ? 0 : 1;
+        system->netGdrLevel = -2;
+    }
+
     void bindComm(int nRanks)
     {
         // Value-init zeroes POD and constructs rmaState's thread/mutex/cv.
@@ -244,8 +250,8 @@ const std::unordered_map<std::string, std::string> kPxnLevel0Env = {
 
 } // namespace
 
-// The lookup contract the PR repaired: a packed NET id is not interchangeable
-// with the bare plugin index once systemId != 0 and no host-0 NIC is present.
+// Contract test for the callee. #2258 changed only its caller, so this case is
+// invariant under a revert; the GetNetDev_* cases below are the discriminators.
 TEST(P2pPxnLevel1NetId, IntermediateRank_PackedIdSucceedsBareDevFails)
 {
     RUN_ISOLATED_TEST(
@@ -391,6 +397,7 @@ TEST(P2pPxnLevel1NetId, GetPxnRanks_Level1PackedIdSucceeds)
 
             int* ranks  = nullptr;
             int  nranks = -1;
+            ASSERT_EQ(fx.system->inter, 1) << "must reach the loop, not the inter==0 early return";
             ASSERT_EQ(ncclTopoGetPxnRanks(fx.comm, &ranks, &nranks), ncclSuccess);
             EXPECT_EQ(nranks, 0);
             EXPECT_EQ(ranks, nullptr);
@@ -411,6 +418,7 @@ TEST(P2pPxnLevel1NetId, GetPxnRanks_Level1MnnvlHost0NicReturnsProxy)
 
             int* ranks  = nullptr;
             int  nranks = -1;
+            ASSERT_EQ(fx.system->inter, 1) << "must reach the loop, not the inter==0 early return";
             ASSERT_EQ(ncclTopoGetPxnRanks(fx.comm, &ranks, &nranks), ncclSuccess);
             ASSERT_EQ(nranks, 1);
             ASSERT_NE(ranks, nullptr);
@@ -485,6 +493,8 @@ TEST(P2pPxnLevel1NetId, GetNetDev_Level1UnknownPeerNvmlDevSucceeds)
                                         kPeerRank, &netId, &netDev, &proxyRank),
                       ncclSuccess);
             EXPECT_EQ(proxyRank, kRank);
+            EXPECT_EQ(netId, fx.packedNetId()) << "fail-closed DevToRank must leave the local NIC in place";
+            EXPECT_EQ(netDev, kNetDev);
         },
         kPxnLevel1Env);
 }
