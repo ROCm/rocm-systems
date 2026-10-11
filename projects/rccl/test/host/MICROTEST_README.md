@@ -47,7 +47,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
     `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`, `GroupJobUnlinkCommsTest.*`,
     `JobFreeCallbacksTest.*`, `MgmtTaskJobFuncTest.*`,
-    `CommGroupRegisterSymmetricCeInitTest.*`, `GroupCleanupTest.*`,
+    `GroupRegisterSymmetricCeInitTest.*`, `GroupCleanupTest.*`,
     `AsyncJobLaunchDirectTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from

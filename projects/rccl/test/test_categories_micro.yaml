@@ -76,7 +76,7 @@ test_categories:
       - "GroupJobUnlinkCommsTest.*"
       - "JobFreeCallbacksTest.*"
       - "MgmtTaskJobFuncTest.*"
-      - "CommGroupRegisterSymmetricCeInitTest.*"
+      - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
