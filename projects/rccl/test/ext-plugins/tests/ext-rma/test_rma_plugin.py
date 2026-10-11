@@ -285,6 +285,8 @@ def test_rma_example_backs_the_gin_proxy(paths):
     assert match.group(1) == "Example", (
         f"GIN proxy is backed by {match.group(1)!r}, expected the adopted RMA example, see {log_file}"
     )
+    for line in ("GIN type previously assigned", "Failed to initialize any GIN plugin"):
+        assert line not in log, f"GIN proxy was not registered ({line!r}), see {log_file}"
 
 
 _PUT_BURST_TEST = "GinMPIDeviceTests.PutBurst_LocalCounter"
