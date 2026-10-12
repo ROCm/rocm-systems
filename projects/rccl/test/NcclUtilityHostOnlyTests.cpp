@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 #include "gtest/gtest.h"
 
@@ -20,9 +21,15 @@ namespace RcclUnitTesting {
 namespace {
 
 #if NCCL_DEVICE_COMPILE
+// Opt-in CI strictness: when set, a hipcc-built binary must fail here instead of skipping all its coverage.
+constexpr const char* kRequirePlainCxxEnvVar = "UT_UTILITY_REQUIRE_PLAIN_CXX";
+
 // A hipcc-configured build compiles .cpp as HIP, where the plain-C++ testAbort overload does not exist.
 TEST(NcclUtilityHostOnly, RequiresPlainCxxCompiler) {
-  GTEST_SKIP() << "built with hipcc as CXX; the !NCCL_DEVICE_COMPILE branches are only compiled by a plain C++ compiler";
+  if (std::getenv(kRequirePlainCxxEnvVar) != nullptr) {
+    FAIL() << kRequirePlainCxxEnvVar << " is set, but this binary was built with hipcc as CXX, so it tests nothing.";
+  }
+  GTEST_SKIP() << "built with hipcc as CXX; the !NCCL_DEVICE_COMPILE branches need a plain C++ compiler";
 }
 #else
 

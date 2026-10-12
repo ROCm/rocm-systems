@@ -179,12 +179,11 @@
       "num_nodes": 1,
       "num_gpus": 1,
       "timeout": 60,
+      "env_variables": {
+        "UT_UTILITY_REQUIRE_PLAIN_CXX": "1"
+      },
       "tests": [
-        {
-          "name": "UtilityHostOnly_AllTests",
-          "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)",
-          "test_filter": "*"
-        }
+        {"name": "UtilityHostOnly_AllTests", "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)", "test_filter": "*"}
       ]
     },
     "unit_tests_gdr": {
