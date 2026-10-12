@@ -71,16 +71,18 @@ get_profiler_ioctl_request()
     return request;
 }
 
-// Device lock and PTL control are KFD profiler ioctls. Without /dev/kfd (e.g. WSL2/DXG) the shared
-// wrapper rejects the descriptor with -EBADF, reported here as NOT_AVAILABLE so counters are
-// collected without them. On ROCPROFILER_STATUS_ERROR, errno holds the ioctl failure.
+// Device lock and PTL control are KFD profiler ioctls. Without /dev/kfd (e.g. WSL2/DXG) they are
+// NOT_AVAILABLE and counters are collected without them; the KFD version probe in
+// get_profiler_ioctl_request() is only issued on a valid descriptor. On ROCPROFILER_STATUS_ERROR,
+// errno holds the ioctl failure.
 rocprofiler_status_t
 profiler_ioctl(kfd_ioctl_profiler_args& args)
 {
-    auto ret = pc_sampling::ioctl::ioctl(
-        pc_sampling::ioctl::get_kfd_fd(), get_profiler_ioctl_request(), &args);
-    if(ret == 0) return ROCPROFILER_STATUS_SUCCESS;
-    return (ret == -EBADF) ? ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE : ROCPROFILER_STATUS_ERROR;
+    const auto fd = pc_sampling::ioctl::get_kfd_fd();
+    if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    if(pc_sampling::ioctl::ioctl(fd, get_profiler_ioctl_request(), &args) == 0)
+        return ROCPROFILER_STATUS_SUCCESS;
+    return ROCPROFILER_STATUS_ERROR;
 }
 }  // namespace
 
