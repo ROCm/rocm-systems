@@ -329,6 +329,29 @@ struct track_info_t
 using track_info_ptr_t  = std::shared_ptr<track_info_t>;
 using track_info_list_t = std::vector<track_info_ptr_t>;
 
+/**
+ * @brief One distinct stream-to-hardware relationship found in the event
+ *        tables. category says which operation produced it. stream_track and
+ *        hardware_track are null when that side has no matching track, which
+ *        includes a memory allocation whose agent or queue was not recorded.
+ *        pid is the process-table id stored on the event row, the same value
+ *        as track_info_t::db_pid, not process_info_t::pid.
+ */
+struct stream_hardware_link_t
+{
+    track_kind_t          category{ track_kind_t::kernel_dispatch_agent_queue };
+    size_t                nid{};
+    size_t                pid{};
+    size_t                stream_id{};
+    std::optional<size_t> agent_id;
+    std::optional<size_t> queue_id;
+
+    track_info_ptr_t stream_track;
+    track_info_ptr_t hardware_track;
+};
+
+using stream_hardware_link_list_t = std::vector<stream_hardware_link_t>;
+
 // --------------------- Call Stack & Source Context (string-owning) -------
 
 struct address_range_info_t

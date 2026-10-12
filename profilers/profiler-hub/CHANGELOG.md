@@ -22,6 +22,16 @@ downstream consumer of the library.
 
 ### Added
 
+- `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
+  stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
+  memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
+  relationship with the resolved track pointers. A missing agent, queue, or
+  track has `is_valid` 0 (C) or a null track pointer (C++). Memory-copy links
+  use the destination agent.
+- `ph_get_node()` also returns the trace's threads, streams, queues, and PMC
+  descriptions (`ph_thread_list_t`, `ph_stream_list_t`, `ph_queue_list_t`,
+  `ph_pmc_info_list_t`). Optional numeric fields use `ph_optional_uint64_t`:
+  `value` is 0 and `is_valid` is 0 when the trace did not record that field.
 - New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
   `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
@@ -84,6 +94,16 @@ downstream consumer of the library.
 
 ### Changed
 
+- **Breaking:** `ph_process_t` now carries `ppid`, `init`, `fini`, `start`, `end`,
+  `environment`, and `extdata` from the trace. The new numeric fields are
+  `ph_optional_uint64_t`.
+- **Breaking:** `ph_agent_t` now carries `extdata`. `absolute_index`,
+  `logical_index`, and `uuid` are `ph_optional_uint64_t` instead of `uint32_t`,
+  so a missing value is distinct from zero.
+- **Breaking:** `ph_progress_fn` now takes a `ph_progress_description_t`
+  (`const char*`) describing the work in progress. The pointer is valid only
+  for the duration of the callback and may be null. Loading a trace reports
+  the current phase (schema, catalog, track list, track load, node info).
 - **Breaking:** public C++ headers moved from `<prefix>/include/profiler-hub/*.hpp`
   to `<prefix>/include/profiler-hub/cpp/*.hpp` (e.g.
   `#include <profiler-hub/storage.hpp>` becomes

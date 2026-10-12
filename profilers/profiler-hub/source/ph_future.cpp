@@ -33,7 +33,7 @@ ph_future::stop_token() const noexcept
 }
 
 void
-ph_future::report_progress(double value)
+ph_future::report_progress(double value, ph_progress_description_t description)
 {
     if(m_on_progress == nullptr) return;
 
@@ -41,7 +41,7 @@ ph_future::report_progress(double value)
         const std::scoped_lock lock{ m_mutex };
         if(m_finishing) return;
     }
-    m_on_progress(this, std::clamp(value, 0.0, 1.0));
+    m_on_progress(this, std::clamp(value, 0.0, 1.0), description);
 }
 
 void

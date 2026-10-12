@@ -116,6 +116,15 @@ struct reader_t
     [[nodiscard]] reader_types::track_info_list_t get_all_tracks() const;
 
     /**
+     * @brief Distinct stream-to-hardware links discovered from kernel-dispatch,
+     *        memory-allocate, and memory-copy rows.
+     * @return One entry per (category, node, process, stream, agent, queue).
+     *         Either track pointer is null when that side was not recorded.
+     */
+    [[nodiscard]] reader_types::stream_hardware_link_list_t get_stream_hardware_links()
+        const;
+
+    /**
      *@section Timeline Event Queries (On-Demand, Not Stored)
      * These query the database and return lightweight timeline_event_t for display.
      * The returned vector is owned by the caller; reader does not cache events.
@@ -333,6 +342,7 @@ private:
         threads,
         agents,
         tracks,
+        stream_hardware_links,
         code_objects,
         kernel_symbols,
         streams,

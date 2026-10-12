@@ -116,12 +116,20 @@ print_agents(const ph_agent_list_t* agents)
     for(uint32_t i = 0; i < agents->list_size; ++i)
     {
         const ph_agent_t* agent = &agents->agents[i];
-        printf("%-4d %-6s %-6d %-6d %-8d %-40s %-8s %-14s %s\n",
-               agent->id,
-               agent->agent_type,
-               agent->absolute_index,
-               agent->logical_index,
-               agent->uuid,
+        printf("%-4d %-6s ", agent->id, agent->agent_type);
+        if(agent->absolute_index.is_valid)
+            printf("%-6llu ", (unsigned long long) agent->absolute_index.value);
+        else
+            printf("%-6s ", "-");
+        if(agent->logical_index.is_valid)
+            printf("%-6llu ", (unsigned long long) agent->logical_index.value);
+        else
+            printf("%-6s ", "-");
+        if(agent->uuid.is_valid)
+            printf("%-8llu ", (unsigned long long) agent->uuid.value);
+        else
+            printf("%-8s ", "-");
+        printf("%-40s %-8s %-14s %s\n",
                agent->name,
                agent->vendor_name,
                agent->model_name,
@@ -455,14 +463,16 @@ read_all_tracks_async(ph_ctx_t               ctx,
 }
 
 static void
-on_load_progress(ph_future_t future, double value)
+on_load_progress(ph_future_t future, double value, ph_progress_description_t description)
 {
     (void) future;
-    static int last_percent = -1;
-    const int  percent      = (int) (value * 100.0);
-    if(percent / 10 == last_percent / 10) return;
-    last_percent = percent;
-    printf("loading trace: %3d%%\n", percent);
+    static int         last_percent     = -1;
+    static const char* last_description = NULL;
+    const int          percent          = (int) (value * 100.0);
+    if(percent / 10 == last_percent / 10 && description == last_description) return;
+    last_percent     = percent;
+    last_description = description;
+    printf("%s: %3d%%\n", description != NULL ? description : "loading trace", percent);
 }
 
 static void

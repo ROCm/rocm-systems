@@ -94,6 +94,12 @@ reader_t::get_all_tracks() const
     return m_impl->get_all_tracks();
 }
 
+reader_types::stream_hardware_link_list_t
+reader_t::get_stream_hardware_links() const
+{
+    return m_impl->get_stream_hardware_links();
+}
+
 reader_types::timeline_event_list_t
 reader_t::get_events_for_track(reader_types::track_info_ptr_t      track,
                                const reader_types::event_filter_t& filter) const

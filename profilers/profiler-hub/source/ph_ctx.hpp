@@ -81,7 +81,7 @@ private:
     };
 
     using stop_requested_fn = std::function<bool()>;
-    using progress_fn       = std::function<void(double)>;
+    using progress_fn       = std::function<void(double, ph_progress_description_t)>;
 
     /** @return false if @p stop_requested became true before the trace was read. */
     [[nodiscard]] bool read_trace(const stop_requested_fn& stop_requested,
@@ -95,6 +95,11 @@ private:
     void               initialize_node_info();
     void               initialize_node_agents();
     void               initialize_node_processes();
+    void               initialize_node_threads();
+    void               initialize_node_streams();
+    void               initialize_node_queues();
+    void               initialize_node_pmc_infos();
+    void               initialize_stream_hardware_links();
 
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
@@ -118,6 +123,20 @@ private:
 
     profiler_hub::reader_types::process_info_list_t m_processes;
     std::vector<ph_process_t>                       m_c_processes;
+
+    profiler_hub::reader_types::thread_info_list_t m_threads;
+    std::vector<ph_thread_t>                       m_c_threads;
+
+    profiler_hub::reader_types::stream_info_list_t m_streams;
+    std::vector<ph_stream_t>                       m_c_streams;
+
+    profiler_hub::reader_types::queue_info_list_t m_queues;
+    std::vector<ph_queue_t>                       m_c_queues;
+
+    profiler_hub::reader_types::pmc_info_list_t m_pmc_infos;
+    std::vector<ph_pmc_info_t>                  m_c_pmc_infos;
+
+    std::vector<ph_stream_hardware_link_t> m_c_stream_hardware_links;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;

@@ -49,6 +49,28 @@ to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
     return PH_TRACK_CATEGORY_THREAD;
 }
 
+ph_optional_uint64_t
+optional_uint64(const std::optional<size_t>& value)
+{
+    if(!value.has_value())
+    {
+        return ph_optional_uint64_t{ .value = 0, .is_valid = 0 };
+    }
+    return ph_optional_uint64_t{ .value    = static_cast<uint64_t>(value.value()),
+                                 .is_valid = 1 };
+}
+
+ph_optional_uint64_t
+optional_track_id(const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    if(!track)
+    {
+        return ph_optional_uint64_t{ .value = 0, .is_valid = 0 };
+    }
+    return ph_optional_uint64_t{ .value    = static_cast<uint64_t>(track->id),
+                                 .is_valid = 1 };
+}
+
 }  // namespace
 
 size_t
@@ -102,7 +124,9 @@ ph_ctx::load_async(std::shared_ptr<ph_future> future)
         const auto stop_requested = [&] {
             return token.stop_requested() || future->stop_token().stop_requested();
         };
-        const auto progress = [&](double value) { future->report_progress(value); };
+        const auto progress = [&](double value, ph_progress_description_t description) {
+            future->report_progress(value, description);
+        };
 
         try
         {
@@ -196,20 +220,36 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
 {
     if(stop_requested()) return false;
 
+    if(progress) progress(0.0, "Reading schema version");
     profiler_hub::storage_t version_probe{ m_file_path, "" };
     const auto              version = version_probe.get_storage_version();
     m_schema_version                = { .major = version.major,
                                         .minor = version.minor,
                                         .patch = version.patch };
 
+    if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
     if(stop_requested()) return false;
 
+    if(progress) progress(0.0, "Building track list");
     initialize_track_list();
     if(!load_all_tracks(stop_requested, progress)) return false;
 
+    if(progress) progress(1.0, "Reading node agents");
     initialize_node_agents();
+    if(progress) progress(1.0, "Reading processes");
     initialize_node_processes();
+    if(progress) progress(1.0, "Reading threads");
+    initialize_node_threads();
+    if(progress) progress(1.0, "Reading streams");
+    initialize_node_streams();
+    if(progress) progress(1.0, "Reading queues");
+    initialize_node_queues();
+    if(progress) progress(1.0, "Reading PMC info");
+    initialize_node_pmc_infos();
+    if(progress) progress(1.0, "Reading stream hardware links");
+    initialize_stream_hardware_links();
+    if(progress) progress(1.0, "Reading node info");
     initialize_node_info();
     return true;
 }
@@ -340,7 +380,8 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         if(progress && total_events != 0)
         {
             progress(static_cast<double>(loaded_events) /
-                     static_cast<double>(total_events));
+                         static_cast<double>(total_events),
+                     "Loading tracks");
         }
     }
     return true;
@@ -385,6 +426,24 @@ ph_ctx::initialize_node_info()
                            .processes = m_c_processes.data() };
 
     m_c_node->track_list = get_track_list();
+
+    m_c_node->thread_list =
+        ph_thread_list_t{ .list_size = static_cast<std::uint32_t>(m_c_threads.size()),
+                          .threads   = m_c_threads.data() };
+    m_c_node->stream_list =
+        ph_stream_list_t{ .list_size = static_cast<std::uint32_t>(m_c_streams.size()),
+                          .streams   = m_c_streams.data() };
+    m_c_node->queue_list =
+        ph_queue_list_t{ .list_size = static_cast<std::uint32_t>(m_c_queues.size()),
+                         .queues    = m_c_queues.data() };
+    m_c_node->pmc_info_list =
+        ph_pmc_info_list_t{ .list_size = static_cast<std::uint32_t>(m_c_pmc_infos.size()),
+                            .pmc_infos = m_c_pmc_infos.data() };
+
+    m_c_node->stream_hardware_links = ph_stream_hardware_link_list_t{
+        .list_size = static_cast<std::uint32_t>(m_c_stream_hardware_links.size()),
+        .links     = m_c_stream_hardware_links.data()
+    };
 }
 
 void
@@ -396,17 +455,17 @@ ph_ctx::initialize_node_agents()
     for(const auto& agent : m_agents)
     {
         m_c_agents.push_back(ph_agent_t{
-            .id         = static_cast<std::uint32_t>(agent->type_index),
-            .agent_type = agent->agent_type.c_str(),
-            .absolute_index =
-                static_cast<std::uint32_t>(agent->absolute_index.value_or(0)),
-            .logical_index = static_cast<std::uint32_t>(agent->logical_index.value_or(0)),
-            .uuid          = static_cast<std::uint32_t>(agent->uuid.value_or(0)),
-            .name          = agent->name.c_str(),
-            .model_name    = agent->model_name.c_str(),
-            .vendor_name   = agent->vendor_name.c_str(),
-            .product_name  = agent->product_name.c_str(),
-            .user_name     = agent->user_name.c_str(),
+            .id             = static_cast<std::uint32_t>(agent->type_index),
+            .agent_type     = agent->agent_type.c_str(),
+            .name           = agent->name.c_str(),
+            .model_name     = agent->model_name.c_str(),
+            .vendor_name    = agent->vendor_name.c_str(),
+            .product_name   = agent->product_name.c_str(),
+            .user_name      = agent->user_name.c_str(),
+            .extdata        = agent->extdata.c_str(),
+            .absolute_index = optional_uint64(agent->absolute_index),
+            .logical_index  = optional_uint64(agent->logical_index),
+            .uuid           = optional_uint64(agent->uuid),
         });
     }
 }
@@ -420,8 +479,115 @@ ph_ctx::initialize_node_processes()
     for(const auto& process : m_processes)
     {
         m_c_processes.push_back(ph_process_t{
-            .id      = static_cast<std::uint32_t>(process->pid),
-            .command = process->command.c_str(),
+            .id          = static_cast<std::uint32_t>(process->pid),
+            .command     = process->command.c_str(),
+            .environment = process->environment.c_str(),
+            .extdata     = process->extdata.c_str(),
+            .ppid        = optional_uint64(process->ppid),
+            .init        = optional_uint64(process->init),
+            .fini        = optional_uint64(process->fini),
+            .start       = optional_uint64(process->start),
+            .end         = optional_uint64(process->end),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_node_threads()
+{
+    m_threads = m_catalog->threads;
+    m_c_threads.reserve(m_threads.size());
+
+    for(const auto& thread : m_threads)
+    {
+        m_c_threads.push_back(ph_thread_t{
+            .thread_id         = static_cast<uint64_t>(thread->thread_id),
+            .name              = thread->name.c_str(),
+            .extdata           = thread->extdata.c_str(),
+            .parent_process_id = optional_uint64(thread->parent_process_id),
+            .start             = optional_uint64(thread->start),
+            .end               = optional_uint64(thread->end),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_node_streams()
+{
+    m_streams = m_catalog->streams;
+    m_c_streams.reserve(m_streams.size());
+
+    for(const auto& stream : m_streams)
+    {
+        m_c_streams.push_back(ph_stream_t{
+            .stream_id = static_cast<uint64_t>(stream->stream_id),
+            .name      = stream->name.c_str(),
+            .extdata   = stream->extdata.c_str(),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_node_queues()
+{
+    m_queues = m_catalog->queues;
+    m_c_queues.reserve(m_queues.size());
+
+    for(const auto& queue : m_queues)
+    {
+        m_c_queues.push_back(ph_queue_t{
+            .queue_id = static_cast<uint64_t>(queue->queue_id),
+            .name     = queue->name.c_str(),
+            .extdata  = queue->extdata.c_str(),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_node_pmc_infos()
+{
+    m_pmc_infos = m_catalog->pmc_infos;
+    m_c_pmc_infos.reserve(m_pmc_infos.size());
+
+    for(const auto& pmc_info : m_pmc_infos)
+    {
+        m_c_pmc_infos.push_back(ph_pmc_info_t{
+            .name             = pmc_info->name.c_str(),
+            .target_arch      = pmc_info->target_arch.c_str(),
+            .symbol           = pmc_info->symbol.c_str(),
+            .description      = pmc_info->description.c_str(),
+            .long_description = pmc_info->long_description.c_str(),
+            .component        = pmc_info->component.c_str(),
+            .units            = pmc_info->units.c_str(),
+            .value_type       = pmc_info->value_type.c_str(),
+            .block            = pmc_info->block.c_str(),
+            .expression       = pmc_info->expression.c_str(),
+            .extdata          = pmc_info->extdata.c_str(),
+            .event_code       = optional_uint64(pmc_info->event_code),
+            .instance_id      = optional_uint64(pmc_info->instance_id),
+            .is_constant      = optional_uint64(pmc_info->is_constant),
+            .is_derived       = optional_uint64(pmc_info->is_derived),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_stream_hardware_links()
+{
+    const auto& links = m_catalog->stream_hardware_links;
+    m_c_stream_hardware_links.reserve(links.size());
+
+    for(const auto& link : links)
+    {
+        m_c_stream_hardware_links.push_back(ph_stream_hardware_link_t{
+            .category          = to_c_track_category(link.category),
+            .nid               = static_cast<std::uint32_t>(link.nid),
+            .pid               = static_cast<std::uint32_t>(link.pid),
+            .stream_id         = static_cast<std::uint64_t>(link.stream_id),
+            .agent_id          = optional_uint64(link.agent_id),
+            .queue_id          = optional_uint64(link.queue_id),
+            .stream_track_id   = optional_track_id(link.stream_track),
+            .hardware_track_id = optional_track_id(link.hardware_track),
         });
     }
 }

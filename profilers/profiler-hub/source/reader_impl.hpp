@@ -33,16 +33,17 @@ struct reader_t::impl
     void ensure_track_topology_indexes();
 
     // Info table accessors (cached)
-    [[nodiscard]] reader_types::node_info_list_t          get_all_nodes();
-    [[nodiscard]] reader_types::process_info_list_t       get_all_processes();
-    [[nodiscard]] reader_types::thread_info_list_t        get_all_threads();
-    [[nodiscard]] reader_types::agent_info_list_t         get_all_agents();
-    [[nodiscard]] reader_types::track_info_list_t         get_all_tracks();
-    [[nodiscard]] reader_types::kernel_symbol_info_list_t get_all_kernel_symbols();
-    [[nodiscard]] reader_types::code_object_info_list_t   get_all_code_objects();
-    [[nodiscard]] reader_types::stream_info_list_t        get_all_streams();
-    [[nodiscard]] reader_types::queue_info_list_t         get_all_queues();
-    [[nodiscard]] reader_types::pmc_info_list_t           get_all_pmc_infos();
+    [[nodiscard]] reader_types::node_info_list_t            get_all_nodes();
+    [[nodiscard]] reader_types::process_info_list_t         get_all_processes();
+    [[nodiscard]] reader_types::thread_info_list_t          get_all_threads();
+    [[nodiscard]] reader_types::agent_info_list_t           get_all_agents();
+    [[nodiscard]] reader_types::track_info_list_t           get_all_tracks();
+    [[nodiscard]] reader_types::stream_hardware_link_list_t get_stream_hardware_links();
+    [[nodiscard]] reader_types::kernel_symbol_info_list_t   get_all_kernel_symbols();
+    [[nodiscard]] reader_types::code_object_info_list_t     get_all_code_objects();
+    [[nodiscard]] reader_types::stream_info_list_t          get_all_streams();
+    [[nodiscard]] reader_types::queue_info_list_t           get_all_queues();
+    [[nodiscard]] reader_types::pmc_info_list_t             get_all_pmc_infos();
 
     // Timeline event queries
     [[nodiscard]] reader_types::timeline_event_list_t get_events(

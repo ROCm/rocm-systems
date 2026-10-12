@@ -255,6 +255,9 @@ reader_t::impl::build_catalog_category(reader_t::catalog_category_t category,
         case reader_t::catalog_category_t::tracks:
             catalog.build_tracks(*m_read_statements);
             break;
+        case reader_t::catalog_category_t::stream_hardware_links:
+            catalog.build_stream_hardware_links(*m_read_statements);
+            break;
         case reader_t::catalog_category_t::code_objects:
             catalog.build_code_objects(*m_read_statements);
             break;
@@ -301,6 +304,12 @@ reader_types::track_info_list_t
 reader_t::impl::get_all_tracks()
 {
     return m_catalog->tracks;
+}
+
+reader_types::stream_hardware_link_list_t
+reader_t::impl::get_stream_hardware_links()
+{
+    return m_catalog->stream_hardware_links;
 }
 
 reader_types::kernel_symbol_info_list_t

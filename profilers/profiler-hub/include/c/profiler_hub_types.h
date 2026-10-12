@@ -72,6 +72,14 @@ extern "C"
         uint32_t is_valid; /**< Non-zero if min and max hold real values. */
     } ph_value_range_t;
 
+    /** @brief An unsigned value that may be absent.
+     *         @p value is 0 and only meaningful when @p is_valid is non-zero. */
+    typedef struct
+    {
+        uint64_t value;
+        uint32_t is_valid;
+    } ph_optional_uint64_t;
+
     /**
      * @brief A single track in a trace.
      * @note track_name points into memory owned by the ph_ctx_t that
@@ -140,16 +148,17 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t    id;
-        const char* agent_type;
-        uint32_t    absolute_index;
-        uint32_t    logical_index;
-        uint32_t    uuid;
-        const char* name;
-        const char* model_name;
-        const char* vendor_name;
-        const char* product_name;
-        const char* user_name;
+        uint32_t             id;
+        const char*          agent_type;
+        const char*          name;
+        const char*          model_name;
+        const char*          vendor_name;
+        const char*          product_name;
+        const char*          user_name;
+        const char*          extdata;
+        ph_optional_uint64_t absolute_index;
+        ph_optional_uint64_t logical_index;
+        ph_optional_uint64_t uuid;
     } ph_agent_t;
 
     /** @brief A list of agents; same lifetime rule as ph_track_list_t. */
@@ -161,13 +170,20 @@ extern "C"
 
     /**
      * @brief A process belonging to a node.
-     * @note command points into memory owned by the producing ph_ctx_t; may
-     *       be empty if the trace did not record it.
+     * @note command, environment, and extdata point into memory owned by the
+     *       producing ph_ctx_t. An unrecorded string is empty.
      */
     typedef struct
     {
-        uint32_t    id; /**< Process id. */
-        const char* command;
+        uint32_t             id; /**< Process id. */
+        const char*          command;
+        const char*          environment;
+        const char*          extdata;
+        ph_optional_uint64_t ppid;
+        ph_optional_uint64_t init;
+        ph_optional_uint64_t fini;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
     } ph_process_t;
 
     /** @brief A list of processes; same lifetime rule as ph_track_list_t. */
@@ -177,13 +193,137 @@ extern "C"
         ph_process_t* processes;
     } ph_process_list_t;
 
-    /** @brief Node info bundled with its agents, processes, and tracks. */
+    /**
+     * @brief A thread belonging to a process.
+     * @note name and extdata point into memory owned by the producing ph_ctx_t.
+     */
     typedef struct
     {
-        ph_node_info_t    info;
-        ph_agent_list_t   agents;
-        ph_process_list_t process_list;
-        ph_track_list_t   track_list;
+        uint64_t             thread_id;
+        const char*          name;
+        const char*          extdata;
+        ph_optional_uint64_t parent_process_id;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
+    } ph_thread_t;
+
+    /** @brief A list of threads; same lifetime rule as ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t     list_size;
+        ph_thread_t* threads;
+    } ph_thread_list_t;
+
+    /**
+     * @brief A stream belonging to a process.
+     * @note name and extdata point into memory owned by the producing ph_ctx_t.
+     */
+    typedef struct
+    {
+        uint64_t    stream_id;
+        const char* name;
+        const char* extdata;
+    } ph_stream_t;
+
+    /** @brief A list of streams; same lifetime rule as ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t     list_size;
+        ph_stream_t* streams;
+    } ph_stream_list_t;
+
+    /**
+     * @brief A queue belonging to a process.
+     * @note name and extdata point into memory owned by the producing ph_ctx_t.
+     */
+    typedef struct
+    {
+        uint64_t    queue_id;
+        const char* name;
+        const char* extdata;
+    } ph_queue_t;
+
+    /** @brief A list of queues; same lifetime rule as ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t    list_size;
+        ph_queue_t* queues;
+    } ph_queue_list_t;
+
+    /**
+     * @brief A PMC counter description.
+     * @note All const char* fields point into memory owned by the producing
+     *       ph_ctx_t.
+     */
+    typedef struct
+    {
+        const char*          name;
+        const char*          target_arch;
+        const char*          symbol;
+        const char*          description;
+        const char*          long_description;
+        const char*          component;
+        const char*          units;
+        const char*          value_type;
+        const char*          block;
+        const char*          expression;
+        const char*          extdata;
+        ph_optional_uint64_t event_code;
+        ph_optional_uint64_t instance_id;
+        ph_optional_uint64_t is_constant;
+        ph_optional_uint64_t is_derived;
+    } ph_pmc_info_t;
+
+    /** @brief A list of PMC descriptions; same lifetime rule as ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t       list_size;
+        ph_pmc_info_t* pmc_infos;
+    } ph_pmc_info_list_t;
+
+    /**
+     * @brief One distinct relationship from a stream to the hardware queue that
+     *        ran its kernel dispatches, memory allocations, or memory copies.
+     * @note stream_track_id and hardware_track_id refer to ph_track_t::id values
+     *       in this node's track list. is_valid is 0 when that side was not
+     *       recorded. For a memory copy, agent_id is the destination agent.
+     *       pid is the process-table id stored on the event row. It matches
+     *       the id used to find the stream track, and it is not ph_track_t::pid
+     *       or ph_process_t::id, which are the OS process id.
+     */
+    typedef struct
+    {
+        ph_track_category_t  category;
+        uint32_t             nid;
+        uint32_t             pid;
+        uint64_t             stream_id;
+        ph_optional_uint64_t agent_id;
+        ph_optional_uint64_t queue_id;
+        ph_optional_uint64_t stream_track_id;
+        ph_optional_uint64_t hardware_track_id;
+    } ph_stream_hardware_link_t;
+
+    /** @brief A list of stream-to-hardware links; same lifetime rule as
+     *         ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t                   list_size;
+        ph_stream_hardware_link_t* links;
+    } ph_stream_hardware_link_list_t;
+
+    /** @brief Node info bundled with its agents, processes, threads, streams,
+     *         queues, PMC descriptions, tracks, and stream-to-hardware links. */
+    typedef struct
+    {
+        ph_node_info_t                 info;
+        ph_agent_list_t                agents;
+        ph_process_list_t              process_list;
+        ph_track_list_t                track_list;
+        ph_thread_list_t               thread_list;
+        ph_stream_list_t               stream_list;
+        ph_queue_list_t                queue_list;
+        ph_pmc_info_list_t             pmc_info_list;
+        ph_stream_hardware_link_list_t stream_hardware_links;
     } ph_node_t;
 
     /** @brief Kind of a duration event. */
@@ -249,8 +389,15 @@ extern "C"
         PH_FUTURE_ERROR,     /**< The operation failed; see the ph_result_t. */
     } ph_future_status_t;
 
-    /** @brief Progress callback of a future, @p value is in [0.0, 1.0]. */
-    typedef void (*ph_progress_fn)(ph_future_t future, double value);
+    /** @brief What the library is doing, reported with a progress value.
+     *         Valid only for the duration of the progress callback. May be
+     *         null. */
+    typedef const char* ph_progress_description_t;
+
+    /** @brief Progress callback of a future. @p value is in [0.0, 1.0]. */
+    typedef void (*ph_progress_fn)(ph_future_t               future,
+                                   double                    value,
+                                   ph_progress_description_t description);
 
     /** @brief Completion callback of a future, called exactly once. */
     typedef void (*ph_finished_fn)(ph_future_t        future,
