@@ -4553,6 +4553,45 @@
       "extends": "dda_fabric_reduce_scatter_base",
       "num_ranks": 8,
       "num_gpus": 8
+    },
+    "dda_fabric_allreduce_ll_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot",
+          "description": "DDA fabric AllReduce LL one-shot tier: analytic sum and the one-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_TwoShot",
+          "description": "DDA fabric AllReduce LL two-shot tier past the one-shot threshold: analytic sum and the two-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot",
+          "description": "DDA fabric AllReduce LL128 one-shot tier with the LL thresholds zeroed; own process because RCCL_PARAM caches thresholds",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
+          "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        }
+      ]
+    },
+    "dda_fabric_allreduce_ll_4rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_allreduce_ll_8rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 8,
+      "num_gpus": 8
     }
   },
   "test_suites": [
@@ -5296,6 +5335,18 @@
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
       "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 4-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 4 GPUs. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_8rank",
       "enabled": true
     }
   ]
