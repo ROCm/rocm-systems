@@ -90,7 +90,7 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (comm->nRanks != nccl_dda_detail::kDdaNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(datatype)) {
     return false;
   }
 
@@ -119,7 +119,7 @@ uint32_t ncclAllGatherDdaIpcBlocks(ncclComm* comm, size_t sendcount, ncclDataTyp
 
 ncclResult_t ncclAllGatherDdaIpc(const void* sendbuff, void* recvbuff, size_t sendcount, ncclDataType_t datatype,
                                  ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(datatype)) {
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
