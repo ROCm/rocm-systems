@@ -257,6 +257,77 @@ Vopd::Vopd(const MachineInst *inst)
 
   opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
   init_operands();
+  // Evaluate the qualified operand restrictions once, at decode.
+  const bool vopd3 = format_ == Format::Vopd3;
+  const auto bank_conflict = [](const Operand &a, const Operand &b) {
+    const auto ar = a.to_register_ref();
+    const auto br = b.to_register_ref();
+    if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR)
+      return false;
+    const unsigned x = ar->index;
+    const unsigned y = br->index;
+    const bool shared = true && x == y && a.size_bits() == b.size_bits();
+    const auto bank_mask = [](unsigned index, unsigned bits) {
+      unsigned mask = 1u << (index % 4);
+      // F64 sources occupy two adjacent 32-bit VGPR banks.
+      if (bits == 64)
+        mask |= 1u << ((index + 1) % 4);
+      return mask;
+    };
+    return !shared && (bank_mask(x, a.size_bits()) & bank_mask(y, b.size_bits())) != 0;
+  };
+  // GFX12 sends the Y source of MOV/MOV through the SRC2 port.
+  const bool split_moves = true && opx_ == kVopdMovB32 && opy_ == kVopdMovB32;
+  bool invalid = !split_moves && bank_conflict(srcx0_, srcy0_);
+  const auto uses_src1_port = [=](const Slot &slot) {
+    return slot.op != kVopdMovB32 && (vopd3 || slot.op != kVopdFmamkF32);
+  };
+  if (uses_src1_port(x_) && uses_src1_port(y_))
+    invalid |= bank_conflict(srcx1_, srcy1_);
+  if (vopd3) {
+    // Only explicit SRC2 operands; no inferred implicit port usage.
+    if (x_.has_src2_operand && y_.has_src2_operand)
+      invalid |= bank_conflict(srcx2_, srcy2_);
+  } else {
+    const auto src2_port = [](const Slot &slot) -> const Operand * {
+      if (slot.op == kVopdFmamkF32)
+        return slot.src1;
+
+      return nullptr;
+    };
+    const Operand *x = src2_port(x_);
+    const Operand *y = src2_port(y_);
+    if (x && y) {
+      // LLVM also permits same-register sharing on the GFX12 SRC2 port.
+      const bool shared =
+          true && x->encoding_value() == y->encoding_value() && x->size_bits() == y->size_bits();
+      invalid |= !shared && (x->encoding_value() & 1) == (y->encoding_value() & 1);
+    }
+  }
+  // RDNA3/3.5/4 explicitly count plain CNDMASK's implicit VCC read.
+  // Wave32 uses VCC_LO (106); deduplicate it with explicit data reads.
+  int scalar_selectors[6] = {106};
+  unsigned scalar_count = false && (opx_ == kVopdCndmaskB32 || opy_ == kVopdCndmaskB32);
+  for (unsigned i = 0; i < num_src_; ++i) {
+    const auto &source = *src_operands_[i];
+    const auto reg = source.to_register_ref();
+    if ((reg && reg->cls == RegClass::VGPR) || source.const_value())
+      continue;
+    int selector = source.encoding_value();
+    // Only GFX12 explicitly qualifies EXEC/SCC as scalar inputs.
+    if (true && (selector == 126 || selector == 127 || selector == 253))
+      selector = 126;
+    else if (selector < 0 || selector >= 124)
+      continue;
+    bool seen = false;
+    for (unsigned j = 0; j < scalar_count; ++j)
+      seen |= scalar_selectors[j] == selector;
+    if (!seen)
+      scalar_selectors[scalar_count++] = selector;
+  }
+  invalid |= scalar_count + unsigned(has_literal_) > 2;
+  if (invalid)
+    flags_ |= INVALID_VOPD_OPERANDS;
   mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
   mnemonic_ = mnemonic_storage_;
   disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
@@ -328,6 +399,11 @@ void Vopd::init_operands() {
 
   add_slot_sources(x_);
   add_slot_sources(y_);
+  const auto direct_slot = [](uint16_t op) {
+    return op == kVopdFmacF32 || op == kVopdMovB32 || op == kVopdAddNcU32 || op == kVopdLshlrevB32;
+  };
+  if (direct_slot(x_.op) && direct_slot(y_.op))
+    flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 std::string Vopd::format_slot(const Slot &slot) const {

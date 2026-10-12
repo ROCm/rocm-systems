@@ -11,7 +11,7 @@ import logging
 
 from lib.test_parser import ArgumentParserInterface
 from lib.test_config import TestConfigProcessor
-from lib.test_executor import TestExecutor, glob_filter_matches
+from lib.test_executor import TestExecutor, suite_disposition
 
 # Configure logging
 logging.basicConfig(
@@ -97,26 +97,27 @@ def main():
             print()
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                is_smoke = suite["suite_details"].get("smoke", False)
-                if not enabled:
-                    print(f"SKIP: Test suite '{suite_name}' is disabled")
-                elif smoke_only and not is_smoke:
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition == "disabled":
+                    print(f"DISABLED: Test suite '{suite_name}' is disabled")
+                elif disposition == "skip_scope":
                     print(f"SKIP: Test suite '{suite_name}' (not in --scope smoke)")
-                elif args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                elif disposition == "skip_name":
                     print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
-            # Run only enabled (scope- and name-matched) test suites
+            # Run enabled (scope- and name-matched) suites; record disabled ones
+            # in the summary so Config entries / Total / Unique include them.
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             for suite in test_suites:
-                suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                is_smoke = suite["suite_details"].get("smoke", False)
-                if not enabled:
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition in ("skip_scope", "skip_name"):
                     continue
-                if smoke_only and not is_smoke:
-                    continue
-                if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                if disposition == "disabled":
+                    executor.record_disabled_suite(suite)
                     continue
                 executor.run_test_suite(suite)
 

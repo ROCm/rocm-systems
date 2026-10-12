@@ -25,6 +25,7 @@ subtrees:
   - file: understand/compilers
   - file: how-to/performance_guidelines
   - file: how-to/debugging
+  - file: how-to/hip_record_replay
   - file: how-to/logging
   - file: how-to/hip_runtime_api
     subtrees:

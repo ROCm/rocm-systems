@@ -10,9 +10,7 @@
 
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -54,5 +52,4 @@ reset_sdk_session_guards();
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk

@@ -12,8 +12,11 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "graph.h"
 #include "gtest/gtest.h"
+#include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
@@ -261,6 +264,41 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
         nccl_dda_detail::kDdaLL128WireBytesPerSlice;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
+}
+
+TEST(DdaFabricScratchSizingTest, PayloadCapTakesMaxAcrossDdaAndCeScratchTables)
+{
+    rcclArchThresholds table{};
+    table.ddaVmmMax[ncclFuncAllReduce] = 16ULL * 1024 * 1024;
+    table.ddaLL128Max[ncclFuncAllReduce] = 32ULL * 1024 * 1024;
+    table.ceNonRegMax[ncclFuncAllGather] = 32ULL * 1024 * 1024;
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
+    table.ddaLLMax[ncclFuncReduceScatter] = 1ULL * 1024 * 1024;
+
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 4;
+    mock.comm.archThresholds = &table;
+
+    // Graph VMM (256 MiB) dominates LL128/CE-Scratch (32 MiB) and RS LL
+    // (1 MiB/rank * 4 = 4 MiB). AR-only VMM (16 MiB) must not win.
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 256ULL * 1024 * 1024);
+
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 0;
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 32ULL * 1024 * 1024);
+}
+
+TEST(DdaFabricScratchSizingTest, PayloadCapUsesPreTableDefaultsWhenNoArchTable)
+{
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 8;
+    mock.comm.archThresholds = nullptr;
+    mock.comm.archName = nullptr;
+    // Matches rcclDdaVmmThreshold() with a null table (128 MiB dominates
+    // the 32 KiB / 32 MiB LL defaults).
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaVmmThreshold(mock.get(), ncclFuncAllReduce), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaLLThreshold(mock.get(), ncclFuncAllReduce), kDdaLLBaseDefault);
+    EXPECT_EQ(rcclDdaLL128Threshold(mock.get(), ncclFuncAllReduce), kDdaLL128BaseDefault);
 }
 
 // ---------------------------------------------------------------------------
@@ -985,6 +1023,8 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 // the rejection is attributable to the threshold and not to the shard shape rules.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
 {
+    // DDA_LL_TWOSHOT_THRESHOLD default 2 MiB; use 524320 float32 (~2.1 MiB)
+    // so both one-shot (1 MiB) and two-shot (2 MiB) limits are exceeded.
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 524320, ncclFloat32, ncclSum));
 }
@@ -1179,6 +1219,24 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
     // message is well past what it can stage.
     EXPECT_FALSE(ddaLL128ArOneShotEligible(
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
+}
+
+// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
+// These call the shape-eligibility function directly (which uses rcclParamDdaLL128OneShotThreshold /
+// TwoShotThreshold, not the arch table), so they are independent of archName.
+// The 32 MiB cap matches gfx1250 ddaLL128Max[AllReduce] from the arch table.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
+{
+    // gfx1250 ddaLL128Max[AllReduce] = 32 MiB; 32 MiB / 4 bytes = 8388608 float32
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_PastCapRejected)
+{
+    // 8388610 * 4 = 33554440 bytes = 32 MiB + 8 bytes; %8 == 0
+    EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388610, ncclFloat32, ncclSum));
 }
 
 // ---------------------------------------------------------------------------
@@ -1432,7 +1490,8 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 {
-    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
+    // fixture sets archName="gfx1250"; resolved threshold = ddaLL128Max[AG] = 64 MiB
+    constexpr size_t totalCap = 64u * 1024u * 1024u;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
@@ -1444,6 +1503,32 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+
+// ReduceScatter LL
+//
+// kDdaLLRsMaxBytes (1 MiB per-rank) replaced the old `bytes * 2 > kDdaLLMaxBytes`
+// rule.  ncclReduceScatterDdaFabricLLEligible had no test callers at all, so
+// neither side of the boundary was pinned.
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_AtCapEligible)
+{
+    // Per-rank shard exactly at kDdaLLRsMaxBytes must be accepted.
+    // kDdaLLRsMaxBytes is a multiple of 16, so the alignment gate passes.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_PastCapRejected)
+{
+    // One 16-byte step above kDdaLLRsMaxBytes must be rejected.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes + 16;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
 }
 
 } // namespace RcclUnitTesting

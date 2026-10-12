@@ -48,11 +48,13 @@ enum class AqlPacketDiagnostic : uint8_t {
   InvalidSignalAddress,
   MissingSignalReader,
   MissingAdmissionCallback,
+  MalformedPm4Ib,
 };
 
 enum class AqlPreparedPacketKind : uint8_t {
   KernelDispatch,
   NonKernel,
+  Pm4Ib,
 };
 
 /// @brief Outcome of attempting to commit a decoded AQL action to its CP queue.
@@ -74,6 +76,8 @@ struct AqlPreparedPacket {
   AqlPreparedPacketKind kind = AqlPreparedPacketKind::NonKernel;
   hsa_kernel_dispatch_packet_t kernel_dispatch{};
   ClusterDispatchShape cluster_shape{};
+  uint64_t pm4_ib_address = 0;
+  uint32_t pm4_ib_dwords = 0;
   uint64_t completion_signal = 0;
   bool barrier_bit = false;
   bool blocks_following = false;
@@ -91,6 +95,9 @@ struct AqlPacketProcessRequest {
   uint32_t ring_slot = 0;
   uint64_t packet_index = 0;
   uint64_t packet_address = 0;
+  /// Whether the queue currently has at least one eligible compute unit.
+  /// Non-kernel packets remain processable while kernel admission is disabled.
+  bool kernel_admission_enabled = true;
 };
 
 struct AqlPacketProcessResult {
@@ -99,6 +106,9 @@ struct AqlPacketProcessResult {
   PacketProcessResult packet;
   AqlBlockedReason blocked_reason = AqlBlockedReason::None;
   AqlPacketDiagnostic diagnostic = AqlPacketDiagnostic::None;
+  /// A successfully admitted packet prevents the ring owner from fetching its
+  /// successor until this packet's completion has been durably published.
+  bool blocks_following = false;
 };
 
 class AqlPacketCallbacks {

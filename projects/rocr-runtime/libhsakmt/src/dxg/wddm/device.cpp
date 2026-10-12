@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cinttypes>
+#include <algorithm>
 #include <bitset>
 
 #if defined(__linux__)
@@ -48,6 +49,8 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#include <poll.h>
+#include <cerrno>
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -60,8 +63,6 @@
 
 namespace wsl {
 namespace thunk {
-
-const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
 WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id), init_status_(kDeviceSuccess) {
@@ -677,10 +678,86 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions
-  cmdbuf_aql_frame_size_ += 128;
+  // Worst-case PM4 of a single AQL packet, before the PMC headroom is added.
+  const uint32_t aql_packet_size = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // WSL multi-counter PM4 frame headroom (computed worst case).
+  //
+  // A vendor-specific (PMC) AQL packet is expanded in
+  // VendorSpecificAqlToPm4() by inlining the aqlprofile-built PM4 IB that
+  // programs and reads the hardware counters, followed by the fixed
+  // completion trailer already budgeted above. That inlined IB is what
+  // overflowed the previous small margin on multi-counter collection
+  // ("used 616 bytes, limit 544 bytes"). Its size grows with the number of
+  // counters in a pass and, per counter, with the number of block instances
+  // the counter is read from, so we size for the worst case here (device
+  // init runs before any --pmc set is known).
+  //
+  // Byte costs use the real gfx11 PM4 packet sizes (see gfx11_cmd_builder.h):
+  //   SET_UCONFIG_REG (GRBM index / control) = 3 dw = 12 B
+  //   COPY_DATA       (select / read)         = 6 dw = 24 B
+  // Per counter, worst case:
+  //   start: GRBM index (12) + select (24) + control (24)      = 60 B -> 64
+  //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
+  // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
+  // single counter's worst-case read-instance count is the device WGP count
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. The 32
+  // below is only a byte budget, not a ceiling anyone enforces: no upstream
+  // invariant caps the events in a pass, and the one hardware limit that is
+  // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
+  // so a pass may emit many more events than this. What keeps an oversized pass
+  // from overflowing the frame is the runtime bounds check in
+  // VendorSpecificAqlToPm4() - and, since every translation path now measures
+  // the frame cumulatively, the matching checks in KernelDispatchAqlToPm4() and
+  // BarrierGenericAqlToPm4() - not this constant. The original 128 B alignment
+  // slack is retained, and the per-counter cost still scales with device
+  // geometry instead of being a blunt over-allocation.
+  constexpr uint32_t kFrameAlignmentMargin    = 128;
+  // Per-pass fixed overhead independent of the counter count: the shared PMC
+  // programming aqlprofile emits once around the per-counter loop
+  // (pmc_builder.h GpuPmcBuilder::Start/Stop/Read/Enable/Disable/WaitIdle).
+  // Rough gfx11 tally, using the packet sizes in gfx11_cmd_builder.h
+  // (EVENT_WRITE 2 dw = 8 B, SET_SH/UCONFIG_REG 3 dw = 12 B, COPY_DATA 6 dw =
+  // 24 B, ACQUIRE_MEM 8 dw = 32 B):
+  //   perfmon ctrl : CP_PERFMON_CNTL reset/start/stop + SQ_PERFCOUNTER_CTRL/CTRL2
+  //                  + GRBM broadcast resets, ~10 writes @ 12-24 B     ~= 220 B
+  //   wait-idle    : ~4 x EVENT_WRITE barrier @ 8 B                    ~=  32 B
+  //   cache flush  : ~2 x ACQUIRE_MEM @ 32 B                           ~=  64 B
+  //   enable/disable: 2 x COMPUTE_PERFCOUNT_ENABLE SET_SH_REG @ 12 B   ~=  24 B
+  //   sync waits   : ~2 x WAIT_REG_MEM (7 dw = 28 B)                   ~=  56 B
+  //                                                          subtotal  ~= 396 B
+  // 512 rounds that up with ~115 B slack (per-counter / per-instance costs are
+  // budgeted separately below), so it is a safe fixed bound.
+  constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
+  constexpr uint32_t kPmcStartBytesPerCounter = 64;
+  constexpr uint32_t kPmcReadBytesPerInstance = 64;
+  constexpr uint32_t kMaxPmcCountersPerPass   = 32;
+
+  const uint32_t wgp_count = std::max<uint32_t>(1u, ComputeUnitCount() / 2);
+  const uint32_t sesa =
+    std::max<uint32_t>(1u, NumShaderEngine() * ShaderArrayPerShaderEngine());
+  const uint32_t max_counter_instances = std::max(wgp_count, sesa);
+  const uint32_t per_counter_bytes =
+    kPmcStartBytesPerCounter + max_counter_instances * kPmcReadBytesPerInstance;
+
+  cmdbuf_aql_frame_size_ += kFrameAlignmentMargin + kPmcFixedOverheadBytes +
+                            kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // Only a vendor-specific (PMC) frame uses the headroom above, but all frames
+  // are sized alike, so cap the ring depth instead of letting the whole
+  // allocation scale with the frame size.
+  constexpr uint32_t kCmdbufBudgetBytes = 2 * 1024 * 1024;
+
+  cmdbuf_aql_frame_num_ =
+      std::clamp(kCmdbufBudgetBytes / cmdbuf_aql_frame_size_, 1u, kMaxAqlFrameNum);
+
+  // SwitchAql2PM4() keeps merging consecutive dispatch packets into the current
+  // frame until the write index reaches a multiple of this limit, so a merge
+  // run must not be able to outgrow one frame.
+  cmdbuf_aql_merge_limit_ =
+      std::clamp(cmdbuf_aql_frame_size_ / aql_packet_size, 1u, cmdbuf_aql_frame_num_);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }
@@ -1228,9 +1305,8 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 
 // ================================================================================================
 uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
-#if defined(WIN32)
-  // Reset maibox locaiton to 0
   *mailbox = 0;
+#if defined(WIN32)
   // Start from 1, since 0 is the default state and can't be identified in KMD
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
     // Check if the current slot is free and assing the mailbox
@@ -1256,6 +1332,9 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
       }
     }
   }
+#else
+  // No KMD events on Linux; returning 0 makes ComputeQueue fall back to stall detection.
+  pr_debug("RegisterEvent: KMD event registration not available on Linux\n");
 #endif
   return 0;
 }
@@ -1285,6 +1364,11 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
 // ================================================================================================
 HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
                                                bool wait_all, uint32_t msec) {
+  // num_elems sizes a stack allocation below; bound it to the event table width.
+  if (num_elems > kNumberOfHsaEvents) {
+    pr_err("event count %u exceeds maximum %u\n", num_elems, kNumberOfHsaEvents);
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 #if defined(WIN32)
   HANDLE* event_handles_ = reinterpret_cast<HANDLE*>(_alloca(sizeof(HANDLE) * num_elems));
   for (uint32_t i = 0; i < num_elems; ++i) {
@@ -1321,6 +1405,53 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
       }
       size_to_process -= MAXIMUM_WAIT_OBJECTS;
     }
+  }
+#else
+  // Linux: poll() on eventfds
+  auto* pfds = reinterpret_cast<struct pollfd*>(alloca(sizeof(struct pollfd) * num_elems));
+  auto* signaled = reinterpret_cast<bool*>(alloca(sizeof(bool) * num_elems));
+  for (uint32_t i = 0; i < num_elems; ++i) {
+    void* handle = reinterpret_cast<Event*>(events[i])->GetHandle();
+    pfds[i].fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+    pfds[i].events = POLLIN;
+    pfds[i].revents = 0;
+    signaled[i] = false;
+  }
+
+  uint32_t effective_msec = msec;
+  constexpr uint32_t kWaitTimeout = 6000;
+  if (!dxg_runtime->disable_wait_timeout_ && (effective_msec > kWaitTimeout)) {
+    effective_msec = kWaitTimeout;
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(effective_msec);
+  uint32_t signaled_count = 0;
+
+  while (true) {
+    auto now = std::chrono::steady_clock::now();
+    int remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    if (remaining_ms < 0) remaining_ms = 0;
+
+    int ret = poll(pfds, num_elems, remaining_ms);
+    if (ret < 0) {
+      if (errno == EINTR) continue;  // Interrupted, not failed; retry on same deadline.
+      pr_err("poll() failed, errno %d\n", errno);
+      return HSAKMT_STATUS_WAIT_FAILURE;
+    }
+    if (ret > 0) {
+      for (uint32_t i = 0; i < num_elems; ++i) {
+        if ((pfds[i].revents & POLLIN) && !signaled[i]) {
+          uint64_t val;
+          // Another waiter may have consumed the counter since poll(); EFD_NONBLOCK gives EAGAIN.
+          if (read(pfds[i].fd, &val, sizeof(val)) != static_cast<ssize_t>(sizeof(val))) continue;
+          if (!wait_all) return HSAKMT_STATUS_SUCCESS;
+          signaled[i] = true;
+          signaled_count++;
+        }
+      }
+      if (wait_all && signaled_count >= num_elems) return HSAKMT_STATUS_SUCCESS;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) break;
   }
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
@@ -1381,7 +1512,14 @@ bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
   memset(priv_data, 0, priv_size);
   Wkmi::FillinTrapHandlerPrivData(priv_data, tba, tma);
 
-  return Escape(priv_data, priv_size, true);
+  const bool ok = Escape(priv_data, priv_size, true);
+  if (ok) {
+    pr_info("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " accepted\n", tba, tma);
+  } else {
+    pr_err("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " rejected by KMD;"
+           " faults will fall back to stall detection\n", tba, tma);
+  }
+  return ok;
 }
 
 

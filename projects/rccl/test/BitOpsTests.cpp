@@ -5,7 +5,13 @@
  ************************************************************************/
 
 #include "bitops.h"
+
+#include <climits>
+#include <cstdint>
+
 #include "gtest/gtest.h"
+
+#include "nccl_device/utility.h"
 
 namespace RcclUnitTesting
 {
@@ -277,6 +283,43 @@ TYPED_TEST(BitOpsTemplateUnsignedTestsFixture, reverseBitsSuccess) {
     EXPECT_EQ(ret, 1);
     ret = reverseBits(this->reverseBits_, 16);
     EXPECT_EQ(ret, 16384);
+}
+
+// One 4 GiB stride, the unit of add4G's delta.
+constexpr uint64_t k4G = 1ULL << 32;
+
+// add4G backs the LSA peer pointer math; always qualify, since bitops.h declares a same-signature ::add4G.
+TEST(Add4G, AddsDeltaTimes4G) {
+    constexpr uint64_t kBase = 0x00000002ABCDEF01ULL;
+    EXPECT_EQ(nccl::utility::add4G(kBase, 0), kBase);
+    EXPECT_EQ(nccl::utility::add4G(kBase, 1), kBase + k4G);
+    EXPECT_EQ(nccl::utility::add4G(kBase, 3), kBase + 3 * k4G);
+    EXPECT_EQ(nccl::utility::add4G(kBase, -1), kBase - k4G);
+    EXPECT_EQ(nccl::utility::add4G(kBase, -2), kBase - 2 * k4G);
+}
+
+TEST(Add4G, LowWordUntouchedHighWordWraps) {
+    EXPECT_EQ(nccl::utility::add4G(0x00000001FFFFFFFFULL, 1), 0x00000002FFFFFFFFULL);
+    EXPECT_EQ(nccl::utility::add4G(0xFFFFFFFF00000005ULL, 1), 0x0000000000000005ULL);
+    EXPECT_EQ(nccl::utility::add4G(0x0000000000000005ULL, -1), 0xFFFFFFFF00000005ULL);
+    EXPECT_EQ(nccl::utility::add4G(0ULL, INT_MAX), 0x7FFFFFFF00000000ULL);
+    EXPECT_EQ(nccl::utility::add4G(0ULL, INT_MIN), 0x8000000000000000ULL);
+}
+
+TEST(Add4G, PointerBase) {
+    constexpr uintptr_t kAddr = 0x00007F0012345000ULL;
+    constexpr int kStride4G = 2;
+    constexpr int kNumRanks = 4;
+    char* cbase = reinterpret_cast<char*>(kAddr);
+    void* vbase = reinterpret_cast<void*>(kAddr);
+    for (int rank = 0; rank < kNumRanks; ++rank) {
+        const int delta4G = rank * kStride4G;
+        const uintptr_t expected = kAddr + static_cast<uintptr_t>(delta4G) * k4G;
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(nccl::utility::add4G(cbase, delta4G)), expected);
+        EXPECT_EQ(reinterpret_cast<uintptr_t>(nccl::utility::add4G(vbase, delta4G)), expected);
+    }
+    char* top = nccl::utility::add4G(cbase, 3 * kStride4G);
+    EXPECT_EQ(nccl::utility::add4G(top, -3 * kStride4G), cbase);
 }
 
 }

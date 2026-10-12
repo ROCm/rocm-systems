@@ -87,6 +87,37 @@ public:
   GraphicsDiscoveryInfo graphics; ///< Topology the driver consumes before GFX startup.
 };
 
+/// @brief The published blocks, looked up by what they are rather than scanned.
+///
+/// @details Built once, because the table does not change while a device is
+/// alive. What it replaces was a linear scan of every record, run on each
+/// lookup -- including once per interrupt-ring read, which is once per delivery
+/// on a path that has a guest waiting at the end of it.
+///
+/// Records with no register bases are left out. A block the table names but
+/// gives no registers is one the driver will instantiate and never address, so
+/// there is nothing here to answer for it, and returning it would hand every
+/// caller an empty segment list to guard against.
+///
+/// Holds pointers into the spec, so the spec must outlive the index and must
+/// not have its block list resized afterwards.
+class IpBlockIndex final {
+public:
+  /// @brief Index @p spec.
+  /// @param[in] spec Blocks to index; must outlive this index.
+  explicit IpBlockIndex(const IpDiscoverySpec &spec);
+
+  /// @brief The record for one copy of one block.
+  /// @param[in] id Which block.
+  /// @param[in] instance Which copy of it.
+  /// @returns The record, or nullptr when the table names no such copy or
+  ///          gives it no registers.
+  [[nodiscard]] const IpBlock *find(IpHardwareId id, uint8_t instance) const;
+
+private:
+  std::vector<const IpBlock *> blocks_;
+};
+
 /// @brief A serialized table, or the reason there is not one.
 ///
 /// @details Building can fail, because the format's fields are narrower than

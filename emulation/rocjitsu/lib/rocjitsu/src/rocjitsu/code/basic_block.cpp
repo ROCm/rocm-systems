@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/code_object.h"
@@ -41,6 +42,13 @@ bool has_no_static_successor(const Instruction &inst) {
 
 bool is_unconditional_branch(const Instruction &inst) {
   return (inst.flags() & BRANCH) && !(inst.flags() & COND_BRANCH);
+}
+
+rj_code_target_id_t concrete_target(const CodeObject &co, rj_code_target_id_t selected_target) {
+  if (selected_target != ROCJITSU_CODE_TARGET_INVALID)
+    return selected_target;
+  const auto *amdgpu_object = dynamic_cast<const AmdGpuCodeObject *>(&co);
+  return amdgpu_object != nullptr ? amdgpu_object->target_id() : ROCJITSU_CODE_TARGET_INVALID;
 }
 
 uint32_t first_word(const Instruction &inst) {
@@ -156,9 +164,11 @@ void BasicBlock::add_static_pc_address_builder(PcAddressBuilder builder) {
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
 BasicBlock::build(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                   DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
-                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points) {
+                  ExternalEntryPolicy entry_policy, std::span<const uint64_t> extra_split_points,
+                  rj_code_target_id_t target) {
   return build_cfg(co, decoder, arch,
                    {.decode_policy = DecodePolicy::FullSection,
+                    .target = target,
                     .entries = extra_leaders,
                     .split_points = extra_split_points,
                     .entry_policy = entry_policy},
@@ -170,7 +180,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                        DecodeErrorEmitter emit_error, std::span<const uint64_t> extra_leaders,
                        ExternalEntryPolicy entry_policy,
                        std::span<const uint64_t> extra_split_points, DecodedSection *prepared,
-                       std::span<const CodeRange> permitted_ranges) {
+                       std::span<const CodeRange> permitted_ranges, rj_code_target_id_t target_id) {
   std::vector<std::unique_ptr<BasicBlock>> blocks;
 
   for (const auto *sec : co.text_sections()) {
@@ -236,7 +246,7 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
       discovery_entries.push_back(decoded.front()->src_loc());
       recovered_indirect_targets =
           discover_indirect_branch_edges(decoded_span, text, arch, discovery_entries, entry_policy,
-                                         &pc_address_builders, extra_split_points);
+                                         &pc_address_builders, extra_split_points, {}, target_id);
     }
 
     std::set<uint64_t> leaders;
@@ -343,12 +353,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     // contains its s_getpc_b64. Blocks are in ascending source order and cover
     // the decoded stream without overlap, so the owning block is the last one
     // starting at or before the producer.
-    const auto starts_after = [](uint64_t offset, const std::unique_ptr<BasicBlock> &block) {
-      return offset < block->start_offset();
-    };
     for (const PcAddressBuilder &builder : pc_address_builders) {
-      const auto it = std::upper_bound(section_blocks.begin(), section_blocks.end(),
-                                       builder.source_getpc_offset, starts_after);
+      const auto it = std::ranges::upper_bound(
+          section_blocks, builder.source_getpc_offset, {},
+          [](const std::unique_ptr<BasicBlock> &block) { return block->start_offset(); });
       if (it == section_blocks.begin())
         continue;
       BasicBlock &owner = **(it - 1);
@@ -685,14 +693,14 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
   return blocks;
 }
 
-FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
-BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
-                            std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error,
-                            std::span<const CodeRange> permitted_ranges,
-                            std::span<const uint64_t> decode_seeds,
-                            std::span<const uint64_t> extra_split_points) {
+FailureOr<std::vector<std::unique_ptr<BasicBlock>>> BasicBlock::build_reachable(
+    const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+    std::span<const uint64_t> entry_offsets, DecodeErrorEmitter emit_error,
+    std::span<const CodeRange> permitted_ranges, std::span<const uint64_t> decode_seeds,
+    std::span<const uint64_t> extra_split_points, rj_code_target_id_t target) {
   return build_cfg(co, decoder, arch,
-                   {.entries = entry_offsets,
+                   {.target = target,
+                    .entries = entry_offsets,
                     .permitted_ranges = permitted_ranges,
                     .decode_seeds = decode_seeds,
                     .split_points = extra_split_points},
@@ -702,11 +710,12 @@ BasicBlock::build_reachable(const CodeObject &co, Decoder &decoder, rj_code_arch
 FailureOr<std::vector<std::unique_ptr<BasicBlock>>>
 BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
                       const BuildOptions &options, DecodeErrorEmitter emit_error) {
+  const rj_code_target_id_t target_id = concrete_target(co, options.target);
   if (options.decode_policy == DecodePolicy::FullSection) {
     if (!options.permitted_ranges.empty() || !options.decode_seeds.empty())
       return emit_error.emit() << "full-section CFG does not accept ranges or decode seeds";
     return build_impl(co, decoder, arch, std::move(emit_error), options.entries,
-                      options.entry_policy, options.split_points, nullptr, {});
+                      options.entry_policy, options.split_points, nullptr, {}, target_id);
   }
   if (options.entry_policy != ExternalEntryPolicy::ExplicitOnly)
     return emit_error.emit() << "reachable CFG requires explicit external entries";
@@ -724,14 +733,17 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return emit_error.emit() << "invalid text section for reachable CFG";
 
-  std::vector<CodeRange> ranges(permitted_ranges.begin(), permitted_ranges.end());
-  for (const CodeRange &range : ranges) {
+  for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
         range.start_offset >= section_end || range.size > section_end - range.start_offset)
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
   }
-  if (ranges.empty())
-    ranges.push_back({0, section_end});
+  // Built in one step: a push_back onto a range-constructed vector trips a GCC 15
+  // -Wfree-nonheap-object false positive.
+  std::vector<CodeRange> ranges =
+      permitted_ranges.empty()
+          ? std::vector<CodeRange>{{0, section_end}}
+          : std::vector<CodeRange>(permitted_ranges.begin(), permitted_ranges.end());
   std::ranges::sort(ranges, {}, &CodeRange::start_offset);
   std::vector<CodeRange> merged_ranges;
   for (const CodeRange &range : ranges) {
@@ -878,7 +890,7 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       prepared.pc_address_builders.clear();
       prepared.indirect_targets = discover_indirect_branch_edges(
           decoded_insts, text, arch, entry_offsets, ExternalEntryPolicy::ExplicitOnly,
-          &prepared.pc_address_builders, split_points, decode_seeds);
+          &prepared.pc_address_builders, split_points, decode_seeds, target_id);
       analyzed_size = decoded.size();
       for (const IndirectCallFixup &fixup : prepared.indirect_targets) {
         if (!is_decoded_start(fixup.source_target_offset))
@@ -912,7 +924,8 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
   // Finalize the stabilized instruction stream and discovery facts directly.
   // This shares block/call construction without decoding or analyzing twice.
   return build_impl(co, decoder, arch, std::move(emit_error), entry_offsets,
-                    ExternalEntryPolicy::ExplicitOnly, split_points, &prepared, merged_ranges);
+                    ExternalEntryPolicy::ExplicitOnly, split_points, &prepared, merged_ranges,
+                    target_id);
 }
 
 } // namespace rocjitsu

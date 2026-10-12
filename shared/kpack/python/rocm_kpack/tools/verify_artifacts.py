@@ -22,7 +22,11 @@ import msgpack
 
 from rocm_kpack.artifact_splitter import base_arch
 from rocm_kpack.binutils import Toolchain
-from rocm_kpack.database_handlers import AotritonHandler, MIOpenHandler
+from rocm_kpack.database_handlers import (
+    AotritonHandler,
+    ComposableKernelHandler,
+    MIOpenHandler,
+)
 from rocm_kpack.coff.kpack_transform import (
     HIPF_MAGIC as COFF_HIPF_MAGIC,
     HIPK_MAGIC as COFF_HIPK_MAGIC,
@@ -299,6 +303,7 @@ class ArtifactVerifier:
             return
 
         miopen = MIOpenHandler()
+        ck = ComposableKernelHandler()
         aotriton = AotritonHandler()
         for artifact, expected_arch in arch_artifacts:
             # Target identity can live in a directory rather than the filename.
@@ -309,6 +314,8 @@ class ArtifactVerifier:
                 # MIOpen concatenates CU counts with arch IDs. Use its parser
                 # for filenames so gfx1250-strict256 is not a different target.
                 database_arch = miopen.detect(file, artifact)
+                if database_arch is None:
+                    database_arch = ck.detect(file, artifact)
                 filename_arches = (
                     [database_arch]
                     if database_arch is not None

@@ -37,7 +37,7 @@ void SLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -56,7 +56,7 @@ void SLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -75,7 +75,7 @@ void SLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -94,7 +94,7 @@ void SLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -113,7 +113,7 @@ void SLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -132,7 +132,7 @@ void SScratchLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -151,7 +151,7 @@ void SScratchLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -170,7 +170,7 @@ void SScratchLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -189,7 +189,7 @@ void SBufferLoadDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -208,7 +208,7 @@ void SBufferLoadDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -227,7 +227,7 @@ void SBufferLoadDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -246,7 +246,7 @@ void SBufferLoadDwordx8Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -265,7 +265,7 @@ void SBufferLoadDwordx16Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;

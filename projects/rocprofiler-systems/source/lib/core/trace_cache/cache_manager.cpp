@@ -18,9 +18,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 cache_manager&
 cache_manager::get_instance()
@@ -81,7 +79,9 @@ cache_manager::post_process_bulk(output_file_registry& _output_registry,
             std::vector<int> source_pids;
             source_pids.reserve(processor_configs.size());
             for(const auto& cfg : processor_configs)
+            {
                 source_pids.push_back(static_cast<int>(cfg->_pid));
+            }
 
             try
             {
@@ -117,5 +117,4 @@ cache_manager::shutdown()
     LOG_TRACE("Cache manager storage shutdown complete");
 }
 
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

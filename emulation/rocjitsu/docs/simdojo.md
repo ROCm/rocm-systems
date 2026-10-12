@@ -16,19 +16,19 @@ event loop via the `Functional<Base>` CRTP mixin.
 | `component.h` | Node, Component, CompositeComponent, Link, Port, QueuedLink |
 | `component.cpp` | Implementation for Component, CompositeComponent, Link |
 | `clock_domain.h` | ClockDomain (frequency, period, phase offset) |
-| `clocked.h` | Clocked\<Base\> Curiously Recurring Template Pattern (CRTP) mixin for clock-driven components |
+| `clocked.h` | `Clocked<Base>` Curiously Recurring Template Pattern (CRTP) mixin for clock-driven components |
 | `topology.h` | Topology, Partition, AdjacencyGraph, Partitioner |
 | `topology.cpp` | Topology wiring, graph construction, multilevel Fiduccia-Mattheyses (FM) partitioning |
-| `functional.h` | Functional\<Base\> CRTP mixin for untimed components |
-| `exec_mode.h` | ExecMode enum (FUNCTIONAL, CLOCKED) and ExecBase\<Mode, Base\> alias |
+| `functional.h` | `Functional<Base>` CRTP mixin for untimed components |
+| `exec_mode.h` | ExecMode enum (FUNCTIONAL, CLOCKED) and `ExecBase<Mode, Base>` alias |
 | `pacing_controller.h` | PacingController - PI-controlled wall-clock pacing with token bucket burst absorption |
 | `simulation.h` | PartitionContext, SimulationEngine |
 | `simulation.cpp` | Engine run loop, event dispatch, LBTS computation (multi-threaded) |
 | `components/memory_interface.h` | MemoryInterface - abstract byte-addressed memory controller |
-| `components/cache.h` | Cache\<NumSets, Assoc, LineSizeBits\> - set-associative cache template |
+| `components/cache.h` | `Cache<NumSets, Assoc, LineSizeBits>` - set-associative cache template |
 | `components/sparse_memory.h` | SparseMemory - page-allocated flat address space |
 | `components/register_file.h` | RegisterFile - typed register storage with read/write interface |
-| `components/vector_reg.h` | VectorReg\<N, T\> - SIMD-width vector register type |
+| `components/vector_reg.h` | `VectorReg<N, T>` - SIMD-width vector register type |
 | *(uses `util/debug_print.h`)* | Conditional debug output (`util::debug` namespace) |
 
 ---
@@ -229,7 +229,10 @@ following dimensions:
 `RegisterFile` divides the physical VGPR index space into fixed 4 KiB chunks.
 An untouched chunk is represented by a null entry and reads as zero; its
 storage is allocated and zero-initialized on the first mutable access. Retiring
-a wave releases wholly covered chunks and clears any shared boundary chunk.
+a wave makes wholly covered chunks logically absent and clears any shared
+boundary chunk. Each lazy register file retains up to 64 KiB of retired chunks,
+which are zeroed when reused; excess chunks release their allocations.
+`materialized_chunk_count()` excludes these retained spares.
 The implementation uses only portable C++ allocation and does not require
 virtual-memory APIs. Mutable handles and handles into materialized registers
 remain stable until their allocation retires, but the complete register file is

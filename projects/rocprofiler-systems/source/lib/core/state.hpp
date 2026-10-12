@@ -225,8 +225,8 @@ public:
 
     [[gnu::hot]] static State set(State state_to_set) noexcept
     {
-        auto last_state = current();
-        current()       = state_to_set;
+        auto const last_state = current();
+        current()             = state_to_set;
         return last_state;
     }
 

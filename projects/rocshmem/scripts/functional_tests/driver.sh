@@ -172,6 +172,18 @@ declare -A TEST_NUMBERS=(
   ["tile_reduce"]="155"
   ["tile_reduce_wave"]="156"
   ["tile_reduce_wg"]="157"
+  ["buffer_register_symmetric"]="162"
+  ["tile_put_wave_rowmajor"]="163"
+  ["tile_put_wave_colmajor"]="164"
+  ["tile_get_wave_rowmajor"]="165"
+  ["tile_get_wave_colmajor"]="166"
+  ["tile_put_wg_rowmajor"]="167"
+  ["tile_put_wg_colmajor"]="168"
+  ["tile_get_wg_rowmajor"]="169"
+  ["tile_get_wg_colmajor"]="170"
+  ["signaladd"]="171"
+  ["signalset"]="172"
+  ["signalwaituntil"]="173"
 )
 
 # Detect which runtime to use
@@ -252,6 +264,17 @@ AdjustGridBarrierProblemSize() {
 
 # Router function - dispatches to appropriate implementation
 ExecTest() {
+  if [[ "$1" == "buffer_register_symmetric" ]]; then
+    local selected_backend="${ROCSHMEM_BACKEND:-${ROCSHMEM_BACKEND_TYPE:-$TEST}}"
+    local heap_allocator="${ROCSHMEM_HEAP_ALLOCATOR_TYPE:-}"
+    heap_allocator="${heap_allocator,,}"
+    if [[ "$heap_allocator" != "vmm_posix" &&
+          "$heap_allocator" != "vmm_fabric" ]]; then
+      echo "Skip:   buffer_register_symmetric (set ROCSHMEM_HEAP_ALLOCATOR_TYPE=vmm_posix or vmm_fabric)"
+      return
+    fi
+  fi
+
   if [ $USE_SLR -eq 1 ]; then
     ExecTest_SLR "$@"
   else
@@ -296,10 +319,7 @@ ExecTest_SLR() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # Build command as an array using SLR instead of MPI
   local -a cmd
@@ -308,7 +328,7 @@ ExecTest_SLR() {
   # Build environment variable list
   env_vars=(
     "ROCSHMEM_SLR_NP=$NUM_RANKS"
-    "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+    "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
     "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
   )
 
@@ -318,6 +338,10 @@ ExecTest_SLR() {
   fi
   if [[ -n "${ROCSHMEM_TEST_USE_DEFAULT_STREAM:-}" ]]; then
     env_vars+=("ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM")
+  fi
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" &&
+        "${selected_backend:-}" == gda* ]]; then
+    env_vars+=("ROCSHMEM_DISABLE_MIXED_IPC=1")
   fi
   # Note: ROCSHMEM_TEST_UUID not needed - SLR always uses uniqueid approach
 
@@ -437,10 +461,7 @@ ExecTest_MPI() {
 
   NUM_WG=$(AdjustGridBarrierProblemSize "$TEST_NAME" "$NUM_WG" "$NUM_THREADS")
 
-  if [[ "" == "$ROCSHMEM_MAX_NUM_CONTEXTS" ]]
-  then
-    ROCSHMEM_MAX_NUM_CONTEXTS=$NUM_WG
-  fi
+  local max_num_contexts="${ROCSHMEM_MAX_NUM_CONTEXTS:-$NUM_WG}"
 
   # MPI Parameters
   LAUNCHER=mpirun
@@ -457,16 +478,29 @@ ExecTest_MPI() {
 
   # Build command as an array to avoid command injection with eval
   local -a cmd
+  local -a test_env_args
+  test_env_args=()
+  if [[ "$TEST_NAME" == "buffer_register_symmetric" ]]; then
+    test_env_args+=(
+      -x "ROCSHMEM_TEST_UUID=1"
+      -x "ROCSHMEM_HEAP_ALLOCATOR_TYPE=$ROCSHMEM_HEAP_ALLOCATOR_TYPE"
+    )
+    if [[ "${selected_backend:-}" == gda* ]]; then
+      test_env_args+=(-x "ROCSHMEM_DISABLE_MIXED_IPC=1")
+    fi
+  fi
+
   cmd=( "$LAUNCHER"
         -n "$NUM_RANKS"
         -mca pml "${OMPI_MCA_pml:-ucx}"
         -mca osc "${OMPI_MCA_osc:-ucx}"
-        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$max_num_contexts"
         -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
         -x "ROCSHMEM_HEAP_SIZE=${ROCSHMEM_HEAP_SIZE:-$HEAP_SIZE}"
         ${ROCSHMEM_MAX_NUM_HOST_CONTEXTS:+-x "ROCSHMEM_MAX_NUM_HOST_CONTEXTS=$ROCSHMEM_MAX_NUM_HOST_CONTEXTS"}
         ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
         ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        "${test_env_args[@]}"
         ${TIMEOUT:+--timeout "$TIMEOUT"}
         ${HOSTFILE:+--hostfile "$HOSTFILE"}
         --map-by numa
@@ -766,6 +800,10 @@ TestSigOps() {
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
   ExecTest  "wavesignalfetch"  2       1            64
+
+  ExecTest  "signaladd"        2       2            32
+  ExecTest  "signalset"        2       2            32
+  ExecTest  "signalwaituntil"  2       1            1
 }
 
 TestColl() {
@@ -934,6 +972,9 @@ TestOther() {
   ##############################################################################
   ExecTest  "init"             2       1            1
   ExecTest  "library_info"     2       1            1
+  ExecTest  "buffer_register_symmetric" 2  1         1       64
+  ExecTest  "buffer_register_symmetric" 2  2        64       64
+  ExecTest  "buffer_register_symmetric" 4  2        64       64
   ExecTest  "hipmodule_init"   2       1            1
   ExecTest  "device_bitcode"   2       1            1
   ExecTest  "device_bitcode"   2       32           1024
@@ -1017,40 +1058,60 @@ TestTiles() {
   #       | Name                      | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
 
-  ExecTest  "tile_put_contiguous"       2       1            1
-  ExecTest  "tile_put_rowmajor"         2       1            1
-  ExecTest  "tile_put_colmajor"         2       1            1
-  ExecTest  "tile_put_arbitrary"        2       1            1
-  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE
-  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_contiguous"       2       1            1
-  ExecTest  "tile_get_rowmajor"         2       1            1
-  ExecTest  "tile_get_colmajor"         2       1            1
-  ExecTest  "tile_get_arbitrary"        2       1            1
-  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16))
-  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16))
-  ExecTest  "tile_put_1d"               2       1            1
-  ExecTest  "tile_get_1d"               2       1            1
-  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE
-  ExecTest  "tile_broadcast"            2       1            1
-  ExecTest  "tile_broadcast"            4       1            1
-  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE
-  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE
-  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE
-  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE
-  ExecTest  "tile_allgather"            2       1            1
-  ExecTest  "tile_allgather"            4       1            1
-  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE
-  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE
-  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE
-  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE
-  ExecTest  "tile_reduce"               2       1            1
-  ExecTest  "tile_reduce"               4       1            1
-  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE
-  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE
-  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE
-  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE
+  ExecTest  "tile_put_contiguous"       2       1            1            1048576
+  ExecTest  "tile_put_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_put_colmajor"         2       1            1            1048576
+  ExecTest  "tile_put_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_put_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_put_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_contiguous"       2       1            1            1048576
+  ExecTest  "tile_get_rowmajor"         2       1            1            1048576
+  ExecTest  "tile_get_colmajor"         2       1            1            1048576
+  ExecTest  "tile_get_arbitrary"        2       1            1            1048576
+  ExecTest  "tile_get_wg_contiguous"    2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_rowmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_colmajor"      2       1            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_get_wg_contiguous"    2       4            $((WAVE_SIZE * 16)) 1048576
+  ExecTest  "tile_put_1d"               2       1            1            1048576
+  ExecTest  "tile_get_1d"               2       1            1            1048576
+  ExecTest  "tile_get_wave_contiguous"  2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_rowmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_get_wave_colmajor"    2       1            $WAVE_SIZE   1048576
+  ExecTest  "tile_broadcast"            2       1            1            1048576
+  ExecTest  "tile_broadcast"            4       1            1            1048576
+  # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_broadcast_wave"       2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_broadcast_wave"       4       1            $WAVE_SIZE   1048576    4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_broadcast_wg"         2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_broadcast_wg"         4       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_allgather"            2       1            1            1048576
+  ExecTest  "tile_allgather"            4       1            1            1048576
+  # tile_allgather_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_allgather_wave"       2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_allgather_wave"       4       1            $WAVE_SIZE   1048576    4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_allgather_wg"         2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_allgather_wg"         4       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_reduce"               2       1            1            1048576
+  ExecTest  "tile_reduce"               4       1            1            65536
+  # tile_reduce_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
+  #       | Name                      | Ranks | Workgroups | Threads    | Max Msg   | NUM_WF #
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_reduce_wave"          2       1            $WAVE_SIZE   1048576    4
+  ExecTest  "tile_reduce_wave"          4       1            $WAVE_SIZE   65536      4
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  ExecTest  "tile_reduce_wg"            2       4            $WAVE_SIZE   1048576
+  ExecTest  "tile_reduce_wg"            4       4            $WAVE_SIZE   65536
 }
 
 TestHeatMapRMA() {

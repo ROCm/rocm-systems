@@ -1036,7 +1036,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         // wave-size specific (uint32_t or uint64_t at compile time), so this is
         // the caller declaring the wrong one, not a gap to paper over.
         if (kernel_wavefront_size(arch_, kernels.front().descriptor) == 32 &&
-            std::any_of(site.probe_args.begin(), site.probe_args.end(), [](const ProbeArgValue &a) {
+            std::ranges::any_of(site.probe_args, [](const ProbeArgValue &a) {
               return a.source == ProbeArgSource::AnchorExecHi;
             })) {
           result.errors.push_back(

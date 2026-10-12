@@ -30,7 +30,9 @@
 #include <bit>
 #include <memory>
 #include <semaphore>
+#include <set>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -56,14 +58,14 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
   }
   memory.write32(pc + 16, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
   amdgpu::MmaAdmissionCache::Words first;
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   for (unsigned i = 0; i != 1000; ++i)
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.decodes, 3u);
   EXPECT_EQ(cache.stats.plans, 1u);
   EXPECT_EQ(cache.stats.hits, 999u);
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.decodes, 3u);
   EXPECT_EQ(cache.stats.plans, 1u);
@@ -72,14 +74,14 @@ TEST(MmaAdmissionCacheTest, ReusesAcceptedAndRejectedPlansAcrossLoopsAndInvalida
   // A changed future word outside the initial fetch must invalidate the plan.
   memory.write32(pc + 16, 0xbf800001); // s_nop, changes the saved decode window.
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   EXPECT_EQ(cache.stats.plans, 2u);
   EXPECT_GT(cache.stats.decodes, 3u);
 
   memory.write32(pc + 8, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
   icache.invalidate_all();
-  icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+  icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
   EXPECT_FALSE(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first));
   const auto decodes = cache.stats.decodes;
   const auto plans = cache.stats.plans;
@@ -111,7 +113,7 @@ TEST(MmaAdmissionCacheTest, RejectsDependenciesBoundsAndUnknownInstructions) {
       memory.write32(pc + 8 + i * 4, hazard == 4 ? 0xffffffffu : b[i]);
     }
     amdgpu::MmaAdmissionCache::Words first;
-    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first).has_value(),
               hazard == 0);
     if (hazard == 0) {
@@ -143,7 +145,7 @@ TEST(MmaAdmissionCacheTest, KeepsWiderGroupsAndStopsAtANonAdjacentHazard) {
     }
     memory.write32(pc + 32, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
     amdgpu::MmaAdmissionCache::Words first;
-    icache.fetch(memory, pc, 0, reinterpret_cast<uint8_t *>(first.data()));
+    icache.fetch(memory, pc, reinterpret_cast<uint8_t *>(first.data()));
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first),
               pc + (hazard ? 16 : 24));
   }
@@ -520,6 +522,99 @@ TEST(MatrixCoexecutionTest, SharedPoolHandlesConcurrentIssuersAndZeroCapacity) {
     for (auto &issuer : issuers)
       issuer.join();
     EXPECT_TRUE(matched.load());
+  }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolScalesPreferredStartToCapacity) {
+  struct Case {
+    uint32_t hash;
+    std::size_t capacity;
+    unsigned expected;
+  };
+  // Include bucket boundaries: masking an unscaled hash would concentrate
+  // small-pool issuers on slot zero instead of reaching these four preferences.
+  for (const Case c : {Case{0, 0, 0},
+                       {0xffffffffu, 1, 0},
+                       {0, 4, 0},
+                       {0x3fffffffu, 4, 0},
+                       {0x40000000u, 4, 1},
+                       {0x7fffffffu, 4, 1},
+                       {0x80000000u, 4, 2},
+                       {0xffffffffu, 4, 3},
+                       {0xffffffffu, 8, 7},
+                       {0xffffffffu, 63, 62},
+                       {0xffffffffu, 64, 63},
+                       {0x80000000u, 65, 32},
+                       {0xffffffffu, 65, 0},
+                       {0x40000000u, 128, 32},
+                       {0x80000000u, 128, 0},
+                       {0xffffffffu, 128, 63}}) {
+    SCOPED_TRACE(c.capacity);
+    SCOPED_TRACE(c.hash);
+    EXPECT_EQ(mc::preferred_helper_start(c.hash, c.capacity), c.expected);
+  }
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolIssuersReusePreferredHelpers) {
+  mc::SharedPool pool(4);
+  Instruction record("record", [](Instruction &, void *opaque) {
+    *static_cast<std::thread::id *>(opaque) = std::this_thread::get_id();
+  });
+  auto helpers = [&](unsigned width, unsigned batches) {
+    std::set<std::thread::id> used;
+    for (unsigned batch = 0; batch != batches; ++batch) {
+      std::array<std::thread::id, 4> ids;
+      std::array<mc::SharedPool::Ticket, 4> tickets{};
+      for (unsigned i = 0; i != width; ++i) {
+        tickets[i] = pool.submit(record, &ids[i]);
+        EXPECT_TRUE(tickets[i]);
+      }
+      for (unsigned i = 0; i != width; ++i)
+        if (tickets[i]) {
+          EXPECT_FALSE(pool.finish(tickets[i]));
+          used.insert(ids[i]);
+        }
+    }
+    return used;
+  };
+  EXPECT_EQ(helpers(4, 1).size(), 4u);
+  EXPECT_EQ(helpers(1, 16).size(), 1u);
+  // While the preferred helper's ticket is held, the same next helper takes the job.
+  EXPECT_EQ(helpers(2, 8).size(), 2u);
+  std::thread([&] { EXPECT_EQ(helpers(1, 16).size(), 1u); }).join();
+}
+
+TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords) {
+  Instruction record("record", [](Instruction &, void *opaque) {
+    *static_cast<std::thread::id *>(opaque) = std::this_thread::get_id();
+  });
+  for (unsigned capacity : {0u, 1u, 4u, 64u, 65u, 128u}) {
+    SCOPED_TRACE(capacity);
+    mc::SharedPool pool(capacity);
+    for (unsigned batch = 0; batch != 3; ++batch) {
+      std::vector<std::thread::id> ids(capacity);
+      std::vector<mc::SharedPool::Ticket> tickets(capacity);
+      for (unsigned i = 0; i != capacity; ++i) {
+        tickets[i] = pool.submit(record, &ids[i]);
+        EXPECT_TRUE(tickets[i]);
+      }
+      // Claims remain held until finish(), even if a helper has completed.
+      EXPECT_FALSE(pool.available());
+      std::thread::id extra_id;
+      const auto extra = pool.submit(record, &extra_id);
+      EXPECT_FALSE(extra);
+      if (extra) {
+        EXPECT_FALSE(pool.finish(extra));
+      }
+      std::set<std::thread::id> used;
+      for (unsigned i = 0; i != capacity; ++i)
+        if (tickets[i]) {
+          EXPECT_FALSE(pool.finish(tickets[i]));
+          used.insert(ids[i]);
+        }
+      EXPECT_EQ(used.size(), capacity);
+      EXPECT_EQ(pool.available(), capacity != 0);
+    }
   }
 }
 

@@ -12,9 +12,10 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-#include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -102,22 +103,23 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
        ddaLL128AgSlotWords(bankSize, nRanks));
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllGatherFabricLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
     break;
   case 8:
-    dda::common::ddaAllGatherFabricLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
     break;
   default:
-    dda::common::ddaAllGatherFabricLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perRankBytes,
-                                   comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
     break;
   }
 
@@ -160,7 +162,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if ((reinterpret_cast<uintptr_t>(sendbuff) % 16) != 0 || (reinterpret_cast<uintptr_t>(recvbuff) % 16) != 0) {
     return false;
   }
-  if (perRankBytes * (size_t)comm->nRanks > (size_t)rcclParamDdaLL128Threshold()) {
+  if (perRankBytes * (size_t)comm->nRanks > rcclDdaLL128Threshold(comm, ncclFuncAllGather)) {
     return false;
   }
   // Derived from the scratch allocation

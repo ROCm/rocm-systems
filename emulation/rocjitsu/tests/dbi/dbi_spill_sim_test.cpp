@@ -171,7 +171,7 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), load.begin(), load.end());
+    auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue scratch load (the restore) not found";
     for (size_t i = 0; i < load.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
@@ -298,7 +298,7 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), readlane.begin(), readlane.end());
+    auto it = std::ranges::search(sabotaged, readlane).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue v_readlane (the scalar restore) not found";
     for (size_t i = 0; i < readlane.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
@@ -530,7 +530,7 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), load.begin(), load.end());
+    auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue acc scratch load (the restore) not found";
     for (size_t i = 0; i < load.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
@@ -672,7 +672,7 @@ protected:
 
     std::vector<uint32_t> sabotaged = patched_text_;
     const auto nop_seq = [&](const auto &seq, const char *what) {
-      auto it = std::search(sabotaged.begin(), sabotaged.end(), seq.begin(), seq.end());
+      auto it = std::ranges::search(sabotaged, seq).begin();
       ASSERT_NE(it, sabotaged.end()) << "restore not found: " << what;
       for (size_t i = 0; i < seq.size(); ++i)
         *(it + static_cast<std::ptrdiff_t>(i)) = nop;
@@ -797,9 +797,7 @@ protected:
     // VGPR can only become the bridge via the reuse fallback, so an epilogue readlane pulling
     // s8 out of v0 proves the reused-bridge path was taken.
     const auto readlane = build_v_readlane_b32(kSpilledSgpr, /*bridge=*/0, /*lane=*/0, a_.arch);
-    EXPECT_NE(
-        std::search(patched_text_.begin(), patched_text_.end(), readlane.begin(), readlane.end()),
-        patched_text_.end())
+    EXPECT_NE(std::ranges::search(patched_text_, readlane).begin(), patched_text_.end())
         << "SGPR bridge is not the reused spilled v0";
     test::DbiSim sim(a_.sim_arch, a_.wave_size);
     const std::vector<uint32_t> v0 =
@@ -1119,7 +1117,7 @@ protected:
                                             scalar_inline_neg_one(a_.base.arch), a_.base.arch);
     // The in-flight-load drain now sits at the envelope top, not in the spill
     // prologue, so the store's immediately preceding word is the EXEC=-1 toggle.
-    auto it = std::search(patched_text_.begin(), patched_text_.end(), store.begin(), store.end());
+    auto it = std::ranges::search(patched_text_, store).begin();
     ASSERT_NE(it, patched_text_.end()) << "spill scratch_store not found";
     const size_t store_idx = static_cast<size_t>(it - patched_text_.begin());
     ASSERT_GE(store_idx, 1u);

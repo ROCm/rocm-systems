@@ -61,7 +61,7 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-project(amd-dbgapi VERSION 0.80.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
+project(amd-dbgapi VERSION 0.82.1 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -365,6 +365,7 @@ add_library(
     src/agent.cpp
     src/architecture.cpp
     src/callbacks.cpp
+    src/cluster.cpp
     src/code_object.cpp
     src/debug.cpp
     src/dispatch.cpp

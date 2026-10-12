@@ -206,10 +206,12 @@ typedef struct amdf_api_t {
   /// No device is implicitly activated and no access is deferred to first use.
   ///
   /// Registered pages remain caller-owned and backed by the same live pages
-  /// through successful memory release. If they came from a host mapping, that
-  /// mapping and its backing must also remain live. Construction performs no
-  /// command inspection, queue submission or device-wide synchronization.
-  /// Failure leaves out_memory unchanged and creates no public cleanup owner.
+  /// through memory release. A native release failure can leave registrations
+  /// live and does not permit recycling those pages. If they came from a host
+  /// mapping, that mapping and its backing obey the same requirement.
+  /// Construction performs no command inspection, queue submission or
+  /// device-wide synchronization. Failure leaves out_memory unchanged and
+  /// creates no public cleanup owner.
   amdf_status_t(AMDF_CALL* memory_create)(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* create_info,
       amdf_memory_t** out_memory);
@@ -308,7 +310,7 @@ typedef struct amdf_api_t {
 
   /// Copies immutable properties of one live host mapping.
   ///
-  /// The copied pointer is borrowed until `host_mapping_destroy` succeeds. Its
+  /// The copied pointer is borrowed until `host_mapping_destroy` is called. Its
   /// flush and invalidate recipes describe available CPU cache operations,
   /// not requirements relative to one attached device. A device's
   /// HOST_COHERENT access can make those operations unnecessary for that
@@ -342,19 +344,31 @@ typedef struct amdf_api_t {
 
   /// Destroys one mapping after all host access to its pointer has stopped.
   ///
-  /// The caller must have exclusive access. Failure leaves the mapping live so
-  /// destruction can be retried. No device wait or cache transition is implied.
+  /// The caller must have exclusive access. A valid mapping is consumed and
+  /// returns OK; NULL returns INVALID_ARGUMENT. The view borrows the memory's
+  /// persistent native mapping, whose unmapping occurs at memory destruction.
+  /// No execution wait or cache transition is implied.
   amdf_status_t(AMDF_CALL* host_mapping_destroy)(amdf_host_mapping_t* mapping);
 
   /// Destroys memory after all host mappings and future device uses are gone.
   ///
-  /// The caller must have exclusive access. Returns `AMDF_STATUS_CODE_BUSY`
-  /// without native mutation while a mapping remains live. Destruction performs
-  /// no implicit device wait or cache transition. A native teardown failure
-  /// leaves the memory live so destruction can be retried.
-  /// Addresses embedded in opaque device work do not create library-visible
-  /// borrows. The caller proves all such accesses have stopped before teardown;
-  /// absence of a BUSY result is not proof of device retirement.
+  /// The caller must have exclusive access and have completed every use,
+  /// including host mappings, queue commands, scratch and opaque device work.
+  /// These are caller preconditions: libamdf neither tracks memory users nor
+  /// diagnoses premature destruction. Violating them is undefined behavior.
+  /// Destruction performs no execution wait or cache transition, but may wait
+  /// for native unmapping or paging cleanup.
+  /// The memory object is consumed even when native release fails. The first
+  /// native error is returned; neither this handle nor its addresses may be
+  /// used again. Each independent consumer receives one release attempt, and
+  /// backing is released only after every consumer succeeds. A failure can leak
+  /// native resources and required backing, without a retained library object
+  /// or later cleanup attempt. Borrowed scopes and devices must outlive this
+  /// call; their destruction does not guarantee reclamation of native residue.
+  /// Registered source storage remains caller-owned. Failed native detach does
+  /// not authorize recycling it: the caller must leave that storage unreclaimed
+  /// through the remaining native lifetime. Failure is observable resource
+  /// loss, not a retryable memory handle or successful source release.
   amdf_status_t(AMDF_CALL* memory_destroy)(amdf_memory_t* memory);
 
   /// Copies immutable properties cached when `queue` was created.
@@ -366,37 +380,43 @@ typedef struct amdf_api_t {
   amdf_status_t(AMDF_CALL* kernel_queue_query_info)(
       amdf_kernel_queue_t* queue, amdf_kernel_queue_info_t* out_info);
 
-  /// Samples retirement and observed terminal state without waiting.
+  /// Reads established retirement and cached terminal state without waiting.
   ///
-  /// The operation may retire completed submissions and release their command
-  /// borrows. It is thread-safe with submission and other status operations. It
-  /// performs no allocation, system call, sleep, or active polling. No
-  /// output is modified when validation fails. ACTIVE means no terminal failure
-  /// has been observed, not that a fresh native health check was performed.
-  /// Rejection and timeout errors do not themselves mark a queue failed. A
-  /// terminal failure remains sticky and is not itself retirement proof.
-  /// Providers without a mapped completion fence report cached progress;
-  /// `kernel_queue_wait`, including a zero-time wait, refreshes that progress.
-  /// This path takes no library lock and performs no lazy initialization. It
-  /// may atomically claim retirement and update a command-memory borrow count;
-  /// those updates can contend, so this is not a wait-free guarantee.
+  /// This is a read-only snapshot, not a native completion check. It does not
+  /// consume command results or retire submissions, even when the native
+  /// completion fence has advanced. Use `kernel_queue_refresh_status` or
+  /// `kernel_queue_wait` to refresh native progress and perform checked
+  /// retirement before reusing command storage. Submission may also reclaim
+  /// completed capacity as specified by its engine; this query never does so.
+  /// The operation is thread-safe with submission and waits. It performs no
+  /// allocation, system call, sleep, active polling, locking, lazy
+  /// initialization or ownership-counter updates. No output is modified when
+  /// validation fails. ACTIVE means no terminal failure has been observed, not
+  /// that a fresh native health check was performed. Rejection and timeout
+  /// errors do not themselves mark a queue failed. A terminal failure remains
+  /// sticky and is not itself retirement proof.
   amdf_status_t(AMDF_CALL* kernel_queue_query_status)(
       amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* out_status);
 
   /// Waits until `submission` retires, a failure is observed, or time expires.
+  /// `submission` must be a completion point returned by this exact queue.
   ///
   /// `timeout_nanoseconds` includes host contention, active polling, and native
-  /// waiting under one deadline. A zero timeout performs one nonblocking native
-  /// poll when progress is not already known. `poll_duration_nanoseconds` is
-  /// clipped to that timeout; zero disables active polling.
-  /// `AMDF_TIMEOUT_INFINITE` requests no deadline. A
-  /// timeout observes but never cancels accepted work or releases its command
-  /// borrows. The operation is thread-safe with submission and status queries.
+  /// waiting under one deadline. A zero timeout attempts checked retirement
+  /// without waiting, including one native poll when progress is not already
+  /// known. It can time out while another caller owns retirement even if native
+  /// execution is complete. `poll_duration_nanoseconds` is clipped to that
+  /// timeout; zero disables active polling.
+  /// `AMDF_TIMEOUT_INFINITE` requests no deadline. A timeout does not itself
+  /// cancel accepted work or permit command storage reuse. The operation is
+  /// thread-safe with submission, status queries and other waits.
   /// A native wait error is returned even if progress concurrently advances;
   /// callers use `kernel_queue_query_status` to determine retirement and
   /// whether a terminal failure was observed before deciding to retry.
-  /// This is the explicit synchronization path. It may query clocks, poll,
-  /// yield, enter native waits and serialize access to a reusable wait event.
+  /// Confirmed native completion permits command-result inspection before
+  /// retirement is published. This explicit synchronization path may query
+  /// clocks, poll, yield, enter native waits and serialize access to a reusable
+  /// wait event.
   /// Contention consumes the same deadline. Queue creation prepares wait
   /// resources; waiting performs no library allocation or lazy resource setup.
   amdf_status_t(AMDF_CALL* kernel_queue_wait)(
@@ -406,9 +426,15 @@ typedef struct amdf_api_t {
   /// Destroys one queue after every accepted submission has retired.
   ///
   /// The caller must have exclusive access. The operation samples progress once
-  /// and returns `AMDF_STATUS_CODE_BUSY` without waiting while work remains. A
-  /// native teardown failure leaves the queue live so destruction can be
-  /// retried.
+  /// and returns API-domain BUSY without waiting or native mutation while work
+  /// remains; the queue stays live. Every other result for a valid queue
+  /// consumes the handle, including a native cleanup error. Native errors
+  /// retain their domains: a native busy error is not the API-domain
+  /// precondition rejection. Failed cleanup preserves unreleased native
+  /// resources and required backing as leaks, without a retained library owner
+  /// or later cleanup attempt. It does not authorize reuse of caller-owned
+  /// command or data storage without independent completion evidence. The
+  /// device must outlive this call.
   amdf_status_t(AMDF_CALL* kernel_queue_destroy)(amdf_kernel_queue_t* queue);
 
   /// Copies immutable properties cached when `queue` was created.
@@ -480,9 +506,15 @@ typedef struct amdf_api_t {
   /// published work has been consumed.
   ///
   /// The caller must have exclusive access. The operation returns BUSY without
-  /// native mutation while a mapping or unconsumed publication remains. A
-  /// native teardown failure leaves the queue live so destruction can be
-  /// retried.
+  /// native mutation while a mapping or unconsumed publication remains. This
+  /// API-domain rejection leaves the queue live. Every other result for a valid
+  /// queue consumes the handle, including a native cleanup error. Native errors
+  /// retain their domains: a native busy error is not a precondition rejection.
+  /// Failed cleanup preserves unreleased native resources and required backing
+  /// as leaks, without a retained library owner or later cleanup attempt.
+  /// Packet consumption alone is not execution completion. Failed queue removal
+  /// does not permit reuse of caller-owned scratch, commands or data without
+  /// independent completion evidence. The device must outlive this call.
   amdf_status_t(AMDF_CALL* user_queue_destroy)(amdf_user_queue_t* queue);
 
   /// Returns the stable base address consumed by `kind` for `memory`.
@@ -505,6 +537,99 @@ typedef struct amdf_api_t {
   amdf_status_t(AMDF_CALL* memory_query_address)(
       amdf_memory_t* memory, uint32_t access_ordinal,
       amdf_memory_address_kind_t kind, uint64_t* out_address);
+
+  /// Qualifies visibility before allocating backing or creating host views.
+  ///
+  /// Success supplies sufficient release/acquire recipes for every successful
+  /// construction with the same scope, profile, backing requirements, complete
+  /// live consumer set and registration cache class. Host sites require
+  /// HOST_VISIBLE in required_flags. Views must provide the declared
+  /// permissions. Allocation size, addresses and host-view ranges may vary
+  /// within the profile; callers still satisfy each transition's range and
+  /// execution requirements. This describes access to one shared backing, not
+  /// transfers between distinct allocations. Ordering and completion remain
+  /// separate caller obligations.
+  ///
+  /// Devices and the scope remain live while the result is used. No backing,
+  /// mapping, handle or plan is retained. The exact queue family owns QUEUE
+  /// operations; HOST_DIRECT uses each actual view's pointer and range, and
+  /// HOST_API uses its actual host_mapping handle. A queue answer does not
+  /// qualify PROGRAM execution. Unknown native/exporter protocols, unsupported
+  /// permissions and unqualified sites return UNSUPPORTED, never a no-op.
+  /// Foreign import host visibility may be unqualified even when device access
+  /// and memory_map are available. Imports are not admitted to a host
+  /// visibility contract by borrowing an allocation profile's answer.
+  ///
+  /// Import qualification additionally fixes the exact external transport type
+  /// and provenance supplied at construction. Opaque payloads preserve their
+  /// exporter-provided interpretation; changing the tag does not qualify a
+  /// foreign payload.
+  ///
+  /// This thread-safe cold metadata query uses the same native selection and
+  /// visibility policy as construction and concrete pair queries. It performs
+  /// no native operation, mapping, synchronization or device activation.
+  /// Temporary host storage scales with the live consumer set. Success is not a
+  /// resource reservation. Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* memory_scope_query_pair_info)(
+      amdf_memory_scope_t* scope, const amdf_memory_profile_pair_query_t* query,
+      amdf_memory_pair_info_t* out_info);
+
+  /// Refreshes native progress and checks available completed command results.
+  ///
+  /// Unlike the read-only status query, this synchronization operation advances
+  /// checked retirement for the completed accepted prefix without waiting for
+  /// a particular submission. Success returns a snapshot in `out_status`,
+  /// including any sticky execution failure in `terminal_status`. Success does
+  /// not mean that every accepted command has completed. Failure returns the
+  /// observation error and leaves `out_status` unchanged; independently checked
+  /// progress remains available through `kernel_queue_query_status`.
+  ///
+  /// The operation is thread-safe with submission, queries, refreshes and
+  /// waits. If another caller owns result consumption, it returns the
+  /// established frontier without waiting for that caller. It performs no host
+  /// allocation, resource creation, lazy initialization, sleep or active
+  /// polling. Native observation may require nonblocking system calls. Result
+  /// inspection is proportional to newly completed commands, not configured
+  /// queue capacity.
+  amdf_status_t(AMDF_CALL* kernel_queue_refresh_status)(
+      amdf_kernel_queue_t* queue, amdf_kernel_queue_status_t* out_status);
+
+  /// Requests one native-progress wake for an already-accepted queue point.
+  ///
+  /// `submission` must have been returned by this exact queue. `event` borrows
+  /// a caller-owned destination of a type reported in notification_types.
+  /// An unsupported type returns UNSUPPORTED. Invalid descriptor tags, payload
+  /// shapes, reserved fields or point zero return INVALID_ARGUMENT; an
+  /// unaccepted point returns OUT_OF_RANGE. Native registration errors retain
+  /// their native status domain.
+  ///
+  /// This is one-shot, not a subscription. Repeating a request adds a fresh
+  /// wake obligation; it does not replace or cancel an earlier request. An
+  /// already-checked point signals immediately, even after packet-slot reuse.
+  /// Delivery may precede return. Notifications may coalesce and contain no
+  /// completion value. A wake is an opportunity to refresh checked status,
+  /// not proof of successful execution or permission to reuse storage. A
+  /// provider may emit an immediate recheck hint if a concurrent caller owns
+  /// native fence capture; no checked progress is implied by that hint.
+  ///
+  /// The caller prepares event-loop ownership before requesting a wake and
+  /// keeps the native event live through delivery. Cancelling an event-loop
+  /// callback does not cancel native notifications or device execution. A
+  /// request error never rejects, replays or retires the accepted submission.
+  /// Existing checked progress and synchronous waits remain independently
+  /// usable. Normal teardown reconciles outstanding native notifications
+  /// before releasing the event and queue.
+  ///
+  /// The operation is thread-safe with submission, queries, refreshes and
+  /// waits. It consumes no command results, stores no event descriptor, and
+  /// creates no libamdf observer or subscription. It performs no library
+  /// allocation, locking, lazy initialization, polling, sleep or execution
+  /// wait. Native registration/signaling calls are explicit costs and may
+  /// allocate native callback state. Library submission paths never arm
+  /// notifications implicitly.
+  amdf_status_t(AMDF_CALL* kernel_queue_request_notification)(
+      amdf_kernel_queue_t* queue, uint64_t submission,
+      const amdf_native_event_t* event);
 } amdf_api_t;
 
 /// Function type used to acquire the immutable API table.

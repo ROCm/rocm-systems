@@ -35,6 +35,7 @@ struct DdaFabricMockComm
         // with an exact small value when exercising scratch-size rejection.
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
+        comm.archName            = const_cast<char*>("gfx1250");
         setFabricResourcesPresent(true);
     }
 

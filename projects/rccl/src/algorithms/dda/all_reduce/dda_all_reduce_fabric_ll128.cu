@@ -16,8 +16,10 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -100,22 +102,23 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   INFO(NCCL_COLL, "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u", nRanks, bytes,
        numLines, grid.x, block.x);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllReduceFlatLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   case 8:
-    dda::common::ddaAllReduceFlatLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   default:
-    dda::common::ddaAllReduceFlatLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), count, comm->rank,
-                                   nRanks, epochDev, epochLen, slotStrideLines);
+    hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
     break;
   }
 
@@ -157,9 +160,10 @@ bool ncclAllReduceDdaFabricLL128Eligible_old(ncclComm* comm, const void* sendbuf
   if (bytes % 8 != 0) {
     return false;
   }
-  // Use the runtime LL128 threshold (RCCL_DDA_LL128_THRESHOLD) as the cap.
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  if (ll128Thresh <= 0 || bytes > (size_t)ll128Thresh) {
+  // Cap by the resolved LL128 threshold (RCCL_DDA_LL128_THRESHOLD, else this
+  // arch's table, else the built-in default).
+  const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  if (ll128Thresh == 0 || bytes > ll128Thresh) {
     return false;
   }
   // Scratch is sized from the actual message (compact per-call slot stride), so

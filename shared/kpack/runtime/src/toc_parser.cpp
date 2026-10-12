@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <msgpack.hpp>
+#include <new>
 #include <vector>
 
 #include "kpack_internal.h"
@@ -24,7 +25,7 @@ static msgpack::object* find_key(const msgpack::object_map& map,
 }
 
 kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
-                        kpack_archive* archive) {
+                        kpack_archive* archive) try {
   // Validate TOC offset is within file bounds
   if (toc_offset >= file_size) {
     return KPACK_ERROR_INVALID_FORMAT;
@@ -43,12 +44,7 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   }
 
   // Unpack MessagePack
-  msgpack::object_handle oh;
-  try {
-    oh = msgpack::unpack(toc_buf.data(), toc_buf.size());
-  } catch (...) {
-    return KPACK_ERROR_MSGPACK_PARSE_FAILED;
-  }
+  msgpack::object_handle oh = msgpack::unpack(toc_buf.data(), toc_buf.size());
 
   msgpack::object obj = oh.get();
   if (obj.type != msgpack::type::MAP) {
@@ -145,6 +141,10 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
   }
 
   return KPACK_SUCCESS;
+} catch (const std::bad_alloc&) {
+  return KPACK_ERROR_OUT_OF_MEMORY;
+} catch (...) {
+  return KPACK_ERROR_MSGPACK_PARSE_FAILED;
 }
 
 }  // namespace kpack

@@ -53,6 +53,9 @@ extern std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindo
 extern std::function<ncclResult_t(void*, void*, int)> g_devrBootstrapAllGather;
 extern std::function<ncclResult_t(void*, int*, int, int, int)> g_devrBootstrapIntraNodeBarrier;
 extern std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBootstrapIntraNodeAllGather;
+// (commState, peer, tag, data, size) of bootstrapSend / bootstrapRecv.
+extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend;
+extern std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv;
 
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS],
                                   ncclGinWindow_t[NCCL_GIN_MAX_CONNECTIONS], int, bool, int)>
@@ -83,7 +86,6 @@ extern std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft;
 extern std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem;
 extern std::function<int(struct ncclComm*)> g_devrComputeCftSize;
 extern std::function<int(struct ncclComm*)> g_devrComputeCftMcSize;
-extern std::function<bool(struct ncclComm*)> g_devrRmaProxyEnabled;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_devrRmaProxyConnectOnce;
 extern std::function<ncclResult_t(struct ncclComm*, void*, size_t, void*[NCCL_GIN_MAX_CONNECTIONS])>

@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mimg.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -68,7 +69,9 @@ void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  amdgpu::execute_image_resource_info(wf, inst_.srsrc * 4, inst_.vaddr,
+                                      wf.vgpr_alloc().base + 0u + inst_.vdata, inst_.dmask,
+                                      inst_.r128, inst_.a16);
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {

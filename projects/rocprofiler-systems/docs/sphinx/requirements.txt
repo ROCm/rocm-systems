@@ -197,7 +197,7 @@ pygments==2.20.0
     #   sphinx
 pyjson5==1.6.7
     # via doxysphinx
-pyjwt[crypto]==2.13.0
+pyjwt[crypto]==2.15.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -227,8 +227,9 @@ referencing==0.36.1
 requests==2.33.0
     # via
     #   pygithub
+    #   rocm-docs-core
     #   sphinx
-rocm-docs-core[api-reference,llms]==1.40.2
+rocm-docs-core[api-reference,llms]==1.41.0
     # via -r requirements.in
 rpds-py==0.22.3
     # via

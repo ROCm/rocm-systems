@@ -21,6 +21,7 @@
 # Environment variables:
 #   ROCM_PATH            Required ROCm installation root
 #   ROCJITSU_SOURCE_DIR  Required rocjitsu source directory
+#   ROCJITSU_CPU_THREAD_BUDGET  Execution threads per simulator (default: 0, auto)
 #
 # Outputs:
 #   .pytest-artifacts/<target>/           Corpus harness logs and artifacts
@@ -31,6 +32,12 @@ set -euo pipefail
 
 : "${ROCM_PATH:?ROCM_PATH must be set}"
 : "${ROCJITSU_SOURCE_DIR:?ROCJITSU_SOURCE_DIR must be set}"
+
+cpu_thread_budget="${ROCJITSU_CPU_THREAD_BUDGET:-0}"
+if [[ ! "${cpu_thread_budget}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "ROCJITSU_CPU_THREAD_BUDGET requires a nonnegative integer" >&2
+  exit 1
+fi
 
 worker_count=8
 soft_timeout_seconds=30
@@ -152,7 +159,6 @@ run_wrapper_prefix=(
   env
   -u LD_PRELOAD
   -u HSA_HOTSWAP_ENABLE
-  "HSA_HOTSWAP_DISABLE=1"
 )
 
 if ! rocjitsu_launcher="$(command -v rocjitsu)"; then
@@ -204,7 +210,8 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
   # does not construct the expected shared-runtime/interposer preload order.
   preflight_config="${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
   "${run_wrapper_prefix[@]}" \
-    "${rocjitsu_launcher}" --config "${preflight_config}" -- \
+    "${rocjitsu_launcher}" --config "${preflight_config}" \
+    --cpu-thread-budget "${cpu_thread_budget}" -- \
     "${child_command_prefix[@]}" true
 fi
 
@@ -228,6 +235,7 @@ run_pytest() {
     timeout --foreground --signal=TERM --kill-after=5s "${timeout_seconds}s"
     "${rocjitsu_launcher}"
     --config "${config_path}"
+    --cpu-thread-budget "${cpu_thread_budget}"
     --
     "${child_command_prefix[@]}"
   )

@@ -108,15 +108,9 @@ bool Device::FreeMemory(amd::Memory* memory, Stream* stream, Event* event, bool 
 
 // ================================================================================================
 void Device::ReleaseFreedMemory() {
-  std::vector<MemoryPool*> pools;
-  {
-    std::scoped_lock lock(lock_);
-    pools.assign(mem_pools_.begin(), mem_pools_.end());
-    for (auto* pool : pools) pool->retain();
-  }
-  for (auto* pool : pools) {
+  std::scoped_lock lock(lock_);
+  for (auto* pool : mem_pools_) {
     pool->ReleaseFreedMemory();
-    pool->release();
   }
 }
 
@@ -811,9 +805,11 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_t* props, int device) {
   // Mapping HIP array
   deviceProps.deferredMappingHipArraySupported = 0;
   // RDMA options
-  deviceProps.gpuDirectRDMASupported = 0;
-  deviceProps.gpuDirectRDMAFlushWritesOptions = 0;
-  deviceProps.gpuDirectRDMAWritesOrdering = 0;
+  deviceProps.gpuDirectRDMASupported = (info.dmabufSupported_ && info.largeBar_) ? 1 : 0;
+  // Set option if we have a HDP register
+  deviceProps.gpuDirectRDMAFlushWritesOptions =
+      hip::ihipRdmaFlushWritesOptions(info.hdpMemFlushCntl);
+  deviceProps.gpuDirectRDMAWritesOrdering = hip::ihipRdmaWritesOrdering();
   // The LUID is a Windows/DXGI adapter concept; the backend reports a zero LUID
   // and zero node mask on platforms without a WDDM adapter.
   *reinterpret_cast<uint32_t*>(&deviceProps.luid[0]) = info.luidLowPart_;

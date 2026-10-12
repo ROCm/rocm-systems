@@ -92,6 +92,7 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, in
 // Find CPU affinity
 ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncclAffinity* affinity);
 
+#define NCCL_TOPO_CPU_ARCH_UNDEF 0
 #define NCCL_TOPO_CPU_ARCH_X86 1
 #define NCCL_TOPO_CPU_ARCH_POWER 2
 #define NCCL_TOPO_CPU_ARCH_ARM 3
@@ -244,4 +245,5 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
 ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm, int protocol, size_t nBytes,
                                  int numPipeOps, float* time);
 int rcclGetTuningIndexForArch(const char* gfxarch);
+#include "rccl_arch_thresholds.h"
 #endif

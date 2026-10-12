@@ -19,9 +19,7 @@
 #include <string>
 #include <sys/types.h>
 
-namespace rocprofsys
-{
-namespace perf
+namespace rocprofsys::perf
 {
 struct perf_event
 {
@@ -187,5 +185,4 @@ private:
 /// provides thread-local instance of perf_event
 std::unique_ptr<perf_event>&
 get_instance(std::int64_t _tid);
-}  // namespace perf
-}  // namespace rocprofsys
+}  // namespace rocprofsys::perf

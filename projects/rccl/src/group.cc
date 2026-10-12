@@ -285,7 +285,7 @@ ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
       case NCCL_ALGO_PAT:
         {
           NCCLCHECK(ncclTransportPatConnect(comm));
-          if (comm->localRanks > 1 && comm->nvlsSupport) {
+          if (comm->localRanks > 1 && ncclNvlsTransportEnabled(comm)) {
             NCCLCHECK(ncclNvlsBufferSetup(comm));
           }
           break;
@@ -305,7 +305,7 @@ ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {
 ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPrepareTasksAndCollPreconnectJob* job = (ncclPrepareTasksAndCollPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
-  bool needConnect;
+  bool needConnect = false;
   bool algoNeedConnect[NCCL_NUM_ALGORITHMS];
   memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
   CUDACHECK(cudaSetDevice(comm->cudaDev));
@@ -434,6 +434,11 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
     struct ncclCeInitTask* task = ncclIntruQueueDequeue(&comm->ceInitTaskQueue);
     NCCLCHECKGOTO(ncclCeInit(task->comm), ret, fail);
     free(task);
+  }
+
+  if (comm->ceColl.stagingPending) {
+    comm->ceColl.stagingPending = false;
+    NCCLCHECKGOTO(ncclCeEnsureAllReduceStaging(comm), ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
@@ -687,6 +692,8 @@ static void groupCleanup(struct ncclComm** groupCommHeadPtr,
           struct ncclAsyncJob* task = ncclIntruQueueDequeue(&comm->mgmtTaskQueue);
           if (task->destructor) task->destructor((void*)task);
         }
+      } else if (type == ncclGroupTaskTypeSymRegister) {
+        comm->ceColl.stagingPending = false;  // its CE task was just dropped with the planner
       }
       if (!comm->config.blocking) (void)ncclCommSetAsyncError(comm, error);
       comm = next;
@@ -802,7 +809,12 @@ static void ncclGroupSymmetricJobFree(void* _job) {
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  if (ncclParamSingleProcMemRegEnable()) {
+  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
+  // When this process owns multiple ranks, prepare them concurrently so the
+  // first rank cannot block before its sibling ranks enter the same consensus.
+  bool const needsConcurrentSymmetricPrepare =
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+  if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
     job->base.func = ncclPrepareTasksAndCollPreconnectFunc;
@@ -1009,6 +1021,16 @@ fail:
   goto exit;
 }
 
+// Preparation-job errors abort communicators. Validate launch-completion-event
+// usage first so invalid usage is returned without aborting the communicator.
+static ncclResult_t groupValidateLaunchCompletionEvents(struct ncclComm* comm) {
+  while (comm != nullptr) {
+    NCCLCHECK(ncclValidateCollConfigLaunchCompletionEvents(comm));
+    comm = comm->groupNext[ncclGroupTaskTypeRawTask];
+  }
+  return ncclSuccess;
+}
+
 static ncclResult_t groupLaunchEnqueueRearch(struct ncclAsyncJob* job_, ncclSimInfo_t* simInfo = NULL) {
   ncclResult_t ret = ncclSuccess;
   struct ncclGroupJob* gjob = (struct ncclGroupJob*)job_;
@@ -1024,6 +1046,9 @@ static ncclResult_t groupLaunchEnqueueRearch(struct ncclAsyncJob* job_, ncclSimI
   ncclIntruQueueConstruct(&asyncMgmtTaskJobs);
   ncclIntruQueueConstruct(&asyncPrepareJobs);
   ncclIntruQueueConstruct(&asyncScheduleJobs);
+
+  NCCLCHECKGOTO(groupValidateLaunchCompletionEvents(groupCommHeadMain[ncclGroupTaskTypeRawTask]), ret, fail);
+
   // launch management tasks
   cliqueHead = groupCommHeadMain[ncclGroupTaskTypeMgmtTask];
   while (cliqueHead) {

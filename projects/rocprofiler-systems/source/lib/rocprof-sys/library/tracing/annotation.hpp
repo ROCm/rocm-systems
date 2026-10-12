@@ -19,9 +19,7 @@
 
 #include <type_traits>
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 using perfetto_event_context_t = ::perfetto::EventContext;
 
@@ -29,7 +27,7 @@ template <size_t Idx>
 struct annotation_value_type;
 
 template <size_t Idx>
-using annotation_value_type_t = typename annotation_value_type<Idx>::type;
+using annotation_value_type_t = annotation_value_type<Idx>::type;
 
 #define ROCPROFSYS_DEFINE_ANNOTATION_TYPE(ENUM, TYPE)                                    \
     template <>                                                                          \
@@ -65,11 +63,11 @@ add_perfetto_annotation(perfetto_event_context_t& ctx, Np&& _name, Tp&& _val,
     static_assert(concepts::is_string_type<named_type>::value,
                   "Error! name is not a string type");
 
-    auto _get_dbg = [&]() {
+    auto const _get_dbg = [&]() {
         auto* _dbg = ctx.event()->add_debug_annotations();
         if(_idx >= 0)
         {
-            auto _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
+            auto const _arg_name = fmt::format("arg{}-{}", _idx, std::forward<Np>(_name));
             _dbg->set_name(_arg_name);
         }
         else
@@ -138,7 +136,9 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     // the name to a null pointer, type to none, or value to a null pointer
     if(_annotation.name == nullptr || _annotation.type == 0 ||
        _annotation.value == nullptr)
+    {
         return;
+    }
 
     if(_annotation.type == Idx)
     {
@@ -152,7 +152,7 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         }
         else
         {
-            auto* _value = reinterpret_cast<type*>(_annotation.value);
+            auto const* _value = reinterpret_cast<type*>(_annotation.value);
             add_perfetto_annotation(ctx, _annotation.name, *_value);
         }
     }
@@ -161,8 +161,8 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
         // the first "iteration": check whether annotation type has valid range
         if constexpr(Idx == ROCPROFSYS_VALUE_NONE + 1)
         {
-            if(!(_annotation.type > ROCPROFSYS_VALUE_NONE &&
-                 _annotation.type < ROCPROFSYS_VALUE_LAST))
+            if(_annotation.type <= ROCPROFSYS_VALUE_NONE ||
+               _annotation.type >= ROCPROFSYS_VALUE_LAST)
             {
                 LOG_CRITICAL("Annotation '{}' has an invalid type designation "
                              "{} which is outside of acceptable range [{}, {}]",
@@ -188,14 +188,11 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
 void
 add_perfetto_annotation(perfetto_event_context_t&      ctx,
                         const rocprofsys_annotation_t& _annotation);
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing
 
 #include <timemory/operations/types/annotate.hpp>
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 using perfetto_event_context_t = ::rocprofsys::tracing::perfetto_event_context_t;
 
@@ -210,7 +207,7 @@ struct annotate<perfetto_event_context_t, Tp>
         }
         else
         {
-            using value_type = typename Tp::value_type;
+            using value_type = Tp::value_type;
             if constexpr(!std::is_void_v<value_type>)
             {
                 auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
@@ -233,20 +230,20 @@ private:
                                                                         obj.get()))
     {
         static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
-        auto _labels = obj.label_array();
-        auto _data   = obj.get();
-        auto _size   = std::min<size_t>(_labels.size(), _data.size());
+        auto const _labels = obj.label_array();
+        auto const _data   = obj.get();
+        auto const _size   = std::min<size_t>(_labels.size(), _data.size());
         return std::make_tuple(_size, _labels, _data);
     }
 
     template <typename T, typename DataT>
     static auto sfinae_data(T& obj, long)
     {
-        using strvec_t    = std::vector<std::string>;
-        using datavec_t   = std::vector<DataT>;
-        size_t    _size   = 1;
-        strvec_t  _labels = { obj.get_label() };
-        datavec_t _data   = { obj.get() };
+        using strvec_t          = std::vector<std::string>;
+        using datavec_t         = std::vector<DataT>;
+        size_t const    _size   = 1;
+        strvec_t const  _labels = { obj.get_label() };
+        datavec_t const _data   = { obj.get() };
         return std::tuple<size_t, strvec_t, datavec_t>{ _size, _labels, _data };
     }
 };
@@ -261,5 +258,4 @@ struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
         return base_type::operator()(obj, _ctx);
     }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation

@@ -26,6 +26,9 @@
  *   P6  - PutToSelf:              PUT to own window (peer=self loopback)
  *   W3  - DoubleDeregister:       ncclCommWindowDeregister twice on same handle
  *   W4  - DestroyCommWithoutDeregister: window auto-freed during commFree
+ *   R1  - RmaDisableIntraNodePutUsesCe: NCCL_RMA_DISABLE=1 leaves LSA puts working
+ *   R2  - RmaDisableCrossNodePutFails:  NCCL_RMA_DISABLE=1 fails non-LSA put/wait,
+ *                                       without hanging or poisoning the comm
  *
  * Constraints (proxy GIN path, current API limits):
  *   sigIdx = 0, ctx = 0, flags = 0, winFlags = winMode()
@@ -152,6 +155,14 @@ inline int winMode()
                                                               : NCCL_WIN_DEFAULT;
     }
     return mode;
+}
+
+// NCCL_RMA_DISABLE is an NCCL_PARAM, cached for the process on first read, so a
+// test cannot set it itself; the runner config does, and R1/R2 skip without it.
+inline bool rmaDisableSet()
+{
+    const char* e = getenv("NCCL_RMA_DISABLE");
+    return e && atoi(e) != 0;
 }
 
 // Calibrate how many clock64() cycles approximate targetMs of GPU busy wait.
@@ -1999,6 +2010,143 @@ TEST_F(HostApiTest, WindowRegisterInvalidArgsNullWindow)
     }
 
     TEST_INFO("W5 rank %d: WindowRegisterInvalidArgsNullWindow passed.", myRank);
+}
+
+// ============================================================================
+// R1 — RmaDisableIntraNodePutUsesCe
+// ============================================================================
+
+/**
+ * @test HostApiTest.RmaDisableIntraNodePutUsesCe
+ * @brief NCCL_RMA_DISABLE only turns off the network (proxy) path. Peers in the
+ *        LSA team are served by the copy engine, so a single-node put/wait still
+ *        delivers the data.
+ */
+TEST_F(HostApiTest, RmaDisableIntraNodePutUsesCe)
+{
+    if(!rmaDisableSet())
+    {
+        GTEST_SKIP() << "Run with NCCL_RMA_DISABLE=1";
+    }
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/1, kRequireSingleNode))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes on a single node";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t putRes = ncclSuccess;
+    if(myRank == 0)
+    {
+        void* srcBuf = static_cast<uint8_t*>(winBuf) + kSendOffset;
+        FillBuf(srcBuf, kTransferSize, /*senderRank=*/0);
+        putRes = ncclPutSignal(
+            srcBuf, kTransferSize, ncclUint8,
+            /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+            kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, putRes);
+
+    ncclResult_t waitRes = ncclSuccess;
+    if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        waitRes = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, waitRes);
+
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    bool ok = (myRank != 1) ||
+              VerifyBuf(static_cast<const uint8_t*>(winBuf) + kRecvOffset, kTransferSize, /*seed=*/0);
+    ASSERT_MPI_TRUE(ok);
+
+    TEST_INFO("R1 rank %d: RmaDisableIntraNodePutUsesCe passed.", myRank);
+}
+
+// ============================================================================
+// R2 — RmaDisableCrossNodePutFails
+// ============================================================================
+
+/**
+ * @test HostApiTest.RmaDisableCrossNodePutFails
+ * @brief With NCCL_RMA_DISABLE=1 a peer on another node has no path, so both
+ *        ends must fail with ncclInvalidUsage rather than hang or move data.
+ *
+ * Window registration must still succeed, on both the symmetric and the
+ * non-symmetric (NCCL_CUMEM_ENABLE=0) path, and must not bring the RMA proxy
+ * up. The put and the wait then fail locally: the launch used to connect the
+ * proxy lazily, and that connect is a comm-wide all-gather reached from one
+ * rank's put, so it deadlocked. A trailing allreduce shows the failure left
+ * the communicator usable.
+ */
+TEST_F(HostApiTest, RmaDisableCrossNodePutFails)
+{
+    if(!rmaDisableSet())
+    {
+        GTEST_SKIP() << "Run with NCCL_RMA_DISABLE=1";
+    }
+    if(!validateTestPrerequisites(/*min=*/2, /*max=*/2, kNoPowerOfTwoRequired,
+                                  /*min_nodes=*/2, /*max_nodes=*/2))
+    {
+        GTEST_SKIP() << "Need exactly 2 MPI processes on 2 nodes";
+    }
+
+    const int   myRank = rank();
+    ncclComm_t  comm   = getActiveCommunicator();
+    hipStream_t stream = getActiveStream();
+
+    void* winBuf = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, allocFineGrainBuffer(&winBuf, kOneMB));
+    auto winBufGuard = makeScopeGuard([&]() { freeFineGrainBuffer(winBuf); });
+
+    ncclWindow_t win = nullptr;
+    NcclWindowGuard wg(comm, winBuf, kOneMB, &win, winMode());
+
+    ASSERT_MPI_NE(win, nullptr);
+    ASSERT_MPI_EQ(ncclSuccess, wg.initResult());
+
+    ncclResult_t res = ncclInvalidUsage;
+    if(myRank == 0)
+    {
+        res = ncclPutSignal(
+            static_cast<uint8_t*>(winBuf) + kSendOffset, kTransferSize, ncclUint8,
+            /*peer=*/1, win, /*peerWinOffset=*/kRecvOffset,
+            kSigIdx, kCtx, kFlags, comm, stream);
+    }
+    else if(myRank == 1)
+    {
+        ncclWaitSignalDesc_t desc{/*opCnt=*/1, /*peer=*/0, kSigIdx, kCtx};
+        res = ncclWaitSignal(/*nDesc=*/1, &desc, comm, stream);
+    }
+    ASSERT_MPI_EQ(ncclInvalidUsage, res);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    int* devVal = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&devVal, sizeof(int)));
+    auto devValGuard = makeScopeGuard([&]() { (void)hipFree(devVal); });
+    const int one = 1;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(devVal, &one, sizeof(int), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(devVal, devVal, 1, ncclInt32, ncclSum, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    int sum = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&sum, devVal, sizeof(int), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(nRanks(), sum);
+
+    TEST_INFO("R2 rank %d: RmaDisableCrossNodePutFails passed.", myRank);
 }
 
 } // namespace RcclUnitTesting

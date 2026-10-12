@@ -106,6 +106,10 @@ fail:
 }
 
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
+  if (!comm) {
+    return ncclSuccess;
+  }
+
   ncclResult_t ret = ncclSuccess;
 
   // Clean up rmaCeInitTaskQueue
@@ -116,37 +120,40 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
 
   // Destroy CE stream and event
   if (comm->rmaState.rmaCeState.ceStream != NULL) {
-    CUDACHECKGOTO(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream), ret, fail);
+    CUDACHECKIGNORE(cudaStreamDestroy(comm->rmaState.rmaCeState.ceStream));
     comm->rmaState.rmaCeState.ceStream = NULL;
   }
 
   if (comm->rmaState.rmaCeState.ceEvent != NULL) {
-    CUDACHECKGOTO(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent), ret, fail);
+    CUDACHECKIGNORE(cudaEventDestroy(comm->rmaState.rmaCeState.ceEvent));
     comm->rmaState.rmaCeState.ceEvent = NULL;
   }
 
-  for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
-    struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+  if (comm->rmaState.rmaCeState.rmaCeCtxs != nullptr) {
+    for (int i = 0; i < comm->rmaState.rmaCeState.rmaCeCtxCount; i++) {
+      struct ncclRmaCeCtx* ceCtx = (struct ncclRmaCeCtx*)comm->rmaState.rmaCeState.rmaCeCtxs[i];
+      if (ceCtx == nullptr) continue;
 
-    // Free per-rank operation sequence counters
-    if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
-    if (ceCtx->signalOpSeqsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret, fail);
+      // Free per-rank operation sequence counters
+      if (ceCtx->signalOpSeqs) free(ceCtx->signalOpSeqs);
+      if (ceCtx->signalOpSeqsDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalOpSeqsDev, comm->memManager), ret);
 
-    // Free host signals buffer
-    if (ceCtx->signalsHost) free(ceCtx->signalsHost);
+      // Free host signals buffer
+      if (ceCtx->signalsHost) free(ceCtx->signalsHost);
 
-    // Free device-resident constants
-    if (ceCtx->signalConstDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret, fail);
+      // Free device-resident constants
+      if (ceCtx->signalConstDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalConstDev, comm->memManager), ret);
 
-    // Deregister and free signal window
-    if (ceCtx->signalsWin) NCCLCHECKGOTO(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret, fail);
+      // Deregister and free signal window
+      if (ceCtx->signalsWin) NCCLCHECKIGNORE(ncclCommWindowDeregister(comm, ceCtx->signalsWin->vidmem), ret);
 
-    // Free signal device memory
-    if (ceCtx->signalsDev) NCCLCHECKGOTO(ncclCudaFree(ceCtx->signalsDev, comm->memManager), ret, fail);
+      // Free signal device memory
+      if (ceCtx->signalsDev) NCCLCHECKIGNORE(ncclCudaFree(ceCtx->signalsDev, comm->memManager), ret);
 
-    // Free the context itself
-    free(ceCtx);
-    comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+      // Free the context itself
+      free(ceCtx);
+      comm->rmaState.rmaCeState.rmaCeCtxs[i] = NULL;
+    }
   }
 
   // Reset the number of contexts and initialized flag
@@ -156,10 +163,7 @@ ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) {
   free(comm->rmaState.rmaCeState.rmaCeCtxs);
   comm->rmaState.rmaCeState.rmaCeCtxs = NULL;
 
-exit:
   return ret;
-fail:
-  goto exit;
 }
 
 static ncclResult_t ncclRmaCePutLaunchPersist(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream) {
@@ -269,6 +273,8 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
   CUstreamBatchMemOpParams* seqStageOps = nullptr;
   struct ncclTaskRma* currentTask = nullptr;
   int nActivePeers = 0;
+  int nQueuedPeers = 0;
+  int selfPeer = -1;
 
   if (nRmaTasksCe == 0) goto exit;
 
@@ -287,10 +293,36 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
     ncclIntruQueueEnqueue(&peerTaskQueues[peer], task);
   }
 
+  // Arrange independent peer heads in LSA-relative cyclic order. For a dense
+  // all-to-all, every descriptor position then targets a different rank on
+  // every sender, avoiding an application-order-induced destination incast.
+  nQueuedPeers = nActivePeers;
+  nActivePeers = 0;
+  for (int step = 1; step < lsaSize; step++) {
+    int peerLsaRank = (lsaSelf + step) % lsaSize;
+    int peer = comm->devrState.lsaRankList[peerLsaRank];
+    if (!ncclIntruQueueEmpty(&peerTaskQueues[peer])) {
+      activePeers[nActivePeers++] = peer;
+    }
+  }
+  selfPeer = comm->devrState.lsaRankList[lsaSelf];
+  if (!ncclIntruQueueEmpty(&peerTaskQueues[selfPeer])) {
+    activePeers[nActivePeers++] = selfPeer;
+  }
+  if (nActivePeers != nQueuedPeers) {
+    WARN("RMA CE: cyclic peer ordering lost active peers (%d of %d)", nActivePeers, nQueuedPeers);
+    ret = ncclInternalError;
+    goto fail;
+  }
+
   while (nActivePeers > 0) {
     int nNextActivePeers = 0;
     int nSeqStageOps = 0;
+    int nRemotePeers = 0;
+    size_t minRemoteBytes = (size_t)-1;
+    size_t maxRemoteBytes = 0;
     dataParams.numOps = 0;
+    dataParams.chunking = false;
     signalParams.numOps = 0;
 
     for (int i = 0; i < nActivePeers; i++) {
@@ -303,6 +335,11 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
       NCCLCHECKGOTO(ncclDevrWorldToLsaRank(comm, currentTask->peer, &peerLsaRank), ret, fail);
 
       size_t bytes = currentTask->count * ncclTypeSize(currentTask->datatype);
+      if (peer != selfPeer) {
+        nRemotePeers++;
+        minRemoteBytes = std::min(minRemoteBytes, bytes);
+        maxRemoteBytes = std::max(maxRemoteBytes, bytes);
+      }
 
       // Data movement
       if (bytes > 0) {
@@ -360,6 +397,10 @@ static ncclResult_t ncclRmaCePutLaunchNonPersist(struct ncclComm* comm, struct n
         activePeers[nNextActivePeers++] = peer;
       }
     }
+
+    // Only dense heterogeneous RMA data batches request CE chunking. The CE
+    // launcher owns the chunk size and round-robin wave construction.
+    dataParams.chunking = nRemotePeers > 0 && (nRemotePeers == lsaSize - 1) && minRemoteBytes != maxRemoteBytes;
 
     // Issue batches in stream order. Staging writes must precede the memcpy
     // batch because signal mem copies read the staged sequence slots.
