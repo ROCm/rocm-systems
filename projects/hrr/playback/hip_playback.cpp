@@ -2877,9 +2877,47 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 // hipMallocHost:  ret(4) ptr(8) size(8)
 
+// An archive can record a host allocation again at an address that still holds
+// one: a second pass replays the same events, and a crafted archive can repeat
+// the address without a free. The entry being replaced keeps a live pinned
+// buffer, so free it, and give its charge back, before the new one is charged.
+// Otherwise the old buffer would stay allocated with no charge against it.
+static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
+    void* host_ptr = nullptr;
+    void* reg_buf = nullptr;
+    AllocKind kind = AllocKind::Device;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(rec);
+        if (it == ctx.alloc_map.end()) return;
+        kind = it->second.kind;
+        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
+        host_ptr = it->second.live_ptr;
+        ctx.host_budget.release(it->second.size);
+        ctx.alloc_map.erase(it);
+        auto rb = ctx.host_reg_bufs.find(rec);
+        if (rb != ctx.host_reg_bufs.end()) {
+            reg_buf = rb->second;
+            ctx.host_reg_bufs.erase(rb);
+        }
+    }
+    if (kind == AllocKind::HostMalloc) {
+        (void)hipHostFree(host_ptr);
+        return;
+    }
+    void* buf = reg_buf ? reg_buf : host_ptr;
+    (void)hipHostUnregister(buf);
+#ifdef _WIN32
+    _aligned_free(buf);
+#else
+    free(buf);
+#endif
+}
+
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
     if (!ctx.charge_host(a->size, "hipHostMalloc")) return hipErrorMemoryAllocation;
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
     if (r == hipSuccess)
@@ -2892,6 +2930,7 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
     if (!ctx.charge_host(a->size, "hipMallocHost")) return hipErrorMemoryAllocation;
     hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
     if (r == hipSuccess)
@@ -2932,6 +2971,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
     size_t sz = static_cast<size_t>(a->sizeBytes);
     if (sz == 0) return hipSuccess;
+    free_replaced_host_alloc(ctx, a->hostPtr);
     if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
         return hipErrorMemoryAllocation;
 
