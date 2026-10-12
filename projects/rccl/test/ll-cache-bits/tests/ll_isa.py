@@ -105,7 +105,9 @@ class Toolchain:
     TOOLS = ("llvm-objcopy", "clang-offload-bundler", "llvm-nm", "llvm-objdump")
 
     def __init__(self, rocm_path):
-        self.bindir = os.path.join(rocm_path, "llvm", "bin")
+        # /opt/rocm has an llvm -> lib/llvm symlink; a TheRock dist may not.
+        dirs = [os.path.join(rocm_path, d, "bin") for d in ("llvm", "lib/llvm")]
+        self.bindir = next((d for d in dirs if os.path.isdir(d)), dirs[0])
 
     def missing(self):
         return [t for t in self.TOOLS
