@@ -709,7 +709,7 @@ void WDDMDevice::DestroyCpuNotificationEventLocked(int efd, D3DKMT_HANDLE syncob
 }
 
 void WDDMDevice::DestroyCpuNotificationEvent(int efd, D3DKMT_HANDLE syncobj) {
-  std::lock_guard<std::mutex> lock(event_mutex_);
+  std::lock_guard<std::mutex> lock(event_lock_);
   DestroyCpuNotificationEventLocked(efd, syncobj);
 }
 
@@ -717,28 +717,23 @@ bool WDDMDevice::CreateEvent(int *efd, uint32_t type, uint32_t *event_id,
                              uint64_t *mailbox, D3DKMT_HANDLE *syncobj) {
   (void)type;
 
-  // Reserve the slot first so the id bitmap is never touched under event_mutex_.
-  uint32_t id = AllocEventId();
+  std::lock_guard<std::mutex> lock(event_lock_);
+  uint32_t id = AllocEventIdLocked();
   if (id == 0) {
     pr_info("out of HSA event slots\n");
     return false;
   }
 
-  bool ret = false;
-  {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    if (CreateCpuNotificationEventLocked(efd, syncobj)) {
-      ret = RegisterEventEscape(id, 0, mailbox);
-      if (!ret) {
-        DestroyCpuNotificationEventLocked(*efd, *syncobj);
-        *efd = -1;
-        *syncobj = 0;
-      }
-    }
+  if (!CreateCpuNotificationEventLocked(efd, syncobj)) {
+    FreeEventIdLocked(id);
+    return false;
   }
 
-  if (!ret) {
-    FreeEventId(id);
+  if (!RegisterEventEscape(id, 0, mailbox)) {
+    DestroyCpuNotificationEventLocked(*efd, *syncobj);
+    *efd = -1;
+    *syncobj = 0;
+    FreeEventIdLocked(id);
     return false;
   }
 
@@ -749,19 +744,15 @@ bool WDDMDevice::CreateEvent(int *efd, uint32_t type, uint32_t *event_id,
 bool WDDMDevice::DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj) {
   // Strip the AQL payload bit to get the actual slot index.
   uint32_t id = event_id & (kAqlPayloadId - 1);
-  bool ret;
 
   if (id == 0 || id >= kNumberOfHsaEvents)
     return false;
 
-  {
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    ret = UnregisterEventEscape(id, 0);
-    DestroyCpuNotificationEventLocked(efd, syncobj);
-  }
-
+  std::lock_guard<std::mutex> lock(event_lock_);
+  bool ret = UnregisterEventEscape(id, 0);
+  DestroyCpuNotificationEventLocked(efd, syncobj);
   // Recycle the id only once KMD has dropped the registration.
-  FreeEventId(id);
+  FreeEventIdLocked(id);
   return ret;
 }
 #endif
@@ -1411,8 +1402,7 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 // ================================================================================================
 // Reserves a free slot in the event id bitmap. Ids start at 1 since 0 is the
 // default state and can't be identified in KMD, so 0 means the bitmap is full.
-uint32_t WDDMDevice::AllocEventId() {
-  std::lock_guard<std::mutex> lock(event_id_lock_);
+uint32_t WDDMDevice::AllocEventIdLocked() {
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
     if (!alloced_events_.test(event_id)) {
       alloced_events_.set(event_id);
@@ -1423,11 +1413,10 @@ uint32_t WDDMDevice::AllocEventId() {
 }
 
 // ================================================================================================
-void WDDMDevice::FreeEventId(uint32_t event_id) {
+void WDDMDevice::FreeEventIdLocked(uint32_t event_id) {
   if (event_id == 0 || event_id >= kNumberOfHsaEvents)
     return;
 
-  std::lock_guard<std::mutex> lock(event_id_lock_);
   alloced_events_.reset(event_id);
 }
 
@@ -1471,14 +1460,15 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
   (void)type;
 
   *mailbox = 0;
-  uint32_t event_id = AllocEventId();
+  std::lock_guard<std::mutex> lock(event_lock_);
+  uint32_t event_id = AllocEventIdLocked();
   if (event_id == 0) {
     pr_info("out of HSA event slots\n");
     return 0;
   }
 
   if (!RegisterEventEscape(event_id, reinterpret_cast<uint64_t>(event_handle), mailbox)) {
-    FreeEventId(event_id);
+    FreeEventIdLocked(event_id);
     return 0;
   }
   return event_id | kAqlPayloadId;
@@ -1492,9 +1482,9 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
   if (id == 0 || id >= kNumberOfHsaEvents)
     return false;
 
+  std::lock_guard<std::mutex> lock(event_lock_);
   bool ret = UnregisterEventEscape(id, reinterpret_cast<uint64_t>(event_handle));
-
-  FreeEventId(id);
+  FreeEventIdLocked(id);
   return ret;
 }
 

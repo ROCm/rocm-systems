@@ -193,9 +193,8 @@ public:
   // GPU completion, waking a guest poll() waiter on |efd|.
   bool CreateCpuEventSyncobj(int efd, D3DKMT_HANDLE *handle);
 
-  // Reserves an event id first, then creates the eventfd plus its
-  // CPU_NOTIFICATION syncobj and registers the event with KMD, the latter two
-  // under event_mutex_ so they cannot interleave with another create/destroy.
+  // Reserves an event id, creates the eventfd plus its CPU_NOTIFICATION
+  // syncobj and registers the event with KMD, all under event_lock_.
   // |*efd| is set on success for poll()/WaitOnMultipleEvents.
   bool CreateEvent(int *efd, uint32_t type, uint32_t *event_id, uint64_t *mailbox,
                    D3DKMT_HANDLE *syncobj);
@@ -306,9 +305,9 @@ private:
   void DestroyCpuNotificationEvent(int efd, D3DKMT_HANDLE syncobj);
 #endif
 
-  uint32_t AllocEventId();
-  void FreeEventId(uint32_t event_id);
-  // KMD escapes for one event slot. On Linux both run under event_mutex_.
+  // Callers must hold event_lock_.
+  uint32_t AllocEventIdLocked();
+  void FreeEventIdLocked(uint32_t event_id);
   bool RegisterEventEscape(uint32_t event_id, uint64_t handle, uint64_t *mailbox);
   bool UnregisterEventEscape(uint32_t event_id, uint64_t handle);
 
@@ -340,13 +339,8 @@ private:
   uint64_t base_mailbox_va_ = 0;  //!< GPU VA returned by KMD for all mailboxes
   std::bitset<kNumberOfHsaEvents> alloced_events_;  //!< The bit map of allocated events
 
-  mutable std::mutex event_id_lock_;  //!< Protects alloced_events_
-#if defined(__linux__)
-  //! Serializes syncobj creation and KMD (un)registration for Linux events.
-  //! Lock order: event_id_lock_ is a leaf lock and must never be taken while
-  //! event_mutex_ is held, so the two critical sections stay disjoint.
-  mutable std::mutex event_mutex_;
-#endif
+  //! Guards alloced_events_, base_mailbox_va_ and event create/register/unregister.
+  mutable std::mutex event_lock_;
 };
 
 NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
