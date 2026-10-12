@@ -15,6 +15,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added instruction and scalar data cache utilization, latency, and stall rate, GL1 request latency, and scalar data cache bandwidth to the gfx1250 Memory Chart.
 
+* Added a self-contained Memory Chart HTML report to CLI analysis. Each analyzed
+  workload with a Memory Chart now gets a `mem_chart*.html` page with aggregate
+  and per-kernel views, GPU and dispatch filtering, metric tables, memory bandwidth
+  guidance, zoom and pan controls, PNG export, and an offline theme toggle.
+
 ### Changed
 
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
