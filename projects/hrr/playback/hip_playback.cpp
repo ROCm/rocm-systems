@@ -4700,6 +4700,14 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
                                   });
     }
 
+    // ihipMemcpy2D returns success for a zero width or height before it looks at
+    // either pointer, so a zero-extent copy can be recorded with ends that are
+    // null or in no map. It does nothing at replay either.
+    if (width == 0 || height == 0) return hipSuccess;
+    // A host-to-host copy is a no-op, as in the 1D path (replay_memcpy_impl):
+    // plain host memory is in no map, and the copy touches nothing replay tracks.
+    if (kind == hipMemcpyHostToHost) return hipSuccess;
+
     // D2D / H2H: translate both ends. An end that is in no map is an address
     // from the capturing process: it is not used as is, since the archive would
     // be choosing where the copy reads or writes.
@@ -4786,17 +4794,15 @@ hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamSetAttribute*>(pl);
     hipStream_t stream = ctx.translate_stream(a->stream);
-    // The access policy window names a host address range (base_ptr) in the
-    // capturing process, and has no translation here: refuse that attribute
-    // rather than hand the runtime the recorded address.
-    if (a->attr == hipStreamAttributeAccessPolicyWindow) {
-        hrr_note_unreplayable(ctx, "hipStreamSetAttribute",
-                              "the access policy window carries a base pointer from the "
-                              "capturing process that replay cannot translate");
-        return hipErrorNotSupported;
-    }
     hipStreamAttrValue val{};
     std::memcpy(&val, a->stream_attr_bytes, sizeof(val));
+    // The access policy window's base_ptr is a device address of the capturing
+    // process; translate it as hipLaunchKernelExC does. CLR only stores the
+    // window, and rejects num_bytes above accessPolicyMaxWindowSize (0 on AMD),
+    // so a recorded window has num_bytes == 0 and replays like any other.
+    if (a->attr == hipStreamAttributeAccessPolicyWindow)
+        val.accessPolicyWindow.base_ptr = ctx.translate_ptr(
+            reinterpret_cast<uint64_t>(val.accessPolicyWindow.base_ptr));
     return hipStreamSetAttribute(stream, static_cast<hipStreamAttrID>(a->attr), &val);
 }
 

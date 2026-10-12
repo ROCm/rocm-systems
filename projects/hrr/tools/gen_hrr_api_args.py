@@ -538,10 +538,13 @@ JIT_OPTION_ARRAY_APIS: Set[str] = {"hipLinkCreate"}
 
 # Generated handlers whose record carries an attribute union by value
 # (hipKernelNodeAttrValue). One member of it, the access policy window, holds a
-# host pointer (base_ptr) from the capturing process with no translation, and
-# the union cannot be translated member by member without knowing which one the
-# attribute id selects. The handler refuses the call when the id selects the
-# window and passes every other attribute through. Maps the API to
+# device address (base_ptr) from the capturing process. The launch path
+# (hipLaunchKernelExC) already translates it with translate_ptr, and CLR only
+# stores the window and rejects num_bytes above accessPolicyMaxWindowSize, which
+# is 0 on AMD, so every recorded window has num_bytes == 0 and must replay. The
+# union cannot be translated member by member without knowing which one the
+# attribute id selects, so the handler translates base_ptr when the id selects
+# the window and passes every other attribute through. Maps the API to
 # (attribute-id field, the enumerator that selects the window).
 ATTR_UNION_WINDOW_APIS: Dict[str, Tuple[str, str]] = {
     "hipGraphKernelNodeSetAttribute": ("attr", "hipKernelNodeAttributeAccessPolicyWindow"),
@@ -3583,10 +3586,8 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     if entry.name in ATTR_UNION_WINDOW_APIS:
         id_field, enumerator = ATTR_UNION_WINDOW_APIS[entry.name]
         lines.append(f"  if (a->{id_field} == {enumerator}) {{")
-        lines.append(f'    hrr_note_unreplayable(ctx, "{entry.name}",')
-        lines.append('        "the access policy window carries a base pointer from the capturing "')
-        lines.append('        "process that replay cannot translate");')
-        lines.append("    return hipErrorNotSupported;")
+        lines.append("    _d_value.accessPolicyWindow.base_ptr = ctx.translate_ptr(")
+        lines.append("        reinterpret_cast<uint64_t>(_d_value.accessPolicyWindow.base_ptr));")
         lines.append("  }")
 
     # A JIT/link option array carries values the runtime may dereference

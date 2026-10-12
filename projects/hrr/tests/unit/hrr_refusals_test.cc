@@ -116,41 +116,6 @@ TEST_CASE("Unit_HRR_Refusals_GeneratedHandlersRefuseUntranslatableSlots", "[hrr]
 /**
  * Test Description
  * ----------------
- *   - hipGraphKernelNodeSetAttribute (generated) and hipStreamSetAttribute
- *     (hand-written) refuse the access policy window attribute, whose union
- *     member holds a host base pointer from the capturing process, and record
- *     the API as unreplayable.
- */
-TEST_CASE("Unit_HRR_Refusals_AccessPolicyWindowAttributeIsRefused", "[hrr]") {
-  {
-    PlaybackContext ctx;
-    hrr_test::ExactRecord<hrr_args_hipGraphKernelNodeSetAttribute> rec;
-    rec.get()->hNode = 0;
-    rec.get()->attr = hipKernelNodeAttributeAccessPolicyWindow;
-    rec.get()->value_present = 1;
-    std::memset(rec.get()->value_bytes, 0xCD, sizeof(rec.get()->value_bytes));
-    hipError_t r = hipSuccess;
-    (void)hrr_test::capture_stderr(
-        [&] { r = dispatch(ctx, HRR_API_HIPGRAPHKERNELNODESETATTRIBUTE, rec.bytes()); });
-    CHECK(r == hipErrorNotSupported);
-    CHECK(ctx.unreplayable_apis.count("hipGraphKernelNodeSetAttribute") == 1);
-  }
-  {
-    PlaybackContext ctx;
-    hrr_test::ExactRecord<hrr_args_hipStreamSetAttribute> rec;
-    rec.get()->stream = 0;
-    rec.get()->attr = hipStreamAttributeAccessPolicyWindow;
-    std::memset(rec.get()->stream_attr_bytes, 0xCD, sizeof(rec.get()->stream_attr_bytes));
-    hipError_t r = hipSuccess;
-    (void)hrr_test::capture_stderr([&] { r = playback_hipStreamSetAttribute(ctx, rec.bytes()); });
-    CHECK(r == hipErrorNotSupported);
-    CHECK(ctx.unreplayable_apis.count("hipStreamSetAttribute") == 1);
-  }
-}
-
-/**
- * Test Description
- * ----------------
  *   - A 2D device-to-device copy whose destination or source is in no replay
  *     map is refused with hipErrorInvalidValue, naming the end that is
  *     missing, instead of being run against the recorded address.
@@ -174,6 +139,36 @@ TEST_CASE("Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused", "[hrr]") {
     const std::string err = hrr_test::capture_stderr([&] { r = playback_hipMemcpy2D(ctx, rec.bytes()); });
     CHECK(r == hipErrorInvalidValue);
     CHECK(err.find(c.missing) != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A 2D copy that does nothing is not refused: one with a zero width or
+ *     height (ihipMemcpy2D returns success before it looks at either pointer, so
+ *     its ends can be null or in no map), and a host-to-host copy (a no-op, as in
+ *     the 1D path). Both return hipSuccess without a HIP call and with no
+ *     message.
+ */
+TEST_CASE("Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused", "[hrr]") {
+  PlaybackContext ctx;
+  struct Case { uint64_t width, height; hipMemcpyKind kind; };
+  for (const Case& c : {Case{0, 2, hipMemcpyDeviceToDevice}, Case{16, 0, hipMemcpyDeviceToDevice},
+                        Case{16, 2, hipMemcpyHostToHost}}) {
+    hrr_test::ExactRecord<hrr_args_hipMemcpy2D> rec;
+    auto* a = rec.get();
+    a->dst = 0x9000;  // in no map
+    a->src = 0x9100;
+    a->dpitch = a->spitch = 16;
+    a->width = c.width;
+    a->height = c.height;
+    a->kind = c.kind;
+    hipError_t r = hipErrorUnknown;
+    const std::string err = hrr_test::capture_stderr([&] { r = playback_hipMemcpy2D(ctx, rec.bytes()); });
+    INFO(err);
+    CHECK(r == hipSuccess);
+    CHECK(err.empty());
   }
 }
 

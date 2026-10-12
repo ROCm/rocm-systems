@@ -120,11 +120,13 @@ class RawSlotRule(unittest.TestCase):
         bad = manual_raw_pointer_casts(MANUAL_PLAYBACK.read_text())
         self.assertEqual(bad, [], "hip_playback.cpp casts a recorded field to a pointer: %r" % bad[:10])
 
-    def test_attribute_union_with_a_window_pointer_is_refused(self):
+    def test_attribute_union_window_pointer_is_translated(self):
         body = _handler_body(self.playback, "hipGraphKernelNodeSetAttribute")
         self.assertIn("a->attr == hipKernelNodeAttributeAccessPolicyWindow", body)
-        self.assertIn("return hipErrorNotSupported;", body)
-        self.assertLess(body.index("AccessPolicyWindow"), body.index("(hipError_t)hipGraphKernelNodeSetAttribute("))
+        self.assertIn("accessPolicyWindow.base_ptr = ctx.translate_ptr(", body)
+        self.assertNotIn("return hipErrorNotSupported;", body)
+        self.assertLess(body.index("accessPolicyWindow.base_ptr = ctx.translate_ptr("),
+                        body.index("(hipError_t)hipGraphKernelNodeSetAttribute("))
 
     def test_scanner_detects_the_patterns_it_guards_against(self):
         self.assertTrue(raw_slot_casts("x = static_cast<const textureReference*>(a->tex);"))

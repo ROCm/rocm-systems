@@ -2008,10 +2008,8 @@ static hipError_t playback_hipGraphKernelNodeSetAttribute(PlaybackContext& ctx, 
   if (a->value_present)
     std::memcpy(&_d_value, a->value_bytes, sizeof(_d_value));
   if (a->attr == hipKernelNodeAttributeAccessPolicyWindow) {
-    hrr_note_unreplayable(ctx, "hipGraphKernelNodeSetAttribute",
-        "the access policy window carries a base pointer from the capturing "
-        "process that replay cannot translate");
-    return hipErrorNotSupported;
+    _d_value.accessPolicyWindow.base_ptr = ctx.translate_ptr(
+        reinterpret_cast<uint64_t>(_d_value.accessPolicyWindow.base_ptr));
   }
   hipError_t _r = (hipError_t)hipGraphKernelNodeSetAttribute((hipGraphNode_t)ctx.translate_graph_node(a->hNode), (hipKernelNodeAttrID)a->attr, (a->value_present ? (const hipKernelNodeAttrValue*)&_d_value : (const hipKernelNodeAttrValue*)nullptr));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
