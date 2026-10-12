@@ -199,11 +199,12 @@ rm -rf "${rccl_tests_build}"; mkdir -p "${rccl_tests_build}"
   # green job only proves the seven matrix binaries exist.
   make -j"${build_jobs}" -k || true
 )
-# Same seven binaries as foreach(_gin_rdc_bin) in
-# projects/rccl-tests/src/CMakeLists.txt and the union of bins in
-# lib/device-api-tests.json. A suite bin missing from that foreach still
-# builds and passes this -x check, then fails at load on an unresolved
-# rocSHMEM host symbol.
+# Keep in sync with foreach(_gin_rdc_bin) in
+# projects/rccl-tests/src/CMakeLists.txt. Because make runs with -k, this
+# -x check is what fails the job when one of those binaries did not build.
+# It does not prove the rocSHMEM RDC link works: only the -D 3/-D 4 suites
+# (gin-d3, gin-d4, gin-d3-allgather) reach the GIN path. The symmetric -R 2
+# runs leave deviceImpl at 0.
 required_perf_bins=(
   all_gather_perf alltoall_perf broadcast_perf
   gather_perf reduce_perf scatter_perf sendrecv_perf
