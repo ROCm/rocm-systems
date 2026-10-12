@@ -21,7 +21,27 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SOURCE_INTERFACE_DIR = os.path.normpath(
     os.path.join(_THIS_DIR, "..", "..", "..", "..", "py-interface")
 )
-_CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
+_SOURCE_CLI_DIR = os.path.normpath(
+    os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli")
+)
+
+
+def _resolve_cli_dir():
+    """Resolve the CLI dir, preferring the in-tree source over any install.
+
+    This is a white-box test: it already force-loads the source interface via
+    ``_load_source_amdsmi_interface``. Resolve the CLI the same way so a stale
+    ``/opt/rocm`` install can't shadow the ``event.py`` under review -- which is
+    exactly what ``cli_search_order`` does when AMDSMI_PATH/ROCM_HOME/ROCM_PATH
+    pins an install. Fall back to the install-aware order only when the source
+    tree is absent (install-only CI legs).
+    """
+    if os.path.isfile(os.path.join(_SOURCE_CLI_DIR, "amdsmi_cli_exceptions.py")):
+        return _SOURCE_CLI_DIR
+    return find_cli_dir(*cli_search_order(_THIS_DIR))
+
+
+_CLI_DIR = _resolve_cli_dir()
 
 
 def _load_source_amdsmi_interface():
