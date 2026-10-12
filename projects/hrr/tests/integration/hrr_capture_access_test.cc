@@ -460,7 +460,8 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // as HRR_TEST_FAIL_EVENTS says. With ftruncate the filter goes in only at the
 // fsync after flush() wrote the trailer, and fails that fsync and every
 // ftruncate; with close-nodup it fails fcntl as well as closing it, so the
-// descriptor cannot be duplicated either. Then it records a few events and
+// descriptor cannot be duplicated either, and with seek-close lseek, so the
+// writer cannot find where its trailer would start. Then it records a few events and
 // exits normally, so the writer meets the failure while it finishes the
 // archive. With close-link it first moves events.bin aside to
 // events.bin.written and plants a link to HRR_TEST_DECOY in its place, so a
@@ -542,7 +543,8 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
   const std::string fail(mode);
   REQUIRE((fail == "write" || fail == "fsync" || fail == "close" || fail == "close-link" ||
-           fail == "fork" || fail == "ftruncate" || fail == "close-nodup"));
+           fail == "fork" || fail == "ftruncate" || fail == "close-nodup" ||
+           fail == "seek-close"));
 
   if (fail == "fork") REQUIRE(std::atexit(events_fail_child_exit) == 0);
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -573,8 +575,10 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
                            : fail == "fsync"                  ? __NR_fsync
                                                               : __NR_close;
   // close-nodup also fails fcntl, so the writer cannot duplicate the
-  // descriptor it is about to close.
-  const std::uint32_t nr_b = fail == "close-nodup" ? __NR_fcntl : nr;
+  // descriptor it is about to close; seek-close also fails lseek.
+  const std::uint32_t nr_b = fail == "close-nodup" ? __NR_fcntl
+                             : fail == "seek-close" ? __NR_lseek
+                                                    : nr;
   if (fail == "ftruncate") {
     g_trailer_events_fd = events_fd;
     g_hrr_fsync_hook = fail_after_trailer;
@@ -1157,13 +1161,14 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureEventsFail_Direct six times: once with every
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct seven times: once with every
  *     write to events.bin failing once the archive is open, once with every
  *     fsync of it failing, once with the fsync after the trailer failing and
  *     no ftruncate able to cut the trailer off, once with closing events.bin
  *     failing after the archive is finished, once like that with its
- *     descriptor unable to be duplicated, and once more with events.bin moved
- *     aside and a link to a decoy file planted in its place before the close.
+ *     descriptor unable to be duplicated, once like that with no seek able
+ *     to find the end of the file, and once more with events.bin moved aside
+ *     and a link to a decoy file planted in its place before the close.
  *   - Each time the file the writer wrote ends without a clean-shutdown
  *     trailer, the reader does not load it as complete, and the manifest says
  *     the archive is incomplete, so neither the reader nor the root index
@@ -1176,7 +1181,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #else
   ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
   constexpr const char* kDecoyText = "not part of the archive\n";
-  for (const char* fail : {"write", "fsync", "ftruncate", "close", "close-nodup", "close-link"}) {
+  for (const char* fail :
+       {"write", "fsync", "ftruncate", "close", "close-nodup", "seek-close", "close-link"}) {
     DYNAMIC_SECTION("failing " << fail) {
       const std::string mode(fail);
       const fs::path base = work.path / mode;

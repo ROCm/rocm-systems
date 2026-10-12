@@ -1576,22 +1576,29 @@ void flush(const char* /*output_dir*/) {
     // absence is exactly how the reader detects a non-faithful archive.
     if (g_events_fd >= 0 && !g_events_finalized && !incomplete) {
       const std::int64_t trailer_at = hrr_seek_end(g_events_fd);
-      hrr_eof_record rec = hrr_make_eof_record(
-          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-      rec.hdr.timestamp_ns = amd::Os::timeNanos();
-      rec.hdr.thread_id    = current_thread_id();
-      buffer_append_locked(&rec, sizeof(rec));
-      flush_buffer_locked();
-      sync_events_locked();
-      if (note_events_io_locked()) {
-        // A trailer that may not have reached the disk claims nothing.
-        if (trailer_at < 0 || !drop_trailer_locked(g_events_fd, trailer_at))
-          LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
-                         "%s/events.bin, so only its manifest says the archive is incomplete",
-                         out_dir.c_str());
+      if (trailer_at < 0) {
+        // A trailer at an unknown offset could not be taken back if closing
+        // the file failed later, so none is written.
+        mark_incomplete("the end of events.bin cannot be found, so no trailer is written");
         incomplete = true;
       } else {
-        g_trailer_at = trailer_at;
+        hrr_eof_record rec = hrr_make_eof_record(
+            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+        rec.hdr.timestamp_ns = amd::Os::timeNanos();
+        rec.hdr.thread_id    = current_thread_id();
+        buffer_append_locked(&rec, sizeof(rec));
+        flush_buffer_locked();
+        sync_events_locked();
+        if (note_events_io_locked()) {
+          // A trailer that may not have reached the disk claims nothing.
+          if (!drop_trailer_locked(g_events_fd, trailer_at))
+            LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
+                           "%s/events.bin, so only its manifest says the archive is incomplete",
+                           out_dir.c_str());
+          incomplete = true;
+        } else {
+          g_trailer_at = trailer_at;
+        }
       }
     }
     // close() runs later and the fd stays open until then. A thread can still
