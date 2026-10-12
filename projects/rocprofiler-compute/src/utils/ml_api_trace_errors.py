@@ -11,7 +11,7 @@ class MlApiTraceError(Exception):
 
 
 class UnaccountedKernelError(MlApiTraceError):
-    """A GPU dispatch whose Correlation_ID is not in that pass's marker CSV."""
+    """Dispatch unmatched on Correlation_ID, plus GUID when both frames have it."""
 
     def __init__(self, unmatched_rows: pd.DataFrame) -> None:
         self.unmatched_rows = unmatched_rows

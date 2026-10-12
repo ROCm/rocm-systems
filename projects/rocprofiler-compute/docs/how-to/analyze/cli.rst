@@ -797,10 +797,12 @@ PyTorch operator analysis
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
 and counter CSV pair. The on-disk join column is ``Correlation_Id``; analyze
-canonicalizes it to ``Correlation_ID``. Collapsed GPU time and kernel lists
-come from pass 0. Analyze parses Function, then nests marker intervals per
-``Thread_Id``. Plain ``analyze -p`` without those flags does not join
-markers. Analyze does not write ``ml_api_trace/consolidated.csv``. Missing
+canonicalizes it to ``Correlation_ID`` and joins on that column, plus
+``GUID`` when both the marker and counter files have it. Collapsed GPU
+time and kernel lists come from pass 0. Analyze parses Function, then
+nests marker intervals per ``Thread_Id``. Plain ``analyze -p`` without
+those flags does not join markers. Analyze does not write
+``ml_api_trace/consolidated.csv``. Missing
 or null marker columns make analyze exit.
 
 Operator analyze exits when:
@@ -813,7 +815,8 @@ Operator analyze exits when:
 
 Operator analyze warns during the join and continues when:
 
-* a kernel's ``Correlation_ID`` is not in any ROCTX range
+* a kernel dispatch does not join to a marker (``Correlation_ID``, plus
+  ``GUID`` when both files have that column)
 * attach cannot find the launcher thread
 * a worker interval is not contained in any launcher interval
 * a torch or triton call-tree root has no file/line and no launcher thread
