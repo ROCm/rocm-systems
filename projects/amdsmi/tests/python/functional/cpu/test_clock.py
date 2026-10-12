@@ -105,16 +105,27 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_apb_status(self):
         self.common.print_func_name("")
 
-        # A non-CPU handle must fail; accept any API status to avoid depending on
-        # host-specific ESMI error codes, but still detect an unexpected SUCCESS.
+        # A GPU handle passed to a CPU-only API must fail -- the garbage socket
+        # index derived from a non-CPU handle trips an ESMI error (eg.
+        # NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL. Accepting
+        # any failure would let a wrong status (including a bogus SUCCESS) pass.
+        wrong_processor = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.IO,
+            amdsmi.AmdSmiStatus.INVAL,
+        ]
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.NO_PERM,
         ]
+        # A null (default-constructed) handle hits the C-layer null check -> INVAL.
+        null_check = [amdsmi.AmdSmiStatus.INVAL]
 
-        # Two independent sweeps: a bug in one handle type's loop must not
-        # prevent the other handle type from being exercised.
+        # Independent sweeps: a bug in one handle type's loop must not
+        # prevent the other handle types from being exercised.
         failures = []
 
         try:
@@ -123,7 +134,7 @@ class TestCpuClock(unittest.TestCase):
                     self.common.print_device_header(i)
                     msg = f"\t### amdsmi_get_cpu_apb_status(gpu={i}):"
                     val = "N/A"
-                    with self.common.expect_status(msg, self.common.ANY_FAIL):
+                    with self.common.expect_status(msg, wrong_processor):
                         val = amdsmi.amdsmi_get_cpu_apb_status(gpu)
                     self.common.print(f"\t    data: {val}")
         except Exception as e:
@@ -142,6 +153,17 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
                     self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            with self.common.status_sweep():
+                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+                msg = "\t### amdsmi_get_cpu_apb_status(null handle):"
+                val = "N/A"
+                with self.common.expect_status(msg, null_check):
+                    val = amdsmi.amdsmi_get_cpu_apb_status(null_handle)
+                self.common.print(f"\t    data: {val}")
         except Exception as e:
             failures.append(e)
 
@@ -232,11 +254,24 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_df_pstate_range(self):
         self.common.print_func_name("")
 
+        # A GPU handle passed to a CPU-only API must fail -- the garbage socket
+        # index derived from a non-CPU handle trips an ESMI error (eg.
+        # NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL. Accepting
+        # any failure would let a wrong status (including a bogus SUCCESS) pass.
+        wrong_processor = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.IO,
+            amdsmi.AmdSmiStatus.INVAL,
+        ]
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.NO_PERM,
         ]
+        # A null (default-constructed) handle hits the C-layer null check -> INVAL.
+        null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         failures = []
 
@@ -246,7 +281,7 @@ class TestCpuClock(unittest.TestCase):
                     self.common.print_device_header(i)
                     msg = f"\t### amdsmi_get_cpu_df_pstate_range(gpu={i}):"
                     val = "N/A"
-                    with self.common.expect_status(msg, self.common.ANY_FAIL):
+                    with self.common.expect_status(msg, wrong_processor):
                         val = amdsmi.amdsmi_get_cpu_df_pstate_range(gpu)
                     self.common.print(f"\t    data: {val}")
         except Exception as e:
@@ -265,6 +300,17 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
                     self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            with self.common.status_sweep():
+                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+                msg = "\t### amdsmi_get_cpu_df_pstate_range(null handle):"
+                val = "N/A"
+                with self.common.expect_status(msg, null_check):
+                    val = amdsmi.amdsmi_get_cpu_df_pstate_range(null_handle)
+                self.common.print(f"\t    data: {val}")
         except Exception as e:
             failures.append(e)
 
@@ -356,13 +402,25 @@ class TestCpuClock(unittest.TestCase):
         # is defined only for *multi-socket* systems (XGMI is the socket-to-socket
         # link). On a single-socket host there is no XGMI link, so ESMI rejects the
         # query and it surfaces as AMDSMI_STATUS_INVAL -- a legitimate result on
-        # the CPU path. Non-CPU handles must fail with any API status.
+        # the CPU path. A GPU handle passed to this CPU-only API must fail -- the
+        # garbage socket index derived from a non-CPU handle trips an ESMI error
+        # (eg. NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL.
+        # Accepting any failure would let a wrong status (incl. bogus SUCCESS) pass.
+        wrong_processor = [
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            amdsmi.AmdSmiStatus.IO,
+            amdsmi.AmdSmiStatus.INVAL,
+        ]
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
             amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
             amdsmi.AmdSmiStatus.INVAL,
+            amdsmi.AmdSmiStatus.NO_PERM,
         ]
+        # A null (default-constructed) handle hits the C-layer null check -> INVAL.
+        null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         failures = []
 
@@ -372,7 +430,7 @@ class TestCpuClock(unittest.TestCase):
                     self.common.print_device_header(i)
                     msg = f"\t### amdsmi_get_cpu_xgmi_width(gpu={i}):"
                     val = "N/A"
-                    with self.common.expect_status(msg, self.common.ANY_FAIL):
+                    with self.common.expect_status(msg, wrong_processor):
                         val = amdsmi.amdsmi_get_cpu_xgmi_width(gpu)
                     self.common.print(f"\t    data: {val}")
         except Exception as e:
@@ -391,6 +449,17 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
                     self.common.print(f"\t    data: {val}")
+        except Exception as e:
+            failures.append(e)
+
+        try:
+            with self.common.status_sweep():
+                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+                msg = "\t### amdsmi_get_cpu_xgmi_width(null handle):"
+                val = "N/A"
+                with self.common.expect_status(msg, null_check):
+                    val = amdsmi.amdsmi_get_cpu_xgmi_width(null_handle)
+                self.common.print(f"\t    data: {val}")
         except Exception as e:
             failures.append(e)
 
