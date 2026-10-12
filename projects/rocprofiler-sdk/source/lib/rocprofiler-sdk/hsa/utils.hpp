@@ -131,11 +131,13 @@ struct formatter<hsa_access_permission_t>
     auto format(hsa_access_permission_t v, Ctx& ctx) const
     {
         auto label = [v]() -> std::string_view {
+            using value_type = std::underlying_type_t<hsa_access_permission_t>;
+
             // Older HSA headers do not define HSA_ACCESS_PERMISSION_EX (1 << 2).
             // Use the integer value to support those headers and combined permissions.
-            constexpr uint32_t execute = 1U << 2;
+            constexpr value_type execute = 1U << 2;
 
-            switch(static_cast<uint32_t>(v))
+            switch(static_cast<value_type>(v))
             {
                 case HSA_ACCESS_PERMISSION_NONE: return "NONE";
                 case HSA_ACCESS_PERMISSION_RO: return "READ_ONLY";
