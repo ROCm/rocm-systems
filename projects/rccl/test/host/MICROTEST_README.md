@@ -186,10 +186,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `param-utils-test.cc`; suite `ParamUtilsMicrotest.*`. Header-only, no
     `_CC_PATH` macro needed. Covers `ncclParamTypeIdOf<T>`'s per-type mapping
     and RAW fallback, `flagsStr`'s private-prefix/flag-ordering/comma-joining,
-    the `srcDefault`/`srcEnvPlugin` labels, `stringFormat` (including an
-    output longer than the dry-run `snprintf` stack estimate),
-    `iequals`/`trim`/`split`, the `ncclParamParser<T>` function-pointer-trio
-    wrapper and its explicit-`bool` truthiness, and `makeOption(s)` /
+    the `srcDefault`/`srcEnvPlugin` labels, `stringFormat` (including a long
+    argument), `iequals`/`trim`/`split`, the `ncclParamParser<T>`
+    function-pointer-trio wrapper (including that `resolve()` forwards its
+    `ctx` to the callee) and its explicit-`bool` truthiness, and
+    `makeOption(s)` /
     `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
     `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
     chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed

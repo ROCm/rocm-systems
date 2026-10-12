@@ -43,6 +43,10 @@ ncclResult_t ResolveDoubled(const void*, const char* input, int32_t& out) {
 ncclResult_t ResolveAlwaysFails(const void*, const char*, int32_t&) {
   return ncclInvalidArgument;
 }
+ncclResult_t ResolveAddsCtx(const void* ctx, const char* input, int32_t& out) {
+  out = *static_cast<const int32_t*>(ctx) + std::atoi(input);
+  return ncclSuccess;
+}
 bool ValidateNonNegative(const void*, const int32_t& val) {
   return val >= 0;
 }
@@ -128,7 +132,10 @@ TEST(ParamUtilsMicrotest, StringFormat_NoSubstitutionsReturnsTheLiteral) {
   EXPECT_EQ("literal text", stringFormat("literal text"));
 }
 
-TEST(ParamUtilsMicrotest, StringFormat_HandlesOutputLongerThanATypicalStackBuffer) {
+TEST(ParamUtilsMicrotest, StringFormat_HandlesALongArgument) {
+  // stringFormat dry-runs snprintf to size a heap std::vector<char> exactly
+  // (utils.h:96-101), so there is no stack buffer to overflow here; this just
+  // pins that a long substitution still round-trips through that two-call path.
   std::string longArg(600, 'x');
   EXPECT_EQ(longArg, stringFormat("%s", longArg.c_str()));
 }
@@ -216,6 +223,22 @@ TEST(ParamUtilsMicrotest, Parser_DelegatesThroughTheFunctionPointerTrio) {
   EXPECT_TRUE(parser.validate(42));
   EXPECT_FALSE(parser.validate(-1));
   EXPECT_EQ("42x", parser.toString(42));
+  // param.h's registry dump prints parser.desc.c_str() directly, so the field
+  // set at construction must be readable back unchanged.
+  EXPECT_EQ("doubled", parser.desc);
+}
+
+TEST(ParamUtilsMicrotest, Parser_ResolveForwardsItsCtxToTheCallee) {
+  // oneOfResolve (parser_enum.h) and listOfResolve (parser_list.h) dereference
+  // ctx.get() unchecked; ResolveDoubled's helpers above all ignore ctx, so
+  // nothing else here proves resolve() actually forwards it rather than
+  // passing nullptr regardless of what the parser was constructed with.
+  auto ctx = std::make_shared<const int32_t>(100);
+  ncclParamParser<int32_t> parser{ResolveAddsCtx, ValidateNonNegative, ToStringWithSuffix, ctx, "withCtx"};
+
+  int32_t value = 0;
+  EXPECT_EQ(ncclSuccess, parser.resolve("5", value));
+  EXPECT_EQ(105, value);
 }
 
 TEST(ParamUtilsMicrotest, Parser_ResolvePropagatesTheCalleesFailure) {
@@ -247,6 +270,8 @@ TEST(ParamUtilsMicrotest, MakeOption_TwoArgLeavesDescriptionNull) {
 
 TEST(ParamUtilsMicrotest, MakeOption_ThreeArgKeepsTheDescription) {
   auto opt = makeOption<int32_t>("ON", 1, "Enable feature");
+  EXPECT_STREQ("ON", opt.name);
+  EXPECT_EQ(1, opt.value);
   EXPECT_STREQ("Enable feature", opt.desc);
 }
 
