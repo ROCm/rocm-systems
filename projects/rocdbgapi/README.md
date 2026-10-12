@@ -47,29 +47,37 @@ Building the ROCdbgapi library has the following prerequisites:
 3. ROCm CMake modules, which can be installed using the ``rocm-cmake`` package
    available as part of the AMD ROCm release.
 
-4. For Ubuntu, the following adds the needed packages:
+4. GoogleTest and GMock, required to build the unit test suite, which is
+   enabled by default (``ENABLE_TESTS``). Either build as part of a parent
+   project that already provides the ``GTest::*`` targets (e.g. the TheRock
+   superbuild), a system package (included below for Ubuntu and RHEL), or
+   pass ``-DENABLE_TESTS=OFF`` to skip building the test suite instead. See
+   ``test/README.md`` for details on the test suite's build options.
+
+5. For Ubuntu, the following adds the needed packages:
 
    ````shell
-   apt install gcc g++ make cmake doxygen graphviz texlive-full
+   apt install gcc g++ make cmake doxygen graphviz texlive-full \
+     libgtest-dev libgmock-dev
    ````
 
    NOTE: The ``doxygen`` 1.8.13 that is installed by Ubuntu 18.04 has a bug
    that prevents the PDF from being created.  ``doxygen`` 1.8.11 can be built
    from source to avoid the issue.
 
-5. For RHEL, the following adds the needed packages:
+6. For RHEL, the following adds the needed packages:
 
    ````shell
    sudo dnf install -y gcc gcc-c++ make cmake doxygen graphviz texlive \
     texlive-xtab texlive-multirow texlive-sectsty texlive-tocloft \
-    texlive-tabu texlive-adjustbox
+    texlive-tabu texlive-adjustbox gtest-devel gmock-devel
    ````
 
    NOTE: The ``doxygen`` 1.8.14 that is installed by CentOS 8.1 and RHEL 8.1,
    has a bug that prevents the PDF from being created. ``doxygen`` 1.8.11 can be
    built from source to avoid the issue.
 
-6. For SLES, the following adds the needed packages:
+7. For SLES, the following adds the needed packages:
 
    ````shell
    sudo zypper in gcc gcc-c++ make cmake doxygen graphviz texlive-scheme-medium \
@@ -77,7 +85,11 @@ Building the ROCdbgapi library has the following prerequisites:
      texlive-tabu
    ````
 
-7. For Windows using MSYS2, the following adds the needed packages:
+   NOTE: This does not include GoogleTest/GMock packages. Pass
+   ``-DENABLE_TESTS=OFF`` or provide the ``GTest::*`` targets via a parent
+   project.
+
+8. For Windows using MSYS2, the following adds the needed packages:
 
    ````shell
    pacman -S make mingw-w64-ucrt-x86_64-gcc \
@@ -87,6 +99,10 @@ Building the ROCdbgapi library has the following prerequisites:
      mingw-w64-x86_64-texlive-latex-extra \
      doxygen mingw-w64-x86_64-graphviz
    ````
+
+   NOTE: This does not include GoogleTest/GMock packages. Pass
+   ``-DENABLE_TESTS=OFF`` or provide the ``GTest::*`` targets via a parent
+   project.
 
 Here is an example command line to build the ROCdbgapi library:
 
