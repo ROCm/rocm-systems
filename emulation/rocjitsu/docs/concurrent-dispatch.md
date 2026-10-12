@@ -14,8 +14,10 @@ drain its CUs without holding that mutex. Pending submissions rotate when a
 worker takes an assignment. An assigned worker finishes its current submission;
 this is not preemptive scheduling.
 
-Each caller executes only its own submission and cancels unused assignments
-when its task index is exhausted. It joins only workers holding that submission.
+Each caller executes only its own submission. The first caller or worker to
+finish draining the task index cancels unused assignments under the queue mutex,
+so workers do not keep claiming empty assignments while other CUs are still
+running. The caller joins all workers holding that submission.
 The last worker notifies before dropping the mutex, protecting the stack-owned
 submission's lifetime. There is no per-submission queue allocation.
 

@@ -160,6 +160,12 @@ bool SkipCurrentTest(const char* reason);
 /// \returns true if the test should be skipped (WSL detected)
 bool SkipOnWsl(const char* reason);
 
+/// The inverse of SkipOnWsl, for tests that only mean something on the DXG
+/// backend: skips everywhere that is not WSL.
+/// \param reason Why the test only applies to WSL
+/// \returns true if the test should be skipped (i.e. this is NOT WSL)
+bool SkipIfNotWsl(const char* reason);
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored

@@ -108,7 +108,9 @@ uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_ha
 
 float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,
                               uint32_t src_selector, bool src_is_f16, bool high_half) {
-  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);
+  uint32_t raw = amdgpu::RegisterAccess(wf)
+                     .read_operand(src, uint64_t{1} << lane, src.register_byte_mask())
+                     .lane(lane);
   if (!src_is_f16)
     return std::bit_cast<float>(raw);
   return util::f16_to_f32(read_fma_mix_f16_bits(raw, src_selector, high_half));
@@ -116,7 +118,9 @@ float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, u
 
 float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,
                                    bool src_is_bf16, bool high_half) {
-  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);
+  uint32_t raw = amdgpu::RegisterAccess(wf)
+                     .read_operand(src, uint64_t{1} << lane, src.register_byte_mask())
+                     .lane(lane);
   if (!src_is_bf16)
     return std::bit_cast<float>(raw);
   // CDNA5 inline BF16 sources retain the FP32 bits for OPSEL.

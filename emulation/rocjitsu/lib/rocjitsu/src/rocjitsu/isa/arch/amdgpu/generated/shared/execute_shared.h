@@ -67,87 +67,63 @@ inline void execute_buffer_wbl2_mubuf([[maybe_unused]] Inst &inst, [[maybe_unuse
 template <typename Inst>
 inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  uint32_t lane_group_width = wf.wf_size();
   ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() == 64 &&
-      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-    lane_group_width = 32;
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.data0, i);
+  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
   uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = regs.read_lane(inst.addr, i);
-    uint32_t group_base = (i / lane_group_width) * lane_group_width;
-    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
-    if (exec & (1ULL << src_lane))
-      tmp[i] = src_data[src_lane];
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const unsigned source =
+        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
+    if (exec & (uint64_t{1} << source))
+      tmp[lane] = regs.read_lane(inst.data0, source);
   }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      regs.write_lane(inst.vdst, i, tmp[i]);
-  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
 inline void execute_ds_bpermute_b32_vds([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  uint32_t lane_group_width = wf.wf_size();
   ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() == 64 &&
-      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-    lane_group_width = 32;
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.data0, i);
+  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
   uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = regs.read_lane(inst.addr, i);
-    uint32_t group_base = (i / lane_group_width) * lane_group_width;
-    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
-    if (exec & (1ULL << src_lane))
-      tmp[i] = src_data[src_lane];
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const unsigned source =
+        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
+    if (exec & (uint64_t{1} << source))
+      tmp[lane] = regs.read_lane(inst.data0, source);
   }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      regs.write_lane(inst.vdst, i, tmp[i]);
-  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
 inline void execute_ds_bpermute_fi_b32_vds([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  uint32_t lane_group_width = wf.wf_size();
   ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() == 64 &&
-      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-    lane_group_width = 32;
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.data0, i);
+  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
   uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    uint32_t addr_val = regs.read_lane(inst.addr, i);
-    uint32_t group_base = (i / lane_group_width) * lane_group_width;
-    uint32_t src_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
-    tmp[i] = src_data[src_lane];
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
+      continue;
+    const unsigned source =
+        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
+    tmp[lane] = regs.read_lane(inst.data0, source);
   }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      regs.write_lane(inst.vdst, i, tmp[i]);
-  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
@@ -158,120 +134,78 @@ inline void execute_ds_nop_vds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wav
 
 template <typename Inst>
 inline void execute_ds_permute_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  uint32_t lane_group_width = wf.wf_size();
   ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() == 64 &&
-      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-    lane_group_width = 32;
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.data0, i);
+  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
   uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (!(exec & (1ULL << i)))
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
       continue;
-    uint32_t addr_val = regs.read_lane(inst.addr, i);
-    uint32_t group_base = (i / lane_group_width) * lane_group_width;
-    uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
-    tmp[dst_lane] = src_data[i];
+    const unsigned destination =
+        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
+    tmp[destination] = regs.read_lane(inst.data0, lane);
   }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      regs.write_lane(inst.vdst, i, tmp[i]);
-  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
 inline void execute_ds_permute_b32_vds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  auto &cu = wf.cu();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  uint32_t lane_group_width = wf.wf_size();
   ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  if (wf.wf_size() == 64 &&
-      (cu.arch() == ROCJITSU_CODE_ARCH_RDNA3 || cu.arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-    lane_group_width = 32;
-  // Pre-read all data0 values from every lane.
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.data0, i);
+  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
   uint32_t tmp[64] = {};
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (!(exec & (1ULL << i)))
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
       continue;
-    uint32_t addr_val = regs.read_lane(inst.addr, i);
-    uint32_t group_base = (i / lane_group_width) * lane_group_width;
-    uint32_t dst_lane = group_base + (((addr_val + offset) / 4) % lane_group_width);
-    tmp[dst_lane] = src_data[i];
+    const unsigned destination =
+        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
+    tmp[destination] = regs.read_lane(inst.data0, lane);
   }
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    if (exec & (1ULL << i))
-      regs.write_lane(inst.vdst, i, tmp[i]);
-  }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
 inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.addr, i);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  uint32_t tmp[64] = {};
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
       continue;
-    uint32_t src_lane;
-    if (offset & 0x8000) {
-      // QDMode: four packed 2-bit selectors within each quad.
-      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);
-    } else {
-      // BitMode: swizzle within 32-lane rows.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      uint32_t row_base = lane & ~0x1Fu;
-      uint32_t row_lane = lane & 0x1Fu;
-      src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);
-    }
-    if (src_lane < wf.wf_size())
-      regs.write_lane(inst.vdst, lane, src_data[src_lane]);
+    const unsigned source = amdgpu::ds_swizzle_lane(lane, offset);
+    if (exec & (uint64_t{1} << source))
+      tmp[lane] = regs.read_lane(inst.addr, source);
   }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
 inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  uint32_t src_data[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i)
-    src_data[i] = regs.read_lane(inst.addr, i);
   uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
+  uint32_t tmp[64] = {};
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (uint64_t{1} << lane)))
       continue;
-    uint32_t src_lane;
-    if (offset & 0x8000) {
-      // QDMode: four packed 2-bit selectors within each quad.
-      src_lane = (lane & ~0x3u) | ((offset >> (2u * (lane & 0x3u))) & 0x3u);
-    } else {
-      // BitMode: swizzle within 32-lane rows.
-      uint32_t and_mask = offset & 0x1F;
-      uint32_t or_mask = (offset >> 5) & 0x1F;
-      uint32_t xor_mask = (offset >> 10) & 0x1F;
-      uint32_t row_base = lane & ~0x1Fu;
-      uint32_t row_lane = lane & 0x1Fu;
-      src_lane = row_base + (((row_lane & and_mask) | or_mask) ^ xor_mask);
-    }
-    if (src_lane < wf.wf_size())
-      regs.write_lane(inst.vdst, lane, src_data[src_lane]);
+    const unsigned source = amdgpu::ds_swizzle_lane(lane, offset);
+    if (exec & (uint64_t{1} << source))
+      tmp[lane] = regs.read_lane(inst.addr, source);
   }
+  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
+    if (exec & (uint64_t{1} << lane))
+      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
@@ -455,10 +389,10 @@ template <typename Inst>
 inline void execute_s_and_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec & (~src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -476,7 +410,7 @@ template <typename Inst>
 inline void execute_s_and_not0_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   uint64_t result = (old_exec & (~src));
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
   wf.write_exec(result);
@@ -516,10 +450,10 @@ template <typename Inst>
 inline void execute_s_and_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                  [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((src & (~old_exec)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -537,7 +471,7 @@ template <typename Inst>
 inline void execute_s_and_not1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   uint64_t result = (src & (~old_exec));
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
   wf.write_exec(result);
@@ -558,10 +492,10 @@ template <typename Inst>
 inline void execute_s_and_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec & src));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -578,10 +512,10 @@ template <typename Inst>
 inline void execute_s_andn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec & (~src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -599,7 +533,7 @@ template <typename Inst>
 inline void execute_s_andn1_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   uint64_t result = (old_exec & (~src));
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
   wf.write_exec(result);
@@ -637,10 +571,10 @@ template <typename Inst>
 inline void execute_s_andn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                               [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((src & (~old_exec)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -658,7 +592,7 @@ template <typename Inst>
 inline void execute_s_andn2_wrexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   uint64_t result = (src & (~old_exec));
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, static_cast<uint64_t>(result));
   wf.write_exec(result);
@@ -2092,10 +2026,10 @@ template <typename Inst>
 inline void execute_s_nand_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((~(old_exec & src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2132,10 +2066,10 @@ template <typename Inst>
 inline void execute_s_nor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((~(old_exec | src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2182,10 +2116,10 @@ template <typename Inst>
 inline void execute_s_or_not0_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec | (~src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2221,10 +2155,10 @@ template <typename Inst>
 inline void execute_s_or_not1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                                 [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((src | (~old_exec)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2241,10 +2175,10 @@ template <typename Inst>
 inline void execute_s_or_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                            [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec | src));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2261,10 +2195,10 @@ template <typename Inst>
 inline void execute_s_orn1_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec | (~src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2298,10 +2232,10 @@ template <typename Inst>
 inline void execute_s_orn2_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((src | (~old_exec)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2560,6 +2494,14 @@ template <typename Inst>
 inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
+inline void execute_s_setvskip_sopc([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  const uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0);
+  const uint32_t bit = amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1) & 31u;
+  const uint32_t vskip = ((source >> bit) & 1u) * Wavefront::VSKIP_BIT;
+  wf.set_mode_raw((wf.mode_raw() & ~Wavefront::VSKIP_BIT) | vskip);
+}
+
+template <typename Inst>
 inline void execute_s_sext_i32_i16_sop1([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
   int32_t result = static_cast<int32_t>(
@@ -2786,10 +2728,10 @@ template <typename Inst>
 inline void execute_s_xnor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                              [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((~(old_exec ^ src)));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2822,10 +2764,10 @@ template <typename Inst>
 inline void execute_s_xor_saveexec_b64_sop1([[maybe_unused]] Inst &inst,
                                             [[maybe_unused]] Wavefront &wf) {
   uint64_t src = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_scalar64(inst.ssrc0));
-  uint64_t old_exec = wf.read_exec();
+  uint64_t old_exec = wf.exec_raw();
   amdgpu::RegisterAccess(wf).write_scalar64(inst.sdst, old_exec);
   wf.write_exec((old_exec ^ src));
-  wf.write_scc((wf.read_exec() != 0ULL));
+  wf.write_scc((wf.exec_raw() != 0ULL));
 }
 
 template <typename Inst>
@@ -2888,7 +2830,7 @@ inline void execute_v_add_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t w = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
                    static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)) +
-                   static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+                   static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (w > 0xFFFFFFFFULL)
         vcc |= (1ULL << lane);
       else
@@ -3396,7 +3338,7 @@ inline void execute_v_addc_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unus
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t w = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)) +
                    static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)) +
-                   static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+                   static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (w > 0xFFFFFFFFULL)
         vcc |= (1ULL << lane);
       else
@@ -8151,9 +8093,8 @@ inline void execute_v_cndmask_b32_vop2([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        ((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1)
-            ? amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)
-            : amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+        ((wf.vcc_mask() >> lane) & 1) ? amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)
+                                      : amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
   }
 }
 
@@ -10450,7 +10391,7 @@ inline void execute_v_div_fmas_f32_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP32();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc_mask(exec);
+  const uint64_t vcc = wf.vcc_mask();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -10481,7 +10422,7 @@ inline void execute_v_div_fmas_f64_vop3([[maybe_unused]] Inst &inst,
                                         [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_DIV_FMAS_VOP3_FP64();
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc_mask(exec);
+  const uint64_t vcc = wf.vcc_mask();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -11746,9 +11687,18 @@ inline void execute_v_fma_mix_f32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -11790,9 +11740,18 @@ inline void execute_v_fma_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -11833,9 +11792,18 @@ inline void execute_v_fma_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -13731,9 +13699,18 @@ inline void execute_v_mad_mix_f32_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -13774,9 +13751,18 @@ inline void execute_v_mad_mixhi_f16_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -13818,9 +13804,18 @@ inline void execute_v_mad_mixlo_f16_vop3p([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
+    uint32_t raw0 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src0, uint64_t{1} << lane, inst.src0.register_byte_mask())
+            .lane(lane);
+    uint32_t raw1 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src1, uint64_t{1} << lane, inst.src1.register_byte_mask())
+            .lane(lane);
+    uint32_t raw2 =
+        amdgpu::RegisterAccess(wf)
+            .read_operand(inst.src2, uint64_t{1} << lane, inst.src2.register_byte_mask())
+            .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -17289,7 +17284,8 @@ inline void execute_v_permlane64_b32_vop1([[maybe_unused]] Inst &inst,
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t partner = lane ^ 32;
+    uint32_t partner =
+        amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm64, lane, 0, 0, wf.wf_size());
     if (partner < wf.wf_size())
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, snap[partner]);
   }
@@ -19286,7 +19282,7 @@ inline void execute_v_sub_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)),
-               c = static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+               c = static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -19706,7 +19702,7 @@ inline void execute_v_subb_co_u32_vop2([[maybe_unused]] Inst &inst, [[maybe_unus
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)),
-               c = static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+               c = static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -19766,7 +19762,7 @@ inline void execute_v_subbrev_co_u32_vop2([[maybe_unused]] Inst &inst,
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               c = static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+               c = static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else
@@ -19827,7 +19823,7 @@ inline void execute_v_subrev_co_ci_u32_vop2([[maybe_unused]] Inst &inst,
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, [&]() {
       uint64_t a = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)),
                b = static_cast<uint64_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)),
-               c = static_cast<uint64_t>(((wf.vcc_mask(uint64_t{1} << lane) >> lane) & 1));
+               c = static_cast<uint64_t>(((wf.vcc_mask() >> lane) & 1));
       if (a < b + c)
         vcc |= (1ULL << lane);
       else

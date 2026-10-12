@@ -5,6 +5,9 @@
 #include "library/rocprofiler-sdk/buffered/kfd/page_fault.hpp"
 #include "library/rocprofiler-sdk/buffered/kfd/queue.hpp"
 #include "library/rocprofiler-sdk/callback/code_object.hpp"
+#include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
+#include "library/rocprofiler-sdk/callback/hip_stream.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/tests/mock_domain_service.hpp"
@@ -15,6 +18,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -27,6 +31,7 @@ namespace rocprofsys
 namespace
 {
 
+using ::testing::_;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::Eq;
@@ -34,6 +39,7 @@ using ::testing::InSequence;
 using ::testing::IsEmpty;
 using ::testing::NotNull;
 using ::testing::Return;
+using ::testing::Sequence;
 using ::testing::SetArgPointee;
 using ::testing::StrictMock;
 
@@ -59,6 +65,8 @@ using domains::test_support::mock_sdk;
 using sut_t = domain_service<mock_sdk, externals>;
 
 constexpr std::size_t k_unsupported_domain_value = 999;
+
+constexpr mock_sdk::context_id_t k_code_object_context{ 3 };
 
 // Matches a tracing_operation_t* argument whose first expected.size() elements equal
 // expected exactly. The pointee address is an implementation-internal detail of
@@ -107,7 +115,21 @@ protected:
     {
         EXPECT_CALL(*g_mock, create_context(NotNull()))
             .Times(1)
+            .InSequence(m_create_context_sequence)
             .WillOnce(DoAll(SetArgPointee<0>(context), Return()));
+    }
+
+    // configure() always finishes by subscribing code_object, with every operation, on
+    // its own always-on context.
+    void expect_code_object_domain_configured()
+    {
+        expect_create_context(k_code_object_context);
+        expect_configure_callback(
+            k_code_object_context,
+            static_cast<mock_sdk::callback_tracing_kind_t>(
+                mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
+            domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
+        expect_start_context(k_code_object_context);
     }
 
     void expect_start_context(const mock_sdk::context_id_t& context)
@@ -164,6 +186,11 @@ protected:
     {
         EXPECT_CALL(*g_mock, destroy_buffer(Eq(buffer))).Times(1).WillOnce(Return(0));
     }
+
+private:
+    // Both the main and the code_object context come from create_context(); the
+    // sequence hands out context ids in the order the expectations are declared.
+    Sequence m_create_context_sequence;
 };
 
 TEST_F(domain_service_test,
@@ -178,9 +205,9 @@ TEST_F(domain_service_test,
                        .value      = k_unsupported_domain_value } }
     };
     g_callback_table = mock_sdk::tracing_names_t{
-        .entries = { { .name       = "code_object",
+        .entries = { { .name       = "hip_runtime_api",
                        .operations = {},
-                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+                       .value      = mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API } }
     };
 
     const sut_t service;
@@ -201,10 +228,45 @@ TEST_F(domain_service_test,
     EXPECT_EQ(*available[0].group, "kfd_events");
 
     EXPECT_EQ(available[1].key.mode, domains::collection_mode::callback);
-    EXPECT_EQ(available[1].key.value, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
-    EXPECT_EQ(available[1].name, "code_object");
+    EXPECT_EQ(available[1].key.value, mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API);
+    EXPECT_EQ(available[1].name, "hip_runtime_api");
     EXPECT_TRUE(available[1].operations.empty());
-    EXPECT_FALSE(available[1].group.has_value());
+    ASSERT_TRUE(available[1].group.has_value());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access) checked by ASSERT_TRUE above
+    EXPECT_EQ(*available[1].group, "hip_api");
+}
+
+TEST_F(domain_service_test, constructor_hides_code_object_from_available_domains)
+{
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "code_object",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+    };
+
+    const sut_t service;
+
+    EXPECT_THAT(service.available_domains(), IsEmpty());
+}
+
+TEST_F(domain_service_test, configure_throws_runtime_error_when_code_object_is_selected)
+{
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "code_object",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+    };
+
+    sut_t service;
+
+    EXPECT_THROW(
+        {
+            service.configure(std::vector<domain_selection>{
+                domain_selection{ .name       = "code_object",
+                                  .group      = std::nullopt,
+                                  .operations = std::nullopt } });
+        },
+        std::runtime_error);
 }
 
 TEST_F(domain_service_test,
@@ -234,6 +296,8 @@ TEST_F(domain_service_test,
     // buffered_domain::configure() forwards (nullptr, 0) to the SDK -- some
     // buffer-tracing kinds silently drop all records when given a non-null array that
     // enumerates every operation id, even though the configure call reports success.
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
 
@@ -250,9 +314,9 @@ TEST_F(domain_service_test,
        configure_selects_and_fully_configures_matching_callback_domain)
 {
     g_callback_table = mock_sdk::tracing_names_t{
-        .entries = { { .name       = "code_object",
+        .entries = { { .name       = "hip_runtime_api",
                        .operations = { "opA" },
-                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
+                       .value      = mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API } }
     };
 
     sut_t service;
@@ -263,14 +327,16 @@ TEST_F(domain_service_test,
     expect_configure_callback(
         context,
         static_cast<mock_sdk::callback_tracing_kind_t>(
-            mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-        domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
+            mock_sdk::CALLBACK_TRACING_HIP_RUNTIME_API),
+        domains::callback::hip::k_runtime_api<mock_sdk, externals>.on_record, {});
 
     // No explicit .operations filter: resolve_operations() must resolve to an empty
     // list so callback_domain::configure() forwards (nullptr, 0) to the SDK instead of
     // enumerating every known operation id.
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{ domain_selection{
-        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
+        .name = "hip_runtime_api", .group = std::nullopt, .operations = std::nullopt } });
 
     const auto configuration = service.configuration();
     ASSERT_EQ(configuration.size(), 1u);
@@ -364,6 +430,8 @@ TEST_F(domain_service_test,
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, { 0, 1 });
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
 
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{
         domain_selection{ .name       = "kfd_queue",
                           .group      = std::nullopt,
@@ -400,6 +468,8 @@ TEST_F(domain_service_test, flush_calls_flush_on_each_configured_buffered_domain
         domains::buffered::kfd::k_queue<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_queue_category_name);
 
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_queue", .group = std::nullopt, .operations = std::nullopt } });
 
@@ -431,6 +501,8 @@ TEST_F(domain_service_test, configure_calls_on_configure_when_domain_defines_it)
         domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
 
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = "kfd_page_fault", .group = std::nullopt, .operations = std::nullopt } });
 
@@ -459,47 +531,14 @@ TEST_F(domain_service_test, configure_calls_on_configure_for_event_domain_that_d
         domains::buffered::kfd::k_event_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_event_page_fault_category_name);
 
+    expect_code_object_domain_configured();
+
     service.configure(
         std::vector<domain_selection>{ domain_selection{ .name  = "kfd_event_page_fault",
                                                          .group = std::nullopt,
                                                          .operations = std::nullopt } });
 
     expect_destroy_buffer(buffer);
-}
-
-TEST_F(domain_service_test,
-       configure_calls_on_configure_for_callback_domain_that_defines_it)
-{
-    // on_code_object_configure() is a no-op, so it has no Externals side effect to
-    // assert on; this instead asserts the precondition domain_service's `if` branches
-    // on (on_configure is non-null) and that invoking it does not throw or crash.
-    constexpr const auto& k_code_object_definition =
-        domains::callback::k_code_object<mock_sdk, externals>;
-    ASSERT_NE(k_code_object_definition.on_configure, nullptr);
-
-    g_callback_table = mock_sdk::tracing_names_t{
-        .entries = { { .name       = "code_object",
-                       .operations = {},
-                       .value      = mock_sdk::CALLBACK_TRACING_CODE_OBJECT } }
-    };
-
-    sut_t service;
-
-    const mock_sdk::context_id_t context{ 2 };
-
-    expect_create_context(context);
-    expect_configure_callback(
-        context,
-        static_cast<mock_sdk::callback_tracing_kind_t>(
-            mock_sdk::CALLBACK_TRACING_CODE_OBJECT),
-        domains::callback::k_code_object<mock_sdk, externals>.on_record, {});
-
-    service.configure(std::vector<domain_selection>{ domain_selection{
-        .name = "code_object", .group = std::nullopt, .operations = std::nullopt } });
-
-    const auto configuration = service.configuration();
-    ASSERT_EQ(configuration.size(), 1u);
-    EXPECT_EQ(configuration[0].key.value, mock_sdk::CALLBACK_TRACING_CODE_OBJECT);
 }
 
 TEST_F(domain_service_test,
@@ -534,6 +573,8 @@ TEST_F(domain_service_test,
             mock_sdk::BUFFER_TRACING_KFD_PAGE_FAULT),
         domains::buffered::kfd::k_page_fault<mock_sdk, externals>.on_records, {});
     expect_on_configure_ran(externals::k_kfd_page_fault_category_name);
+
+    expect_code_object_domain_configured();
 
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = std::nullopt, .group = "KFD_EVENTS", .operations = std::nullopt } });
@@ -582,6 +623,8 @@ TEST_F(domain_service_test,
 
     // No name and no group set: match_domains() falls through to its final branch,
     // which selects every available domain.
+    expect_code_object_domain_configured();
+
     service.configure(std::vector<domain_selection>{ domain_selection{
         .name = std::nullopt, .group = std::nullopt, .operations = std::nullopt } });
 
@@ -612,6 +655,99 @@ TEST_F(domain_service_test, configure_throws_runtime_error_for_unknown_group)
                                   .operations = std::nullopt } });
         },
         std::runtime_error);
+}
+
+// ─── finalize ────────────────────────────────────────────────────────────────
+
+TEST_F(domain_service_test, finalize_is_a_noop_when_no_domains_are_configured)
+{
+    sut_t service;
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test, finalize_does_not_invoke_domains_that_leave_on_finalize_unset)
+{
+    // hip_stream does not define on_finalize, so k_hip_stream.on_finalize is the
+    // default-initialized nullptr; finalize() must skip it rather than call through a
+    // null function pointer.
+    constexpr const auto& k_hip_stream_definition =
+        domains::callback::k_hip_stream<mock_sdk, externals>;
+    ASSERT_EQ(k_hip_stream_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "hip_stream",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_HIP_STREAM } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(context,
+                              static_cast<mock_sdk::callback_tracing_kind_t>(
+                                  mock_sdk::CALLBACK_TRACING_HIP_STREAM),
+                              k_hip_stream_definition.on_record, {});
+    expect_code_object_domain_configured();
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "hip_stream", .group = std::nullopt, .operations = std::nullopt } });
+
+    service.finalize();
+}
+
+TEST_F(domain_service_test,
+       finalize_invokes_on_finalize_for_configured_domain_that_defines_it)
+{
+    // ompt is currently the only domain that defines on_finalize (it flushes any OMPT
+    // region still open when the tool shuts down -- see ompt.hpp's
+    // ompt_finalize_orphan_events). Populating its pending-callback storage and
+    // asserting it drains after service.finalize() proves domain_service::finalize()
+    // actually reaches the domain's on_finalize hook end-to-end, rather than merely
+    // not crashing.
+    constexpr const auto& k_ompt_definition =
+        domains::callback::ompt::k_ompt_api<mock_sdk, externals>;
+    ASSERT_NE(k_ompt_definition.on_finalize, nullptr);
+
+    g_callback_table = mock_sdk::tracing_names_t{
+        .entries = { { .name       = "ompt",
+                       .operations = {},
+                       .value      = mock_sdk::CALLBACK_TRACING_OMPT } }
+    };
+
+    sut_t service;
+
+    const mock_sdk::context_id_t context{ 2 };
+
+    expect_create_context(context);
+    expect_configure_callback(
+        context,
+        static_cast<mock_sdk::callback_tracing_kind_t>(mock_sdk::CALLBACK_TRACING_OMPT),
+        k_ompt_definition.on_record, {});
+    expect_code_object_domain_configured();
+
+    service.configure(std::vector<domain_selection>{ domain_selection{
+        .name = "ompt", .group = std::nullopt, .operations = std::nullopt } });
+
+    mock_sdk::callback_tracing_record_t record{};
+    record.operation = static_cast<std::uint32_t>(mock_sdk::OMPT_ID_task_create);
+    record.correlation_id.internal = 42U;
+
+    auto& pending_standard_callbacks =
+        domains::callback::ompt::detail::open_regions<mock_sdk>::s_standard;
+    pending_standard_callbacks.emplace(
+        record.correlation_id.internal,
+        domains::callback::ompt::detail::pending_region<mock_sdk>{
+            record, /*begin_timestamp=*/1, function_args_t{} });
+
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(1);
+    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(1);
+
+    service.finalize();
+
+    EXPECT_TRUE(pending_standard_callbacks.empty());
 }
 
 }  // namespace

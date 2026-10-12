@@ -165,6 +165,18 @@ public:
     return false;
   }
 
+  /// Inspect residency without changing replacement order or cache contents.
+  const CacheTag *peek(uint64_t addr, uint32_t vmid = 0) const {
+    const uint32_t set = set_index(addr);
+    const uint64_t tag = tag_bits(addr);
+    for (uint32_t way = 0; way < Associativity; ++way) {
+      const auto &entry = tag_at(set, way);
+      if (entry.valid && entry.tag == tag && entry.vmid == vmid)
+        return &entry;
+    }
+    return nullptr;
+  }
+
   /// @brief Allocate a cache line for an address, evicting the LRU victim if needed.
   ///
   /// @param addr The memory address to allocate for.
@@ -263,17 +275,26 @@ public:
 
   /// @brief Invalidate all cache lines.
   void invalidate_all() {
-    for (uint32_t s = 0; s < NumSets; ++s) {
-      if (!touched_sets_[s])
+    for (uint32_t first = 0; first < NumSets; first += sizeof(uint64_t)) {
+      const uint32_t end = std::min<uint32_t>(first + sizeof(uint64_t), NumSets);
+      uint64_t touched = 0;
+      // Full-cache maintenance already excludes concurrent set accesses.
+      // Scan empty marker groups together without changing fill-side writes.
+      std::memcpy(&touched, touched_sets_.data() + first, end - first);
+      if (touched == 0)
         continue;
-      for (uint32_t w = 0; w < Associativity; ++w) {
-        auto &t = tag_at(s, w);
-        t.coherence_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+      for (uint32_t s = first; s < end; ++s) {
+        if (!touched_sets_[s])
+          continue;
+        for (uint32_t w = 0; w < Associativity; ++w) {
+          auto &t = tag_at(s, w);
+          t.coherence_epoch = 0;
+          t.valid = false;
+          t.dirty = false;
+          t.coherence = CoherenceState::INVALID;
+        }
+        touched_sets_[s] = 0;
       }
-      touched_sets_[s] = 0;
     }
   }
 

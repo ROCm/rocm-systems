@@ -66,8 +66,7 @@ class EventCommands:
             raise e
         finally:
             self.stop = True
-            for thread in threads:
-                thread.join()
+            event_thread.join()
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
         if system_exit_exc is not None:
@@ -119,16 +118,27 @@ class EventCommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        device = devices[i]
-        listener = amdsmi_interface.AmdSmiEventReader(
-            device, amdsmi_interface.AmdSmiEvtNotificationType
-        )
+        listeners = [
+            amdsmi_interface.AmdSmiEventReader(device, amdsmi_interface.AmdSmiEvtNotificationType)
+            for device in devices
+        ]
         values_dict = {}
 
-        while not self.stop:
-            try:
-                events = listener.read(2000)
+        try:
+            while not self.stop:
+                try:
+                    # read() is a global poll: amdsmi_get_gpu_event_notification()
+                    # returns queued events for ALL registered devices, each tagged
+                    # with its own processor_handle. A single listener's read()
+                    # therefore drains every GPU, not just listeners[0].
+                    events = listeners[0].read(2000)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
+                        print(e, file=sys.stderr)
+                    continue
+
                 for event in events:
+                    values_dict["timestamp"] = event["timestamp"]
                     values_dict["event"] = event["event"]
                     # parse message as it's own dictionary
                     message_list = event["message"].split("  ")
@@ -140,13 +150,14 @@ class EventCommands:
                     values_dict["message"] = message_dict
                     commands.logger.store_output(event["processor_handle"], "values", values_dict)
                     commands.logger.print_output()
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.err_code != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA:
-                    print(e)
             except Exception as e:
-                print(e)
-
-        listener.stop()
+                        # Isolate per-event failures (e.g. a malformed message) so
+                        # one bad record can't drop its batch siblings; keep the
+                        # stdout record stream clean by logging to stderr.
+                        print(e, file=sys.stderr)
+        finally:
+            for listener in listeners:
+                listener.stop()
 
     # Thread class for capture exceptions from event listener threads which will be passed to main thread
     class EventListenerThread(threading.Thread):

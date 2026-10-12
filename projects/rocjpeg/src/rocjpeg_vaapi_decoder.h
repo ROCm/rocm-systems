@@ -68,7 +68,7 @@ typedef enum {
  * whether it can convert to RGB, and whether it supports ROI (Region of Interest) decoding.
  */
 typedef struct {
-    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. */
+    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. Always >= 1: it is the stride used to group work into sub-batches, so a zero would stall those loops. */
     bool can_convert_to_rgb; /**< Flag indicating whether the VCN JPEG decoder can convert to RGB. */
     bool can_roi_decode; /**< Flag indicating whether the VCN JPEG decoder supports ROI decoding. */
 } VcnJpegSpec;

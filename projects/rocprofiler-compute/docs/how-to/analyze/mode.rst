@@ -35,8 +35,8 @@ See the following sections to explore ROCm Compute Profiler's analysis and visua
 options.
 
 * :doc:`cli`
-* :doc:`standalone-gui` (experimental feature)
-* :doc:`tui` (experimental feature)
+* :doc:`standalone-gui` (experimental feature, deprecated)
+* :doc:`tui` (experimental feature, deprecated)
 * :doc:`optiq` (graphical application)
 
 .. note::
