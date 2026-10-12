@@ -173,7 +173,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
 - **Fixed AMD AI NIC ports reporting the wrong network interface index when the index is above 255**.  
-  - The interface index in NIC port information is now 32 bits wide, so programs that read NIC port information must be rebuilt.
+  - The interface index in NIC port information is now 32 bits wide, so programs that read NIC port information must be rebuilt. An unknown index is now `UINT32_MAX` (was 255) and shows as `N/A` in the Python interface and `amd-smi`.
 
 ## amd_smi_lib for ROCm 10.1.0
 

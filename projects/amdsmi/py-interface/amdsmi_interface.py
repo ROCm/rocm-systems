@@ -2565,7 +2565,7 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "TYPE": port_info.type.decode("utf-8"),
             "FLAVOUR": port_info.flavour.decode("utf-8"),
             "NETDEV": port_info.netdev.decode("utf-8"),
-            "IFINDEX": port_info.ifindex,
+            "IFINDEX": _validate_if_max_uint(port_info.ifindex, MaxUIntegerTypes.UINT32_T),
             "MAC_ADDRESS": port_info.mac_address.decode("utf-8"),
             "CARRIER": port_info.carrier,
             "MTU": f"{port_info.mtu}B",

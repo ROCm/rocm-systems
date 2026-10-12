@@ -20,7 +20,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <optional>
 #include <string>
+#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "smi_nic.h"
@@ -215,19 +218,63 @@ TEST_F(NicUnit, RestoreRebindsProductionGetters) {
   EXPECT_EQ(populate_amd_ainic_device(nullptr, 0x1000, info), AMDSMI_STATUS_INVAL);
 }
 
+// Creates a unique directory and removes it however the test exits.
+class ScopedTempDir {
+ public:
+  ScopedTempDir() {
+    std::string tmpl = (std::filesystem::temp_directory_path() / "amdsmi_nic_port_XXXXXX").string();
+    if (mkdtemp(tmpl.data()) != nullptr) {
+      path_ = tmpl;
+    }
+  }
+  ~ScopedTempDir() {
+    if (!path_.empty()) {
+      std::error_code ec;
+      std::filesystem::remove_all(path_, ec);
+    }
+  }
+  ScopedTempDir(const ScopedTempDir&) = delete;
+  ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+
+  const std::string& path() const { return path_; }
+
+ private:
+  std::string path_;
+};
+
+// The reader returns an empty file as 0, so a failed write has to stop the
+// test instead of surfacing as a wrong index.
+::testing::AssertionResult WriteFile(const std::string& path, const std::string& contents) {
+  std::ofstream out(path);
+  out << contents;
+  out.close();
+  if (!out) {
+    return ::testing::AssertionFailure() << "cannot write " << path;
+  }
+  return ::testing::AssertionSuccess();
+}
+
 // The kernel numbers network interfaces with an int, and hosts with many
-// interfaces, such as container hosts, hand out indexes above 255. A port's
-// ifindex must come back from sysfs whole, not cut to its low byte. It lives
+// interfaces, such as container hosts, hand out indexes above 255. INT_MAX, the
+// largest it assigns, fails any field narrower than 32 bits. These tests live
 // here because every NicUnit test has to share this file's fixture.
-TEST_F(NicUnit, PortIfindexAbove255IsReadWhole) {
-  char dir[] = "/tmp/amdsmi_nic_port_XXXXXX";
-  ASSERT_NE(mkdtemp(dir), nullptr);
-  std::ofstream(std::string(dir) + "/ifindex") << "300\n";
+TEST_F(NicUnit, PortIfindexIsReadAtFullWidth) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  constexpr auto kIfindex = static_cast<uint32_t>(std::numeric_limits<int>::max());
+  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", std::to_string(kIfindex) + "\n"));
 
-  const SmiNicPort port("eth0", "0000:01:00.0", dir, dir);
-  EXPECT_EQ(port.ifindex(), 300u);
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), kIfindex);
+}
 
-  std::filesystem::remove_all(dir);
+// A missing file must read as no value, not as a number.
+TEST_F(NicUnit, PortIfindexWithoutFileIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), std::nullopt);
 }
 
 }  // namespace
