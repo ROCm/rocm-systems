@@ -545,6 +545,17 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
 };
 
+bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {
+  if (maxBytes != 0 && minBytes > maxBytes) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      WARN("rcclWindowFits: min (%zu) > max (%zu); path silently disabled", minBytes, maxBytes);
+    }
+  }
+  return maxBytes > 0 && totalBytes >= minBytes && totalBytes <= maxBytes;
+}
+
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
   if (gcn == nullptr) return nullptr;
   if (IsArchMatch(gcn, "gfx1250")) return &rcclArchThresholds_gfx1250;
