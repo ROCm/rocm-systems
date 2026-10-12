@@ -124,6 +124,8 @@ hipError_t ihipGraphAddKernelNode(
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
+  const bool clusterDimsSpecified =
+      clusterDim.x != 0 || clusterDim.y != 0 || clusterDim.z != 0;
   if (hipError_t status =
           ihipResolveGraphClusterDimensions(func, deviceId, pNodeParams->gridDim, &clusterDim);
       status != hipSuccess) {
@@ -159,7 +161,7 @@ hipError_t ihipGraphAddKernelNode(
   auto* kernelNode =
       new hip::GraphKernelNode(pNodeParams, pNodeEvents, coopKernel, globalWorkSizeX_remainder,
                                globalWorkSizeY_remainder, globalWorkSizeZ_remainder, clusterDim,
-                               launchFlags);
+                               clusterDimsSpecified, launchFlags);
   status = kernelNode->GetParamCopyStatus();
   if (status != hipSuccess) {
     delete kernelNode;

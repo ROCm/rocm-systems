@@ -60,6 +60,28 @@
 
 namespace fs = std::filesystem;
 
+// On a real WSL2 CI runner, WSLGPUBackend::IsActive() makes every NPM call
+// short-circuit to AMDSMI_STATUS_NOT_SUPPORTED before ever consulting this
+// test's fabricated board_path content (see the ENABLE_WSL_BACKEND guard at
+// the top of each amdsmi_*npm* function in amd_smi.cc). A plain helper
+// function would not work here: GTEST_SKIP_() expands to a `return`, which
+// would only exit the helper, not the TEST() body -- hence a macro.
+#if defined(ENABLE_WSL_BACKEND)
+#define SKIP_IF_WSL_BACKEND_ACTIVE()                                   \
+  do {                                                                 \
+    if (amd::smi::WSLGPUBackend::IsActive()) {                         \
+      GTEST_SKIP_(                                                     \
+          "WSLGPUBackend is active: this NPM call short-circuits to "  \
+          "AMDSMI_STATUS_NOT_SUPPORTED before this test's fabricated " \
+          "board content is ever consulted");                          \
+    }                                                                  \
+  } while (0)
+#else
+#define SKIP_IF_WSL_BACKEND_ACTIVE() \
+  do {                               \
+  } while (0)
+#endif  // ENABLE_WSL_BACKEND
+
 namespace {
 
 // RAII helper identical in spirit to the one in rocm_smi_npm_test.cc; kept
@@ -110,20 +132,31 @@ class ScopedAmdSmiInit {
 
 }  // namespace
 
+// Driverless runners (e.g. the ASAN CI container) cannot init; any other init
+// failure is still a test failure.
+#define REQUIRE_AMDSMI_INIT(init)                             \
+  do {                                                        \
+    if ((init).status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) { \
+      GTEST_SKIP() << "amdgpu driver not loaded";             \
+    }                                                         \
+    ASSERT_EQ((init).status(), AMDSMI_STATUS_SUCCESS);        \
+  } while (0)
+
 // ---------------------------------------------------------------------
 // amdsmi_set_npm_limit()
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, SetNpmLimitNullHandleIsInval) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   EXPECT_EQ(amdsmi_set_npm_limit(nullptr, 100), AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, SetNpmLimitNonRootIsNoPerm) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (amd::smi::is_sudo_user()) {
     GTEST_SKIP_(
@@ -142,7 +175,8 @@ TEST(GpuUnit, SetNpmLimitNonRootIsNoPerm) {
 
 TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -175,7 +209,8 @@ TEST(GpuUnit, SetNpmLimitRootSuccessWritesValue) {
 
 TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -206,7 +241,8 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenNpmDisabled) {
 
 TEST(GpuUnit, SetNpmLimitRootRejectsZero) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -227,7 +263,8 @@ TEST(GpuUnit, SetNpmLimitRootRejectsZero) {
 
 TEST(GpuUnit, SetNpmLimitRootRejectsOverMax) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -248,7 +285,8 @@ TEST(GpuUnit, SetNpmLimitRootRejectsOverMax) {
 
 TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxUnreadable) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -271,7 +309,8 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxUnreadable) {
 
 TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -306,7 +345,8 @@ TEST(GpuUnit, SetNpmLimitRootRejectsWhenMaxCorrupted) {
 
 TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -326,7 +366,8 @@ TEST(GpuUnit, SetNpmLimitRootAcceptsInRange) {
 
 TEST(GpuUnit, SetNpmLimitRootMissingFileIsNotSupported) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -348,7 +389,8 @@ TEST(GpuUnit, SetNpmLimitRootMissingFileIsNotSupported) {
 
 TEST(GpuUnit, SetNpmLimitRootMissingBoardDirIsNotSupported) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (!amd::smi::is_sudo_user()) {
     GTEST_SKIP_("Invalid permission - Must run as super user");
@@ -389,7 +431,7 @@ TEST(GpuUnit, SetNpmLimitRootMissingBoardDirIsNotSupported) {
 
 TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   // Heap-allocated (not stack-allocated) so this address cannot alias a
   // stack slot some other test in this binary already passed to
@@ -409,7 +451,7 @@ TEST(GpuUnit, GetNpmInfoRejectsUnregisteredHandle) {
 
 TEST(GpuUnit, SetNpmLimitRejectsUnregisteredHandle) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   // See GetNpmInfoRejectsUnregisteredHandle above for why this must be
   // heap-allocated rather than a stack-local std::string.
@@ -425,7 +467,8 @@ TEST(GpuUnit, SetNpmLimitRejectsUnregisteredHandle) {
 
 TEST(GpuUnit, SetNpmLimitAcceptsHandleAfterTestRegistration) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
+  SKIP_IF_WSL_BACKEND_ACTIVE();
 
   if (amd::smi::is_sudo_user()) {
     GTEST_SKIP_(
@@ -458,7 +501,7 @@ TEST(GpuUnit, SetNpmLimitAcceptsHandleAfterTestRegistration) {
 // than asserting anything about the (untaken) native-Linux path.
 TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   if (!amd::smi::WSLGPUBackend::IsActive()) {
     GTEST_SKIP_(
@@ -500,7 +543,7 @@ TEST(GpuUnit, SetNpmLimitNotSupportedWhenWslBackendActive) {
 // real acquisition path end-to-end, not a test-fabricated handle.
 TEST(GpuUnit, GetNpmInfoCurrentNodePowerRoundTrip) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   amdsmi_socket_handle sockets[16];
   uint32_t socket_count = 16;
@@ -555,7 +598,7 @@ TEST(GpuUnit, GetNpmInfoCurrentNodePowerRoundTrip) {
 
 TEST(GpuUnit, GetPowerInfoNullInfoIsInval) {
   ScopedAmdSmiInit init;
-  ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
+  REQUIRE_AMDSMI_INIT(init);
 
   amdsmi_socket_handle sockets[16];
   uint32_t socket_count = 16;

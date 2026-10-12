@@ -47,7 +47,14 @@ MemoryPipeline::~MemoryPipeline() {
 
 MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instruction &inst) const {
   WaitCounterTokens counters;
-  if (const auto *issue = inst.amdgpu_memory_issue_info()) {
+  const DynamicInstState *state = inst.data();
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM)) {
+    const auto &routed = inst.data_as<VectorMemState>()->routed_issue_info;
+    if (routed)
+      issue = &*routed;
+  }
+  if (issue) {
     for (const auto obligation : issue->counter_obligations()) {
       for (uint8_t token = 0; token < obligation.counter_increment(); ++token)
         counters.types[counters.size++] = obligation.wait_counter_type();
@@ -56,7 +63,6 @@ MemoryPipeline::WaitCounterTokens MemoryPipeline::issue_counters(const Instructi
   }
 
   WaitCounterType counter = counter_type_;
-  const DynamicInstState *state = inst.data();
   if (state != nullptr) {
     switch (state->tag()) {
     case SCALAR_MEM:
@@ -354,7 +360,13 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       uint32_t data_offset = lane * stride + i * 4;
       uint32_t copy_size =
           is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
-      std::memcpy(&val, &d.response_data[data_offset], copy_size);
+      // Constant sizes let the compiler inline common response-word copies.
+      if (copy_size == 4)
+        std::memcpy(&val, &d.response_data[data_offset], 4);
+      else if (copy_size == 2)
+        std::memcpy(&val, &d.response_data[data_offset], 2);
+      else
+        std::memcpy(&val, &d.response_data[data_offset], copy_size);
       if (d.sign_extend && i == 0 && d.elem_size < 4) {
         if (d.elem_size == 1)
           val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val)));
@@ -450,14 +462,16 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       // Descriptor bounds suppress memory access while preserving zero writeback.
     } else if (d.elem_size < 4) {
       uint8_t bytes[4] = {};
-      const VmAccessOutcome outcome = l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id());
+      const VmAccessOutcome outcome =
+          l1_->load_bytes(d.addr, d.elem_size, bytes, wf.process_id(), d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
       d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
     } else if (d.load_dword_mask != 0xffff) {
       for (uint32_t i = 0; i < d.num_dwords; ++i)
         if (d.load_dword_mask & (1u << i)) {
-          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id());
+          const auto outcome = l1_->load(d.addr + i * 4, 1, &d.response_data[i], wf.process_id(),
+                                         /*allow_private_batch=*/false, d.mtype);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
         }
@@ -465,13 +479,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       auto &cu = wf.raw_cu();
       const bool allow_private_batch =
           GpuVmAccessBatchGuard::active() && !cu.debug_active() && cu.plugin_group().empty();
-      const VmAccessOutcome outcome =
-          l1_->load(d.addr, d.num_dwords, d.response_data, wf.process_id(), allow_private_batch);
+      const VmAccessOutcome outcome = l1_->load(d.addr, d.num_dwords, d.response_data,
+                                                wf.process_id(), allow_private_batch, d.mtype);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
     }
   } else {
-    const VmAccessOutcome outcome = l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id());
+    const VmAccessOutcome outcome =
+        l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
   }
@@ -1182,14 +1197,41 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
     const uint32_t vgpr_count = d.ds2_destination_vgpr_count();
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (!(d.lane_mask & (1ULL << lane)))
-        continue;
-      for (uint32_t i = 0; i < vgpr_count; ++i) {
-        uint32_t val = 0;
-        uint32_t data_offset = lane * d.elem_size + i * 4;
-        std::memcpy(&val, &d.ds2_response_data[data_offset], std::min(d.elem_size, 4u));
-        cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+    // Both destination ranges were validated before the first writeback.
+    // As in the ordinary dword-load path, VM completion does not emit an
+    // instruction-side register observation. Resolve storage once per register.
+    if (d.atomic_op == AtomicOp::NONE && !d.lds_stack_inputs && d.num_elems == 1 &&
+        (d.elem_size == 4 || d.elem_size == 8) && vgpr_count == d.elem_size / 4 &&
+        d.wf_size <= cu.vgpr_storage_lane_count()) {
+      const uint64_t wave_mask = d.wf_size == 64 ? ~uint64_t{0} : (uint64_t{1} << d.wf_size) - 1;
+      const uint64_t write_mask = d.lane_mask & wave_mask;
+      if (write_mask) {
+        for (uint32_t i = 0; i < vgpr_count; ++i) {
+          auto *destination =
+              reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.ds2_dst_reg_base + i));
+          for (uint64_t lanes = write_mask; lanes; lanes &= lanes - 1) {
+            const uint32_t lane = std::countr_zero(lanes);
+            std::memcpy(&destination[lane], &d.ds2_response_data[lane * d.elem_size + i * 4], 4);
+          }
+        }
+      }
+    } else {
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+        if (!(d.lane_mask & (1ULL << lane)))
+          continue;
+        for (uint32_t i = 0; i < vgpr_count; ++i) {
+          uint32_t val = 0;
+          uint32_t data_offset = lane * d.elem_size + i * 4;
+          const uint32_t copy_size = std::min(d.elem_size, 4u);
+          // Keep the same fixed-size copy specialization as the first destination.
+          if (copy_size == 4)
+            std::memcpy(&val, &d.ds2_response_data[data_offset], 4);
+          else if (copy_size == 2)
+            std::memcpy(&val, &d.ds2_response_data[data_offset], 2);
+          else
+            std::memcpy(&val, &d.ds2_response_data[data_offset], copy_size);
+          cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+        }
       }
     }
     // Per-lane dual-access completion trace.

@@ -39,6 +39,16 @@ function(hipfile_set_compiler_flags target)
         endif()
     endforeach()
 
+    # Clang "safe buffer" warnings (see HipFileClangSafeBuffers.cmake)
+    #
+    # C++ only, since HIP kernels use raw pointers by necessity. Skipped
+    # with IWYU for the same reason as the warning flags, above.
+    if(HIPFILE_WARN_UNSAFE_BUFFER_OPS AND NOT HIPFILE_USE_IWYU)
+        target_compile_options(${target} PRIVATE
+            $<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wunsafe-buffer-usage -fsafe-buffer-usage-suggestions>
+        )
+    endif()
+
     if(HIPFILE_USE_SANITIZERS OR HIPFILE_USE_THREAD_SANITIZER)
         hipfile_add_sanitizers(${target})
     endif()
