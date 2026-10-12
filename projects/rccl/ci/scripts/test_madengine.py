@@ -89,7 +89,7 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # execute a multi-node workload in place instead of submitting its own sbatch
 # (ROCm/madengine#213).  That is not on develop yet, so the fork is pinned.
 MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
-MADENGINE_REF = "10a0414b644d204e45437ab01d9e795176e0ee4f"  # madengine#213
+MADENGINE_REF = "95685108f27bd4eb4d44209f5ee2e7e86d5451c3"  # madengine#213, on #190
 MAD_REPO = "https://github.com/ROCm/MAD.git"
 MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
 MAD_BRANCH = "mad-rccl"
@@ -243,70 +243,6 @@ def install_madengine(work_dir: Path) -> Path:
         log.warning("madengine --version failed, but install may still be usable")
 
     return madengine_dir
-
-
-def patch_madengine_for_cluster(madengine_dir: Path) -> None:
-    """Patch madengine source for cluster-specific compatibility."""
-    src = madengine_dir / "src" / "madengine"
-
-    # /var/tmp is persistent and shared, so job-scope the workspace and delete
-    # it after use. Anchor-guarded: a no-op once ROCm/madengine#190 is pinned.
-    template = src / "deployment" / "templates" / "slurm" / "job.sh.j2"
-    if template.exists():
-        content = template.read_text()
-        original = content
-        patches = [
-            (
-                # Bare SLURM_TMPDIR would rsync the project into /var/tmp.
-                "single-node workspace scoping",
-                '        WORKSPACE=$SLURM_TMPDIR\n'
-                '        WORKSPACE_TYPE="local-slurm"\n',
-                '        WORKSPACE=$SLURM_TMPDIR/madengine_job_${SLURM_JOB_ID:-$$}\n'
-                '        mkdir -p $WORKSPACE\n'
-                '        WORKSPACE_TYPE="local-slurm"\n',
-            ),
-        ]
-        # Any upstream removal of the workspace wins: #190 keeps it when the
-        # task failed or artifacts did not all copy out, and a second
-        # unconditional delete here would undo that.
-        if 'rm -rf "$WORKSPACE"' not in content:
-            patches.append(
-                (
-                    # Last in the per-node task script, so artifacts are in
-                    # $NODE_COLLECTION_DIR on shared storage by now. Only the
-                    # node-local workspace: shared-nfs is the submission dir.
-                    "node-local workspace cleanup",
-                    "\nexit $TASK_EXIT\nTASK_SCRIPT_EOF\n",
-                    "\n"
-                    "# Nothing else reclaims this on a persistent"
-                    " SLURM_TMPDIR; a failed task keeps it for the"
-                    " post-mortem.\n"
-                    'if [ $TASK_EXIT -eq 0 ] && '
-                    '[ "$WORKSPACE_TYPE" = "local-multinode" ] && '
-                    '[ -n "$WORKSPACE" ]; then\n'
-                    '    echo "Node ${SLURM_PROCID}: removing local workspace '
-                    '$WORKSPACE"\n'
-                    '    cd / && rm -rf "$WORKSPACE" || true\n'
-                    "fi\n"
-                    "\n"
-                    "exit $TASK_EXIT\n"
-                    "TASK_SCRIPT_EOF\n",
-                )
-            )
-
-        for label, old, new in patches:
-            if old not in content:
-                log.warning(
-                    "SLURM template: %s anchor not found — already patched "
-                    "upstream, or the template drifted",
-                    label,
-                )
-                continue
-            content = content.replace(old, new)
-            log.info("Patched SLURM template: %s", label)
-
-        if content != original:
-            template.write_text(content)
 
 
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
@@ -1455,9 +1391,7 @@ def main() -> None:
                  rccl_fingerprint["size"])
 
     # Step 2: Install madengine
-    madengine_dir = install_madengine(work_dir)
-
-    patch_madengine_for_cluster(madengine_dir)
+    install_madengine(work_dir)
 
     # Step 3: Build overlay image (or use pre-built)
     if args.skip_overlay_build:
