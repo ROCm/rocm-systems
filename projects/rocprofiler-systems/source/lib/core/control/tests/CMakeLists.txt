@@ -17,6 +17,22 @@ target_include_directories(
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
 )
 
+add_library(control-timeline-clock-tests OBJECT test_timeline.cpp)
+
+target_link_libraries(
+    control-timeline-clock-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-common-library
+        rocprofiler-systems-logger
+)
+
+target_include_directories(
+    control-timeline-clock-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib
+)
+
 add_library(control-steady-clock-tests OBJECT test_steady_clock.cpp)
 
 target_link_libraries(

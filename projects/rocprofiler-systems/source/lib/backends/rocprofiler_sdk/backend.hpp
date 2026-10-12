@@ -89,6 +89,9 @@ struct backend
     using kernel_dispatch_record_t       = Wrapper::kernel_dispatch_record;
     using memory_copy_record_t           = Wrapper::memory_copy_record;
     using scratch_memory_record_t        = Wrapper::scratch_memory_record;
+    using code_object_load_data_t        = Wrapper::code_object_load_data;
+    using code_object_kernel_symbol_register_data_t =
+        Wrapper::code_object_kernel_symbol_register_data;
 #if ROCPROFILER_VERSION >= 700
     using async_correlation_id_t    = Wrapper::async_correlation_id_t;
     using tracing_hip_stream_data_t = Wrapper::hip_stream_data;
@@ -175,6 +178,58 @@ struct backend
         Wrapper::RCCL_API_ID_ncclAlltoAll;
 #endif
     // NOLINTEND(readability-identifier-naming)
+    // ─── Code object operation constants ─────────────────────────────────────────
+    static constexpr tracing_operation_t CODE_OBJECT_LOAD = Wrapper::CODE_OBJECT_LOAD;
+    static constexpr tracing_operation_t CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER =
+        Wrapper::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+
+#if ROCPROFILER_VERSION >= 600
+    // ─── OMPT types and constants ─────────────────────────────────────────────────
+    using ompt_operation_t             = Wrapper::ompt_operation_t;
+    using callback_tracing_ompt_data_t = Wrapper::ompt_data_t;
+    using ompt_thread_t                = Wrapper::ompt_thread_t;
+
+    // NOLINTBEGIN(readability-identifier-naming) -- names mirror OMPT / rocprofiler-sdk
+    static constexpr ompt_thread_t OMPT_THREAD_INITIAL = Wrapper::OMPT_THREAD_INITIAL;
+
+    static constexpr ompt_operation_t OMPT_ID_thread_begin =
+        Wrapper::OMPT_ID_thread_begin;
+    static constexpr ompt_operation_t OMPT_ID_thread_end = Wrapper::OMPT_ID_thread_end;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin =
+        Wrapper::OMPT_ID_parallel_begin;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end =
+        Wrapper::OMPT_ID_parallel_end;
+    static constexpr ompt_operation_t OMPT_ID_task_create = Wrapper::OMPT_ID_task_create;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule =
+        Wrapper::OMPT_ID_task_schedule;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task =
+        Wrapper::OMPT_ID_implicit_task;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize =
+        Wrapper::OMPT_ID_device_initialize;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize =
+        Wrapper::OMPT_ID_device_finalize;
+    static constexpr ompt_operation_t OMPT_ID_device_load = Wrapper::OMPT_ID_device_load;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released =
+        Wrapper::OMPT_ID_mutex_released;
+    static constexpr ompt_operation_t OMPT_ID_dependences = Wrapper::OMPT_ID_dependences;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence =
+        Wrapper::OMPT_ID_task_dependence;
+    static constexpr ompt_operation_t OMPT_ID_lock_init = Wrapper::OMPT_ID_lock_init;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy =
+        Wrapper::OMPT_ID_lock_destroy;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire =
+        Wrapper::OMPT_ID_mutex_acquire;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired =
+        Wrapper::OMPT_ID_mutex_acquired;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock = Wrapper::OMPT_ID_nest_lock;
+    static constexpr ompt_operation_t OMPT_ID_flush     = Wrapper::OMPT_ID_flush;
+    static constexpr ompt_operation_t OMPT_ID_cancel    = Wrapper::OMPT_ID_cancel;
+    static constexpr ompt_operation_t OMPT_ID_dispatch  = Wrapper::OMPT_ID_dispatch;
+    static constexpr ompt_operation_t OMPT_ID_error     = Wrapper::OMPT_ID_error;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions =
+        Wrapper::OMPT_ID_callback_functions;
+    // NOLINTEND(readability-identifier-naming)
+#endif
 
 #if ROCPROFILER_VERSION >= 600
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_ROCDECODE_API =

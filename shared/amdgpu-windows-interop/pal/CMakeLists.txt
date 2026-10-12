@@ -80,6 +80,7 @@ target_compile_definitions(pal
         PAL_BUILD_RDF=1
         PAL_DEVELOPER_BUILD=0
         PAL_KMT_BUILD=1
+        PAL_WORK_LISTS_SUPPORT=1
 )
 target_include_directories(pal
     INTERFACE

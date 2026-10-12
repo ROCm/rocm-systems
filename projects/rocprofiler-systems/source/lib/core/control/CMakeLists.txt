@@ -11,6 +11,7 @@ set(control_headers
     ${CMAKE_CURRENT_LIST_DIR}/clock.hpp
     ${CMAKE_CURRENT_LIST_DIR}/clocks/posix.hpp
     ${CMAKE_CURRENT_LIST_DIR}/clocks/steady.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/clocks/timeline.hpp
     ${CMAKE_CURRENT_LIST_DIR}/session.hpp
     ${CMAKE_CURRENT_LIST_DIR}/triggers/roctx.hpp
     ${CMAKE_CURRENT_LIST_DIR}/triggers/time_window.hpp
