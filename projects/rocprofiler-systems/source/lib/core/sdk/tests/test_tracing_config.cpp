@@ -10,11 +10,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::rocprofiler_sdk::testing
 {
@@ -39,37 +41,32 @@ enum backend_tag : int
     version_fields                              = 1,
     version_formatted                           = 2,
     version_caching                             = 3,
-    ops_throw_get_operations_callback           = 60,
-    ops_throw_get_operations_buffer             = 61,
-    ops_throw_get_backtrace_callback            = 62,
-    ops_throw_get_backtrace_buffer              = 63,
     ops_throw_message                           = 64,
     domain_settings_test                        = 80,
     operation_settings_test                     = 81,
-    callback_backtrace_operations               = 84,
-    buffered_backtrace_operations               = 85,
-    callback_operations                         = 86,
-    buffered_operations                         = 87,
     buffered_domains_memory_copy                = 88,
-    buffered_domains_aliases                    = 89,
     buffered_domains_kfd_events                 = 91,
     buffered_domains_kfd_individual             = 92,
     buffered_domains_allocation                 = 93,
     buffered_domains_unified_memory             = 94,
     buffered_domains_generic_lookup             = 95,
-    buffered_domains_invalid                    = 96,
-    buffered_domains_page_migration             = 97,
     callback_domains_aliases                    = 98,
     callback_domains_generic_lookup             = 99,
     callback_domains_implicit_flags             = 100,
     callback_domains_invalid                    = 101,
     callback_domains_rocshmem_hipfile_supported = 103,
-    buffered_domains_callback_only_skipped      = 104,
     callback_domains_buffer_only_no_warning     = 105,
-    buffered_domains_callback_only_no_warning   = 106,
     operation_settings_marker_core_api_skip     = 107,
     buffered_domains_kfd_below_boundary_version = 108,
     buffered_domains_kfd_at_boundary_version    = 109,
+    domain_requests_buffered                    = 110,
+    domain_requests_callback_filtered           = 111,
+    domain_requests_callback_unfiltered         = 112,
+    domain_requests_marker_skipped              = 113,
+    domain_requests_legacy_page_migration       = 114,
+    domain_requests_before_hip_stream           = 115,
+    domain_requests_marker_skipped_aliases      = 116,
+    domain_requests_buffered_operations         = 117,
 };
 
 // tracing_config no longer caches get_version()/get_callback_tracing_names()/
@@ -121,16 +118,6 @@ template <int Tag>
 struct tagged_backend : cached_backend_methods<Tag, mock_backend>
 {};
 
-// buffered_domains_page_migration simulates a pre-1.0 SDK: below the KFD gate
-// (>= 10000), so get_buffered_domains() falls back to the legacy
-// BUFFER_TRACING_PAGE_MIGRATION path instead of the granular KFD_* domains.
-template <>
-struct tagged_backend<buffered_domains_page_migration>
-: cached_backend_methods<buffered_domains_page_migration, mock_backend>
-{
-    static constexpr std::uint32_t compile_time_version = 500;
-};
-
 // The KFD gate is s_sdk_version_1_2_2 (10202): SDK versions below 1.2.2 have a
 // fatal bug parsing KFD events with undefined node IDs. 10201 (1.2.1) is one
 // patch below the boundary, so KFD domains must stay unsupported.
@@ -158,6 +145,23 @@ struct tagged_backend<callback_domains_rocshmem_hipfile_supported>
 : cached_backend_methods<callback_domains_rocshmem_hipfile_supported, mock_backend>
 {
     static constexpr std::uint32_t compile_time_version = 10305U;
+};
+
+// 500 (0.5.0) predates both the 0.6.0 domains and the 1.0.0 KFD split, so
+// page_migration is the only buffered domain the SDK offers beyond the basics.
+template <>
+struct tagged_backend<domain_requests_legacy_page_migration>
+: cached_backend_methods<domain_requests_legacy_page_migration, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 500U;
+};
+
+// 600 (0.6.0) is one minor below the 0.7.0 gate for the derived hip_stream domain.
+template <>
+struct tagged_backend<domain_requests_before_hip_stream>
+: cached_backend_methods<domain_requests_before_hip_stream, mock_backend>
+{
+    static constexpr std::uint32_t compile_time_version = 600U;
 };
 
 // ─── Shared fake name tables ───────────────────────────────────────────────────
@@ -303,6 +307,56 @@ protected:
     }
 };
 
+// ─── get_domains helpers ──────────────────────────────────────────────────────
+
+struct domain_flags
+{
+    bool rcclp          = false;
+    bool ompt           = false;
+    bool unified_memory = false;
+};
+
+// Every get_domains() test goes through the same Externals reads; the flags a test
+// does not care about stay off and the operation settings default to "unset".
+// Expectations declared after this call take precedence over these defaults.
+void
+expect_domains_environment(const std::string& domains, const domain_flags& flags = {})
+{
+    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
+        .WillRepeatedly(gtest::Return(domains));
+    EXPECT_CALL(*g_mock_externals, get_use_rcclp)
+        .WillRepeatedly(gtest::Return(flags.rcclp));
+    EXPECT_CALL(*g_mock_externals, get_use_ompt)
+        .WillRepeatedly(gtest::Return(flags.ompt));
+    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
+        .WillRepeatedly(gtest::Return(flags.unified_memory));
+    EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::_))
+        .WillRepeatedly(gtest::Return(std::string{}));
+}
+
+void
+expect_name_tables(const mock_backend::callback_name_info_t& callback_names)
+{
+    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(make_buffer_name_info()));
+    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
+        .Times(1)
+        .WillOnce(gtest::Return(callback_names));
+}
+
+template <typename Requests>
+std::vector<std::string>
+domain_names(const Requests& requests)
+{
+    auto names = std::vector<std::string>{};
+    for(const auto& request : requests)
+    {
+        names.push_back(request.name);
+    }
+    return names;
+}
+
 // ─── get_version ─────────────────────────────────────────────────────────────
 
 TEST_F(tracing_config_test, get_version_populates_major_minor_patch)
@@ -363,18 +417,12 @@ TEST_F(tracing_config_test, get_version_caches_result_calling_backend_exactly_on
     EXPECT_EQ(ver3.formatted(), 20000u);
 }
 
-// ─── throw when domain has no operations ──────────────────────────────────────
+// ─── get_domains throws ───────────────────────────────────────────────────────
 //
-// Design A removed the "operation_settings() must run first" ordering
-// dependency entirely (see tracing-config.hpp's operation_env_names_for_kind):
-// get_operations()/get_backtrace_operations() now derive the env-var names
-// on demand from the tracing-name table instead of reading a map populated as
-// a side effect elsewhere. The only remaining throw condition is a kind whose
-// domain has no named operations — modeled here with an empty tracing-name
-// table, which makes any queried kind resolve to a default (empty-operations)
-// entry. Each test uses its own Tag: get_callback_tracing_names()/
-// get_buffer_tracing_names() are cached per-Tag (cached_backend_methods), so a
-// shared Tag across tests would let one test's empty table leak into another.
+// The only throw condition left once the domain list is valid is an operation
+// filter that was never registered. Each test uses its own Tag: the tracing-name
+// tables are cached per-Tag (cached_backend_methods), so a shared Tag would let one
+// test's table leak into another.
 
 class tracing_config_throw_test : public ::testing::Test
 {
@@ -392,83 +440,29 @@ protected:
 };
 
 TEST_F(tracing_config_throw_test,
-       get_operations_callback_throws_when_domain_has_no_operations)
-{
-    using backend_t = tagged_backend<ops_throw_get_operations_callback>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(mock_backend::callback_name_info_t{}));
-    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
-
-    EXPECT_THROW(sut::get_operations(backend_t::CALLBACK_TRACING_HIP_RUNTIME_API),
-                 std::runtime_error);
-}
-
-TEST_F(tracing_config_throw_test,
-       get_operations_buffer_throws_when_domain_has_no_operations)
-{
-    using backend_t = tagged_backend<ops_throw_get_operations_buffer>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(mock_backend::buffer_name_info_t{}));
-    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
-
-    EXPECT_THROW(sut::get_operations(backend_t::BUFFER_TRACING_KERNEL_DISPATCH),
-                 std::runtime_error);
-}
-
-TEST_F(tracing_config_throw_test,
-       get_backtrace_callback_throws_when_domain_has_no_operations)
-{
-    using backend_t = tagged_backend<ops_throw_get_backtrace_callback>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(mock_backend::callback_name_info_t{}));
-    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
-
-    EXPECT_THROW(
-        sut::get_backtrace_operations(backend_t::CALLBACK_TRACING_HIP_RUNTIME_API),
-        std::runtime_error);
-}
-
-TEST_F(tracing_config_throw_test,
-       get_backtrace_buffer_throws_when_domain_has_no_operations)
-{
-    using backend_t = tagged_backend<ops_throw_get_backtrace_buffer>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(mock_backend::buffer_name_info_t{}));
-    EXPECT_CALL(*g_mock_externals, set_state).Times(1);
-
-    EXPECT_THROW(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_KERNEL_DISPATCH),
-                 std::runtime_error);
-}
-
-TEST_F(tracing_config_throw_test, get_operations_error_message_contains_kind_value)
+       get_domains_throws_when_operation_setting_is_unregistered)
 {
     using backend_t = tagged_backend<ops_throw_message>;
     using sut       = tracing_config<backend_t, mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(mock_backend::callback_name_info_t{}));
+    auto callback_names = mock_backend::callback_name_info_t{};
+    callback_names.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API,
+                           "HIP_RUNTIME_API");
+    callback_names.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API, 0,
+                           "hipMalloc");
+    expect_name_tables(callback_names);
+    expect_domains_environment("hip_runtime_api");
+    EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::_))
+        .WillRepeatedly(gtest::Return(std::nullopt));
     EXPECT_CALL(*g_mock_externals, set_state).Times(1);
 
     try
     {
-        sut::get_operations(backend_t::CALLBACK_TRACING_HIP_RUNTIME_API);
+        static_cast<void>(sut::get_domains());
         FAIL() << "Expected std::runtime_error";
     } catch(const std::runtime_error& ex)
     {
-        EXPECT_THAT(ex.what(), gtest::HasSubstr("callback tracing kind"));
+        EXPECT_THAT(ex.what(), gtest::HasSubstr("no registered setting"));
     }
 }
 
@@ -568,677 +562,330 @@ TEST_F(tracing_config_test, operation_settings_does_not_register_marker_core_api
     }));
 }
 
-// ─── get_callback_domains ─────────────────────────────────────────────────────
-//
-// get_callback_domains() calls Wrapper::get_callback_tracing_names() directly and
-// also calls domain_choices() (to validate ROCm domain names), which calls both
-// get_buffer_tracing_names() and get_callback_tracing_names() again;
-// cached_backend_methods memoizes both per-Tag, so each mock still only fires once
-// per test despite the two call sites.
+// ─── get_domains ──────────────────────────────────────────────────────────────
 
-TEST_F(tracing_config_domains_test, get_callback_domains_aliases_expand_to_exact_domains)
+TEST_F(tracing_config_domains_test, get_domains_expands_aliases_to_their_domains)
 {
-    using backend_t = tagged_backend<callback_domains_aliases>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+    using sut =
+        tracing_config<tagged_backend<callback_domains_aliases>, mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("hsa_api,hip_api");
 
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(
-        sut::get_callback_domains(),
-        gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_HSA_CORE_API,
-                                    backend_t::CALLBACK_TRACING_HSA_AMD_EXT_API,
-                                    backend_t::CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                                    backend_t::CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-                                    backend_t::CALLBACK_TRACING_HIP_RUNTIME_API,
-                                    backend_t::CALLBACK_TRACING_HIP_COMPILER_API,
-                                    backend_t::CALLBACK_TRACING_MARKER_CORE_API));
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("hsa_core_api", "hsa_amd_ext_api",
+                                            "hsa_image_ext_api", "hsa_finalize_ext_api",
+                                            "hip_runtime_api", "hip_compiler_api"));
 }
 
-TEST_F(tracing_config_domains_test,
-       get_callback_domains_supported_callback_info_name_returns_domain)
+TEST_F(tracing_config_domains_test, get_domains_skips_marker_api_and_roctx)
 {
-    using backend_t = tagged_backend<callback_domains_generic_lookup>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "rccl_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_callback_domains(),
-                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_callback_domains_rccl_and_ompt_flags_return_both_domains)
-{
-    using backend_t = tagged_backend<callback_domains_implicit_flags>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{}));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(true));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(true));
-
-    EXPECT_THAT(sut::get_callback_domains(),
-                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_RCCL_API,
-                                            backend_t::CALLBACK_TRACING_OMPT));
-}
-
-TEST_F(tracing_config_domains_test, get_callback_domains_invalid_domain)
-{
-    using backend_t = tagged_backend<callback_domains_invalid>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-
-    try
-    {
-        static_cast<void>(sut::get_callback_domains());
-        FAIL() << "Expected std::runtime_error";
-    } catch(const std::runtime_error& error)
-    {
-        EXPECT_STREQ(error.what(),
-                     "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
-    }
-}
-
-// kernel_dispatch is a buffered-only domain (present in make_buffer_name_info(),
-// absent from make_callback_name_info()). It must be silently skipped without
-// logging the "not supported by the loaded rocprofiler-sdk headers" warning,
-// which would otherwise misreport a valid, buffered-only domain as unsupported.
-TEST_F(tracing_config_domains_test,
-       get_callback_domains_skips_buffer_only_domain_without_warning)
-{
-    using backend_t = tagged_backend<callback_domains_buffer_only_no_warning>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "kernel_dispatch,hip_runtime_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-
-    gtest::internal::CaptureStdout();
-    gtest::internal::CaptureStderr();
-    const auto domains = sut::get_callback_domains();
-    const auto output =
-        gtest::internal::GetCapturedStdout() + gtest::internal::GetCapturedStderr();
-
-    EXPECT_THAT(domains,
-                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_HIP_RUNTIME_API));
-    EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("not supported")));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_callback_domains_rocshmem_and_hipfile_supported_when_version_at_or_above_gate)
-{
-    using backend_t = tagged_backend<callback_domains_rocshmem_hipfile_supported>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "rocshmem_api,hipfile_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_rcclp).Times(1).WillOnce(gtest::Return(false));
-    EXPECT_CALL(*g_mock_externals, get_use_ompt).Times(1).WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_callback_domains(),
-                gtest::UnorderedElementsAre(backend_t::CALLBACK_TRACING_ROCSHMEM_API,
-                                            backend_t::CALLBACK_TRACING_HIPFILE_API));
-}
-
-// ─── get_buffered_domains ─────────────────────────────────────────────────────
-//
-// get_buffered_domains() calls Wrapper::get_buffer_tracing_names() directly and
-// also calls domain_choices() (to validate ROCm domain names), which calls both
-// get_buffer_tracing_names() and get_callback_tracing_names() again;
-// cached_backend_methods memoizes both per-Tag, so each mock still only fires once
-// per test despite the two call sites.
-
-TEST_F(tracing_config_domains_test, get_buffered_domains_memory_copy_returns_memory_copy)
-{
-    using backend_t = tagged_backend<buffered_domains_memory_copy>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "memory_copy" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_buffered_domains(),
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
-}
-
-TEST_F(tracing_config_domains_test, get_buffered_domains_aliases_expand_to_exact_domains)
-{
-    using backend_t = tagged_backend<buffered_domains_aliases>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "hsa_api,hip_api,marker_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(
-        sut::get_buffered_domains(),
-        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_HSA_CORE_API,
-                                    backend_t::BUFFER_TRACING_HSA_AMD_EXT_API,
-                                    backend_t::BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                                    backend_t::BUFFER_TRACING_HSA_FINALIZE_EXT_API,
-                                    backend_t::BUFFER_TRACING_HIP_COMPILER_API,
-                                    backend_t::BUFFER_TRACING_HIP_RUNTIME_API,
-                                    backend_t::BUFFER_TRACING_MARKER_CORE_API));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_kfd_events_returns_all_kfd_domains)
-{
-    using backend_t = tagged_backend<buffered_domains_kfd_events>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "kfd_events" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(
-        sut::get_buffered_domains(),
-        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_individual_kfd_names_return_all_kfd_domains)
-{
-    using backend_t = tagged_backend<buffered_domains_kfd_individual>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{
-            "kfd_page_fault, kfd_page_migrate, kfd_queue, kfd_event_page_fault, "
-            "kfd_event_page_migrate, kfd_event_queue, kfd_event_unmap_from_gpu, "
-            "kfd_event_dropped_events" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(
-        sut::get_buffered_domains(),
-        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_memory_allocation_returns_memory_allocation)
-{
-    using backend_t = tagged_backend<buffered_domains_allocation>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "memory_allocation" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_buffered_domains(),
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_ALLOCATION));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_unified_memory_enables_page_fault_and_migrate)
-{
-    using backend_t = tagged_backend<buffered_domains_unified_memory>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{}));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(true));
-
-    EXPECT_THAT(sut::get_buffered_domains(),
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                            backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_supported_buffer_info_name_returns_domain)
-{
-    using backend_t = tagged_backend<buffered_domains_generic_lookup>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "scratch_memory" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_buffered_domains(),
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_SCRATCH_MEMORY));
-}
-
-// rccl_api is a callback-only domain (present in make_callback_name_info(), absent
-// from make_buffer_name_info()). domain_choices() accepts it as valid, but
-// get_buffered_domain_map() has no entry for it, so it must be silently skipped
-// rather than throwing std::out_of_range.
-TEST_F(tracing_config_domains_test, get_buffered_domains_skips_callback_only_domain)
-{
-    using backend_t = tagged_backend<buffered_domains_callback_only_skipped>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "memory_copy,rccl_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(sut::get_buffered_domains(),
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
-}
-
-// rccl_api is a callback-only domain. It must be silently skipped without
-// logging the "has no buffered-tracing equivalent" warning, which would
-// otherwise misreport a valid, callback-only domain as unsupported.
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_skips_callback_only_domain_without_warning)
-{
-    using backend_t = tagged_backend<buffered_domains_callback_only_no_warning>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "memory_copy,rccl_api" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    gtest::internal::CaptureStdout();
-    gtest::internal::CaptureStderr();
-    const auto domains = sut::get_buffered_domains();
-    const auto output =
-        gtest::internal::GetCapturedStdout() + gtest::internal::GetCapturedStderr();
-
-    EXPECT_THAT(domains,
-                gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_MEMORY_COPY));
-    EXPECT_THAT(output, ::testing::Not(::testing::HasSubstr("has no buffered-tracing "
-                                                            "equivalent")));
-}
-
-TEST_F(tracing_config_domains_test, get_buffered_domains_invalid_domain_throws)
-{
-    using backend_t = tagged_backend<buffered_domains_invalid>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "invalid_domain" }));
-
-    try
-    {
-        static_cast<void>(sut::get_buffered_domains());
-        FAIL() << "Expected std::runtime_error";
-    } catch(const std::runtime_error& error)
-    {
-        EXPECT_STREQ(error.what(),
-                     "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
-    }
-}
-
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_legacy_page_migration_returns_page_migration)
-{
-    using sut = tracing_config<tagged_backend<buffered_domains_page_migration>,
+    using sut = tracing_config<tagged_backend<domain_requests_marker_skipped_aliases>,
                                mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("marker_api,roctx");
 
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "page_migration" }));
+    EXPECT_THAT(domain_names(sut::get_domains()), gtest::IsEmpty());
+}
 
-    EXPECT_THAT(sut::get_buffered_domains(),
+TEST_F(tracing_config_domains_test, get_domains_returns_domain_named_by_the_sdk)
+{
+    using sut = tracing_config<tagged_backend<callback_domains_generic_lookup>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("rccl_api");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("rccl_api"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_adds_rccl_and_ompt_when_enabled)
+{
+    using sut = tracing_config<tagged_backend<callback_domains_implicit_flags>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("", domain_flags{ .rcclp = true, .ompt = true });
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("rccl_api", "ompt"));
+}
+
+TEST_F(tracing_config_domains_test,
+       get_domains_returns_buffered_and_callback_domains_together)
+{
+    using sut = tracing_config<tagged_backend<callback_domains_buffer_only_no_warning>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kernel_dispatch,hip_runtime_api");
+
+    EXPECT_THAT(
+        domain_names(sut::get_domains()),
+        gtest::UnorderedElementsAre("kernel_dispatch", "hip_stream", "hip_runtime_api"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_returns_rocshmem_and_hipfile)
+{
+    using sut =
+        tracing_config<tagged_backend<callback_domains_rocshmem_hipfile_supported>,
+                       mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("rocshmem_api,hipfile_api");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("rocshmem_api", "hipfile_api"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_adds_derived_hip_stream)
+{
+    using sut =
+        tracing_config<tagged_backend<buffered_domains_memory_copy>, mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("memory_copy");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("memory_copy", "hip_stream"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_omits_hip_stream_before_sdk_0_7_0)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_before_hip_stream>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kernel_dispatch");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("kernel_dispatch"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_expands_kfd_events)
+{
+    using sut =
+        tracing_config<tagged_backend<buffered_domains_kfd_events>, mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kfd_events");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
                 gtest::UnorderedElementsAre(
-                    tagged_backend<
-                        buffered_domains_page_migration>::BUFFER_TRACING_PAGE_MIGRATION));
+                    "kfd_page_fault", "kfd_page_migrate", "kfd_queue",
+                    "kfd_event_page_fault", "kfd_event_page_migrate", "kfd_event_queue",
+                    "kfd_event_unmap_from_gpu", "kfd_event_dropped_events"));
 }
 
-// SDK 1.2.1 (10201) is one patch below the KFD gate (s_sdk_version_1_2_2 = 10202):
-// kfd_page_fault is a known, valid domain name (present in the raw name table),
-// but get_supported_buffer_domains() excludes it below the gate, so it must
-// resolve to nothing rather than to BUFFER_TRACING_KFD_PAGE_FAULT.
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_kfd_domain_unsupported_below_version_gate)
+TEST_F(tracing_config_domains_test, get_domains_returns_individual_kfd_domains)
 {
-    using backend_t = tagged_backend<buffered_domains_kfd_below_boundary_version>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+    using sut = tracing_config<tagged_backend<buffered_domains_kfd_individual>,
+                               mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kfd_page_fault,kfd_queue");
 
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "kfd_page_fault" }));
-
-    EXPECT_THAT(sut::get_buffered_domains(), gtest::IsEmpty());
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("kfd_page_fault", "kfd_queue"));
 }
 
-// SDK 1.2.2 (10202) is exactly the KFD gate boundary: the "kfd_events" alias
-// becomes a valid domain choice and all KFD_* kinds become supported, proving
-// the gate is inclusive.
-TEST_F(tracing_config_domains_test,
-       get_buffered_domains_kfd_events_supported_at_version_gate)
+TEST_F(tracing_config_domains_test, get_domains_returns_memory_allocation)
 {
-    using backend_t = tagged_backend<buffered_domains_kfd_at_boundary_version>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+    using sut =
+        tracing_config<tagged_backend<buffered_domains_allocation>, mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("memory_allocation");
 
-    EXPECT_CALL(*g_mock_externals, get_rocm_domains)
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "kfd_events" }));
-    EXPECT_CALL(*g_mock_externals, get_use_unified_memory_profiling)
-        .Times(1)
-        .WillOnce(gtest::Return(false));
-
-    EXPECT_THAT(
-        sut::get_buffered_domains(),
-        gtest::UnorderedElementsAre(backend_t::BUFFER_TRACING_KFD_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_QUEUE,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                                    backend_t::BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS));
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("memory_allocation"));
 }
 
-// ─── get_operations ───────────────────────────────────────────────────────────
+TEST_F(tracing_config_domains_test, get_domains_returns_scratch_memory)
+{
+    using sut = tracing_config<tagged_backend<buffered_domains_generic_lookup>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("scratch_memory");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("scratch_memory"));
+}
 
 TEST_F(tracing_config_domains_test,
-       get_operations_callback_applies_include_and_exclude_settings)
+       get_domains_unified_memory_enables_page_fault_and_migrate)
 {
-    using backend_t = tagged_backend<callback_operations>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+    using sut = tracing_config<tagged_backend<buffered_domains_unified_memory>,
+                               mock_sdk_externals>;
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("", domain_flags{ .unified_memory = true });
 
-    sut::get_operation_settings();
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("kfd_page_fault", "kfd_page_migrate"));
+}
 
-    EXPECT_CALL(*g_mock_externals,
-                get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MARKER_API_OPERATIONS")))
-        .Times(1)
-        .WillOnce(
-            gtest::Return(std::string{ "roctxMarkA|roctxRangePushA|roctxRangePop" }));
+TEST_F(tracing_config_domains_test, get_domains_skips_legacy_page_migration)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_legacy_page_migration>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("page_migration");
+
+    EXPECT_THAT(domain_names(sut::get_domains()), gtest::IsEmpty());
+}
+
+TEST_F(tracing_config_domains_test, get_domains_expands_kfd_events_at_sdk_1_2_2)
+{
+    using sut = tracing_config<tagged_backend<buffered_domains_kfd_at_boundary_version>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kfd_events");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre(
+                    "kfd_page_fault", "kfd_page_migrate", "kfd_queue",
+                    "kfd_event_page_fault", "kfd_event_page_migrate", "kfd_event_queue",
+                    "kfd_event_unmap_from_gpu", "kfd_event_dropped_events"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_deduplicates_domains_named_twice)
+{
+    using sut =
+        tracing_config<tagged_backend<domain_requests_buffered>, mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("hip_api,hip_runtime_api");
+
+    EXPECT_THAT(domain_names(sut::get_domains()),
+                gtest::UnorderedElementsAre("hip_runtime_api", "hip_compiler_api"));
+}
+
+TEST_F(tracing_config_domains_test, get_domains_rejects_kfd_events_before_sdk_1_2_2)
+{
+    using sut =
+        tracing_config<tagged_backend<buffered_domains_kfd_below_boundary_version>,
+                       mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("kfd_events");
+
+    EXPECT_THROW(static_cast<void>(sut::get_domains()), std::runtime_error);
+}
+
+TEST_F(tracing_config_domains_test, get_domains_rejects_unknown_domain)
+{
+    using sut =
+        tracing_config<tagged_backend<callback_domains_invalid>, mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("invalid_domain");
+
+    try
+    {
+        static_cast<void>(sut::get_domains());
+        FAIL() << "Expected std::runtime_error";
+    } catch(const std::runtime_error& error)
+    {
+        EXPECT_STREQ(error.what(),
+                     "unsupported ROCPROFSYS_ROCM_DOMAINS value: invalid_domain");
+    }
+}
+
+mock_backend::callback_name_info_t
+make_hip_runtime_name_info()
+{
+    auto table = mock_backend::callback_name_info_t{};
+    table.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API, "HIP_RUNTIME_API");
+    table.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API, 0, "hipMalloc");
+    table.emplace(mock_backend::CALLBACK_TRACING_HIP_RUNTIME_API, 1, "hipFree");
+    return table;
+}
+
+TEST_F(tracing_config_domains_test,
+       get_domains_carries_filtered_operations_and_backtrace_operations)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_callback_filtered>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_hip_runtime_name_info());
+    expect_domains_environment("hip_runtime_api");
     EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::Eq(
-                                       "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_EXCLUDE")))
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "roctxRangePushA" }));
+                                       "ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS")))
+        .WillOnce(gtest::Return(std::string{ "hipMalloc" }));
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(gtest::Eq(
+                    "ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS_ANNOTATE_BACKTRACE")))
+        .WillOnce(gtest::Return(std::string{ "hipFree" }));
 
-    EXPECT_THAT(
-        sut::get_operations(backend_t::CALLBACK_TRACING_MARKER_CORE_API),
-        gtest::ElementsAre(
-            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxMarkA),
-            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxRangePop)));
+    const auto requests = sut::get_domains();
+
+    ASSERT_EQ(requests.size(), 1U);
+    const auto& request = requests.front();
+    EXPECT_EQ(request.name, "hip_runtime_api");
+    EXPECT_THAT(request.operations, gtest::Optional(gtest::ElementsAre("hipMalloc")));
+    EXPECT_THAT(request.backtrace_operations, gtest::UnorderedElementsAre(1));
 }
 
 TEST_F(tracing_config_domains_test,
-       get_operations_buffered_applies_include_and_exclude_settings)
+       get_domains_excludes_operations_matching_exclude_setting)
 {
-    using backend_t = tagged_backend<buffered_operations>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
+    using sut = tracing_config<tagged_backend<domain_requests_callback_unfiltered>,
+                               mock_sdk_externals>;
 
-    // Memory-copy operation ids: match the order populated by make_buffer_name_info()
-    // ("HOST_TO_DEVICE"=0, "DEVICE_TO_HOST"=1, "DEVICE_TO_DEVICE"=2).
-    constexpr std::int32_t k_memory_copy_host_to_device = 0;
-    constexpr std::int32_t k_memory_copy_device_to_host = 1;
+    expect_name_tables(make_hip_runtime_name_info());
+    expect_domains_environment("hip_runtime_api");
+    EXPECT_CALL(*g_mock_externals,
+                get_setting_value(
+                    gtest::Eq("ROCPROFSYS_ROCM_HIP_RUNTIME_API_OPERATIONS_EXCLUDE")))
+        .WillOnce(gtest::Return(std::string{ "hipFree" }));
 
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
+    const auto requests = sut::get_domains();
 
-    sut::get_operation_settings();
+    ASSERT_EQ(requests.size(), 1U);
+    EXPECT_THAT(requests.front().operations,
+                gtest::Optional(gtest::ElementsAre("hipMalloc")));
+}
 
+TEST_F(tracing_config_domains_test, get_domains_requests_all_operations_without_filters)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_marker_skipped>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_hip_runtime_name_info());
+    expect_domains_environment("hip_runtime_api");
+
+    const auto requests = sut::get_domains();
+
+    ASSERT_EQ(requests.size(), 1U);
+    EXPECT_EQ(requests.front().operations, std::nullopt);
+    EXPECT_THAT(requests.front().backtrace_operations, gtest::IsEmpty());
+}
+
+TEST_F(tracing_config_domains_test,
+       get_domains_applies_operation_filter_to_buffered_domains)
+{
+    using sut = tracing_config<tagged_backend<domain_requests_buffered_operations>,
+                               mock_sdk_externals>;
+
+    expect_name_tables(make_callback_name_info());
+    expect_domains_environment("scratch_memory,memory_copy");
     EXPECT_CALL(*g_mock_externals,
                 get_setting_value(gtest::Eq("ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS")))
-        .Times(1)
-        .WillOnce(gtest::Return(
-            std::string{ "HOST_TO_DEVICE|DEVICE_TO_HOST|DEVICE_TO_DEVICE" }));
-    EXPECT_CALL(*g_mock_externals, get_setting_value(gtest::Eq(
-                                       "ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS_EXCLUDE")))
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "DEVICE_TO_DEVICE" }));
+        .WillOnce(gtest::Return(std::string{ "HOST_TO_DEVICE" }));
 
-    EXPECT_THAT(
-        sut::get_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
-        gtest::ElementsAre(k_memory_copy_host_to_device, k_memory_copy_device_to_host));
-}
+    const auto requests = sut::get_domains();
 
-// ─── get_backtrace_operations ─────────────────────────────────────────────────
-
-TEST_F(tracing_config_domains_test,
-       get_backtrace_operations_callback_returns_operations_matching_setting)
-{
-    using backend_t = tagged_backend<callback_backtrace_operations>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    sut::get_operation_settings();
-
-    EXPECT_CALL(*g_mock_externals,
-                get_setting_value(gtest::Eq(
-                    "ROCPROFSYS_ROCM_MARKER_API_OPERATIONS_ANNOTATE_BACKTRACE")))
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "roctxMarkA|roctxRangePop" }));
-
-    EXPECT_THAT(
-        sut::get_backtrace_operations(backend_t::CALLBACK_TRACING_MARKER_CORE_API),
-        gtest::UnorderedElementsAre(
-            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxMarkA),
-            static_cast<std::int32_t>(backend_t::MARKER_CORE_API_ID_roctxRangePop)));
-}
-
-TEST_F(tracing_config_domains_test,
-       get_backtrace_operations_buffered_returns_operations_matching_setting)
-{
-    using backend_t = tagged_backend<buffered_backtrace_operations>;
-    using sut       = tracing_config<backend_t, mock_sdk_externals>;
-
-    // Memory-copy operation ids: match the order populated by make_buffer_name_info()
-    // ("HOST_TO_DEVICE"=0, "DEVICE_TO_HOST"=1, "DEVICE_TO_DEVICE"=2).
-    constexpr std::int32_t k_memory_copy_host_to_device = 0;
-    constexpr std::int32_t k_memory_copy_device_to_host = 1;
-
-    EXPECT_CALL(*g_mock_wrapper, get_buffer_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_buffer_name_info()));
-    EXPECT_CALL(*g_mock_wrapper, get_callback_tracing_names)
-        .Times(1)
-        .WillOnce(gtest::Return(make_callback_name_info()));
-
-    sut::get_operation_settings();
-
-    EXPECT_CALL(*g_mock_externals,
-                get_setting_value(gtest::Eq(
-                    "ROCPROFSYS_ROCM_MEMORY_COPY_OPERATIONS_ANNOTATE_BACKTRACE")))
-        .Times(1)
-        .WillOnce(gtest::Return(std::string{ "HOST_TO_DEVICE|DEVICE_TO_HOST" }));
-
-    EXPECT_THAT(sut::get_backtrace_operations(backend_t::BUFFER_TRACING_MEMORY_COPY),
-                gtest::UnorderedElementsAre(k_memory_copy_host_to_device,
-                                            k_memory_copy_device_to_host));
+    const auto memory_copy =
+        std::ranges::find(requests, "memory_copy", &sut::domain_request::name);
+    ASSERT_NE(memory_copy, requests.end());
+    EXPECT_THAT(memory_copy->operations,
+                gtest::Optional(gtest::ElementsAre("HOST_TO_DEVICE")));
 }
 
 }  // namespace rocprofsys::rocprofiler_sdk::testing
