@@ -153,30 +153,36 @@ _DT_NULL = 0
 _DT_FLAGS_1 = 0x6FFFFFFB
 _DF_1_NODELETE = 0x8
 
-# Starts gRPC's threads with a failing RPC, shuts RDC down, and reports whether
-# librdc_client.so is still mapped.
+# Runs two connect / failing RPC / disconnect / rdc_shutdown() cycles (the RPC
+# starts gRPC's threads) and reports whether librdc_client.so is still mapped.
 _SHUTDOWN_PROBE = """
 import ctypes, os, sys
 P = ctypes.c_void_p
 lib_dir = sys.argv[1]
+client = os.path.realpath(os.path.join(lib_dir, "librdc_client.so"))
+
+
+def mapped():
+    with open("/proc/self/maps") as maps:
+        return any(line.rstrip().endswith(" " + client) for line in maps)
+
+
 rdc = ctypes.CDLL(os.path.join(lib_dir, "librdc_bootstrap.so"))
 rdc.rdc_init.argtypes = [ctypes.c_uint64]
 rdc.rdc_connect.argtypes = [ctypes.c_char_p, ctypes.POINTER(P)] + [ctypes.c_char_p] * 3
 rdc.rdc_device_get_all.argtypes = [P, P, P]
 rdc.rdc_disconnect.argtypes = [P]
 rdc.rdc_shutdown.argtypes = []
-handle = P()
-assert rdc.rdc_init(0) == 0
-assert rdc.rdc_connect(b"localhost:1", ctypes.byref(handle), None, None, None) == 0
-ids, count = (ctypes.c_uint32 * 128)(), ctypes.c_uint32()
-rdc.rdc_device_get_all(handle, ids, ctypes.byref(count))  # nothing listens on port 1
-assert rdc.rdc_disconnect(handle) == 0
-assert rdc.rdc_shutdown() == 0
-try:
-    ctypes.CDLL(os.path.join(lib_dir, "librdc_client.so"), mode=os.RTLD_NOLOAD)
-    print("resident")
-except OSError:
-    print("unloaded")
+for _ in range(2):
+    handle = P()
+    assert rdc.rdc_init(0) == 0
+    assert rdc.rdc_connect(b"localhost:1", ctypes.byref(handle), None, None, None) == 0
+    assert mapped(), "rdc_connect() did not load " + client
+    ids, count = (ctypes.c_uint32 * 128)(), ctypes.c_uint32()
+    rdc.rdc_device_get_all(handle, ids, ctypes.byref(count))  # nothing listens on port 1
+    assert rdc.rdc_disconnect(handle) == 0
+    assert rdc.rdc_shutdown() == 0
+print("resident" if mapped() else "unloaded")
 """
 
 
@@ -207,8 +213,8 @@ def _dt_flags_1(path):
 class TestClientLibraryLifetime:
     """rdc_shutdown() dlclose()s librdc_client.so while gRPC threads still run.
 
-    Unloading the library under those threads crashes every rdci command on exit,
-    so the library must stay resident.
+    Unloading the library under those threads crashes rdci and other clients on
+    exit, so the library must stay resident.
     """
 
     @pytest.fixture
@@ -219,6 +225,8 @@ class TestClientLibraryLifetime:
         return lib_dir
 
     def test_client_library_is_nodelete(self, client_lib_dir):
+        # The only check that fails without the flag in GCC builds with shared gRPC,
+        # where the gRPC libraries keep librdc_client.so loaded anyway.
         path = os.path.realpath(os.path.join(client_lib_dir, "librdc_client.so"))
         assert _dt_flags_1(path) & _DF_1_NODELETE, "librdc_client.so is not linked -z nodelete"
 
