@@ -4,6 +4,8 @@
 
 """CLI leaf test: metric command."""
 
+import json
+
 from cli.base import TestCliBase
 
 
@@ -22,3 +24,12 @@ class TestMetric(TestCliBase):
         )
         self.RunCmds(cmds)
         return
+
+    def test_repeated_gpu_selection(self):
+        if len(self.list_data) < 2:
+            self.skipTest("Requires at least two GPUs")
+        first, second = (gpu["gpu"] for gpu in self.list_data[:2])
+        cmd = f"amd-smi metric -u -g={first} -g={second} -g={first} --json"
+        status, output, error = self.util.RunCmdSync(cmd)
+        self.assertEqual(status, 0, error or output)
+        self.assertEqual([gpu["gpu"] for gpu in json.loads(output)["gpu_data"]], [first, second])

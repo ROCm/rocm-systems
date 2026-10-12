@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for repeated ``--gpu`` selections and repeated ``set`` values.
+"""Unit tests for repeated device selections and repeated ``set`` values.
 
 Drives the real parser and ``set`` handler with library initialization stubbed
 and every device call mocked, so it runs without GPUs.
@@ -29,16 +29,36 @@ _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file
 PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else None
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else None
 
-_HANDLES = ["gpu-handle-0", "gpu-handle-1", "gpu-handle-2"]
-_GPU_CHOICES = {
-    str(index): {
-        "Device Handle": handle,
-        "bdf": f"0000:0{index + 1}:00.0",
-        "UUID": f"00000000-0000-0000-0000-00000000000{index}",
-        "CUID": f"cuid-{index}",
+_HANDLE = amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle
+
+
+def _device_choices(first_value, count, domain):
+    return {
+        str(index): {
+            "Device Handle": _HANDLE(first_value + index),
+            "bdf": f"{domain:04x}:0{index + 1}:00.0",
+            "UUID": f"{domain:08x}-0000-0000-0000-00000000000{index}",
+            "CUID": f"cuid-{domain}-{index}",
+        }
+        for index in range(count)
     }
-    for index, handle in enumerate(_HANDLES)
-}
+
+
+_GPUS = _device_choices(0x100, 3, 0)
+_CPUS = _device_choices(0x200, 2, 1)
+_CORES = _device_choices(0x300, 2, 2)
+_NICS = _device_choices(0x400, 2, 3)
+_SWITCHES = _device_choices(0x500, 2, 4)
+_GPU_VALUES = [0x100, 0x101, 0x102]
+
+
+def _values(handles):
+    return [handle.value for handle in handles]
+
+
+def _fresh_gpu_handles():
+    # The library returns new handle objects on every query, so they never compare equal.
+    return [_HANDLE(value) for value in _GPU_VALUES]
 
 
 def _fake_modules():
@@ -53,14 +73,13 @@ def _fake_modules():
         ),
         "amdsmi_helpers": None,
         "amdsmi_cli_exceptions": None,
-        # Another suite may have stubbed _version during discovery; find_spec rejects that.
-        **({} if "_version" in sys.modules else generated_version_stub()),
+        **generated_version_stub(),
     }
 
 
 def _baremetal_helpers(helpers_type, errors):
     class _Helpers(helpers_type):
-        """Bare-metal Linux host with three GPUs and no other device types."""
+        """Bare-metal Linux host with three GPUs and two of each other device type."""
 
         def __init__(self):
             # The base constructor probes the platform.
@@ -83,16 +102,16 @@ def _baremetal_helpers(helpers_type, errors):
             return True
 
         def is_amd_hsmp_initialized(self):
-            return False
+            return True
 
         def is_ainic_initialized(self):
-            return False
+            return True
 
         def is_brcm_nic_initialized(self):
             return False
 
         def is_brcm_switch_initialized(self):
-            return False
+            return True
 
         def get_output_format(self):
             return "human_readable"
@@ -104,7 +123,19 @@ def _baremetal_helpers(helpers_type, errors):
             return "test"
 
         def get_gpu_choices(self):
-            return dict(_GPU_CHOICES), "0, 1, 2"
+            return dict(_GPUS), "0, 1, 2"
+
+        def get_cpu_choices(self):
+            return dict(_CPUS), "0, 1"
+
+        def get_core_choices(self):
+            return dict(_CORES), "0, 1"
+
+        def get_nic_choices(self):
+            return dict(_NICS), "0, 1"
+
+        def get_switch_choices(self):
+            return dict(_SWITCHES), "0, 1"
 
         def get_fan_support(self):
             return "0-255"
@@ -128,7 +159,7 @@ def _baremetal_helpers(helpers_type, errors):
             pass
 
         def get_gpu_id_from_device_handle(self, input_device_handle):
-            return _HANDLES.index(input_device_handle)
+            return _GPU_VALUES.index(input_device_handle.value)
 
     return _Helpers()
 
@@ -163,7 +194,13 @@ class _CliFixture(unittest.TestCase):
             return parser.parse_args(full_argv[1:])
 
 
-class TestRepeatedGpuSelection(_CliFixture):
+class TestRepeatedDeviceSelection(_CliFixture):
+    def gpus(self, *argv, command="metric"):
+        with mock.patch.object(
+            amdsmi_interface, "amdsmi_get_processor_handles", side_effect=_fresh_gpu_handles
+        ):
+            return _values(self.parse(command, *argv).gpu)
+
     def test_repeated_gpu_options_combine(self):
         for argv in (
             ["-g", "0", "-g", "1"],
@@ -173,37 +210,64 @@ class TestRepeatedGpuSelection(_CliFixture):
             ["-g", "0", "--gpu=1"],
         ):
             with self.subTest(argv=argv):
-                self.assertEqual(self.parse("metric", *argv).gpu, _HANDLES[:2])
+                self.assertEqual(self.gpus(*argv), _GPU_VALUES[:2])
 
     def test_repeated_gpu_options_match_one_list(self):
         for repeated, listed in (
             (["-g", "0", "1", "-g", "2"], ["-g", "0", "1", "2"]),
             (["-g", "2", "-g", "0"], ["-g", "2", "0"]),
-            (["-g", "1", "-g", "1"], ["-g", "1", "1"]),
+            (["-g", "0", "-g", "all"], ["-g", "0", "all"]),
         ):
             with self.subTest(argv=repeated):
-                self.assertEqual(self.parse("list", *repeated).gpu, self.parse("list", *listed).gpu)
+                self.assertEqual(
+                    self.gpus(*repeated, command="list"), self.gpus(*listed, command="list")
+                )
+
+    def test_duplicate_gpus_are_selected_once(self):
+        for argv, expected in (
+            (["-g", "1", "-g", "1"], [0x101]),
+            (["-g", "1", "1"], [0x101]),
+            (["-g", "0", "-g", "all"], _GPU_VALUES),
+            (["-g", "all", "-g", "0"], _GPU_VALUES),
+            (["-g", "2", "-g", "0", "2", "1"], [0x102, 0x100, 0x101]),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.gpus(*argv), expected)
 
     def test_repeated_gpu_options_accept_bdf_and_uuid(self):
-        bdf = _GPU_CHOICES["0"]["bdf"]
-        uuid = _GPU_CHOICES["2"]["UUID"]
-        args = self.parse("metric", "--gpu", bdf, "--gpu", uuid.upper())
-        self.assertEqual(args.gpu, [_HANDLES[0], _HANDLES[2]])
+        bdf = _GPUS["0"]["bdf"]
+        uuid = _GPUS["2"]["UUID"]
+        self.assertEqual(self.gpus("--gpu", bdf, "--gpu", uuid.upper()), [0x100, 0x102])
 
     def test_single_gpu_selections_unchanged(self):
-        self.assertEqual(self.parse("metric", "-g", "1").gpu, [_HANDLES[1]])
-        self.assertEqual(self.parse("metric", "-g", "0", "2").gpu, [_HANDLES[0], _HANDLES[2]])
+        self.assertEqual(self.gpus("-g", "1"), [0x101])
+        self.assertEqual(self.gpus("-g", "0", "2"), [0x100, 0x102])
+        self.assertEqual(self.gpus("-g", "all"), _GPU_VALUES)
         self.assertIsNone(self.parse("metric").gpu)
-        with mock.patch.object(
-            amdsmi_interface, "amdsmi_get_processor_handles", return_value=list(_HANDLES)
+
+    def test_other_selectors_combine_repeated_options(self):
+        for argv, dest, expected in (
+            (["-U", "0", "-U", "1"], "cpu", [0x200, 0x201]),
+            (["--cpu", "1", "--cpu=1"], "cpu", [0x201]),
+            (["-O", "0", "-O", "1"], "core", [0x300, 0x301]),
+            (["-N", _NICS["0"]["bdf"], "--nic", _NICS["1"]["bdf"]], "nic", [0x400, 0x401]),
+            (["--switch", "0", "--switch", "1", "--switch", "0"], "switch", [0x500, 0x501]),
         ):
-            self.assertEqual(self.parse("metric", "-g", "all").gpu, _HANDLES)
+            with self.subTest(argv=argv):
+                self.assertEqual(_values(getattr(self.parse("list", *argv), dest)), expected)
+
+    def test_other_selectors_select_all_once(self):
+        cpus = {"processor_handles": [_HANDLE(0x200), _HANDLE(0x201)]}
+        with mock.patch.object(amdsmi_interface, "amdsmi_get_cpu_handles", return_value=cpus):
+            args = self.parse("list", "-U", "1", "-U", "all")
+        self.assertEqual(_values(args.cpu), [0x201, 0x200])
 
     def test_invalid_repeated_gpu_is_rejected(self):
         for argv, error in (
             (["-g", "0", "-g", "9"], self.errors.AmdSmiDeviceNotFoundException),
             (["-g", "0", "-g", "bad"], self.errors.AmdSmiInvalidParameterValueException),
             (["-g", "0", "-g"], self.errors.AmdSmiMissingParameterValueException),
+            (["-g", "0", "-U", "0"], self.errors.AmdSmiInvalidParameterException),
         ):
             with self.subTest(argv=argv):
                 with self.assertRaises(error):
@@ -244,8 +308,8 @@ class TestRepeatedSetValues(_CliFixture):
                 with self.assertRaises(self.errors.AmdSmiInvalidParameterException):
                     self.parse("set", *argv)
 
-    def test_repeated_gpus_receive_last_partition_value(self):
-        args = self.parse("set", "-g", "0", "-M", "NPS1", "-g", "1", "-M", "NPS2")
+    def set_memory_partition(self, *argv):
+        args = self.parse("set", *argv)
         command = self.set_value_mod.SetValueCommands()
         command.helpers = self.helpers
         command.logger = mock.Mock(format="human_readable")
@@ -258,7 +322,17 @@ class TestRepeatedSetValues(_CliFixture):
             return_value={"partition_caps": ["NPS1", "NPS2"], "mp_mode": "NPS1"},
         ), mock.patch.object(amdsmi_interface, "amdsmi_set_gpu_memory_partition_mode") as setter:
             command.set_gpu(args)
+        return [(handle.value, mode) for (handle, mode), _ in setter.call_args_list]
+
+    def test_repeated_gpus_receive_last_partition_value(self):
         nps2 = amdsmi_interface.AmdSmiMemoryPartitionType.NPS2
         self.assertEqual(
-            setter.call_args_list, [mock.call(_HANDLES[0], nps2), mock.call(_HANDLES[1], nps2)]
+            self.set_memory_partition("-g", "0", "-M", "NPS1", "-g", "1", "-M", "NPS2"),
+            [(0x100, nps2), (0x101, nps2)],
         )
+
+    def test_duplicate_gpus_are_set_once(self):
+        nps2 = amdsmi_interface.AmdSmiMemoryPartitionType.NPS2
+        for argv in (["-g", "0", "-g", "0"], ["-g", "0", "0"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.set_memory_partition(*argv, "-M", "NPS2"), [(0x100, nps2)])
