@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <optional>
 
 namespace hipFile {
@@ -13,6 +14,7 @@ class Configuration {
 
     std::optional<bool> m_fastpath_override;
     std::optional<bool> m_fallback_override;
+    std::atomic<bool>   m_ais_unsupported{false};
 
 public:
     virtual ~Configuration() = default;
@@ -26,6 +28,13 @@ public:
     /// If hipAmdFileRead/hipAmdFileWrite are not available fastpath() will
     /// return false even if fastpath(true) is called.
     virtual void fastpath(bool enabled) noexcept;
+
+    /// @brief Permanently disable the fastpath backend for this process because
+    /// the GPU driver does not implement AIS.
+    ///
+    /// Unlike fastpath(false), this is not an override: it can't be undone and
+    /// takes precedence over fastpath(true).
+    virtual void markAisUnsupported() noexcept;
 
     /// @brief Checks if the fallback backend is enabled
     /// @return true if the fallback backend is enabled, false otherwise
