@@ -54,6 +54,23 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     std::vector<att_shader_data_t> shaderdata{};
     std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t> other_simd{};
     std::vector<occupancy_info_t> occupancy{};
+    bool bIsTrackingExec = false;
+
+    auto sendPop = [&](int wid, uint64_t count, bool va)
+    {
+        if(SIMD[wid].empty()) return;
+
+        auto& wave = SIMD[wid].back();
+
+        auto& deque = va ? wave.popcnt_va : wave.popcnt_sa;
+        if (deque.empty()) return;
+
+        auto popcnt = deque.front();
+        deque.pop_front();
+
+        popcnt.count = count;
+        SIMD[wid].back().popcnt.emplace_back(popcnt);
+    };
 
     auto send_occupancy = [&]()
     {
@@ -150,8 +167,6 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 tt_version = header_type{.raw = token.contents}.version;
                 csregister.tt_version = tt_version;
 
-                if (tt_version >= 4) double_buffer = (token.contents >> 43) & 1;
-
                 if (tt_version >= 5)
                 {
                     mi400::header_type header{.raw = token.contents};
@@ -159,6 +174,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     target_sa_wgp = get_sa_wgp(header.DSA, header.DWGP);
                     target_simd = header.DSIMD;
                     derate = header.trans2;
+                    bIsTrackingExec = header.exec;
+                    double_buffer = header.dbl;
                 }
                 else
                 {
@@ -171,7 +188,12 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     int dpr = header.DPRate & mask;
                     dprate = dpr ? (1 << (dpr - 1)) : 1;
                     derate = 1 << (header.dp_derate);
-                    if (tt_version == 4) exclude_barrier_wait = (token.contents >> 59) & 1;
+                    if (tt_version == 4)
+                    {
+                        exclude_barrier_wait = header.exbarw;
+                        bIsTrackingExec = header.exec;
+                        double_buffer = header.dbl;
+                    }
                 }
                 break;
             }
@@ -193,6 +215,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (start.count >= CTX_BEGIN && start.count < CTX_END)
                 {
+                    start.isExt = false;
+
                     // We are in context save or restore
                     constexpr uint64_t ctx_save_array = 0b0000110011;
                     constexpr uint64_t ctx_resr_array = 0b1111001100;
@@ -429,6 +453,21 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         mapped.cycles++;
                     }
 
+                    // TODO: Move to arch specific
+                    constexpr uint64_t WR_EXEC_SALU = 114;
+                    constexpr uint64_t WR_EXEC_END = 117;
+                    if (bIsTrackingExec && inst.inst >= WR_EXEC_SALU && inst.inst <= WR_EXEC_END)
+                    {
+                        auto popcnt = rocprofiler_thread_trace_decoder_exec_popcnt_t{};
+                        popcnt.time = token.time;
+                        popcnt.index = wave.instructions.size();
+            
+                        if (inst.inst == WR_EXEC_SALU)
+                            wave.popcnt_sa.push_back(popcnt);
+                        else
+                            wave.popcnt_va.push_back(popcnt);
+                    }
+
                     wave.apply_inst(inst_time, inst.inst, mapped, tt_version);
                 }
                 break;
@@ -600,6 +639,22 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 shaderdata.emplace_back(shader);
                 if (shaderdata.size() >= MAX_ACCUM_RECORDS) stitch.sendShaderdata(shaderdata);
 
+                break;
+            }
+            case RdnaType::EXEC_POPCOUNT1:
+            {
+                auto execpop = gfx12::execpopcnt1_type{.raw = token.contents};
+                DEBUGPRINT(execpop);
+                sendPop(execpop.wid, execpop.cnt, execpop.va);
+                break;
+            }
+            case RdnaType::EXEC_POPCOUNT3:
+            {
+                auto execpop = gfx12::execpopcnt3_type{.raw = token.contents};
+                DEBUGPRINT(execpop);
+                sendPop(execpop.wid1, execpop.cnt1, execpop.va1);
+                sendPop(execpop.wid2, execpop.cnt2, execpop.va2);
+                sendPop(execpop.wid3, execpop.cnt3, execpop.va3);
                 break;
             }
             default:
