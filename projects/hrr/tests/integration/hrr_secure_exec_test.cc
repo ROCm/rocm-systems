@@ -133,10 +133,14 @@ struct CopyRun {
 
 // Runs the probe and the GPU workload in the copy, capturing to `cap` unless it
 // is empty, with no LD_LIBRARY_PATH: secure-execution mode ignores it, so the
-// control has to do without it too.
+// control has to do without it too. An empty `cap` also drops a capture this
+// test was itself launched under.
 CopyRun run_copy(const fs::path& exe, const fs::path& cap) {
   hrr::test::SpawnProc proc(exe.string(), /*capture_stdout=*/true, /*capture_stderr=*/true);
-  if (!cap.empty()) proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
+  if (!cap.empty())
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
+  else
+    proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
   proc.setEnv("LD_LIBRARY_PATH", "");
   set_proc_search_path(proc);
   // Unquoted: Catch2 reads a quoted filter as one name, comma included.
