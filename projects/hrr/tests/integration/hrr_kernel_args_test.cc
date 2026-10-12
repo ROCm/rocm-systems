@@ -186,17 +186,19 @@ TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[.][hrr]") {
 // on. Both are set in both runs, and the log file is unset so the log goes to
 // stderr, so the parent's environment cannot decide the outcome.
 // AMD_LOG_MASK=0 keeps the per-API traces out; the dumps log with LOG_ALWAYS,
-// which no mask filters.
+// which no mask filters. CLR reads a bool flag as on for "true" or a nonzero
+// number and as off for anything else, "false" included, and both runtimes must
+// agree on which a value is.
 // ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
   struct Run { bool dumped, noticed, ignored; };
-  auto capture = [](bool debug_args) {
+  auto capture = [](const char* debug_args, bool on) {
     ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args_debug.hrr");
     hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    proc.setEnv("HIP_HRR_DEBUG_ARGS", debug_args ? "1" : "0");
-    proc.setEnv("AMD_LOG_LEVEL", debug_args ? "0" : "3");
+    proc.setEnv("HIP_HRR_DEBUG_ARGS", debug_args);
+    proc.setEnv("AMD_LOG_LEVEL", on ? "0" : "3");
     proc.setEnv("AMD_LOG_MASK", "0");
     proc.unsetEnv("AMD_LOG_LEVEL_FILE");
     proc.unsetEnv("AMD_LOG_ASYNC");
@@ -214,21 +216,27 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
                    std::string::npos};
   };
 
-  const Run unset = capture(false);
-  CHECK_FALSE(unset.dumped);
-  CHECK_FALSE(unset.noticed);
-  CHECK_FALSE(unset.ignored);
+  for (const char* value : {"0", "false"}) {
+    INFO("HIP_HRR_DEBUG_ARGS=" << value);
+    const Run unset = capture(value, false);
+    CHECK_FALSE(unset.dumped);
+    CHECK_FALSE(unset.noticed);
+    CHECK_FALSE(unset.ignored);
+  }
 
-  const Run set = capture(true);
+  for (const char* value : {"1", "true"}) {
+    INFO("HIP_HRR_DEBUG_ARGS=" << value);
+    const Run set = capture(value, true);
 #if defined(HRR_TEST_CLR_DEBUG_FLAGS)
-  CHECK(set.dumped);
-  CHECK(set.noticed);
-  CHECK_FALSE(set.ignored);
+    CHECK(set.dumped);
+    CHECK(set.noticed);
+    CHECK_FALSE(set.ignored);
 #else
-  CHECK_FALSE(set.dumped);
-  CHECK_FALSE(set.noticed);
-  CHECK(set.ignored);
+    CHECK_FALSE(set.dumped);
+    CHECK_FALSE(set.noticed);
+    CHECK(set.ignored);
 #endif
+  }
 }
 
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE

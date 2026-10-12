@@ -2507,10 +2507,12 @@ void hip_capture_init() {
     }
 #if !defined(DEBUG)
     // A release runtime cannot read the flag, so tell whoever set it why no
-    // traces appear rather than leave them looking.
+    // traces appear rather than leave them looking. The value test is the one
+    // Flag::setValue applies to a bool, so a value a Debug build would read as
+    // off, such as "false", is not reported.
     else {
       const std::string dbg = amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS");
-      if (!dbg.empty() && dbg != "0")
+      if (dbg == "true" || atoi(dbg.c_str()) != 0)
         fprintf(stderr,
                 "[HRR capture] HIP_HRR_DEBUG_ARGS ignored: only a Debug build of the "
                 "HIP runtime reads it\n");
