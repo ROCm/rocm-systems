@@ -30,6 +30,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
+    $<$<TARGET_EXISTS:instrument-tests>:$<TARGET_OBJECTS:instrument-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
@@ -39,6 +40,7 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:posix-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:hipfile-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-hipfile-collector-tests>)
 list(
