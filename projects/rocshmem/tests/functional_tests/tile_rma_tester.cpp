@@ -466,7 +466,7 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // arbitrary: row_stride=257 fixed with t1 clamped to ARBITRARY_MAX_COLS) are all safe
   // because the buffer is allocated for the maximum tile_extent_1 and
   // smaller ke_tile_extent_1 values only access a subset of it.
-  this->args.min_msg_size = row_bytes;
+  this->args.min_msg_size = tile_size_bytes;
   max_msg_size            = tile_size_bytes;
 
   // Set start_coord_offset for non-zero start_coord test variants.
@@ -1071,8 +1071,8 @@ void TileRMATester::verifyResults(uint64_t size) {
     // using the source's tile_linear_idx at (row-off, col-off).
     int verify_row_start = is_start_coord_test ? start_coord_offset : 0;
     int verify_col_start = is_start_coord_test ? start_coord_offset : 0;
-    int verify_rows      = is_start_coord_test ? t0 : t0;
-    int verify_cols      = is_start_coord_test ? t1 : t1;
+    int verify_rows      = t0;
+    int verify_cols      = t1;
 
     for (size_t tile_id = 0; tile_id < num_tiles_transferred; tile_id++) {
       size_t base_offset = tile_id * buffer_elements_per_thread;
