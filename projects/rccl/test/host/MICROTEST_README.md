@@ -248,6 +248,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroNcclDevice`**: the six device-resource requirement
+  builders in `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,
+  lsa_barrier}.cc` (via `CFT_BARRIER_CC_PATH`, `GIN_BARRIER_CC_PATH`,
+  `GIN_SCRATCH_CC_PATH`, `LL_A2A_CC_PATH`, `LSA_BARRIER_CC_PATH`, from
+  `nccl-device-requirements-test.cc`); suite `NcclDeviceRequirementsMicrotest.*`.
+  Its own binary: `fakes/dev_runtime_micro_fakes.cc` (needed by
+  `dev-runtime-test.cc` in `rccl-UnitTestsMicro`) fakes
+  `ncclLsaBarrierCreateRequirement`/`ncclGinBarrierCreateRequirement`/
+  `ncclCftBarrierCreateRequirement`, which this target compiles as the real
+  thing under test. These functions are pure host computation (no HIP/device
+  calls), so five of the six port directly from the existing GPU-binary
+  coverage in `test/DeviceResourceRequirementTests.cpp` (AICOMRCCL-2446,
+  including its `ProcessIsolatedTestRunner`-based divide-by-zero crash pin);
+  the sixth, `ncclCftBarrierCreateRequirement`, had no coverage anywhere and is
+  new here.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,

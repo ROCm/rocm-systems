@@ -114,6 +114,8 @@ test_categories:
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc (rccl-UnitTestsMicroNcclDevice)
+      - "NcclDeviceRequirementsMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
