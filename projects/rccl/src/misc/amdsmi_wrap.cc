@@ -4,6 +4,7 @@
 #include "alt_rsmi.h"
 #include "core.h"
 #include "utils.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -135,7 +136,12 @@ ncclResult_t fabricInitResult = ncclSuccess;
 std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 bool amdSmiInitCalled = false;
+// Set by whichever of the RCCL_USE_AMD_SMI_LIB path and the RAS diagnostics called amdsmi_init, so the library is
+// initialized once and amd_smi_shutdown undoes it through that path's amdsmi_shut_down.
 bool amdSmiLibInitialized = false;
+amdsmi_status_t (*amdSmiLibShutDown)() = nullptr;
+// Cleared by amd_smi_shutdown, so the RAS diagnostics initialize the library again on their next query.
+bool amdSmiDiagLoadCalled = false;
 
 // Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
 // name call convention; see amdSmiTelemIdUsesOutParam().
@@ -239,8 +245,11 @@ static ncclResult_t amd_smi_init_impl() {
     }
 
     // initialize amd-smi for AMD GPUs
-    AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
-    amdSmiLibInitialized = true;
+    if (!amdSmiLibInitialized) {
+      AMDSMITRY(amdsmi_init, AMDSMI_INIT_AMD_GPUS);
+      amdSmiLibInitialized = true;
+      amdSmiLibShutDown = pfn_amdsmi_shut_down;
+    }
 
     // get amd-smi version
     amdsmi_version_t version;
@@ -274,12 +283,19 @@ ncclResult_t amd_smi_init() {
 ncclResult_t amd_smi_shutdown() {
   std::lock_guard<std::mutex> lock(amdSmiInitLock);
 
-  if (!amdSmiInitCalled) return ncclSuccess;
+  if (!amdSmiInitCalled && !amdSmiLibInitialized) return ncclSuccess;
 
   // The backend may be initialized even if a later version query failed.
   if (amdSmiLibInitialized) {
-    AMDSMITRY(amdsmi_shut_down);
+    if (amdSmiLibShutDown == nullptr) return ncclInternalError;
+    amdsmi_status_t ret = amdSmiLibShutDown();
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      ERROR("AMD SMI failure: amdsmi_shut_down returned %d", (int)ret);
+      return ncclInternalError;
+    }
     amdSmiLibInitialized = false;
+    amdSmiLibShutDown = nullptr;
+    amdSmiDiagLoadCalled = false;
   }
 
   amdSmiLibMajor.store(kAmdSmiLibVersionUnknown, std::memory_order_release);
@@ -851,3 +867,210 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId) {
   }
   return telemName;
 }
+
+/*************************************************************************
+ * RAS Diagnostics Queries
+ ************************************************************************/
+
+#if AMDSMI_DIRECT
+namespace {
+// Separate from the pfn_ table above: that table belongs to the RCCL_USE_AMD_SMI_LIB path, which loads it only
+// when its own amdsmi_init pointer is still null.
+struct AmdSmiDiagFns {
+  amdsmi_status_t (*init)(uint64_t initFlags);
+  amdsmi_status_t (*shutDown)();
+  amdsmi_status_t (*getSocketHandles)(uint32_t* socketCount, amdsmi_socket_handle* socketHandles);
+  amdsmi_status_t (*getProcessorHandles)(amdsmi_socket_handle socketHandle, uint32_t* processorCount,
+                                         amdsmi_processor_handle* processorHandles);
+  amdsmi_status_t (*getProcessorType)(amdsmi_processor_handle processorHandle, processor_type_t* processorType);
+  amdsmi_status_t (*getProcessorHandleFromBdf)(amdsmi_bdf_t bdf, amdsmi_processor_handle* processorHandle);
+  amdsmi_status_t (*getGpuAsicInfo)(amdsmi_processor_handle processorHandle, amdsmi_asic_info_t* info);
+  amdsmi_status_t (*getGpuDriverInfo)(amdsmi_processor_handle processorHandle, amdsmi_driver_info_t* info);
+  amdsmi_status_t (*getGpuTotalEccCount)(amdsmi_processor_handle processorHandle, amdsmi_error_count_t* ec);
+  amdsmi_status_t (*getGpuXgmiLinkStatus)(amdsmi_processor_handle processorHandle,
+                                          amdsmi_xgmi_link_status_t* linkStatus);
+};
+AmdSmiDiagFns amdSmiDiag = {};
+ncclResult_t amdSmiDiagLoadResult = ncclSystemError;
+} // namespace
+
+// A missing symbol (logged once at load) or a failed query makes the value unavailable; it is not an error of the job.
+#define AMDSMIDIAG(fn, ...) \
+  do { \
+    if (amdSmiDiag.fn == nullptr) return ncclSystemError; \
+    amdsmi_status_t ret = amdSmiDiag.fn(__VA_ARGS__); \
+    if (ret != AMDSMI_STATUS_SUCCESS) { \
+      INFO(NCCL_RAS, "RAS diagnostics: amd_smi %s returned %d", #fn, (int)ret); \
+      return ncclSystemError; \
+    } \
+  } while (0)
+
+static ncclResult_t amd_smi_diagLoadImpl() {
+  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
+    __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
+  if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
+    INFO(NCCL_RAS, "RAS diagnostics: not using %s, WSL2 environment detected", RCCL_AMDSMI_LIBNAME);
+    return ncclSystemError;
+  }
+
+  void* libhandle = dlopen(RCCL_AMDSMI_LIBNAME, RTLD_NOW);
+  if (libhandle == nullptr) {
+    INFO(NCCL_RAS, "RAS diagnostics: cannot open %s: %s", RCCL_AMDSMI_LIBNAME, dlerror());
+    return ncclSystemError;
+  }
+  struct Symbol {
+    void** ppfn;
+    char const* name;
+  };
+  std::initializer_list<Symbol> symbols = {
+    {(void**)&amdSmiDiag.init, "amdsmi_init"},
+    {(void**)&amdSmiDiag.shutDown, "amdsmi_shut_down"},
+    {(void**)&amdSmiDiag.getSocketHandles, "amdsmi_get_socket_handles"},
+    {(void**)&amdSmiDiag.getProcessorHandles, "amdsmi_get_processor_handles"},
+    {(void**)&amdSmiDiag.getProcessorType, "amdsmi_get_processor_type"},
+    {(void**)&amdSmiDiag.getProcessorHandleFromBdf, "amdsmi_get_processor_handle_from_bdf"},
+    {(void**)&amdSmiDiag.getGpuAsicInfo, "amdsmi_get_gpu_asic_info"},
+    {(void**)&amdSmiDiag.getGpuDriverInfo, "amdsmi_get_gpu_driver_info"},
+    {(void**)&amdSmiDiag.getGpuTotalEccCount, "amdsmi_get_gpu_total_ecc_count"},
+    {(void**)&amdSmiDiag.getGpuXgmiLinkStatus, "amdsmi_get_gpu_xgmi_link_status"},
+  };
+  for (Symbol sym : symbols) {
+    *sym.ppfn = dlsym(libhandle, sym.name);
+    if (*sym.ppfn == nullptr) INFO(NCCL_RAS, "RAS diagnostics: %s not found in %s", sym.name, RCCL_AMDSMI_LIBNAME);
+  }
+
+  // The RCCL_USE_AMD_SMI_LIB path may have initialized the library already; amdsmi_init is not called twice.
+  if (!amdSmiLibInitialized) {
+    AMDSMIDIAG(init, AMDSMI_INIT_AMD_GPUS);
+    amdSmiLibInitialized = true;
+    amdSmiLibShutDown = amdSmiDiag.shutDown;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t amd_smi_diagLoad() {
+  std::lock_guard<std::mutex> lock(amdSmiInitLock);
+  if (!amdSmiDiagLoadCalled) {
+    amdSmiDiagLoadResult = amd_smi_diagLoadImpl();
+    amdSmiDiagLoadCalled = true;
+  }
+  return amdSmiDiagLoadResult;
+}
+
+ncclResult_t amd_smi_diagInit() {
+  return amd_smi_diagLoad();
+}
+
+static ncclResult_t amd_smi_diagHandle(int64_t busId, amdsmi_processor_handle* handle) {
+  if (amd_smi_diagLoad() != ncclSuccess) return ncclSystemError;
+  // busIdToInt64 encoding: domain[35:20] bus[19:12] device[11:4] function[3:0].
+  amdsmi_bdf_t bdf = {};
+  bdf.function_number = busId & 0xf;
+  bdf.device_number = (busId >> 4) & 0xff;
+  bdf.bus_number = (busId >> 12) & 0xff;
+  bdf.domain_number = busId >> 20;
+  AMDSMIDIAG(getProcessorHandleFromBdf, bdf, handle);
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_diagGpuCount(uint32_t* count) {
+  if (amd_smi_diagLoad() != ncclSuccess) return ncclSystemError;
+  uint32_t nSockets = 0;
+  AMDSMIDIAG(getSocketHandles, &nSockets, nullptr);
+  std::vector<amdsmi_socket_handle> sockets(nSockets);
+  AMDSMIDIAG(getSocketHandles, &nSockets, sockets.data());
+  // The second call may report a different count than the first; only the handles it wrote are read.
+  sockets.resize(std::min<size_t>(nSockets, sockets.size()));
+
+  uint32_t nGpus = 0;
+  for (amdsmi_socket_handle socket : sockets) {
+    uint32_t nProcs = 0;
+    AMDSMIDIAG(getProcessorHandles, socket, &nProcs, nullptr);
+    std::vector<amdsmi_processor_handle> procs(nProcs);
+    AMDSMIDIAG(getProcessorHandles, socket, &nProcs, procs.data());
+    procs.resize(std::min<size_t>(nProcs, procs.size()));
+    for (amdsmi_processor_handle proc : procs) {
+      processor_type_t type;
+      AMDSMIDIAG(getProcessorType, proc, &type);
+      if (type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) nGpus++;
+    }
+  }
+  *count = nGpus;
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len) {
+  amdsmi_processor_handle handle;
+  amdsmi_asic_info_t info = {};
+  if (amd_smi_diagHandle(busId, &handle) != ncclSuccess) return ncclSystemError;
+  AMDSMIDIAG(getGpuAsicInfo, handle, &info);
+  info.market_name[sizeof(info.market_name) - 1] = '\0';
+  if (info.market_name[0] == '\0') return ncclSystemError;
+  snprintf(model, len, "%s", info.market_name);
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len) {
+  amdsmi_processor_handle handle;
+  // amdsmi_driver_info_t has grown between AMD SMI releases (3 to 7 strings), and the loaded library may be newer
+  // than the header RCCL was built with. Its first field, driver_version, is read from a buffer with room to spare.
+  struct {
+    amdsmi_driver_info_t info;
+    char spare[16 * AMDSMI_MAX_STRING_LENGTH];
+  } buf = {};
+  if (amd_smi_diagHandle(busId, &handle) != ncclSuccess) return ncclSystemError;
+  AMDSMIDIAG(getGpuDriverInfo, handle, &buf.info);
+  char* driverVersion = buf.info.driver_version;
+  driverVersion[sizeof(buf.info.driver_version) - 1] = '\0';
+  // Without /sys/module/amdgpu/version, as with an in-tree amdgpu, AMD SMI reports "N/A".
+  if (driverVersion[0] == '\0' || strcmp(driverVersion, "N/A") == 0) return ncclSystemError;
+  snprintf(version, len, "%s", driverVersion);
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_diagEccCounts(int64_t busId, struct amdsmiDiagEccCounts* counts) {
+  amdsmi_processor_handle handle;
+  amdsmi_error_count_t ec = {};
+  if (amd_smi_diagHandle(busId, &handle) != ncclSuccess) return ncclSystemError;
+  AMDSMIDIAG(getGpuTotalEccCount, handle, &ec);
+  counts->correctable = ec.correctable_count;
+  counts->uncorrectable = ec.uncorrectable_count;
+  counts->deferred = ec.deferred_count;
+  return ncclSuccess;
+}
+
+ncclResult_t amd_smi_diagXgmiLinks(int64_t busId, struct amdsmiDiagXgmiLinks* links) {
+  amdsmi_processor_handle handle;
+  amdsmi_xgmi_link_status_t status = {};
+  if (amd_smi_diagHandle(busId, &handle) != ncclSuccess) return ncclSystemError;
+  AMDSMIDIAG(getGpuXgmiLinkStatus, handle, &status);
+  uint32_t nStatus = std::min<uint32_t>(status.total_links, AMDSMI_MAX_NUM_XGMI_LINKS);
+  links->nLinks = 0;
+  links->nDown = 0;
+  for (uint32_t i = 0; i < nStatus; i++) {
+    if (status.status[i] == AMDSMI_XGMI_LINK_DISABLE) continue;
+    links->nLinks++;
+    if (status.status[i] == AMDSMI_XGMI_LINK_DOWN) links->nDown++;
+  }
+  return ncclSuccess;
+}
+#else
+ncclResult_t amd_smi_diagInit() {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagGpuCount(uint32_t*) {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagGpuModel(int64_t, char*, size_t) {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagDriverVersion(int64_t, char*, size_t) {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagEccCounts(int64_t, struct amdsmiDiagEccCounts*) {
+  return ncclSystemError;
+}
+ncclResult_t amd_smi_diagXgmiLinks(int64_t, struct amdsmiDiagXgmiLinks*) {
+  return ncclSystemError;
+}
+#endif // AMDSMI_DIRECT

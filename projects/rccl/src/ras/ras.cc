@@ -118,6 +118,8 @@ ncclResult_t ncclRasCommInit(struct ncclComm* comm, struct rasRankInit* myRank) 
       NCCLCHECKGOTO(ncclOsSocketPairCreate(rasNotificationPipe), ret, fail);
 
       rasDiagnosticsInit();
+      if (ncclParamRasDiagnostics()) rasDiagnosticsGpuInit();
+
       rasThread = std::thread(rasThreadMain, nullptr);
       ncclSetThreadName(rasThread, "NCCL RAS");
 

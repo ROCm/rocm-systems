@@ -10,6 +10,11 @@
 
 #include "diagnostics.h"
 
+// Loads the GPU data source of the checks below ahead of their first use. Every peer collects its local data before
+// forwarding a diagnostics request, so a source loaded on first use delays the request once per hop; a short-lived
+// communicator can be gone by then.
+void rasDiagnosticsGpuInit();
+
 ncclResult_t rasDiagnosticsGpuModelCollectLocal(const struct rasDiagnosticsContext* ctx,
                                                 struct rasDiagnosticsLocalData* data);
 ncclResult_t rasDiagnosticsGpuModelSummarize(
