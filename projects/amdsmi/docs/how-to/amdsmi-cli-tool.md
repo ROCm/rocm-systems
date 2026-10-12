@@ -80,6 +80,10 @@ amd-smi reset --gpureset --gpu all
 amd-smi --rocm-smi
 ```
 
+To select several GPUs, list them after one `--gpu` or repeat the option.
+`amd-smi process --gpu 0 --gpu 1` selects the same GPUs as
+`amd-smi process --gpu 0 1`.
+
 ```{note}
 For command-specific help, use `amd-smi [command] --help` for see more detailed
 usage information. See [Commands](#cmds).

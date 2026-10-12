@@ -794,6 +794,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _gpu_select(self, gpu_choices):
         """Custom argparse action to return the device handle(s) for the gpu(s) selected
         This will set the destination (args.gpu) to a list of 1 or more device handles
+        Repeated --gpu options add to the selection, the same as listing every value after one --gpu
         If 1 or more device handles are not found then raise an ArgumentError for the first invalid gpu seen
         """
 
@@ -812,7 +813,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    previous_handles = getattr(args, self.dest) or []
+                    setattr(args, self.dest, previous_handles + selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(

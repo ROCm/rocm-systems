@@ -21,6 +21,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Repeating `--gpu` in an `amd-smi` command now selects every listed GPU**.  
+  - Previously only the last `--gpu` took effect, so `-g 0 -g 1` selected only GPU 1. It now matches `-g 0 1`.
+
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
