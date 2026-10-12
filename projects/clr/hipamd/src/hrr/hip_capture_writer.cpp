@@ -810,7 +810,9 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   // A blobs/<xx> prefix is claimed before its files are trusted: one that is
   // not a directory or fails claim_private_dir is not read, counts like a file
   // that is not ours, since playback would read the blobs in it, and
-  // write_blob refuses it later.
+  // write_blob refuses it later. Any other entry is never written by the
+  // capture: a stray file, or a directory holding blobs playback does not look
+  // for there, counts the same.
   std::error_code ec;
   const fs::path blobs_root = output_dir + "/blobs";
   for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
@@ -821,7 +823,16 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
     const auto nibble = [](char c) -> int {
       return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
     };
-    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
+    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) {
+      bool holds_blobs = false;
+      if (is_dir) {
+        for (fs::directory_iterator it(dit->path(), entry_ec), end;
+             !entry_ec && it != end && !holds_blobs; it.increment(entry_ec))
+          holds_blobs = it->path().extension() == ".blob";
+      }
+      if (!is_dir || holds_blobs) ++mismatched;
+      continue;
+    }
     if (!is_dir || !claim_private_dir(dit->path().string())) {
       ++mismatched;
       continue;

@@ -142,7 +142,9 @@ owned by the effective user, hashes to its name and, for a blob, sits under the
 `blobs/<xx>` named by its first two digits, where playback looks for it; one
 that does not is written again when the run next records it, and the archive is
 marked incomplete, since events from the earlier run may name bytes nothing
-vouches for.
+vouches for. A `blobs/<xx>` that is not a private directory of ours, a stray file
+in `blobs/`, and a directory there that is not a prefix but holds blobs mark it
+incomplete the same way.
 
 A write, `fsync` or close of `events.bin` that fails marks the archive incomplete
 as well: the clean-shutdown trailer is omitted and `manifest.complete` is false.

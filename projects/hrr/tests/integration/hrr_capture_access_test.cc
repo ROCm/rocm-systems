@@ -57,7 +57,8 @@
  *   Unit_HRR_CaptureResumeChecksBlobBytes:
  *     resuming an archive with a blob whose bytes no longer hash to its name,
  *     or that sits under the wrong blobs/<xx>, writes the blob again where it
- *     belongs and leaves the archive marked incomplete, as does a blobs/<xx>
+ *     belongs and leaves the archive marked incomplete, as do a blob under a
+ *     directory that is not a prefix, a stray file in blobs/ and a blobs/<xx>
  *     that is a link (POSIX).
  *
  *   Unit_HRR_CaptureEventsWriteFails:
@@ -1113,14 +1114,15 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  * ----------------
  *   - Captures Unit_HRR_GpuWorkload_Direct, then either changes one byte of
  *     its largest blob, moves that blob, unchanged, under another
- *     blobs/<xx>, or plants a blobs/<xx> no blob uses as a link to a
- *     directory outside the archive, and copies the archive into the next
- *     run's pid-<pid>, which resumes it.
+ *     blobs/<xx> or under blobs/zz, plants a stray file in blobs/, or plants
+ *     a blobs/<xx> no blob uses as a link to a directory outside the archive,
+ *     and copies the archive into the next run's pid-<pid>, which resumes it.
  *   - The file no longer hashes to its name, or is not where playback looks
  *     for it, so the resume does not trust it: the run writes that blob again
  *     where it belongs, and the archive is marked incomplete, since events
- *     from the first run named the bytes it lost. The linked prefix is not
- *     read, and leaves the archive marked incomplete as well.
+ *     from the first run named the bytes it lost. The stray file and the
+ *     linked prefix are not read, and leave the archive marked incomplete as
+ *     well.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 #ifdef _WIN32
@@ -1153,6 +1155,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
     const std::string other = changed.parent_path().filename().string() == "00" ? "01" : "00";
     fs::create_directories(first_archive / "blobs" / other);
     fs::rename(first_archive / changed, first_archive / "blobs" / other / changed.filename());
+  }
+  SECTION("under a directory that is not a prefix") {
+    fs::create_directories(first_archive / "blobs" / "zz");
+    fs::rename(first_archive / changed, first_archive / "blobs" / "zz" / changed.filename());
+  }
+  SECTION("next to a stray file") {
+    write_text(first_archive / "blobs" / "stray", "not a blob directory\n");
   }
   SECTION("next to a prefix that is a link") {
     // A prefix none of the first run's blobs uses, so only the resume meets it,
