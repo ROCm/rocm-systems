@@ -4509,6 +4509,50 @@
           "test_filter": "PluginCompatV11.CollNetLazyInitialization"
         }
       ]
+    },
+    "dda_fabric_reduce_scatter_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL",
+          "description": "DDA fabric ReduceScatter LL tier: 16 B to ~1 MiB shards, three back-to-back calls per shape, position-dependent data, guard tail, one COLL launch line per call",
+          "test_filter": "DdaMPI_ReduceScatter.LLTierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL128",
+          "description": "DDA fabric ReduceScatter LL128 tier: odd-word shards with a partial last 128 B line, three back-to-back calls per shape, position-dependent data, guard tail",
+          "test_filter": "DdaMPI_ReduceScatter.LL128TierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_Interleaved",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated back to back on one communicator: shared epoch cells and scratch with different line layouts",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_GridStride",
+          "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride",
+          "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
+        }
+      ]
+    },
+    "dda_fabric_reduce_scatter_2rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_reduce_scatter_4rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_reduce_scatter_8rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 8,
+      "num_gpus": 8
     }
   },
   "test_suites": [
@@ -5234,6 +5278,24 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 2-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 4-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 4 GPUs, unrolled NRANKS_CT=4 kernel. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_8rank",
       "enabled": true
     }
   ]
