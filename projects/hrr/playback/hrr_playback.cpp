@@ -664,18 +664,16 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
     }
   }
 
-  // An ordered event holds the turn until its call returns. The sequence waits
-  // of the other threads do not count while it does (see hrr::wait_for_turn):
-  // a long recorded synchronize is not a missing event. An unordered event
-  // hands the turn on at once and holds nothing, so it is not counted: a call
-  // of it that never returns must not hide a later gap from --max-seq-waits.
+  // From here until this function returns the thread is inside its call. The
+  // sequence waits of the other threads do not count while it is (see
+  // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
+  // Every call counts, ordered or not: an unordered synchronize hands the turn
+  // on before it blocks, and the next event may be this thread's own.
   struct InFlight {
-    std::atomic<int>* n;
-    InFlight(std::atomic<int>& c, bool held) : n(held ? &c : nullptr) {
-      if (n) n->fetch_add(1, std::memory_order_acq_rel);
-    }
-    ~InFlight() { if (n) n->fetch_sub(1, std::memory_order_acq_rel); }
-  } in_flight{ctx.turns_in_flight, order};
+    std::atomic<int>& n;
+    explicit InFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
+    ~InFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
+  } in_flight{ctx.turns_in_flight};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
@@ -1452,8 +1450,10 @@ static void print_usage(const char* argv0) {
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
     "  --max-seq-waits N     End the replay when an event's sequence number is not\n"
-    "                        reached after N waits with no progress (a gap or\n"
-    "                        duplicate in the recorded sequence). Default 5000000.\n"
+    "                        reached after N waits with no progress and no call in\n"
+    "                        flight (a backstop: a gap or duplicate in the recorded\n"
+    "                        sequence is refused before the replay starts).\n"
+    "                        Default 5000000.\n"
     "  --max-query-attempts N\n"
     "                        Stop retrying hipEventQuery/hipStreamQuery after N\n"
     "                        attempts that return hipErrorNotReady. Default: no\n"
@@ -1775,12 +1775,19 @@ int main(int argc, char** argv) {
     std::vector<uint64_t> ids;
     ids.reserve(archive.events.size());
     for (const auto& ev : archive.events) ids.push_back(ev.header().sequence_id);
-    uint64_t dup = 0;
-    if (hrr::find_duplicate_seq(std::move(ids), &dup)) {
+    uint64_t dup = 0, missing = 0;
+    if (hrr::find_duplicate_seq(ids, &dup)) {
       fprintf(stderr,
               "[HRR] Fatal: malformed event stream: sequence number %llu occurs "
               "more than once, so the replay order is not defined\n",
               (unsigned long long)dup);
+      return 1;
+    }
+    if (hrr::find_seq_gap(std::move(ids), &missing)) {
+      fprintf(stderr,
+              "[HRR] Fatal: malformed event stream: sequence number %llu is "
+              "missing, so the replay would wait for it\n",
+              (unsigned long long)missing);
       return 1;
     }
   }

@@ -112,7 +112,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
-| `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress, i.e. a gap or duplicate in the recorded sequence (default `5000000`, a few minutes) |
+| `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress and no HIP call in flight; a backstop, since a gap or duplicate in the recorded sequence is refused before the replay starts (default `5000000`, a few minutes) |
 | `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default: no limit; the query waits for replayed work as a synchronize does) |
 | `--max-file-bytes N` | Refuse a blob or code object larger than `N` bytes (default `4294967296`, 4 GiB) |
 | `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
