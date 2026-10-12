@@ -14,16 +14,16 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <type_traits>
 #include <vector>
 
-#include "HipVmmLedger.h"
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 
+#include "algorithms/dda/fabric/FabricGpuBarrierState.h"
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 #include "mem_manager.h"
 
 #include FABRIC_GPU_BARRIER_CC_PATH
@@ -35,37 +35,22 @@ using dda::common::FabricGpuBarrierResources;
 using dda::common::kDdaMaxNranks;
 using FlagType = FabricGpuBarrier::FlagType;
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
+
 constexpr int kNBlocks = 3;
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
 
-// Mirrors FabricGpuBarrier's private layout.
-struct BarrierState {
-  int nBlocks;
-  int selfRank;
-  int nRanks;
-  FlagType** peerFlags;
-};
-static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
-static_assert(std::is_standard_layout<FabricGpuBarrier>::value, "FabricGpuBarrier layout is no longer fixed");
-static_assert(std::is_trivially_copyable<FabricGpuBarrier>::value, "FabricGpuBarrier is no longer a plain value");
-BarrierState StateOf(const FabricGpuBarrier& barrier) {
-  BarrierState state;
-  std::memcpy(&state, &barrier, sizeof(state));
-  return state;
-}
-
 using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>;
 
-class FabricGpuBarrierMicrotest : public ::testing::Test {
+class FabricGpuBarrierMicrotest : public FabricLedgerTest {
  protected:
   void SetUp() override {
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
-    ledger_.Install();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
     g_cuMemEnable = [] { return 1; };
     auto ledgerMemset = g_hipMemset;
     g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
@@ -87,11 +72,7 @@ class FabricGpuBarrierMicrotest : public ::testing::Test {
 
   void TearDown() override {
     result_.first.reset();
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   InitResult& Init(int nRanks = kNRanks, int selfRank = kRank, int nBlocks = kNBlocks,
@@ -105,7 +86,7 @@ class FabricGpuBarrierMicrotest : public ::testing::Test {
   void ExpectFailsWithoutLeaking(int nRanks = kNRanks, int selfRank = kRank) {
     Init(nRanks, selfRank);
     EXPECT_EQ(result_.first, nullptr);
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
+    EXPECT_TRUE(LedgerClean());
   }
 
   size_t EventIndex(const std::string& event, size_t nth = 0) const {
@@ -123,7 +104,6 @@ class FabricGpuBarrierMicrotest : public ::testing::Test {
 
   int nRanks_ = kNRanks;
   int selfRank_ = kRank;
-  HipVmmLedger ledger_;
   std::vector<std::string> events_;
   std::vector<Memset> memsets_;
   std::vector<void*> gatherStates_;
@@ -283,7 +263,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_BarrierCarriesGeometr
   InitResult& r = Init();
   ASSERT_NE(r.first, nullptr);
 
-  const BarrierState state = StateOf(r.second);
+  const FabricGpuBarrierState state = StateOf(r.second);
   EXPECT_EQ(state.nBlocks, kNBlocks);
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);
