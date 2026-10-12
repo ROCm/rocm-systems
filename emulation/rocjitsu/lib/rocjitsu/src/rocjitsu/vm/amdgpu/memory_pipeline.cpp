@@ -360,7 +360,13 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       uint32_t data_offset = lane * stride + i * 4;
       uint32_t copy_size =
           is_atomic ? std::min(d.elem_size - i * 4, 4u) : std::min(d.elem_size, 4u);
-      std::memcpy(&val, &d.response_data[data_offset], copy_size);
+      // Constant sizes let the compiler inline common response-word copies.
+      if (copy_size == 4)
+        std::memcpy(&val, &d.response_data[data_offset], 4);
+      else if (copy_size == 2)
+        std::memcpy(&val, &d.response_data[data_offset], 2);
+      else
+        std::memcpy(&val, &d.response_data[data_offset], copy_size);
       if (d.sign_extend && i == 0 && d.elem_size < 4) {
         if (d.elem_size == 1)
           val = static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(val)));
@@ -1191,14 +1197,41 @@ MemoryAccessCompletion LocalMemPipeline::complete_access(Instruction &inst, Wave
   if (d.ds2_active && d.is_load) {
     auto &cu = wf.raw_cu();
     const uint32_t vgpr_count = d.ds2_destination_vgpr_count();
-    for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-      if (!(d.lane_mask & (1ULL << lane)))
-        continue;
-      for (uint32_t i = 0; i < vgpr_count; ++i) {
-        uint32_t val = 0;
-        uint32_t data_offset = lane * d.elem_size + i * 4;
-        std::memcpy(&val, &d.ds2_response_data[data_offset], std::min(d.elem_size, 4u));
-        cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+    // Both destination ranges were validated before the first writeback.
+    // As in the ordinary dword-load path, VM completion does not emit an
+    // instruction-side register observation. Resolve storage once per register.
+    if (d.atomic_op == AtomicOp::NONE && !d.lds_stack_inputs && d.num_elems == 1 &&
+        (d.elem_size == 4 || d.elem_size == 8) && vgpr_count == d.elem_size / 4 &&
+        d.wf_size <= cu.vgpr_storage_lane_count()) {
+      const uint64_t wave_mask = d.wf_size == 64 ? ~uint64_t{0} : (uint64_t{1} << d.wf_size) - 1;
+      const uint64_t write_mask = d.lane_mask & wave_mask;
+      if (write_mask) {
+        for (uint32_t i = 0; i < vgpr_count; ++i) {
+          auto *destination =
+              reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.ds2_dst_reg_base + i));
+          for (uint64_t lanes = write_mask; lanes; lanes &= lanes - 1) {
+            const uint32_t lane = std::countr_zero(lanes);
+            std::memcpy(&destination[lane], &d.ds2_response_data[lane * d.elem_size + i * 4], 4);
+          }
+        }
+      }
+    } else {
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+        if (!(d.lane_mask & (1ULL << lane)))
+          continue;
+        for (uint32_t i = 0; i < vgpr_count; ++i) {
+          uint32_t val = 0;
+          uint32_t data_offset = lane * d.elem_size + i * 4;
+          const uint32_t copy_size = std::min(d.elem_size, 4u);
+          // Keep the same fixed-size copy specialization as the first destination.
+          if (copy_size == 4)
+            std::memcpy(&val, &d.ds2_response_data[data_offset], 4);
+          else if (copy_size == 2)
+            std::memcpy(&val, &d.ds2_response_data[data_offset], 2);
+          else
+            std::memcpy(&val, &d.ds2_response_data[data_offset], copy_size);
+          cu.write_vgpr(d.ds2_dst_reg_base + i, lane, val);
+        }
       }
     }
     // Per-lane dual-access completion trace.

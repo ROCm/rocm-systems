@@ -53,7 +53,9 @@ the CMake configure or build.
 From the rocm-systems repository root:
 
 ```sh
-cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cargo fetch --manifest-path runtimes/Cargo.toml --locked
+cmake -S runtimes -B build/runtimes -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DROCM_RUNTIMES_CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 cmake --build build/runtimes
 ctest --test-dir build/runtimes --output-on-failure
 ```
@@ -86,7 +88,7 @@ in the helper, with explicit errors for Windows/Darwin until implemented.
 The configure helper recognizes native Linux x86-64, AArch64, PPC64/PPC64LE,
 and RISC-V64 toolchains. This is not runtime backend support: rocddi currently
 supports only Linux x86-64/AArch64 and rejects other architectures at compile
-time in `ddi/rocddi/src/driver/builtin.rs`. Only x86-64 has been validated locally.
+time in `ddi/rocddi/src/driver.rs`. Only x86-64 has been validated locally.
 Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
@@ -99,8 +101,8 @@ remain explicit qualification tools, not automatic build tests.
 ## Dependency inputs
 
 All CMake-driven Cargo metadata/build/test commands run frozen and offline.
-The current lockfile has no external dependencies. Future dependency inputs
-must be prepared before configuration; missing inputs fail rather than fetch.
+The lockfile includes the `libc` crate for Linux error numbers. Its source must
+be prepared before configuration; missing inputs fail rather than fetch.
 
 - `ROCM_RUNTIMES_CARGO_HOME`: writable Cargo home, defaulting to `cargo-home/`
   in the binary directory. Can point to a prepared registry/Git cache.

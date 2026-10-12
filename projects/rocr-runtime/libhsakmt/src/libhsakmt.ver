@@ -102,6 +102,7 @@ hsaKmtAisReadWriteFile;
 hsaKmtGetMemoryHandle;
 #endif
 hsaKmtHandleImport;
+hsaKmtQueryDmaBufInfo;
 hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;
@@ -111,6 +112,7 @@ hsaKmtMemoryGetCpuAddr;
 hsaKmtMemoryCpuMap;
 hsaKmtSetSigbusDelay;
 hsaKmtGetAmdGPUDeviceFd;
+hsaKmtSetPersistingCacheSize;
 local: *;
 };
 
