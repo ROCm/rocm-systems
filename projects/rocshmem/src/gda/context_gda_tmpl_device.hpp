@@ -1387,9 +1387,9 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 
   if(wf_info.pe_group_logical_lane_id == 0) {
     // Only the leader lane updates the counter (Does it require atomics?)
-    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
-    //                                        __ATOMIC_RELAXED,
-    //                                        __HIP_MEMORY_SCOPE_AGENT);
+    // uint32_t local_qp_counter =
+    //     atomic::fetch_add<atomic::memory_scope::device,
+    //                       atomic::memory_order::relaxed>(&qp_counter[pe], 1);
     // local_qp_counter %= num_qps_per_pe;
     // qp_index = (local_qp_counter * num_pes) + pe;
     qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;

@@ -1211,7 +1211,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
         int qpIndex = -1;
         NCCLCHECK(IbCastCommBaseGetQpByQpNum(commBase, devIndex, wc->qp_num, &qp, &qpIndex));
         req->recv.cmplsRecords->completions[qpIndex] = 1;
-        IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest);
+        NCCLCHECK(IbCastPostRecvWorkRequest(qp->qp, &recvComm->ibRecvWorkRequest));
       } else {
         // In the prepost path wr_id is UINT64_MAX (sentinel); only decrement rxPosts
         // in the non-prepost path where wr_id is a valid slot index.

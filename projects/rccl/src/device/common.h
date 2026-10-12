@@ -478,8 +478,8 @@ __device__ __forceinline__ void progressCounterPublishCompletedSlot(int slot, ui
   // Publish the count after the timestamp. Future consumers that require
   // stronger snapshot ordering may need a device fence here.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  __hip_atomic_fetch_add(&counters->completedWorkCount[slot], (uint64_t)count, __ATOMIC_RELAXED,
-                         __HIP_MEMORY_SCOPE_SYSTEM);
+  __scoped_atomic_fetch_add(&counters->completedWorkCount[slot], (uint64_t)count,
+                            __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 #else
   asm volatile("red.global.add.u64 [%0], %1;" : : "l"(&counters->completedWorkCount[slot]), "l"((uint64_t)count));
 #endif

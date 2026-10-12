@@ -12,7 +12,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -34,15 +33,12 @@ class LibraryContainer {
 
   // Load and build the library
   hipError_t BuildIt();
-  int DeviceId() const { return dynco_ != nullptr ? dynco_->getDeviceId() : -1; }
 
   // Get the total Kernel count in Library
   size_t KernelCount();
 
   // Get the Kernel from name
   hipError_t Kernel(hipKernel_t* k, const std::string &name);
-  // Resolve an internal kernel for a specific device without changing the current device.
-  hipError_t ResolveKernelForDevice(hipKernel_t* k, const std::string& name, int device);
 
   // Register the kernel function, make an entry in global state
   void Register(const std::string &name, int device, hipKernel_t k);
@@ -55,6 +51,10 @@ class LibraryContainer {
   hipError_t GetGlobal(const std::string& name, void** dptr, size_t* bytes);
   hipError_t GetManaged(const std::string& name, void** dptr, size_t* bytes);
 
+  // Module handle of the underlying DynCO, for hipLibraryGetModule. It returns
+  // the module for the device the library was built on.
+  hipError_t Module(hipModule_t* module);
+
  private:
   LibraryContainer() = delete;
   LibraryContainer(const LibraryContainer&) = delete;
@@ -64,12 +64,12 @@ class LibraryContainer {
 
   std::mutex lib_mutex_;
   std::atomic_bool built_ = false;
-  std::string filename_;              // empty when loading from image
-  const char* input_image_ = nullptr; // caller-owned image, used only when filename_ is empty
-  std::vector<char> image_storage_;   // image copy needed for lazy-load of secondary devices
   std::unique_ptr<hip::DynCO> dynco_;
-  // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
-  std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
+  // Set once Module() has registered dynco_ into PlatformState.
+  bool module_registered_ = false;
+  // Construction args saved until the lazy BuildIt() runs.
+  std::string filename_;          // empty when loading from image
+  const char* image_ = nullptr;   // valid only when filename_ is empty
   // Cache of hipKernel_t handles keyed by (name, device).
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
 };

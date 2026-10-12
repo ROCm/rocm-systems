@@ -1135,7 +1135,8 @@ static int repair_archive(const hrr::Archive& archive) {
 
   // Rewrite events.bin trimmed to the last complete record plus the trailer.
   const bool events_ok = write_file_in_dir(archive_dir, "events.bin", [&](FILE* out) {
-    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+    // The flags say how the blobs were laid out, and repair keeps every blob.
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, archive.flags};
     bool ok = write_u(out, &fh, sizeof(fh));
 
     uint64_t max_seq = 0;
@@ -1674,6 +1675,7 @@ int main(int argc, char** argv) {
   }
 
   ctx.archive_dir = archive.path;
+  ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,

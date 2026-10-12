@@ -108,7 +108,7 @@ format_time(std::uint64_t nanoseconds)
 
 unified_memory_processor_t::unified_memory_processor_t(
     std::shared_ptr<agent_manager> agent_mgr, int pid, output_file_sink_view output_sink)
-: processor_t<unified_memory_processor_t>()
+: sample_processor_interface()
 , m_agent_manager(std::move(agent_mgr))
 , m_pid(pid)
 , m_output_dir(config::get_ump_absolute_path())

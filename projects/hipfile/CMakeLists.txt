@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-# Top-level CMake file for AIS
+# Top-level CMake file for hipFile
 
 # CMake version according to latest ROCm platform requirements
 cmake_minimum_required(VERSION 3.21)
@@ -16,20 +16,20 @@ endif()
 
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
-set(AIS_LIBRARY_MAJOR 0)
-set(AIS_LIBRARY_MINOR 6)
-set(AIS_LIBRARY_PATCH 0)
-set(AIS_LIBRARY_VERSION "${AIS_LIBRARY_MAJOR}.${AIS_LIBRARY_MINOR}.${AIS_LIBRARY_PATCH}")
+set(HIPFILE_LIBRARY_MAJOR 0)
+set(HIPFILE_LIBRARY_MINOR 6)
+set(HIPFILE_LIBRARY_PATCH 0)
+set(HIPFILE_LIBRARY_VERSION "${HIPFILE_LIBRARY_MAJOR}.${HIPFILE_LIBRARY_MINOR}.${HIPFILE_LIBRARY_PATCH}")
 
 # Set the SOVERSION to the major library version (this is the default
 # but we set it explicitly to convey intent).
 #
 # Changes to minor and patch releases must NEVER break the ABI. This
 # includes things like reordering struct fields that don't break the API.
-set(AIS_LIBRARY_SOVERSION "${AIS_LIBRARY_MAJOR}")
+set(HIPFILE_LIBRARY_SOVERSION "${HIPFILE_LIBRARY_MAJOR}")
 
 project("hipfile"
-    VERSION ${AIS_LIBRARY_VERSION}
+    VERSION ${HIPFILE_LIBRARY_VERSION}
     DESCRIPTION "Direct-to-GPU IO for AMD's ROCm platform"
     LANGUAGES C CXX HIP
 )
@@ -48,8 +48,13 @@ set(HIPFILE_TEST_COMMON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/common")
 set(HIPFILE_AMD_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/test/amd_detail")
 set(HIPFILE_THIRD_PARTY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third-party")
 
-set(AIS_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
-set_property(CACHE AIS_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
+# Map the deprecated AIS_* options to their HIPFILE_* replacements
+#
+# NOTE: This has to be done BEFORE any of the HIPFILE_* options are declared!
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipFileDeprecatedAISOptions.cmake")
+
+set(HIPFILE_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
+set_property(CACHE HIPFILE_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
 
 # Set the list of build types for ccmake/CMake GUI
 #
@@ -90,11 +95,11 @@ endif()
 
 # Set the platform variables (internal only)
 if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
-    set(AIS_BUILD_AMD_DETAIL OFF)
-    set(AIS_BUILD_NVIDIA_DETAIL ON)
+    set(HIPFILE_BUILD_AMD_DETAIL OFF)
+    set(HIPFILE_BUILD_NVIDIA_DETAIL ON)
 else()
-    set(AIS_BUILD_AMD_DETAIL ON)
-    set(AIS_BUILD_NVIDIA_DETAIL OFF)
+    set(HIPFILE_BUILD_AMD_DETAIL ON)
+    set(HIPFILE_BUILD_NVIDIA_DETAIL OFF)
 endif()
 
 #-----------------------------------------------------------------------------
@@ -168,16 +173,16 @@ message(STATUS "ROCM_PATH set to: ${ROCM_PATH}")
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     execute_process(
         COMMAND "${CMAKE_CXX_COMPILER}" -v -x c++ /dev/null -fsyntax-only
-        ERROR_VARIABLE _ais_cxx_verbose
+        ERROR_VARIABLE _hipfile_cxx_verbose
         OUTPUT_QUIET
         ERROR_STRIP_TRAILING_WHITESPACE
     )
-    if(_ais_cxx_verbose MATCHES "Selected GCC installation: ([^\n]+)")
+    if(_hipfile_cxx_verbose MATCHES "Selected GCC installation: ([^\n]+)")
         message(STATUS "Selected GCC installation (libstdc++): ${CMAKE_MATCH_1}")
     else()
         message(STATUS "Selected GCC installation (libstdc++): <not reported>")
     endif()
-    unset(_ais_cxx_verbose)
+    unset(_hipfile_cxx_verbose)
 endif()
 
 # Add ROCm search paths
@@ -200,7 +205,7 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Directory name for installed ROCm l
 #-----------------------------------------------------------------------------
 # Import useful things for later
 #-----------------------------------------------------------------------------
-include(AISAddLibraries)
+include(HipFileAddLibraries)
 
 #-----------------------------------------------------------------------------
 # Options
@@ -210,7 +215,7 @@ include(AISAddLibraries)
 # Code coverage (via llvm-cov)
 #
 # To use with the hipFile library:
-#   - Build with AIS_USE_CODE_COVERAGE set to ON
+#   - Build with HIPFILE_USE_CODE_COVERAGE set to ON
 #   - Run `ctest .`
 #
 #   This should create a default.profraw file in each test directory
@@ -224,37 +229,37 @@ include(AISAddLibraries)
 # You can export the data to lcov or json
 #   - Run `llvm-cov export -instr-profile=ais.profdata -format=<json|lcov> > coverage.<lcov|json>`
 #-----------------------------------------------------------------------------
-option(AIS_USE_CODE_COVERAGE "Build with code coverage flags (llvm C++ only)" OFF)
+option(HIPFILE_USE_CODE_COVERAGE "Build with code coverage flags (llvm C++ only)" OFF)
 
 #----------------------------------------------
 # Clang "safe buffer" warnings and suggestions
 #----------------------------------------------
-include(AISClangSafeBuffers)
+include(HipFileClangSafeBuffers)
 
 #----------------
 # Run clang-tidy
 #----------------
-include(AISClangTidy)
+include(HipFileClangTidy)
 
 #---------------------------------
 # Run include-what-you-use (IWYU)
 #---------------------------------
-include(AISIWYU)
+include(HipFileIWYU)
 
 #-------------------
 # Sanitizer options
 #-------------------
-include(AISSanitizers)
+include(HipFileSanitizers)
 
 #------------------
 # Example programs
 #------------------
-option(AIS_INSTALL_EXAMPLES "Install example programs" ON)
+option(HIPFILE_INSTALL_EXAMPLES "Install example programs" ON)
 
 #------------------
 # Tool programs
 #------------------
-option(AIS_INSTALL_TOOLS "Install tool programs" ON)
+option(HIPFILE_INSTALL_TOOLS "Install tool programs" ON)
 
 #------------------
 # rocprofiler-register integration
@@ -270,15 +275,15 @@ option(HIPFILE_ROCPROFILER_REGISTER "Enable rocprofiler-register API table regis
 # from the build of the tests, matching the convention used by sibling projects
 # (e.g. rocprofiler-systems' ROCPROFSYS_INSTALL_TESTING). Installing the tests
 # requires building them, so enabling this forces BUILD_TESTING on.
-option(AIS_INSTALL_TESTS "Install unit-test programs" OFF)
-if(AIS_INSTALL_TESTS)
-    set(BUILD_TESTING ON CACHE BOOL "Build testing (forced on by AIS_INSTALL_TESTS)" FORCE)
+option(HIPFILE_INSTALL_TESTS "Install unit-test programs" OFF)
+if(HIPFILE_INSTALL_TESTS)
+    set(BUILD_TESTING ON CACHE BOOL "Build testing (forced on by HIPFILE_INSTALL_TESTS)" FORCE)
 endif()
 
 #------
 # docs
 #------
-include(AISDocumentation)
+include(HipFileDocumentation)
 
 #-----------------------------------------------------------------------------
 # Find important packages for building the software
@@ -298,7 +303,7 @@ else()
     message(NOTICE "find_package did NOT find hip")
 endif()
 
-if(HIPFILE_ROCPROFILER_REGISTER AND AIS_BUILD_AMD_DETAIL)
+if(HIPFILE_ROCPROFILER_REGISTER AND HIPFILE_BUILD_AMD_DETAIL)
   find_package(
     rocprofiler-register
     REQUIRED
@@ -311,7 +316,7 @@ if(HIPFILE_ROCPROFILER_REGISTER AND AIS_BUILD_AMD_DETAIL)
 endif()
 
 # Find the cuFile library and headers on NVIDIA
-if(AIS_BUILD_NVIDIA_DETAIL)
+if(HIPFILE_BUILD_NVIDIA_DETAIL)
     find_package(CUDAToolkit REQUIRED)
 
     if(CMAKE_VERSION VERSION_LESS "3.28")
@@ -329,8 +334,8 @@ if(AIS_BUILD_NVIDIA_DETAIL)
     endif()
 endif()
 
-if(NOT AIS_CAPABLE_DIR)
-    set(AIS_CAPABLE_DIR "/tmp" CACHE STRING "Directory to use for e2e tests.")
+if(NOT HIPFILE_CAPABLE_DIR)
+    set(HIPFILE_CAPABLE_DIR "/tmp" CACHE STRING "Directory to use for e2e tests.")
 endif()
 
 option(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS
@@ -341,7 +346,7 @@ option(HIPFILE_ALLOW_SKIP_FASTPATH_TESTS
 #-----------------------------------------------------------------------------
 
 # Add the src directory depending on the HIP platform
-if(AIS_BUILD_NVIDIA_DETAIL)
+if(HIPFILE_BUILD_NVIDIA_DETAIL)
     add_subdirectory(src/nvidia_detail)
 else()
     add_subdirectory(src/amd_detail)
@@ -349,15 +354,15 @@ endif()
 
 # Add the testing directories
 if(BUILD_TESTING)
-    include(AISUseGTest)
+    include(HipFileUseGTest)
     add_subdirectory(test)
 endif()
-if(BUILD_TESTING AND AIS_BUILD_AMD_DETAIL)
+if(BUILD_TESTING AND HIPFILE_BUILD_AMD_DETAIL)
     add_subdirectory(test/amd_detail)
 endif()
 
 # Add the example directory
-if(AIS_INSTALL_EXAMPLES)
+if(HIPFILE_INSTALL_EXAMPLES)
     add_subdirectory(examples/aiscp)
     add_subdirectory(examples/api)
     add_subdirectory(examples/common)
@@ -367,7 +372,7 @@ if(AIS_INSTALL_EXAMPLES)
 endif()
 
 # Add tools directory
-if(AIS_INSTALL_TOOLS AND AIS_BUILD_AMD_DETAIL)
+if(HIPFILE_INSTALL_TOOLS AND HIPFILE_BUILD_AMD_DETAIL)
     add_subdirectory(tools/ais-stats)
 endif()
 
@@ -375,13 +380,13 @@ endif()
 #-----------------------------------------------------------------------------
 # Set up installs (must come AFTER target creation)
 #-----------------------------------------------------------------------------
-include(AISUseROCmCMake)
+include(HipFileUseROCmCMake)
 # Install the relocatable unit-test assets (binaries + a self-locating
 # CTestTestfile.cmake) so the suite can run from an installed/packaged tree.
-# Gated on AIS_INSTALL_TESTS (which forces BUILD_TESTING on above, so the test
+# Gated on HIPFILE_INSTALL_TESTS (which forces BUILD_TESTING on above, so the test
 # targets exist). Must come after the test targets are created
 # (add_subdirectory(test) above).
-if(AIS_INSTALL_TESTS)
-    include(AISInstallTests)
+if(HIPFILE_INSTALL_TESTS)
+    include(HipFileInstallTests)
 endif()
-include(AISInstall)
+include(HipFileInstall)

@@ -1,16 +1,7 @@
-# Native ABI version follows the ROCr baseline, independently of Cargo's version.
-project(ROCmRuntimeHSA VERSION 1.21.0 LANGUAGES C)
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
-runtime_rust_library(runtime_hsa_shared
-  PACKAGE libhsa LIBRARY hsa_runtime64 TYPE SHARED OUTPUT_NAME hsa-runtime64
-  VERSION "${PROJECT_VERSION}" SOVERSION "${PROJECT_VERSION_MAJOR}"
-  SONAME_ENV ROCM_RUNTIME_HSA_SONAME
-)
-add_library(rocm_runtime::hsa_shared ALIAS runtime_hsa_shared)
-target_link_libraries(
-    runtime_hsa_shared
-    INTERFACE rocm_runtime::runtime_headers
-)
+project(ROCmRuntimeHSA LANGUAGES C)
 
 if(BUILD_TESTING)
     add_executable(hsa_smoke tests/abi/native_c_smoke.c)
