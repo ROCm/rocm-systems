@@ -10,22 +10,22 @@ A goal is to support alignment of timestamps across HSA agents with precision ta
 Ethernet based networks. PTP is seeing growing adoption in datacenters as a mechanism to achieve sub-microsecond
 alignment across thousands of end-systems attached through the Ethernet fabric.
 
-Support for sub-microsecond precision in MI4xx systems requires a range of HW and SW support:
+Support for sub-microsecond precision requires a range of HW and SW support:
 - Ethernet switches and end-host NICs must support HW-level packet timestamping
 - Ethernet switches must implement IEEE-1588 GMC, TC and/or BC capabilities.
 - NIC or host system software must implement IEEE OC capabilities, and through them, constantly discipline the host's
   CPU-based POSIX `CLOCK_REALTIME` clock.
-- GPU clocks cannot be programmed dynamically on MI4xx; therefore, GPU timestamps must be post-processed to translate
+- In GPUs lacking programmable realtime HW clocks, GPU timestamps must be post-processed to translate
   them onto the systems realtime clock domain, thus aligning them to the network's PTP clock.
 
 ## Overview
 
 Because clocks drift over time, there is generally no fixed ratio between the tick rate of a GPU clock and that of the
-host CPU (this is to some extent not true in A+A systems, for which some shortcuts can be taken). For this reason, in
-order to accurately translate a GPU timestamp to the system timeline requires host software to maintain a running
-history of how much the CPU and GPU clocks differ at various points over time. Depending on the independent a) drift rate
-of the CPU clock, b) drift rate of the GPU clock, and c) target precision level, this running history may need to be
-populated with samples of CPU/GPU timestamps collected at very frequent intervals -- possibly up to 100 Hz.
+host CPU (tough some exceptions to this rule exist, e.g., in A+A systems). For this reason, to accurately translate a
+GPU timestamp to the system timeline requires host software to maintain a running history of how much the CPU and GPU
+clocks differ at various points over time. Depending on the independent a) drift rate of the CPU clock, b) drift rate of
+the GPU clock, and c) target precision level, this running history may need to be populated with samples of CPU/GPU
+timestamps collected at very frequent intervals -- possibly up to 100 Hz.
 
 Our approach is thus to continuously sample synchronized GPU/realtime timestamps ("crosststamps") at high
 frequency, and use them to perform translations between clock domains when needed.
