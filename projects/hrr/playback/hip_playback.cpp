@@ -834,11 +834,15 @@ static void decode_kernel_args(
             // may be a genuine scalar (a large count, a double, a packed value)
             // that was mis-flagged — overwriting it with null would silently
             // corrupt it. Only rewrite the word when it actually resolves.
-            auto try_translate_word = [&](size_t off, const char* src) -> bool {
+            auto try_translate_word = [&](size_t off, const char* src, bool flagged) -> bool {
                 if (off + 8 > arg_size) return false;
                 uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
-                // null, small, or a packed-integer false positive
-                if (!va_shaped(rec_ptr)) return false;
+                // null, small, or a packed-integer false positive. A word capture
+                // flagged inside a pinned host allocation need not look like a
+                // device VA: a host address can have small low 32 bits.
+                if (!va_shaped(rec_ptr) &&
+                    !(flagged && ctx.in_pinned_host(rec_ptr)))
+                    return false;
                 void* live = ctx.translate_ptr(rec_ptr);
                 // Same bypassed-segment materialisation as a whole-pointer
                 // argument: a struct field pointing into memory HIP never saw
@@ -863,7 +867,7 @@ static void decode_kernel_args(
             // First honor the capture-recorded offsets (these may be unaligned).
             std::vector<char> handled(arg_size, 0);
             for (uint16_t off : ptr_offsets) {
-                if (try_translate_word(off, "captured"))
+                if (try_translate_word(off, "captured", true))
                     for (int b = 0; b < 8 && static_cast<size_t>(off) + b < arg_size; b++)
                         handled[off + b] = 1;
                 else if (ctx.verbose)
@@ -886,7 +890,7 @@ static void decode_kernel_args(
                 (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
             for (size_t off = 0; !no_rescan && off + 8 <= arg_size; ) {
                 if (handled[off]) { off += 1; continue; }
-                if (try_translate_word(off, "rescan")) off += 8;
+                if (try_translate_word(off, "rescan", false)) off += 8;
                 else off += 1;
             }
         } else {

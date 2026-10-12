@@ -17,6 +17,9 @@
 
 #include <string>
 #include <vector>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 namespace {
 constexpr int kPinnedN     = 256;
@@ -97,6 +100,32 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostUnregister(in.data()));
 }
 
+// A hipHostFree that fails, as on registered memory, leaves it tracked.
+TEST_CASE("Unit_HRR_PinnedHostFailedFree_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  std::vector<int> in(kPinnedN);
+  HRR_HIP_CHECK(hipHostRegister(in.data(), kPinnedN * sizeof(int), hipHostRegisterDefault));
+  REQUIRE(hipHostFree(in.data()) != hipSuccess);
+  (void)hipGetLastError();
+  hrr_pinned_workload(in.data());
+  HRR_HIP_CHECK(hipHostUnregister(in.data()));
+}
+
+#ifndef _WIN32
+// The struct case from pinned memory whose low 32 bits are zero, an address
+// replay's device-pointer shape check rejects.
+TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* at = reinterpret_cast<void*>(uintptr_t{0x7e0000000000});
+  void* p  = mmap(at, 1 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  REQUIRE(p == at);
+  HRR_HIP_CHECK(hipHostRegister(p, kPinnedN * sizeof(int), hipHostRegisterDefault));
+  hrr_pinned_workload(static_cast<int*>(p), true);
+  HRR_HIP_CHECK(hipHostUnregister(p));
+  munmap(p, 1 << 16);
+}
+#endif
+
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
 // Replay matches the recording only if it wrote each launch's input back; its
 // own buffer never sees the host's stores. With HIP_HRR_HOST_SNAPSHOTS=0 there
@@ -104,10 +133,14 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
                              "Unit_HRR_PinnedHostRegister_Direct",
+                             "Unit_HRR_PinnedHostFailedFree_Direct",
+#ifndef _WIN32
+                             "Unit_HRR_PinnedHostStructLowBits_Direct",
+#endif
                              "Unit_HRR_PinnedHostStruct_Direct"}) {
     for (const char* snapshots : {"1", "0"}) {
       // Without snapshots the struct would carry a host address replay never mapped.
-      if (std::string(direct) == "Unit_HRR_PinnedHostStruct_Direct" && *snapshots == '0')
+      if (std::string(direct).find("Struct") != std::string::npos && *snapshots == '0')
         continue;
       INFO(direct << " HIP_HRR_HOST_SNAPSHOTS=" << snapshots);
       ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host"};

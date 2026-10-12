@@ -440,6 +440,16 @@ struct PlaybackContext {
         return nullptr;
     }
 
+    // Does v fall inside a pinned host allocation replay made?
+    bool in_pinned_host(uint64_t v) const {
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, e] : alloc_map)
+            if ((e.kind == AllocKind::HostMalloc || e.kind == AllocKind::HostRegister) &&
+                v - base < e.size)
+                return true;
+        return false;
+    }
+
     // Is this value an address from the capturing process — i.e. does it fall
     // inside an allocation as *recorded*, before translation? Reports the
     // enclosing recorded base so a hit can be traced back to the event that

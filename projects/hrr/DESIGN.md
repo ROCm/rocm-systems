@@ -515,12 +515,14 @@ At playback:
 A kernel can read pinned host memory that the host filled with plain stores, which no HIP
 call records; replay would run it on whatever its fresh buffer holds. Capture tracks the
 ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
-`hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
+`hipFree` and `hipHostUnregister` once the call succeeds; no snapshot reads it during the
+call). Before each launch it reads the 8-byte-aligned words of
 the arguments, by-value structs included; for each tracked allocation a word points into,
 it writes the whole allocation as a blob and adds a record (base, offset 0, length, blob
 hash, direction 0) to the launch event, unless the hash equals that of the allocation's
 last record. Struct words pointing into such an allocation are flagged for translation like
-embedded device pointers. Replay checks each record names the base of a pinned host
+embedded device pointers, and replay translates them without the device-address shape
+check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
 otherwise; then it synchronizes the launch stream, copies the blob in, and launches. The
 summary prints restored, refused and skipped counts.
@@ -541,8 +543,7 @@ Kept deliberately simple:
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for. A `fork()` while another thread snapshots can leave the
-  child's tracking lock held.
+  the buffer is not waited for.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
