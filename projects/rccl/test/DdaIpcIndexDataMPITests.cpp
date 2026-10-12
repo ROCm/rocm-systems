@@ -49,7 +49,7 @@ struct IndexCase {
 };
 
 size_t elemBytes(ncclDataType_t dtype) {
-  return dtype == ncclFloat32 ? 4 : 2;
+  return static_cast<size_t>(ncclTypeSize(dtype));
 }
 
 // fp32 sends rank * 1000 + j % 997 and bf16 rank + j % 29, so every partial sum is an integer the type holds exactly.
@@ -182,6 +182,12 @@ protected:
   }
 
   void runAllReduce(const std::vector<IndexCase>& cases, bool tree) {
+    // RCCL_CE_ALLREDUCE=1 lets CE take AllReduce ahead of DDA; ReduceScatter is unaffected.
+    const bool ceAllReduce = rcclCeAllReduceEnabled(getActiveCommunicator());
+    const std::string skip = mpiCoordinatedSkipReason(ceAllReduce, "CE AllReduce routes away from DDA IPC");
+    if (!skip.empty()) {
+      GTEST_SKIP() << skip;
+    }
     for (const IndexCase& c : cases) {
       const size_t bytes = c.count * elemBytes(c.dtype);
       ASSERT_EQ(tree, bytes > kFlatTreeThresholdBytes) << "count " << c.count << " misses the intended kernel";
@@ -209,9 +215,10 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceFlat) {
     /*tree=*/false);
 }
 
-// Two-shot tree kernel: each rank reduces one count/8 slice, then gathers the peers' slices.
+// Two-shot tree kernel: each rank reduces one count/8 slice, then gathers the peers' slices. Largest case stays below
+// gfx942's 8 MiB DDA IPC AllReduce cap.
 TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
-  runAllReduce({{ncclFloat32, 65568}, {ncclFloat32, 1u << 20}, {ncclFloat32, 2u << 20}, {ncclBfloat16, 131136}},
+  runAllReduce({{ncclFloat32, 65568}, {ncclFloat32, 1u << 20}, {ncclFloat32, 3u << 19}, {ncclBfloat16, 131136}},
                /*tree=*/true);
 }
 
