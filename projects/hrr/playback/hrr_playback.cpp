@@ -971,6 +971,18 @@ static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
   return static_cast<uint64_t>(pid);
 }
 
+// True when `p` is a symbolic link. On Windows a directory junction is a
+// reparse point that fs::is_symlink does not report, and a normal user can
+// create one, so any reparse point counts.
+static bool is_link(const fs::path& p) {
+#ifdef _WIN32
+  const DWORD attrs = GetFileAttributesW(p.c_str());
+  if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
+#endif
+  std::error_code ec;
+  return fs::is_symlink(p, ec);
+}
+
 // Write `name` inside `dir` without following a symbolic link.
 //
 // The content goes to a new, unpredictably named file made with O_EXCL and
@@ -996,7 +1008,7 @@ static bool write_file_in_dir(const fs::path& dir, const std::string& name,
     case Entry::Regular: {
       struct stat old_st;
       if (::fstatat(d.get(), name.c_str(), &old_st, AT_SYMLINK_NOFOLLOW) == 0) {
-        new_mode = old_st.st_mode & 07777;
+        new_mode = old_st.st_mode & 0777;
         have_old_mode = true;
       }
       break;
@@ -1037,8 +1049,8 @@ static bool write_file_in_dir(const fs::path& dir, const std::string& name,
   // Windows: no O_NOFOLLOW/openat. Refuse links, then write beside and replace.
   std::error_code ec;
   const fs::path target = dir / name;
-  if (fs::is_symlink(dir, ec) || fs::is_symlink(target, ec)) {
-    *err = "refusing " + target.string() + ": it is a symbolic link";
+  if (is_link(dir) || is_link(target)) {
+    *err = "refusing " + target.string() + ": it is a symbolic link or junction";
     return false;
   }
   // The temporary file has an unpredictable name and is made with CREATE_NEW,
@@ -1120,10 +1132,9 @@ static bool check_repair_targets(const fs::path& dir, std::string* err) {
   }
   return true;
 #else
-  std::error_code ec;
   for (const char* n : {"", "events.bin", "manifest.json"}) {
-    if (fs::is_symlink(dir / n, ec)) {
-      *err = "refusing " + (dir / n).string() + ": it is a symbolic link";
+    if (is_link(dir / n)) {
+      *err = "refusing " + (dir / n).string() + ": it is a symbolic link or junction";
       return false;
     }
   }
@@ -1146,9 +1157,8 @@ static bool check_root_manifest_target(const fs::path& root, std::string* err) {
   }
   return true;
 #else
-  std::error_code ec;
-  if (fs::is_symlink(root / "manifest.json", ec)) {
-    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link";
+  if (is_link(root / "manifest.json")) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link or junction";
     return false;
   }
   return true;
@@ -1260,7 +1270,7 @@ static bool write_root_manifest(const fs::path& root,
                                 std::vector<std::pair<fs::path, ProcessInfo>> processes) {
   // A pid-* entry that is a link is not listed in the index.
   processes.erase(std::remove_if(processes.begin(), processes.end(),
-                                 [](const auto& p) { return fs::is_symlink(p.first); }),
+                                 [](const auto& p) { return is_link(p.first); }),
                   processes.end());
   std::sort(processes.begin(), processes.end(),
             [](const auto& a, const auto& b) { return a.second.pid < b.second.pid; });
@@ -1343,8 +1353,8 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     printf("[HRR] --- %s ---\n", dir.filename().string().c_str());
     // A pid-* entry that is a link is the archive's doing, not a capture of
     // this process tree: it is not read, repaired or indexed.
-    if (fs::is_symlink(dir)) {
-      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link\n",
+    if (is_link(dir)) {
+      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link or junction\n",
               dir.string().c_str());
       failed++;
       continue;
