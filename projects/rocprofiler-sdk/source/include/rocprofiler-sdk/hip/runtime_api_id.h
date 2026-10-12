@@ -645,7 +645,7 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceFlushGPUDirectRDMAWrites,
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 36
-    ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttributeForDevice,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipLibraryGetModule,
 #endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;

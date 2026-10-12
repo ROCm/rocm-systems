@@ -98,6 +98,7 @@ The probe-call envelope, in emit order, is: an in-flight-load drain; the special
 ### Spill bracket
 
 `build_spill_bracket()` produces the prologue (saves) and epilogue (restores) that wrap the call:
+
 - **VGPRs** — a direct `build_scratch_store_dword` in the prologue, `build_scratch_load_dword` in the epilogue.
 - **AccVGPRs** — the same builders with `acc=true` (CDNA scratch `acc` bit), addressing the accumulator file directly; no bridge. CDNA-only.
 - **SGPRs** — bridged through one VGPR (`plan.spill_bridge_vgpr`): `v_writelane` then a scratch store in the prologue; a scratch load, load-wait, then `v_readlane` in the epilogue. The single bridge is reused, so each SGPR restore is its own load/wait/readlane.
@@ -134,6 +135,7 @@ Three validators sit at the orchestrator boundary, separated so each can evolve 
 Pure predicate over the anchor instruction and its position. Permanent structural checks only — no `InstrumentationPoint` involvement. Reusable by future predicate-based anchor selection (Instrumentor walks blocks and filters candidates) without inheriting milestone noise.
 
 Rules enforced:
+
 - `anchor_offset` is dword aligned.
 - `anchor.size()` is 4 or 8 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
 - `anchor.raw_encoding()` is non-null.
@@ -182,6 +184,7 @@ ISA-parameterized helpers for encoding common instructions (`s_branch`, `s_nop`,
 ### Spill Builders (`code/builders/spill_builders.h`) [DBI-only]
 
 Multi-word, generation-specific encoders for the spill bracket, split out from the scalar helpers because their prefixes/opcodes move by ISA and they return variable-length word lists. Not shared with DBT (which emits scratch through its own target-specific path):
+
 - `build_scratch_store_dword` / `build_scratch_load_dword` — per-lane scratch store/load. CDNA3/CDNA4 use the gfx9 FLAT `seg=SCRATCH` encoding (2 words, 13-bit signed offset, `lds`=0); RDNA4 uses the dedicated VSCRATCH encoding (3 words, 24-bit offset, `sve`=0). Both take an `acc` flag that, on CDNA, sets the FLAT `acc` bit to address the AccVGPR file directly (RDNA throws — no acc file).
 - `build_v_writelane_b32` / `build_v_readlane_b32` — the SGPR↔VGPR lane bridge (VOP3; CDNA prefix `0x34`, RDNA `0x35`).
 - `build_wait_loads_complete` / `build_wait_stores_complete` — the async-access fences. CDNA uses a unified `s_waitcnt`; RDNA4 splits into `s_wait_loadcnt` (loads on LOADCNT) and `s_wait_storecnt` (stores on STORECNT). `build_wait_all_loads_complete` is the boundary drain used by `emit_probe_call`.

@@ -529,6 +529,9 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
          channelId, connIndex, myInfo->rank, myInfo->busId, peerInfo->rank, peerInfo->busId, intermediateRank,
          comm->peerInfo[intermediateRank].busId, useReadStr, comm, comm->nRanks);
   }
+  if (!useMemcpy) {
+    send->conn.flags |= NCCL_GPU_PRODUCER;
+  }
 
   memset(&req, '\0', sizeof(req));
   req.size = sendSize;
@@ -600,6 +603,9 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   } else {
     resources->type = P2P_INTERMEDIATE;
     info->rank = intermediateRank;
+  }
+  if (!useMemcpy) {
+    recv->conn.flags |= NCCL_GPU_PRODUCER;
   }
 
   memset(&req, '\0', sizeof(req));

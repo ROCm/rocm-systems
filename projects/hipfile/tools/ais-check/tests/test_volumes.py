@@ -92,6 +92,57 @@ def test_lvm_over_nvme_nested_lvm(ais_check, monkeypatch):
     assert ais_check.lvm_over_nvme("253:1") is True
 
 
+def test_lvm_over_nvme_raid_lv(ais_check, monkeypatch):
+    # A two-member RAID LV: the visible LV is stacked on four sub-LVs (data +
+    # metadata per member), each of which is itself an LVM dm node carrying an
+    # "LVM-" uuid, and each of those sits on an NVMe partition. The existing
+    # walk descends the whole tree, so no dm-raid special case is needed --
+    # this test exists to keep it that way.
+    lv = "/sys/dev/block/253:6"
+    members = {
+        "/sys/dev/block/253:2": "/dev/nvme1n1p20",  # rmeta_0
+        "/sys/dev/block/253:3": "/dev/nvme1n1p20",  # rimage_0
+        "/sys/dev/block/253:4": "/dev/nvme1n1p21",  # rmeta_1
+        "/sys/dev/block/253:5": "/dev/nvme1n1p21",  # rimage_1
+    }
+    prefixes = {lv: "lvm"}
+    slaves = {lv: list(members)}
+    for sub_lv, pv in members.items():
+        prefixes[sub_lv] = "lvm"
+        prefixes[pv] = None
+        slaves[sub_lv] = [pv]
+
+    _fake_topology(ais_check, monkeypatch, prefixes=prefixes, slaves=slaves)
+    assert ais_check.lvm_over_nvme("253:6") is True
+
+
+def test_lvm_over_nvme_raid_lv_with_non_nvme_member_rejected(ais_check, monkeypatch):
+    # Every member must qualify. A RAID LV with one member on SCSI cannot serve
+    # every read over P2P-DMA, so the volume as a whole does not qualify.
+    lv, nvme_member, scsi_member = (
+        "/sys/dev/block/253:4",
+        "/sys/dev/block/253:2",
+        "/sys/dev/block/253:3",
+    )
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={
+            lv: "lvm",
+            nvme_member: "lvm",
+            scsi_member: "lvm",
+            "/dev/nvme1n1p20": None,
+            "/dev/sda1": None,
+        },
+        slaves={
+            lv: [nvme_member, scsi_member],
+            nvme_member: ["/dev/nvme1n1p20"],
+            scsi_member: ["/dev/sda1"],
+        },
+    )
+    assert ais_check.lvm_over_nvme("253:4") is False
+
+
 def test_lvm_over_nvme_on_scsi_rejected(ais_check, monkeypatch):
     lv = "/sys/dev/block/253:0"
     _fake_topology(

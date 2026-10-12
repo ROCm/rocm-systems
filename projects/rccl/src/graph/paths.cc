@@ -401,9 +401,6 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // In general, use P2P whenever we can.
   int p2pLevel = PATH_SYS;
 
-  // User override
-  NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
-
   // Don't use P2P through ARM CPUs
   int arch, vendor, model;
   NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
@@ -414,6 +411,9 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   if (arch == NCCL_TOPO_CPU_ARCH_X86 && vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     p2pLevel = PATH_PXB;
   }
+
+  // User override, last so NCCL_P2P_DISABLE / NCCL_P2P_LEVEL win over the CPU defaults
+  NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
 
   // Compute the PCI distance and compare with the p2pLevel.
   // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
