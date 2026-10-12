@@ -122,8 +122,8 @@ static bool IsKfdPidNamespaced() {
     std::string proc_path = "/proc/" + name;
     struct stat st;
     if (stat(proc_path.c_str(), &st) != 0) {
-      // PID not in /proc — could be a short-lived process that already exited.
-      // Skip to the next KFD entry to avoid a false positive race condition.
+      // PID not in /proc: it exited, or it is a host PID that a container's
+      // /proc does not show. Either way this entry proves nothing.
       continue;
     }
     // PID exists in /proc; check whether the same process has /dev/kfd open.
@@ -144,8 +144,9 @@ static bool IsKfdPidNamespaced() {
   }
   closedir(kfd_dir);
 
-  // If every KFD entry was inconclusive (exited or unreadable), conservatively
-  // assume we are not namespaced — the stale KFD entries will be reaped soon.
+  // If no KFD entry was conclusive (none in /proc, or none readable), assume we
+  // are not namespaced. That is also the outcome in a container whose /proc
+  // shows none of KFD's host PIDs.
   if (!determined) {
     namespaced = false;
   }
@@ -292,8 +293,48 @@ static uint64_t AddCapped(uint64_t a, uint64_t b) {
 }
 
 // Whether a sysfs error means the entry went away with its exiting process:
-// it is missing, or was removed between the lookup and the open.
+// it is missing, or was removed after the lookup (ENODEV from open or read).
 static bool SysfsEntryGone(int err) { return err == ENOENT || err == ENODEV; }
+
+// Reads a KFD process file, which holds one number. Unlike ReadSysfsStr(), it
+// returns the errno of a failed open() or read(), so a file removed with its
+// exiting process (ENOENT, ENODEV) can be told from a running process's read
+// error. An empty value, or one too long for any number, is ENXIO.
+static int ReadKfdProcessFile(const std::string& path, std::string* value) {
+  value->clear();
+  int fd = -1;
+  do {
+    fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  } while (fd < 0 && errno == EINTR);
+  int err = fd < 0 ? errno : 0;
+  const char* cause = nullptr;
+  if (fd >= 0) {
+    // sysfs returns the whole value in the first read; a 64-bit number and its
+    // newline take 21 bytes.
+    char buf[64];
+    ssize_t n = 0;
+    do {
+      n = read(fd, buf, sizeof(buf));
+    } while (n < 0 && errno == EINTR);
+    if (n < 0) {
+      err = errno;
+    } else if (n == 0 || static_cast<size_t>(n) == sizeof(buf)) {
+      err = ENXIO;
+      cause = n == 0 ? "empty value" : "value too long";
+    } else {
+      value->assign(buf, static_cast<size_t>(n));
+      if (value->back() == '\n') value->pop_back();
+    }
+    close(fd);
+  }
+  if (err != 0 && !SysfsEntryGone(err)) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Fail | " << path << " | "
+       << (cause != nullptr ? cause : std::strerror(err));
+    LOG_ERROR(ss);
+  }
+  return err;
+}
 
 // Helper function to get secondary context directories under a KFD process
 // Returns a vector of full paths to context_xxxx directories
@@ -781,9 +822,9 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
 
       std::string q_gpu_id_str = queues_dir + '/' + q_dentry->d_name + "/gpuid";
 
-      // A queue destroyed during the scan is missing, or reads empty.
-      int read_err = ReadSysfsStr(q_gpu_id_str, &tmp);
-      if (SysfsEntryGone(read_err) || (read_err == 0 && tmp.empty())) {
+      // A queue destroyed during the scan is missing, or fails with ENODEV.
+      int read_err = ReadKfdProcessFile(q_gpu_id_str, &tmp);
+      if (SysfsEntryGone(read_err)) {
         q_dentry = readdir(queues_dir_hd);
         continue;
       }
@@ -862,14 +903,13 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
         if (gpu_id_str.empty() || !is_number(gpu_id_str)) continue;
 
         std::string vram_bytes;
-        const int read_err = ReadSysfsStr(std::string(proc_path) + "/" + de->d_name, &vram_bytes);
+        const int read_err =
+            ReadKfdProcessFile(std::string(proc_path) + "/" + de->d_name, &vram_bytes);
         if (SysfsEntryGone(read_err)) continue;
         if (read_err != 0) {
           closedir(pd);
           return read_err;
         }
-        // A size that reads empty belongs to an exiting process.
-        if (vram_bytes.empty()) continue;
         uint64_t bytes = 0;
         if (!ParseU64(vram_bytes, &bytes)) {
           closedir(pd);
@@ -887,12 +927,7 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
 }
 
 static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret) {
-  // A KFD process file always holds a number. It reads empty when it is
-  // removed during the read, with its exiting process, or rarely when the read
-  // fails: ReadSysfsStr() does not tell the two apart.
-  if (sysfs_ret == 0 && s.empty()) {
-    return ENODEV;
-  }
+  // A KFD process file always holds a number.
   if (sysfs_ret == 0 && !is_number(s)) {
     return ENXIO;
   }
@@ -901,7 +936,7 @@ static int CheckValidProcessInfoData(const std::string& s, int sysfs_ret) {
 
 static int GetProcessKFDStats(std::string path, uint32_t& val) {
   std::string tmp;
-  int err = ReadSysfsStr(path, &tmp);
+  int err = ReadKfdProcessFile(path, &tmp);
   auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
   if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
@@ -992,11 +1027,11 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
     // Aggregate metrics from primary process and all secondary contexts
     for (const auto& metric_base_path : metric_paths) {
       // A secondary context can be destroyed while its process keeps running:
-      // its files then fail to open with ENODEV or read empty. Skip it.
+      // its files then fail with ENODEV. Skip it.
       const bool is_primary = (metric_base_path == proc_str_path);
       std::string vram_str_path = metric_base_path + "/vram_" + std::to_string(gpu_id);
 
-      err = ReadSysfsStr(vram_str_path, &tmp);
+      err = ReadKfdProcessFile(vram_str_path, &tmp);
       auto sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
       if (!is_primary && sysfs_data_errcode == ENODEV) continue;
 
@@ -1016,7 +1051,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 
       std::string sdma_str_path = metric_base_path + "/sdma_" + std::to_string(gpu_id);
 
-      err = ReadSysfsStr(sdma_str_path, &tmp);
+      err = ReadKfdProcessFile(sdma_str_path, &tmp);
       sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
       if (!is_primary && sysfs_data_errcode == ENODEV) continue;
 
