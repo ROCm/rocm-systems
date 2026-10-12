@@ -952,14 +952,6 @@ is_active(rocprofiler_context_id_t ctx)
     return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
 }
 
-bool
-is_valid(rocprofiler_context_id_t ctx)
-{
-    int        status = 0;
-    auto const errc   = rocprofiler_context_is_valid(ctx, &status);
-    return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
-}
-
 void
 start_context(rocprofiler_context_id_t ctx)
 {
@@ -1604,7 +1596,7 @@ start()
         return;
     }
 
-    start_context(g_tool_data->get_all_contexts());
+    start_context(g_tool_data->get_counter_contexts());
 }
 
 void
@@ -1615,7 +1607,7 @@ stop()
         return;
     }
 
-    stop_context(g_tool_data->get_all_contexts());
+    stop_context(g_tool_data->get_counter_contexts());
 }
 
 void
@@ -1627,7 +1619,7 @@ resume()
     {
         return;
     }
-    start_context(g_tool_data->get_main_contexts());
+    start_context(g_tool_data->get_counter_contexts());
 
     if(g_domain_service != nullptr)
     {
@@ -1642,7 +1634,7 @@ pause()
     {
         return;
     }
-    stop_context(g_tool_data->get_main_contexts());
+    stop_context(g_tool_data->get_counter_contexts());
 
     if(g_domain_service != nullptr)
     {

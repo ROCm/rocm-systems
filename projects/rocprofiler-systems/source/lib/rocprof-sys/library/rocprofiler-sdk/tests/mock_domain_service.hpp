@@ -505,8 +505,8 @@ struct mock_sdk
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH   = 32;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY       = 33;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION = 34;
-    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CORE_API               = 14;
-    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CONTROL_API            = 15;
+    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CORE_API               = 15;
+    static constexpr std::size_t      CALLBACK_TRACING_MARKER_CONTROL_API            = 16;
     static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxMarkA               = 1;
     static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePushA          = 2;
     static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePop            = 3;

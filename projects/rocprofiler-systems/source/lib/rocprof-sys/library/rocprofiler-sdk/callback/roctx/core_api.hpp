@@ -61,13 +61,6 @@ struct open_ranges
     static inline thread_local auto s_started = range_stack_t<Externals>{};
 };
 
-inline std::atomic<std::uint64_t>&
-push_range_id_counter()
-{
-    static std::atomic<std::uint64_t> s_counter{ UINT64_MAX };
-    return s_counter;
-}
-
 [[nodiscard]] constexpr const char*
 message_or_empty(const char* message) noexcept
 {
@@ -179,12 +172,13 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category, typename Trigger>
 void
-enter_range_push(Trigger& trigger, const typename SdkBackend::marker_payload_t& data,
-                 typename SdkBackend::timestamp_t timestamp)
+enter_range_push(Trigger& trigger, std::atomic<std::uint64_t>& range_id_counter,
+                 const typename SdkBackend::marker_payload_t& data,
+                 typename SdkBackend::timestamp_t             timestamp)
 {
     const char*         name = message_or_empty(data.args.roctxRangePushA.message);
     const std::uint64_t range_id =
-        push_range_id_counter().fetch_sub(1, std::memory_order_relaxed);
+        range_id_counter.fetch_sub(1, std::memory_order_relaxed);
 
     trigger.on_range_start(range_id, name);
     open_range_on<Externals, Category>(open_ranges<Externals>::s_pushed, trigger, name,
@@ -333,11 +327,15 @@ on_roctx_core_enter(
 
     const auto& data = *static_cast<const SdkBackend::marker_payload_t*>(record.payload);
 
+    // Counts down from UINT64_MAX so push IDs never collide with SDK-allocated
+    // roctxRangeStart IDs, which count upward.
+    static std::atomic<std::uint64_t> s_push_range_id{ UINT64_MAX };
+
     switch(record.operation)
     {
         case SdkBackend::MARKER_CORE_API_ID_roctxRangePushA:
-            detail::enter_range_push<SdkBackend, Externals, Category>(*trigger, data,
-                                                                      timestamp);
+            detail::enter_range_push<SdkBackend, Externals, Category>(
+                *trigger, s_push_range_id, data, timestamp);
             break;
         case SdkBackend::MARKER_CORE_API_ID_roctxMarkA:
             detail::enter_mark<SdkBackend, Externals, Category>(*trigger, data);

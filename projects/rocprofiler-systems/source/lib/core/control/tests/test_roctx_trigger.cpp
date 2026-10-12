@@ -566,7 +566,7 @@ TEST_F(roctx_trigger_control_test, start_with_null_message_is_ignored)
 // engage for push/pop the same way it does for roctxRangeStartA/roctxRangeStop.
 //
 // They drive the trigger directly, using synthetic range IDs from the
-// UINT64_MAX-downward space that callback/marker.hpp reserves for push/pop.
+// UINT64_MAX-downward space that callback/roctx/core_api.hpp reserves for push/pop.
 // ============================================================================
 
 class roctx_push_pop_region_test : public roctx_trigger_control_test
