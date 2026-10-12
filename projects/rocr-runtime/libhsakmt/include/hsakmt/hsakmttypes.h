@@ -1533,12 +1533,14 @@ typedef enum _HsaAisFlags {
 /* memory object handle used for translating drm BO object*/
 typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
 
-/* Access Permissions for memory mapping */
+/* Access Permissions for memory mapping.
+ * Read, write, and execute are independent bits and may be combined. */
 typedef enum _HsaMemoryMapFlags {
     HSA_MEMORY_ACCESS_NONE = 0,
-    HSA_MEMORY_ACCESS_RO   = 1,
-    HSA_MEMORY_ACCESS_WO   = 2,
-    HSA_MEMORY_ACCESS_RW   = 3
+    HSA_MEMORY_ACCESS_RO   = 1 << 0,
+    HSA_MEMORY_ACCESS_WO   = 1 << 1,
+    HSA_MEMORY_ACCESS_RW   = (1 << 0) | (1 << 1),
+    HSA_MEMORY_ACCESS_EX   = 1 << 2
 } HsaMemoryMapFlags;
 
 /* Handle type for import */
