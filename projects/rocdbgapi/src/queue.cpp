@@ -407,7 +407,7 @@ compute_queue_t::update_waves ()
 
     wave->set_mark (wave_mark);
     wave->workgroup ().set_mark (wave_mark);
-    wave->workgroup ().cluster ().set_mark (wave_mark);
+    wave->cluster ().set_mark (wave_mark);
   };
 
   process_t &process = this->process ();
@@ -467,14 +467,13 @@ compute_queue_t::update_waves ()
     log_info ("%zu out of %zu wave%s running on %s", *m_waves_running,
               wave_count, wave_count > 1 ? "s" : "", to_cstring (id ()));
 
-  /* Iterate all waves, workgroups and dispatches belonging to this queue, and
-     prune waves and workgroups with a mark older than the current mark, and
-     dispatches with ids older (smaller) than the queue current read dispatch
-     id.
+  /* Iterate all items in the wave ->..-> dispatch hierarchy belonging
+     to this queue.  Prune objects below dispatches if they have a mark
+     older than the current mark.  Prune dispatches with ids older
+     (smaller) than the queue current read dispatch id.
 
-     Note that the waves must be pruned before the workgroups and the
-     workgroups must be pruned before the dispatches to ensure there are no
-     dangling pointers to pruned objects.  */
+     Note that the items must be pruned according to the hierarchical
+     order to ensure there are no dangling pointers to pruned objects.  */
 
   auto &&wave_range = process.range<wave_t> ();
   for (auto it = wave_range.begin (); it != wave_range.end ();)
