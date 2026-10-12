@@ -54,10 +54,13 @@ jobs:
       ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
+      # event_name tells TheRock's skip filter this is a scheduled/manual run
+      # with no meaningful diff, so it always runs CI instead of diffing files.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
+          "event_name": "${{ github.event_name }}",
           "family_overrides": {
             "gfx125x": {
               "linux": {
