@@ -2140,9 +2140,7 @@ static __device__ void spinWallTicks(uint64_t ticks) {
   }
 }
 
-// Block 0 raises state[2] and flushes pe; block 1 waits for state[2], gives flush graceTicks to read pis[pe], posts one
-// GFD (pi + 1), then consumes only up to the old pi. state is {returned, rescued, entered}; only the timed arm sets
-// outResult. A flush that re-reads pi never sees ci reach it, so it times out or is rescued by the watchdog.
+// Block 1 posts a GFD after block 0's flush read pi, then sets ci to the old pi; state is {returned, rescued, entered}.
 __global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint32_t pe, bool timed,
                                                  uint64_t timeoutCycles, uint64_t graceTicks, uint64_t watchdogTicks,
                                                  ncclResult_t* outResult, uint32_t* state) {

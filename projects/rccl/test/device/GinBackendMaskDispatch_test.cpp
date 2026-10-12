@@ -442,8 +442,7 @@ TEST_F(GinBackendMaskDispatchTest, MixedSingleSegmentPutEscalatesRequiredToSyste
   check(ncclGin_SignalAdd{args.signalId, kSignalAddValue}, ncclGinSignalAdd, kSignalAddValue);
 }
 
-// Different src and dst layouts from non-zero offsets: chunks end where either segment ends, the 4K base is unused,
-// the first HOST_NUMA src chunk escalates required to system, later chunks drop to thread, and only the last signals.
+// Chunks end where either segment ends; the first HOST_NUMA src chunk escalates to system, later ones drop to thread.
 TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutChunksAcrossSegmentsAndEscalatesOnFirstHostNuma) {
   constexpr uintptr_t kS0 = 0x5C0100, kS1 = 0x5C0200, kS2 = 0x5C0300, kS3 = 0x5C0400;
   constexpr uintptr_t kD0 = 0xD50100, kD1 = 0xD50200, kD2 = 0xD50300, kD3 = 0xD50400;
