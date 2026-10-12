@@ -12,6 +12,7 @@ import argparse
 import os
 import types
 import unittest
+from unittest import mock
 
 from common.common import (
     amdsmi_path,
@@ -27,6 +28,8 @@ PARSER_PATH = os.path.join(_CLI_DIR, "amdsmi_parser.py") if _CLI_DIR else None
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
 _STATUS_NOT_SUPPORTED = 2
+_NUMA_SCOPE = 0
+_SOCKET_SCOPE = 1
 
 
 class _FakeLibraryException(Exception):
@@ -101,6 +104,9 @@ class _GuestHelpers:
 
     def get_gpu_id_from_device_handle(self, _handle):
         return 0
+
+    def get_bitmask_ranges(self, bitmask_dict):
+        return dict.fromkeys(bitmask_dict, "0-7")
 
     def os_info(self):
         return "Linux Guest"
@@ -188,18 +194,23 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
             "amdsmi.amdsmi_exception", AmdSmiLibraryException=_FakeLibraryException
         )
 
-        def _no_cpu_affinity(_handle, _scope):
-            raise _FakeLibraryException("mock: no NUMA node in guest")
+        def _guest_cpu_affinity(_handle, scope):
+            # No NUMA node in the guest, but local_cpulist still gives the socket CPUs.
+            if scope == _NUMA_SCOPE:
+                raise _FakeLibraryException("mock: no NUMA node in guest")
+            return [0xFF]
 
         # Every other default static section degrades to N/A instead of needing a stub.
         interface = _FakeInterface(
             amdsmi_wrapper=types.SimpleNamespace(AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_NOT_SUPPORTED),
-            AmdSmiAffinityScope=types.SimpleNamespace(NUMA_SCOPE=0, SOCKET_SCOPE=1),
+            AmdSmiAffinityScope=types.SimpleNamespace(
+                NUMA_SCOPE=_NUMA_SCOPE, SOCKET_SCOPE=_SOCKET_SCOPE
+            ),
             # No host NUMA topology: PCI numa_node is -1 and KFD falls back to
             # CPU node 0, as on baremetal without firmware proximity info.
             amdsmi_topo_get_numa_node_number=lambda _handle: 0,
             amdsmi_get_gpu_topo_numa_affinity=lambda _handle: -1,
-            amdsmi_get_cpu_affinity_with_scope=_no_cpu_affinity,
+            amdsmi_get_cpu_affinity_with_scope=_guest_cpu_affinity,
         )
         stub_modules(
             cls,
@@ -219,6 +230,7 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
             },
         )
         cls.static_module = load_cli_module("static_numa_guest_under_test", STATIC_PATH)
+        cls.interface = interface
 
     def _run_static(self, numa, fmt="human"):
         commands = object.__new__(self.static_module.StaticCommands)
@@ -261,9 +273,40 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         self.assertIn("numa", static_dict)
 
     def test_numa_csv_row_on_guest(self):
-        # --csv flattens NUMA into node/affinity columns and keeps -1 rather than NONE.
+        # --csv keeps -1 rather than NONE and must not drop socket affinity without a NUMA node.
         row = self._run_static(numa=True, fmt="csv")
 
         self.assertEqual(row["node"], 0)
         self.assertEqual(row["affinity"], -1)
+        self.assertEqual(row["cpu_list"], "cpu_list_0")
+        self.assertEqual(row["bitmask"], "N/A")
+        self.assertEqual(row["socket_bitmask"], "00000000000000FF")
+        self.assertEqual(row["socket_cpu_cores_affinity"], "0-7")
+
+    def test_numa_csv_row_without_socket_affinity(self):
+        def _numa_scope_only(_handle, scope):
+            if scope == _SOCKET_SCOPE:
+                raise _FakeLibraryException("mock: no local_cpulist")
+            return [0xFF]
+
+        with mock.patch.object(
+            self.interface, "amdsmi_get_cpu_affinity_with_scope", _numa_scope_only
+        ):
+            row = self._run_static(numa=True, fmt="csv")
+
+        self.assertEqual(row["bitmask"], "00000000000000FF")
+        self.assertEqual(row["cpu_cores_affinity"], "0-7")
+        self.assertEqual(row["socket_bitmask"], "N/A")
+
+    def test_numa_csv_row_without_any_cpu_affinity(self):
+        def _no_cpu_affinity(_handle, _scope):
+            raise _FakeLibraryException("mock: no CPU affinity")
+
+        with mock.patch.object(
+            self.interface, "amdsmi_get_cpu_affinity_with_scope", _no_cpu_affinity
+        ):
+            row = self._run_static(numa=True, fmt="csv")
+
         self.assertEqual(row["cpu_list"], "N/A")
+        self.assertEqual(row["bitmask"], "N/A")
+        self.assertEqual(row["socket_bitmask"], "N/A")
