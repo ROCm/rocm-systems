@@ -1383,6 +1383,17 @@ int main(int argc, char** argv) {
       env_size_or("HIP_HRR_REPLAY_SYNC_WATCHDOG_MS", ctx.sync_watchdog_ms));
   ctx.dump_ptrs_ordinal =
       env_size_or("HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL", ctx.dump_ptrs_ordinal);
+  ctx.scan_args_ordinal =
+      env_size_or("HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL", ctx.scan_args_ordinal);
+  ctx.scan_args_bytes =
+      env_size_or("HIP_HRR_REPLAY_SCAN_ARGS_BYTES", ctx.scan_args_bytes);
+  ctx.scan_h2d = env_size_or("HIP_HRR_REPLAY_SCAN_H2D", 0u) != 0;
+  ctx.audit_host_args =
+      env_size_or("HIP_HRR_REPLAY_AUDIT_HOST_ARGS", 0u) != 0;
+  // The scan reads the pointer arguments, which the pointer dump is what
+  // collects, so asking for one implies the other.
+  if (ctx.scan_args_ordinal && !ctx.dump_ptrs_ordinal)
+    ctx.dump_ptrs_ordinal = ctx.scan_args_ordinal;
 
   if (archive_path.empty()) {
     fprintf(stderr, "[HRR] No archive path specified\n");
@@ -1633,6 +1644,9 @@ int main(int argc, char** argv) {
     printf("[HRR]   GPU graph time  : %.1f ms\n", ctx.total_graph_ms);
     printf("[HRR]   GPU total time  : %.1f ms\n", ctx.total_kernel_ms + ctx.total_graph_ms);
   }
+  if (!ctx.co_no_device_code.empty())
+    printf("[HRR]   Fat binaries   : %zu skipped (no code for this GPU)\n",
+           ctx.co_no_device_code.size());
   printf("[HRR]   D2H checks     : %zu pass (%zu exact, %zu within tol), %zu fail, %zu skipped\n",
          ctx.d2h_pass.load(),
          ctx.d2h_pass.load() - ctx.d2h_pass_tol.load(), ctx.d2h_pass_tol.load(),

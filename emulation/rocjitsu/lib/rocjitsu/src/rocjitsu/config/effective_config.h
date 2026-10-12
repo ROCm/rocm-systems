@@ -7,6 +7,9 @@
 #ifndef ROCJITSU_CONFIG_EFFECTIVE_CONFIG_H_
 #define ROCJITSU_CONFIG_EFFECTIVE_CONFIG_H_
 
+#include "rocjitsu/result.h"
+#include "util/diagnostic.h"
+
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -25,17 +28,22 @@ inline constexpr char kEffectiveConfigName[] = "effective_config.json";
 /// setting process-wide state, so simulations built from other configs in the same
 /// process keep the budgets their own configs ask for. The field is replaced where
 /// it already appears and inserted otherwise; all other text is preserved verbatim.
-/// @throws std::runtime_error when @p json is not a simulation-config object, or
-/// when the rewritten document does not parse back with @p budget.
-std::string json_with_cpu_thread_budget(std::string_view json, uint32_t budget);
+/// Failure means @p json is not a simulation-config object, or the rewritten document
+/// does not parse back with @p budget. The reason is emitted through @p emit_error.
+[[nodiscard]] FailureOr<std::string>
+json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
+                            const util::DiagnosticEmitter &emit_error = {});
 
 /// @brief Write the effective config for one invocation and return its path.
 ///
 /// @details The copy is placed in the invocation runtime directory next to the
 /// config-path handoff an exec'd workload already reads, so it is reclaimed by the
 /// same cleanup and never lands beside a config file the launcher does not own.
-/// @throws std::runtime_error when the source cannot be read or the copy written.
-std::string write_effective_config(const std::string &source_path, uint32_t budget, pid_t pid);
+/// Failure means the source cannot be read, the budget cannot be applied, or the
+/// copy cannot be written. The reason is emitted through @p emit_error.
+[[nodiscard]] FailureOr<std::string>
+write_effective_config(const std::string &source_path, uint32_t budget, pid_t pid,
+                       const util::DiagnosticEmitter &emit_error = {});
 
 } // namespace config
 } // namespace rocjitsu

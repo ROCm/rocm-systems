@@ -60,6 +60,7 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ext_amd.h>
 #include <pthread.h>
 
 #include <array>
@@ -74,6 +75,10 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#if defined(__x86_64__) || defined(__i386__)
+#    include <immintrin.h>
+#endif
 
 namespace rocprofiler
 {
@@ -210,6 +215,177 @@ cpu_relax()
 #endif
 }
 
+// Drain the CPU's write-combining buffers, making every preceding store visible before any
+// store that follows. Stores to write-combining memory -- which is how a queue ring buffer in
+// device memory is mapped -- retire out of order, so a packet body written there can reach the
+// command processor after the header that publishes the slot.
+inline void
+store_fence()
+{
+#if defined(__x86_64__) || defined(__i386__)
+    _mm_sfence();
+#else
+    std::atomic_thread_fence(std::memory_order_release);
+#endif
+}
+
+// Where a ring buffer lives
+enum class ring_placement
+{
+    unknown,
+    system,
+    device,
+};
+
+const char*
+placement_name(ring_placement placement)
+{
+    switch(placement)
+    {
+        case ring_placement::unknown: break;
+        case ring_placement::system: return "system";
+        case ring_placement::device: return "device";
+    }
+    return "unknown";
+}
+
+// How an agent reaches the host. `pcie` covers every non-XGMI link type
+enum class host_link
+{
+    unknown,
+    xgmi,
+    pcie,
+};
+
+const char*
+host_link_name(host_link link)
+{
+    switch(link)
+    {
+        case host_link::unknown: break;
+        case host_link::xgmi: return "xgmi";
+        case host_link::pcie: return "pcie";
+    }
+    return "unknown";
+}
+
+// Where a ring buffer lives, and how its owning agent reaches the host
+struct ring_properties
+{
+    ring_placement placement = ring_placement::unknown;
+    host_link      host      = host_link::unknown;
+};
+
+// Resolves the agent whose memory backs a pointer. A null handle means the query failed
+hsa_agent_t
+memory_owner(const void* ptr)
+{
+    const auto* amd_ext = get_amd_ext_table();
+
+    if(!ptr || !amd_ext || !amd_ext->hsa_amd_pointer_info_fn) return hsa_agent_t{};
+
+    auto info = hsa_amd_pointer_info_t{};
+    info.size = sizeof(hsa_amd_pointer_info_t);
+    if(amd_ext->hsa_amd_pointer_info_fn(const_cast<void*>(ptr), &info, nullptr, nullptr, nullptr) !=
+       HSA_STATUS_SUCCESS)
+        return hsa_agent_t{};
+
+    return info.agentOwner;
+}
+
+// Resolves where a ring buffer lives, given the agent that owns its memory
+ring_placement
+ring_buffer_placement(hsa_agent_t owner)
+{
+    const auto* core = get_core_table();
+
+    if(!core || !core->hsa_agent_get_info_fn) return ring_placement::unknown;
+
+    auto device_type = hsa_device_type_t{};
+    if(core->hsa_agent_get_info_fn(owner, HSA_AGENT_INFO_DEVICE, &device_type) !=
+       HSA_STATUS_SUCCESS)
+        return ring_placement::unknown;
+
+    return (device_type == HSA_DEVICE_TYPE_GPU) ? ring_placement::device : ring_placement::system;
+}
+
+// Resolves how an agent reaches the host, mirroring the link test behind ROCr's
+// needsPcieOrdering(). Resolved against the first CPU agent, as ROCr does
+host_link
+resolve_host_link(hsa_agent_t agent)
+{
+    const auto* amd_ext = get_amd_ext_table();
+    const auto* core    = get_core_table();
+
+    if(!core || !core->hsa_iterate_agents_fn || !core->hsa_agent_get_info_fn)
+        return host_link::unknown;
+    if(!amd_ext || !amd_ext->hsa_amd_agent_iterate_memory_pools_fn ||
+       !amd_ext->hsa_amd_memory_pool_get_info_fn || !amd_ext->hsa_amd_agent_memory_pool_get_info_fn)
+        return host_link::unknown;
+
+    auto cpu_agent = hsa_agent_t{};
+    core->hsa_iterate_agents_fn(
+        [](hsa_agent_t candidate, void* data) -> hsa_status_t {
+            auto* out  = static_cast<hsa_agent_t*>(data);
+            auto  type = hsa_device_type_t{};
+            if(get_core_table()->hsa_agent_get_info_fn(candidate, HSA_AGENT_INFO_DEVICE, &type) ==
+                   HSA_STATUS_SUCCESS &&
+               type == HSA_DEVICE_TYPE_CPU)
+            {
+                *out = candidate;
+                return HSA_STATUS_INFO_BREAK;
+            }
+            return HSA_STATUS_SUCCESS;
+        },
+        &cpu_agent);
+    if(cpu_agent.handle == 0) return host_link::unknown;
+
+    auto pool = hsa_amd_memory_pool_t{};
+    amd_ext->hsa_amd_agent_iterate_memory_pools_fn(
+        agent,
+        [](hsa_amd_memory_pool_t candidate, void* data) -> hsa_status_t {
+            auto* out     = static_cast<hsa_amd_memory_pool_t*>(data);
+            auto  segment = hsa_amd_segment_t{};
+            if(get_amd_ext_table()->hsa_amd_memory_pool_get_info_fn(
+                   candidate, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) == HSA_STATUS_SUCCESS &&
+               segment == HSA_AMD_SEGMENT_GLOBAL)
+            {
+                *out = candidate;
+                return HSA_STATUS_INFO_BREAK;
+            }
+            return HSA_STATUS_SUCCESS;
+        },
+        &pool);
+    if(pool.handle == 0) return host_link::unknown;
+
+    auto link = hsa_amd_memory_pool_link_info_t{};
+    if(amd_ext->hsa_amd_agent_memory_pool_get_info_fn(
+           cpu_agent, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO, &link) != HSA_STATUS_SUCCESS)
+        return host_link::unknown;
+
+    return (link.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI) ? host_link::xgmi : host_link::pcie;
+}
+
+// Resolves where a ring buffer lives and, for a device-memory ring, how its owning agent reaches
+// the host.
+ring_properties
+resolve_ring_properties(const void* ring_buf)
+{
+    auto ring_props = ring_properties{};
+    auto owner      = memory_owner(ring_buf);
+
+    if(owner.handle == 0) return ring_props;
+
+    ring_props.placement = ring_buffer_placement(owner);
+
+    // A system-memory ring is write-back and ordered by the hardware, so the host link cannot
+    // change the outcome and is left unresolved
+    if(ring_props.placement != ring_placement::device) return ring_props;
+
+    ring_props.host = resolve_host_link(owner);
+    return ring_props;
+}
+
 // Per-thread handoff from process_doorbell_impl() to ring_buffer_writer().
 struct doorbell_tls_t
 {
@@ -293,10 +469,11 @@ wait_for_free_slot(QueueState* state, uint64_t submit_pos)
 void
 ring_buffer_writer(const void* pkts, uint64_t pkt_count)
 {
-    auto&       tls      = get_doorbell_tls();
-    auto*       state    = tls.state;
-    auto        pkt_size = tls.pkt_size;
-    const auto* src      = static_cast<const char*>(pkts);
+    auto&       tls         = get_doorbell_tls();
+    auto*       state       = tls.state;
+    auto        pkt_size    = tls.pkt_size;
+    const auto* src         = static_cast<const char*>(pkts);
+    const bool  needs_fence = state->ring_needs_store_fence;
     for(uint64_t i = 0; i < pkt_count; i++)
     {
         wait_for_free_slot(state, tls.submit_pos);
@@ -311,6 +488,7 @@ ring_buffer_writer(const void* pkts, uint64_t pkt_count)
                 ::memcpy(dst + header_size, s + header_size, pkt_size - header_size);
                 uint16_t header = 0;
                 ::memcpy(&header, s, header_size);
+                if(needs_fence) store_fence();
                 __atomic_store_n(reinterpret_cast<uint16_t*>(dst), header, __ATOMIC_RELEASE);
             }
             else
@@ -1712,16 +1890,27 @@ create_queue_state(const hsa_queue_t* queue, bool overwrite)
     volatile uint64_t* wdid_addr = &amd_queue->write_dispatch_id;
     volatile uint64_t* rdid_addr = &amd_queue->read_dispatch_id;
     uint64_t           current_wdid = __atomic_load_n(wdid_addr, __ATOMIC_ACQUIRE);
+    const auto         ring         = resolve_ring_properties(queue->base_address);
     state->ring_buf                 = queue->base_address;
-    state->ring_size                = queue->size;
-    state->ring_mask                = queue->size - 1;
-    state->real_wdid                = wdid_addr;
-    state->real_rdid                = rdid_addr;
-    state->hsa_queue                = queue;
-    state->doorbell_signal          = queue->doorbell_signal;
+    state->ring_needs_store_fence =
+        (ring.placement != ring_placement::system) && ring.host != host_link::xgmi;
+    state->ring_size       = queue->size;
+    state->ring_mask       = queue->size - 1;
+    state->real_wdid       = wdid_addr;
+    state->real_rdid       = rdid_addr;
+    state->hsa_queue       = queue;
+    state->doorbell_signal = queue->doorbell_signal;
     state->virtual_wptr.store(current_wdid, std::memory_order_relaxed);
     state->next_scan_pos   = current_wdid;
     state->next_submit_pos = current_wdid;
+
+    ROCP_INFO << fmt::format(
+        "[queue-interposition] ring buffer for hsa_queue_t{{.id={}}}: placement {}, host link {}; "
+        "packet writes {} a store fence",
+        queue->id,
+        placement_name(ring.placement),
+        host_link_name(ring.host),
+        state->ring_needs_store_fence ? "use" : "skip");
     // Close the interlock's init end: set AFTER real_rdid, BEFORE publication, so no
     // observer reaches a state with rdid_valid true but real_rdid null. The wlock
     // release below orders this plain-bool write for every reader.

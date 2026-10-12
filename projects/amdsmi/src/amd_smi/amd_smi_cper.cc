@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstddef>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -48,8 +49,13 @@ class CperReader {
 
   template <typename Tp>
   const Tp* at(size_t offset) const {
-    return is_buffer_fit(offset, sizeof(Tp)) ? reinterpret_cast<const Tp*>(base_ + offset)
-                                             : nullptr;
+    return at<Tp>(offset, sizeof(Tp));
+  }
+
+  // For a Tp whose trailing union the record only fills in part.
+  template <typename Tp>
+  const Tp* at(size_t offset, size_t extent) const {
+    return is_buffer_fit(offset, extent) ? reinterpret_cast<const Tp*>(base_ + offset) : nullptr;
   }
 
  private:
@@ -371,6 +377,15 @@ exit:
                                     section->revision_major, body->err_ctx.reg_ctx_type);
 }
 
+// Crashdump sections end at whichever dump member amdgpu wrote: runtime fatal
+// records stop after fatal_err, 32 bytes short of sizeof(cper_sec_crashdump).
+constexpr size_t kCrashdumpDumpOffset =
+    (offsetof(struct cper_sec_crashdump, data) + offsetof(struct cper_sec_crashdump_data, dump));
+constexpr size_t kFatalCrashdumpExtent =
+    (kCrashdumpDumpOffset + sizeof(cper_sec_crashdump_data{}.dump.fatal_err));
+constexpr size_t kBootCrashdumpExtent =
+    (kCrashdumpDumpOffset + sizeof(cper_sec_crashdump_data{}.dump.boot_err));
+
 static int cper_dump_cr_fatal(const struct cper_sec_crashdump* crashdump,
                               const cper_sec_desc* section) {
   std::ostringstream ss;
@@ -637,13 +652,14 @@ std::vector<int> cper_decode(const amdsmi_cper_hdr_t* cper, size_t buf_size) {
 
     int afid = -1;
     if (cper_is_cr(sec_guid)) {
-      const struct cper_sec_crashdump* crashdump =
-          rec.at<struct cper_sec_crashdump>(section->sec_offset);
+      const bool is_boot = cper_is_bt(cper_guid);
+      const struct cper_sec_crashdump* crashdump = rec.at<struct cper_sec_crashdump>(
+          section->sec_offset, is_boot ? kBootCrashdumpExtent : kFatalCrashdumpExtent);
       if (!crashdump) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] crash dump section: " << i
            << " out of bounds; skipping\n";
         LOG_ERROR(ss);
-      } else if (cper_is_bt(cper_guid)) {
+      } else if (is_boot) {
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS] decoding boot crash dump\n";
         LOG_DEBUG(ss);
         afid = cper_dump_cr_boot(crashdump, section);

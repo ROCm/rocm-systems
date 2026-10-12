@@ -304,6 +304,12 @@ deviceLib:
   Unit_half_min_max_host:
     <<: *level_2
     tags: [types]
+  Unit_hipTestHalfIntegralAssign_Host:
+    <<: *level_2
+    tags: [types]
+  Unit_hipTestHalfIntegralAssign_Device:
+    <<: *level_2
+    tags: [types]
   Unit_bf16_atomic_add:
     <<: *level_2
     tags: [atomics, types]

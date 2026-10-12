@@ -23,8 +23,8 @@ protected:
 
     std::string create_temp_dir()
     {
-        char  tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
-        char* dir    = mkdtemp(tmpl);
+        char        tmpl[] = "/tmp/rocprofsys_path_test_XXXXXX";
+        char const* dir    = mkdtemp(tmpl);
         if(!dir)
         {
             throw std::runtime_error("Failed to create temp directory");
@@ -263,7 +263,7 @@ TEST_F(PathTest, IsDirectory_RelativePath)
 
 TEST_F(PathTest, IsRegularFile_ExistingFile)
 {
-    std::string file_path = create_file("isregular_file.txt");
+    std::string const file_path = create_file("isregular_file.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
@@ -281,21 +281,21 @@ TEST_F(PathTest, IsRegularFile_NonexistentPath)
 
 TEST_F(PathTest, IsRegularFile_SymlinkToFile)
 {
-    std::string target    = create_file("isregular_target.txt");
-    std::string link_path = create_symlink(target, "isregular_link_to_file");
+    std::string const target    = create_file("isregular_target.txt");
+    std::string const link_path = create_symlink(target, "isregular_link_to_file");
     EXPECT_TRUE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_SymlinkToDirectory)
 {
-    std::string subdir    = create_subdir("isregular_target_dir");
-    std::string link_path = create_symlink(subdir, "isregular_link_to_dir");
+    std::string const subdir    = create_subdir("isregular_target_dir");
+    std::string const link_path = create_symlink(subdir, "isregular_link_to_dir");
     EXPECT_FALSE(is_regular_file(link_path));
 }
 
 TEST_F(PathTest, IsRegularFile_BrokenSymlink)
 {
-    std::string link_path =
+    std::string const link_path =
         create_symlink("/nonexistent/target", "isregular_broken_link");
     EXPECT_FALSE(is_regular_file(link_path));
 }
@@ -304,13 +304,13 @@ TEST_F(PathTest, IsRegularFile_EmptyPath) { EXPECT_FALSE(is_regular_file("")); }
 
 TEST_F(PathTest, IsRegularFile_SpecialCharactersInPath)
 {
-    std::string file_path = create_file("isregular file with spaces.txt");
+    std::string const file_path = create_file("isregular file with spaces.txt");
     EXPECT_TRUE(is_regular_file(file_path));
 }
 
 TEST_F(PathTest, IsRegularFile_Fifo)
 {
-    std::string fifo_path = m_test_dir + "/isregular_fifo";
+    std::string const fifo_path = m_test_dir + "/isregular_fifo";
     ASSERT_EQ(mkfifo(fifo_path.c_str(), 0644), 0);
     EXPECT_FALSE(is_regular_file(fifo_path));
 }

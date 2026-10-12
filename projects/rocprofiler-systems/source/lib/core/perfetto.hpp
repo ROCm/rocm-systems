@@ -60,7 +60,7 @@ template <typename Tp>
 auto
 perfetto_counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
-    bool _v = get_data().second.count(_idx) != 0;
+    bool const _v = get_data().second.contains(_idx);
     if(_n < 0 || !_v)
     {
         return _v;
@@ -72,7 +72,7 @@ template <typename Tp>
 size_t
 perfetto_counter_track<Tp>::size(size_t _idx)
 {
-    bool _v = get_data().second.count(_idx) != 0;
+    bool const _v = get_data().second.contains(_idx);
     if(!_v)
     {
         return 0;
@@ -95,7 +95,7 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
         _missing.emplace_back(*itr, itr->c_str(), false);
     }
 
-    auto        _index     = _track_data.size();
+    auto const  _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
     const char* _name_cstr = _name->c_str();
     const char* _unit_name = nullptr;

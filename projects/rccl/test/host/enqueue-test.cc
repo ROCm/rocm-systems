@@ -657,6 +657,50 @@ TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgScalesWithRankCount) {
   EXPECT_NE(a.scalarArg, b.scalarArg);
 }
 
+TEST_F(EnqueueMicrotest, HostToDevRedOp_AvgFloat8_PacksFloatReciprocalNotFp8Bits) {
+  // AICOMRCCL-1945. The fp8 arms used to pack 1/nRanks as a host (always OCP) fp8 byte,
+  // which gfx942 device code decodes as FNUZ, i.e. at half the value. The rank counts are
+  // ones an fp8 scalar cannot carry at all: 1/3 and 1/384 are not representable, and
+  // 1/1024 rounds to zero in OCP e4m3. The full 64 bits are compared, so no stray fp8 byte
+  // or poison may survive above the float.
+  for (int nRanks : {3, 8, 384, 1024}) {
+    AvgComm comm(nRanks);
+    float want = float(1.0 / nRanks);
+    uint32_t wantBits;
+    std::memcpy(&wantBits, &want, sizeof(wantBits));
+    for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
+      auto out = MakeRedOpOut();
+      ASSERT_EQ(ncclSuccess, hostToDevRedOp(&out, ncclAvg, dt, comm.get())) << "dtype=" << int(dt);
+      EXPECT_EQ(ncclDevPreMulSum, out.op) << "dtype=" << int(dt);
+      EXPECT_EQ(uint64_t(wantBits), out.scalarArg) << "dtype=" << int(dt) << " nRanks=" << nRanks;
+      EXPECT_FALSE(out.scalarArgIsPtr) << "dtype=" << int(dt);
+    }
+  }
+}
+
+TEST_F(EnqueueMicrotest, Fp8DeviceIsFnuz_MirrorsTheTypedefSelection) {
+  // Mirrors rccl_float8.h: only these take the OCP typedef in device code.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1200"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1201"));
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx1250"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942")) << "explicit FNUZ typedef";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx90a")) << "software fallback, which is FNUZ";
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz(nullptr)) << "an unknown arch lands on the software fallback";
+  // comm->archName carries target features, and IsArchMatch is a prefix compare.
+  EXPECT_FALSE(rcclFp8DeviceIsFnuz("gfx950:sramecc+:xnack-"));
+  EXPECT_TRUE(rcclFp8DeviceIsFnuz("gfx942:sramecc+:xnack-"));
+}
+
+TEST_F(EnqueueMicrotest, Fp8ToFloat_DecodesInTheRequestedEncoding) {
+  // 0x38 separates all four encodings: OCP and FNUZ differ by one in exponent bias, and
+  // e4m3 and e5m2 place the exponent differently.
+  EXPECT_EQ(1.0f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/false));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/false, /*fnuz=*/true));
+  EXPECT_EQ(0.5f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/false));
+  EXPECT_EQ(0.25f, rcclFp8ToFloat(0x38, /*isE5m2=*/true, /*fnuz=*/true));
+}
+
 // ---------------------------------------------------------------------------
 // NOT A BUG -- investigated and cleared. The ncclAvg inner datatype switch
 // (:3235-3275) has no `default:` arm, which reads like an uninitialised-`op`
@@ -1754,6 +1798,32 @@ TEST_F(EnqueueMicrotest, RedOpCreate_DeviceResidence_StoresPointerNotBytes) {
   EXPECT_EQ(reinterpret_cast<uint64_t>(&scalar), u.opFull.scalarArg);
 }
 
+TEST_F(EnqueueMicrotest, RedOpCreate_HostImmediateFp8_DecodesToFloatWithTheDeviceEncoding) {
+  // FuncPreMulSum<fp8> reads float bits, so the user's byte is promoted here. It must be
+  // read in the device's encoding, as the device reads the payload and an ncclScalarDevice
+  // scalar; the host typedef would be off by 2x wherever the device is FNUZ.
+  const uint8_t byte = 0x38;
+  const struct { ncclDataType_t dt; const char* arch; float want; } kCases[] = {
+      {ncclFloat8e4m3, "gfx950", 1.0f},  {ncclFloat8e4m3, "gfx942", 0.5f},
+      {ncclFloat8e4m3, "gfx90a", 0.5f},  {ncclFloat8e4m3, "gfx1201:xnack-", 1.0f},
+      {ncclFloat8e5m2, "gfx950", 0.5f},  {ncclFloat8e5m2, "gfx942", 0.25f}};
+  for (auto c : kCases) {
+    RedOpComm rc;
+    rc.get()->archName = const_cast<char*>(c.arch);
+    ncclRedOp_t op = ncclSum;
+    ASSERT_EQ(ncclSuccess, ncclRedOpCreatePreMulSum_impl(&op, const_cast<uint8_t*>(&byte), c.dt,
+                                                         ncclScalarHostImmediate, rc.get()))
+        << "arch=" << c.arch;
+    const int ix = int(ncclUserRedOpMangle(rc.get(), op)) - int(ncclNumOps);
+    const ncclUserRedOp& u = rc.get()->userRedOps[ix];
+    EXPECT_FALSE(u.opFull.scalarArgIsPtr) << "arch=" << c.arch;
+    uint32_t want;
+    std::memcpy(&want, &c.want, sizeof(want));
+    EXPECT_EQ(uint64_t(want), u.opFull.scalarArg) << "dtype=" << int(c.dt) << " arch=" << c.arch;
+    rc.get()->archName = nullptr;  // not owned here
+  }
+}
+
 TEST_F(EnqueueMicrotest, RedOpCreate_MarksSlotAllocatedViaFreeNext) {
   // freeNext == -1 is the "allocated" marker Destroy checks. Pin it explicitly.
   RedOpComm rc;
@@ -1989,6 +2059,275 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 }
 
 // ===========================================================================
+// rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
+// bracket an addon collective wraps its own launch in.
+//
+// AICOMRCCL-2184: the epilogue records comm->doneEvent unless a kernel took it as
+// its stop event. The production launches that take nothing are the CE two-shot
+// AllReduce and the hierarchical ReduceScatter, which need CE-capable hardware or
+// eight nodes, so the arm is only assertable here.
+//
+// In the two cases that must not record, the hipEventRecord hook fails every
+// call: an unexpected call then shows up twice, in the hook's call count and in
+// the result the bracket returns.
+//
+// Each case installs the capture answer it relies on instead of inheriting it: a host binary has no
+// graph and can only answer "not capturing", and a case that took that answer without asking for it
+// would look covered while never reaching capture at all.
+// ===========================================================================
+
+namespace {
+// Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
+hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
+hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+
+// ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
+// device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
+struct AddonComm {
+  std::unique_ptr<ncclComm> comm{new ncclComm{}};
+  AddonComm() {
+    comm->cudaDev   = g_currentDevice;
+    comm->doneEvent = kAddonDoneEvent;
+  }
+  ncclComm* c() { return comm.get(); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  hipEvent_t recordedEvent = nullptr;
+  hipStream_t recordedStream = nullptr;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    recordedEvent = event;
+    recordedStream = stream;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  ASSERT_EQ(1, record.calls);
+  EXPECT_EQ(kAddonDoneEvent, recordedEvent);
+  EXPECT_EQ(kAddonStream, recordedStream);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  // The tag advances however the event reached the stream, so the next collective on another
+  // stream still gets its edge.
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclInternalError,
+            rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
+// rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
+// per-communicator chain that ncclLaunchPrepare / ncclLaunchFinish capture native collectives into:
+// sharedRes->deviceStream when graphStreamOrdering is on, its serialEvent when it is off.
+// ===========================================================================
+
+namespace {
+hipStream_t const        kAddonDeviceStream = reinterpret_cast<hipStream_t>(0xD57);
+hipStream_t const        kAddonLiveStream   = reinterpret_cast<hipStream_t>(0x11E);
+hipEvent_t const         kAddonScratchEvent = reinterpret_cast<hipEvent_t>(0x5C8);
+hipEvent_t const         kAddonSerialEvent  = reinterpret_cast<hipEvent_t>(0x5E1);
+unsigned long long const kAddonGraphId      = 42;
+
+struct CapturingAddonComm : AddonComm {
+  std::unique_ptr<ncclSharedResources> sharedRes{new ncclSharedResources{}};
+  explicit CapturingAddonComm(int graphStreamOrdering) {
+    comm->config.graphStreamOrdering    = graphStreamOrdering;
+    comm->sharedRes                     = sharedRes.get();
+    sharedRes->scratchEvent             = kAddonScratchEvent;
+    sharedRes->deviceStream.liveStream  = kAddonLiveStream;
+    sharedRes->deviceStream.serialEvent = kAddonSerialEvent;
+  }
+};
+
+ncclResult_t CapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  if (graph) {
+    *graph         = ncclCudaGraphNone(mode);
+    graph->graphId = kAddonGraphId;
+  }
+  return ncclSuccess;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceStreamChain) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  struct ncclStrongStream* const deviceStream = &ac.c()->sharedRes->deviceStream;
+  std::vector<std::string> calls;
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool, hipStream_t* workStream) {
+                       EXPECT_EQ(kAddonGraphId, graph.graphId);
+                       EXPECT_EQ(deviceStream, ss);
+                       *workStream = kAddonDeviceStream;
+                       calls.push_back("acquire");
+                       return ncclSuccess;
+                     });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [&](hipStream_t waiter, hipStream_t waited, hipEvent_t event) {
+    EXPECT_EQ(kAddonStream, waiter);
+    EXPECT_EQ(kAddonDeviceStream, waited);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    calls.push_back("wait");
+    return ncclSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonStream, stream);
+    calls.push_back(event == kAddonDoneEvent      ? "recordDone"
+                    : event == kAddonScratchEvent ? "recordScratch"
+                                                  : "recordOther");
+    return hipSuccess;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToEvent, [&](struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonDeviceStream, stream);
+    EXPECT_EQ(kAddonScratchEvent, event);
+    calls.push_back("advance");
+    return ncclSuccess;
+  });
+  ScopedHook release(g_strongStreamRelease, [&](struct ncclCudaGraph graph, struct ncclStrongStream* ss, bool) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(deviceStream, ss);
+    calls.push_back("release");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
+    calls.push_back("launch");
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ((std::vector<std::string>{"acquire", "wait", "launch", "recordDone", "recordScratch", "advance",
+                                      "release"}),
+            calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/0);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  int bootstrapRecords = 0;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    if (event == kAddonSerialEvent) {
+      EXPECT_EQ(kAddonLiveStream, stream);
+      ++bootstrapRecords;
+    }
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t stream, hipEvent_t event, unsigned int flags) {
+    EXPECT_EQ(kAddonStream, stream);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(static_cast<unsigned int>(hipEventWaitExternal), flags);
+    return hipSuccess;
+  });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent, [](struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonGraphId, graph.graphId);
+    EXPECT_EQ(kAddonSerialEvent, event);
+    EXPECT_EQ(kAddonStream, stream);
+    return ncclSuccess;
+  });
+
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  }
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  // The live-stream record only bootstraps the first capture's external wait.
+  EXPECT_EQ(1, bootstrapRecords);
+  EXPECT_EQ(2, wait.calls);
+  EXPECT_EQ(2, graphRecord.calls);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.graphOriginCaptured);
+  EXPECT_TRUE(ac.c()->sharedRes->deviceStream.everCaptured);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
+  AddonComm ac;  // no sharedRes: touching the capture chain would crash, not just miscount
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+    if (graph) *graph = ncclCudaGraphNone(mode);
+    return ncclSuccess;
+  });
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclInternalError; });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [](hipStream_t, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook graphRecord(g_ncclCudaGraphRecordEvent,
+                         [](struct ncclCudaGraph, hipEvent_t, hipStream_t) { return ncclInternalError; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, acquire.calls);
+  EXPECT_EQ(0, release.calls);
+  EXPECT_EQ(0, waitStream.calls);
+  EXPECT_EQ(0, graphRecord.calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedLaunchFailed_StillReleasesTheDeviceStream) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                       *workStream = kAddonDeviceStream;
+                       return ncclSuccess;
+                     });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook advance(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclInternalError; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclInternalError; }));
+
+  EXPECT_EQ(1, acquire.calls);
+  EXPECT_EQ(1, release.calls);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0, advance.calls);
+  EXPECT_EQ(0u, ac.c()->lastStreamTag);
+}
+
+// ===========================================================================
 // getImplicitOrder (enqueue.cc:2091)
 // Reads comm->config.launchOrderImplicit (env is applied at init). On AMD the
 // CUDA driver-version arm is #if'd out, so only two arms are reachable:
@@ -2095,7 +2434,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_FirstItem_OpensABatchAndCountsIt) {
   // "can we append?" decision reads these back.
   BatchPlanComm bp;
   addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl,
-                     /*devFuncId=*/7, /*workOffset=*/0);
+                     /*devFuncId=*/7, /*progressSlot=*/0, /*workOffset=*/0);
   ASSERT_EQ(1, bp.queueLength());
   EXPECT_EQ(1, bp.p()->nWorkBatches);
   auto* b = bp.tailBatch();
@@ -2121,8 +2460,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondCollItem_ExceedsByteBudgetAndOpensNe
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeColl);
   ASSERT_GT(2 * ws, size_t(NCCL_MAX_DEV_WORK_BATCH_BYTES))
       << "precondition: two coll items must not fit in one batch";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, uint32_t(ws));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, uint32_t(ws));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
 }
@@ -2132,8 +2471,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_SecondContiguousP2p_AppendsToSameBatch) {
   // contiguous offset, same epoch, distinct rounds -> one batch, two bits set.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "must reuse the open batch";
   EXPECT_EQ(1, bp.p()->nWorkBatches);
@@ -2155,12 +2494,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_BcastCapSplitsAtExactlyMaxItem) {
   // than opening a batch of its own: `0 != offset % workSize` is what would
   // otherwise split these and mask the cap.
   for (int i = 0; i < maxitem; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(i * bcastSize));
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(i * bcastSize));
   }
   const int beforeCap = bp.queueLength();
 
   // The (maxitem + 1)th item is the first to see nBcasts == maxitem.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(maxitem * bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(maxitem * bcastSize));
   EXPECT_EQ(beforeCap + 1, bp.queueLength())
       << "the cap at :240 must open a new batch on the item that reaches maxitem";
 }
@@ -2187,8 +2526,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_DifferentWorkType_ForcesNewBatch) {
   const size_t bcastSize = ncclDevWorkSize(ncclDevWorkTypeBcast);
   ASSERT_LT(1, ncclMaxDevWorkBatchBytes(bp.c()->cudaArch) / int(sizeof(ncclDevWorkBcast)))
       << "maxitem must exceed the single bcast item, or the :240 cap is the splitter";
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, uint32_t(bcastSize));
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeBcast, 7, /*progressSlot=*/0, uint32_t(bcastSize));
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(2, bp.p()->nWorkBatches);
   EXPECT_EQ(0, bp.chan()->workBatchQueue.head->batch.nextExtends)
@@ -2210,9 +2549,9 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_NonMultipleOffset_CreatesExtensionBatch) {
   // before the extension logic could be reached.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
   auto* first = bp.tailBatch();
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength());
   EXPECT_EQ(1, first->nextExtends) << "the previous batch must be marked as extended";
@@ -2225,15 +2564,15 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_OffsetBeyondBitsetRange_CreatesExtensionBa
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   {
     BatchPlanComm fits(/*nNodes=*/4);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(63 * ws), 1, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(fits.c(), fits.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(63 * ws), 1, true);
     EXPECT_EQ(1, fits.queueLength()) << "slot 63 is the last representable one";
     EXPECT_NE(0ull, fits.tailBatch()->offsetBitset & (1ull << 63));
   }
   {
     BatchPlanComm over(/*nNodes=*/4);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(64 * ws), 1, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+    addWorkBatchToPlan(over.c(), over.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(64 * ws), 1, true);
     EXPECT_EQ(2, over.queueLength()) << "slot 64 must spill to an extension batch";
   }
 }
@@ -2244,13 +2583,13 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ExtensionBatchDoesNotResetWipCounters) {
   // genuinely new batch resets it.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws / 2),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws / 2),
                      /*p2pRound=*/1, true);  // misaligned -> extension
   EXPECT_EQ(2 * ws, bp.chan()->wipBatch.workBytes) << "extension must ACCUMULATE";
 
   // A different funcId forces a genuinely new batch, which DOES reset.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, 0, /*p2pRound=*/2, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 9, /*progressSlot=*/0, 0, /*p2pRound=*/2, true);
   EXPECT_EQ(ws, bp.chan()->wipBatch.workBytes) << "a new batch must RESET";
 }
 
@@ -2258,8 +2597,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_ChannelsAreIndependent) {
   // Every decision reads comm->planner.wipPlan.channels[channelId], so work on
   // one channel must not disturb another. Catches a hardcoded index.
   BatchPlanComm bp;
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, 0);
-  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), /*channelId=*/1, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(1, bp.queueLength(0));
   EXPECT_EQ(1, bp.queueLength(1));
   EXPECT_EQ(2, bp.p()->nWorkBatches) << "but the plan-wide count sums both";
@@ -2278,8 +2617,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentEpoch_ForcesNewBatch) {
   // batching uniform across ranks and prevents hangs.
   BatchPlanComm bp(/*nNodes=*/4);  // >2 so the per-batch cap is the epoch size
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/NCCL_MAX_DEV_WORK_P2P_PER_BATCH, true);
   EXPECT_EQ(2, bp.queueLength()) << "cross-epoch p2ps must not fuse";
 }
@@ -2290,8 +2629,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pSameEpochDifferentRounds_MayShareABatch
   // Without this, "always makes a new batch" would pass the other two.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(1, bp.queueLength()) << "same epoch, different rounds -> one batch";
   EXPECT_EQ(2, bp.chan()->wipBatch.nP2ps);
@@ -2303,8 +2642,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pTwoNodesOrFewer_CapsAtOnePerBatch) {
   // which differs ONLY in nNodes.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, /*p2pRound=*/0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws),
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws),
                      /*p2pRound=*/1, true);
   EXPECT_EQ(2, bp.queueLength()) << "nNodes<=2 allows only one p2p per batch";
 }
@@ -2320,8 +2659,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pRecordsRoundAndBatchEligibility) {
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;      // first round of an epoch
   const int r1 = r0 + 1;                                   // same epoch
   ASSERT_EQ(r0 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH, r1 / NCCL_MAX_DEV_WORK_P2P_PER_BATCH);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r1, true);
   EXPECT_TRUE(bp.chan()->wipBatch.batchP2P);
   ASSERT_EQ(2, bp.chan()->wipBatch.nP2ps);
   EXPECT_EQ(r0, bp.chan()->wipBatch.p2pRounds[0]);
@@ -2341,8 +2680,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pEligibleAfterIneligible_ForcesNewBatch)
   // and lets a mutant that drops :227 survive.
   BatchPlanComm bp(/*nNodes=*/4);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, /*batchP2P=*/false);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, /*batchP2P=*/false);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1,
                      /*batchP2P=*/true);
   EXPECT_EQ(2, bp.queueLength()) << "an ineligible batch must not absorb an eligible op";
 }
@@ -2352,12 +2691,12 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_CountsP2pBatchesSeparately) {
   // because it derives a proxyOpCount that fused ops must share.
   BatchPlanComm bp(/*nNodes=*/2);
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, 0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), 1, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, 0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), 1, true);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p);
 
   // A coll batch must NOT bump the p2p counter.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, 0);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeColl, 7, /*progressSlot=*/0, 0);
   EXPECT_EQ(2, bp.chan()->nWorkBatchesP2p) << "coll work must not count as p2p";
 }
 
@@ -2370,7 +2709,7 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_EveryItemLandsInExactlyOneBatch) {
   const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
   const int kItems = 6;
   for (int i = 0; i < kItems; ++i) {
-    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(i * ws),
+    addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(i * ws),
                        /*p2pRound=*/i, true);
   }
   int bits = 0;
@@ -2448,7 +2787,7 @@ struct FinishComm {
   void addBatches(int c, int n, int funcIdBase) {
     for (int i = 0; i < n; ++i) {
       addWorkBatchToPlan(this->c(), p(), c, ncclDevWorkTypeColl,
-                         funcIdBase + i, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
+                         funcIdBase + i, /*progressSlot=*/0, uint32_t(i * ncclDevWorkSize(ncclDevWorkTypeColl)));
     }
     markChannel(c);
   }
@@ -2969,16 +3308,16 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDifferentFuncId_ForcesNewBatch_Isolated
   // Same epoch, distinct rounds, contiguous offsets, within budget: every OTHER
   // guard is satisfied, so only the funcId difference can open a new batch.
   const int r0 = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, 0, r0, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8,
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, /*devFuncId=*/8, /*progressSlot=*/0,
                      uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(2, bp.queueLength()) << "a different funcId must force a new batch";
 
   // Control: identical call with the SAME funcId shares a batch. Without this
   // pair the assertion above could also be satisfied by an unconditional split.
   BatchPlanComm same(/*nNodes=*/4);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, 0, r0, true);
-  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r0 + 1, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r0, true);
+  addWorkBatchToPlan(same.c(), same.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r0 + 1, true);
   EXPECT_EQ(1, same.queueLength()) << "same funcId must still share";
 }
 
@@ -2995,8 +3334,8 @@ TEST_F(EnqueueMicrotest, AddWorkBatch_P2pDuplicateRoundSameEpoch_ForcesNewBatch_
   const int r = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;  // first round of an epoch
   // Identical round twice: same epoch, so the epoch rule CANNOT fire. Only the
   // duplicate-round guard can split these.
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, 0, r, true);
-  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, uint32_t(ws), r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, r, true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), r, true);
   EXPECT_EQ(2, bp.queueLength())
       << "two p2ps of the SAME round use the same connections and must not fuse";
 }
@@ -3406,4 +3745,147 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
   ASSERT_NE(nullptr, t);
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
+}
+
+// ===========================================================================
+// addP2pToPlan (enqueue.cc:1334) -- gfx1250 SendRecv protocol selection.
+// GPU SendRecvTests skip off gfx1250, so host CI never reached this planner.
+// These tests fake cudaArch=1250 / nRanks=4 and inspect the emitted
+// ncclDevWorkP2p plus the kernel funcId (LL vs LL128).
+// ===========================================================================
+
+#if !defined(ENABLE_LL128)
+#error "rccl-UnitTestsMicroEnqueue must compile ENABLE_LL128 so addP2pToPlan's gfx1250 window is in this binary"
+#endif
+
+namespace {
+void InstallSendRecvDevFuncIds() {
+  auto key = [](int reg) -> uint64_t {
+    return (uint64_t(ncclFuncSendRecv & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
+           (uint64_t(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
+  };
+  ncclDevFuncNameToId[key(0)] = 100;  // legacy LL kernel
+  ncclDevFuncNameToId[key(1)] = 101;  // LL128 kernel
+}
+
+struct Gfx1250AddP2pScene {
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/1250};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char ll128Buf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+  ncclTaskP2p recvTask{};
+  ncclTaskP2p sendTask{};
+  int planTotalTasks[2]{1, 1};
+
+  Gfx1250AddP2pScene() {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 4;
+    c->nNodes = 1;
+    c->cudaArch = 1250;
+    c->p2pnChannels = 4;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 128 << 10;
+    c->ll128LineElems = 16;
+    c->ll128DataElems = 15;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    SetSingleGpuArch(topo.get(), "gfx1250");
+    topo->ll128Enabled = true;
+    c->topo = topo.get();
+
+    peers.resize(4);
+    peerSlots.resize(4);
+    for (int i = 0; i < 4; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
+    }
+    for (int ch = 0; ch < 4; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    recvTask.collAPI = ncclFuncRecv;
+    recvTask.func = ncclFuncRecv;
+    sendTask.collAPI = ncclFuncSend;
+    sendTask.func = ncclFuncSend;
+  }
+
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+    struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
+  }
+
+  int p2pWorkCount() {
+    int n = 0;
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) ++n;
+    }
+    return n;
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
+  // Argus hang: 2 KiB + 8 KiB used to be LL+LL128 and split into recv-then-send.
+  // ENABLE=1 windows start at 0, so both dirs stay LL128 in one work item.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/8192, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount()) << "mixed round must not split into two work items";
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(true), batch->funcId) << "ENABLE=1 in-window uses the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {
+  // Default ENABLE=-1: below P2P_LL_THRESHOLD stays legacy LL, not LL128.
+  SetParam("P2P_LL128_ENABLE", -1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/2048, /*recvBytes=*/2048));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(1, work->sendProtoLL);
+  EXPECT_EQ(1, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId) << "default must not select the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
+  // 4-rank cap is 1 MiB. Above it ENABLE=1 is SIMPLE (protoLL=0) and the LL kernel.
+  SetParam("P2P_LL128_ENABLE", 1);
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/(1 << 20) + 1, /*recvBytes=*/(1 << 20) + 1));
+  EXPECT_EQ(1, sc.p2pWorkCount());
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(0, work->sendProtoLL);
+  EXPECT_EQ(0, work->recvProtoLL);
+  auto* batch = sc.bp.tailBatch();
+  ASSERT_NE(nullptr, batch);
+  EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }

@@ -136,11 +136,14 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
         GTEST_SKIP() << "CE driver not in supported range";
 
     mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    // Scratch rejects a registered recv even when the team covers the comm, so
+    // the flip below uses a non-registered recv. Both gates must reject the
+    // small team.
     EXPECT_FALSE(ncclCeScratchAvailable(mockComm_.get(),
                                         ncclFuncAlltoAllv,
                                         ncclDevSum,
                                         ncclFloat32,
-                                        ncclSymSendRegRecvReg));
+                                        ncclSymSendRegRecvNonreg));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAllv,
                                  ncclDevSum,
@@ -149,14 +152,26 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
                                  /*sendWin=*/nullptr,
                                  /*recvWin=*/nullptr));
 
-    // Restoring only the team size flips the verdict, so no other clause is
+    // Restoring only the team size flips both verdicts, so no other clause is
     // responsible for the rejection above.
     mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclCeScratchAvailable(mockComm_.get(),
                                        ncclFuncAlltoAllv,
                                        ncclDevSum,
                                        ncclFloat32,
-                                       ncclSymSendRegRecvReg));
+                                       ncclSymSendRegRecvNonreg));
+    EXPECT_FALSE(ncclCeScratchAvailable(mockComm_.get(),
+                                        ncclFuncAlltoAllv,
+                                        ncclDevSum,
+                                        ncclFloat32,
+                                        ncclSymSendRegRecvReg));
+    EXPECT_TRUE(ncclCeAvailable(mockComm_.get(),
+                                ncclFuncAlltoAllv,
+                                ncclDevSum,
+                                ncclFloat32,
+                                ncclSymSendRegRecvReg,
+                                /*sendWin=*/nullptr,
+                                /*recvWin=*/nullptr));
 }
 
 TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_NoSymmetricSupportRejected)
@@ -390,16 +405,12 @@ TEST_F(CeAlltoAllEligibilityTest, MultiNodeHierAvailable_DoesNotYieldDda)
                                     ncclFuncAlltoAll,
                                     ncclDevSum,
                                     ncclFloat32,
-                                    ncclSymSendRegRecvReg,
-                                    /*sendWin=*/nullptr,
-                                    /*recvWin=*/nullptr));
+                                    ncclSymSendRegRecvReg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
                                  ncclFuncAlltoAll,
                                  ncclDevSum,
                                  ncclFloat32,
-                                 ncclSymSendRegRecvReg,
-                                 /*sendWin=*/nullptr,
-                                 /*recvWin=*/nullptr));
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
     EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
                                         ncclFloat32,
                                         ncclSymSendRegRecvReg,

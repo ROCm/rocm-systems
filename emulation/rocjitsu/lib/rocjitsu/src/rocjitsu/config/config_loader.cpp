@@ -26,6 +26,7 @@
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/topology.h"
 #include "simulation_config_generated.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <cassert>
@@ -53,12 +54,13 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
   if (request.helpers < -1 || request.helpers > 128)
     throw std::invalid_argument("async_helper_threads must be -1 or between 0 and 128");
   const uint32_t budget = request.budget ? request.budget : std::max(host_threads, 1u);
-  const uint32_t cpu_budget =
-      request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
   xcds = std::max(xcds, 1u);
-  if (clocked)
+  if (clocked) {
+    const uint32_t cpu_budget =
+        request.budget ? request.budget : std::min(budget, kDefaultExecutionThreadCap);
     return {std::min(request.engines ? request.engines : cpu_budget, xcds),
             std::vector<uint32_t>(dispatch_capacities.size(), 1), 0};
+  }
   auto effective = [&](ExecutionThreadChoice choice) {
     ExecutionThreadAllocation result;
     result.engines = std::min(request.engines ? request.engines : choice.engines, xcds);
@@ -80,11 +82,6 @@ ExecutionThreadAllocation resolve_execution_threads(const ExecutionThreadRequest
     uint64_t cpu_cost = candidate.engines;
     for (uint32_t width : candidate.dispatch)
       cpu_cost += width - 1;
-    // Extra affinity can supply helpers without increasing the automatic
-    // engine/dispatch allocation beyond its existing cap. Explicit CPU knobs
-    // retain their override behavior.
-    if (!request.engines && !request.dispatch && cpu_cost > cpu_budget)
-      continue;
     const uint64_t cost = cpu_cost + candidate.helpers;
     if (cost <= budget && cost >= best_cost) {
       result = std::move(candidate);
@@ -616,9 +613,33 @@ void build_children(simdojo::CompositeComponent *parent,
   }
 }
 
-void do_wire_cps(simdojo::CompositeComponent *root) {
+void do_wire_cps(simdojo::CompositeComponent *root, uint32_t cus_per_shader_array,
+                 uint32_t shader_arrays_per_engine) {
   std::vector<simdojo::Component *> all;
   root->collect_components(all);
+
+  // Device geometry can describe a different machine from a custom topology.
+  // Keep it unknown unless every SE (including direct-CU groups) agrees.
+  const uint64_t expected_cus = uint64_t{cus_per_shader_array} * shader_arrays_per_engine;
+  for (auto *comp : all) {
+    auto *group = dynamic_cast<simdojo::CompositeComponent *>(comp);
+    if (!group)
+      continue;
+    const uint64_t num_cus =
+        std::count_if(group->children().begin(), group->children().end(), [](const auto &child) {
+          return dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
+        });
+    if ((num_cus || dynamic_cast<amdgpu::ShaderEngine *>(group)) && num_cus != expected_cus) {
+      if (cus_per_shader_array)
+        util::Logger::warn("Shader-array geometry mismatch: ", group->full_path(), " has ", num_cus,
+                           " compute units; expected ", expected_cus,
+                           " from num_shader_arrays_per_engine * num_cu_per_sh. "
+                           "Shader-array width remains unknown.");
+      cus_per_shader_array = 0;
+      break;
+    }
+  }
+
   for (auto *comp : all) {
     auto *cp = dynamic_cast<amdgpu::CommandProcessor *>(comp);
     if (!cp)
@@ -642,7 +663,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(se_child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(shader_engine_id, cu_index++);
+        cu->set_shader_engine_location(shader_engine_id, cu_index++, cus_per_shader_array);
         cp->add_compute_unit(cu);
       }
       ++shader_engine_id;
@@ -656,7 +677,7 @@ void do_wire_cps(simdojo::CompositeComponent *root) {
         auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(child.get());
         if (!cu)
           continue;
-        cu->set_shader_engine_location(0, cu_index++);
+        cu->set_shader_engine_location(0, cu_index++, cus_per_shader_array);
         cp->add_compute_unit(cu);
       }
     }
@@ -708,7 +729,8 @@ void set_cu_l2(simdojo::CompositeComponent *root) {
 
 TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo::ExecMode mode,
                                    rj_code_arch_t arch, rj_code_target_id_t target,
-                                   const AsyncResources &resources) {
+                                   const AsyncResources &resources, uint32_t cus_per_shader_array,
+                                   uint32_t shader_arrays_per_engine) {
   if (!topology_def || !topology_def->root())
     throw std::runtime_error("TopologyDef missing root ComponentDef");
 
@@ -759,7 +781,7 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
   }
 
   set_cu_l2(root);
-  do_wire_cps(root);
+  do_wire_cps(root, cus_per_shader_array, shader_arrays_per_engine);
 
   if (topology_def->links())
     for (auto *ld : *topology_def->links())
@@ -859,11 +881,14 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
       }
       self(self, child, checked(copies * n));
     }
-    // Match do_wire_cps(): a CP drains its sibling SEs, or direct sibling CUs
-    // when the parent has no shader engines.
-    if (has_cp)
-      result.dispatch_capacity =
-          std::max(result.dispatch_capacity, checked(has_se ? se_cus : direct_cus));
+    // Match do_wire_cps(): sibling CPs share the same CUs. Each XCD caller can
+    // use at most CUs-1 pool workers, but concurrent XCDs share the whole pool.
+    // This is maximum demand; fewer engine partitions can leave workers idle.
+    if (has_cp) {
+      const uint64_t cus = has_se ? se_cus : direct_cus;
+      if (cus)
+        result.dispatch_capacity = checked(result.dispatch_capacity + copies * (cus - 1));
+    }
   };
   if (root)
     visit(visit, root, 1);
@@ -968,7 +993,8 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
     result.engine_config.num_threads = result.execution_threads.engines;
   result.async_resources = make_async_execution_resources(result.execution_threads.helpers);
   result.build_result =
-      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources);
+      build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
+                     result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine);
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -994,7 +1020,8 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
       result.extra_gpu_builds.push_back(
-          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources));
+          build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
+                         result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine));
       if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);

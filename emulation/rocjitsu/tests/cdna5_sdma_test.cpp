@@ -4,7 +4,6 @@
 #include "cdna5_sim_test_common.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
-#include "rocjitsu/vm/amdgpu/pm4/pm4_queue_controller.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 
 #include <sys/mman.h>
@@ -262,7 +261,7 @@ public:
     if (!address_space_)
       throw std::runtime_error("cannot register transient AQL test address space");
 
-    amdgpu::AqlQueueConfig queue{};
+    amdgpu::ComputeQueueConfig queue{};
     queue.address_space = address_space_;
     queue.process_id = kProcessId;
     queue.queue_id = kQueueId;
@@ -923,7 +922,7 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
 
   auto register_queue = [&](uint32_t queue_id, uint64_t &exception_status, uint32_t event_id,
                             const amdgpu::InterruptSink &interrupt_sink) {
-    amdgpu::AqlQueueConfig queue{};
+    amdgpu::ComputeQueueConfig queue{};
     queue.address_space = address_space;
     queue.interrupt_sink = interrupt_sink;
     queue.process_id = kProcessId;
@@ -1025,7 +1024,7 @@ TEST(SoCLifetimeTest, ReleasesDirectCommandProcessorQueuesBeforeGpuVm) {
       sim->soc->gpu_vm().register_translated(kProcessId, backing, backing);
   ASSERT_TRUE(address_space);
 
-  amdgpu::AqlQueueConfig aql{};
+  amdgpu::ComputeQueueConfig aql{};
   aql.address_space = address_space;
   aql.process_id = kProcessId;
   aql.queue_id = 1;

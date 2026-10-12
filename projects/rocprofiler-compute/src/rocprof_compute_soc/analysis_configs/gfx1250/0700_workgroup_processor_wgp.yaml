@@ -78,7 +78,7 @@ Panel Config:
 
   - metric_table:
       id: 703
-      title: Wave Dispatch
+      title: Wavefront Dispatch
       header:
         metric: Metric
         avg: Avg
@@ -86,11 +86,11 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Dispatched Waves:
+        Dispatched Wavefronts:
           avg: AVG(SQG_WAVES_sum)
           min: MIN(SQG_WAVES_sum)
           max: MAX(SQG_WAVES_sum)
-          unit: Waves
+          unit: Wavefronts
         Dispatched Threads:
           avg: AVG(SQG_ITEMS_sum)
           min: MIN(SQG_ITEMS_sum)
@@ -98,7 +98,7 @@ Panel Config:
           unit: Threads
   - metric_table:
       id: 704
-      title: Wave Life
+      title: Wavefront Life
       header:
         metric: Metric
         avg: Avg
@@ -106,14 +106,14 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        Wave Life:
+        Wavefront Life:
           avg: SUM(SQG_WAVE_CYCLES_sum) / SUM(SQG_WAVES_sum)
           min: MIN(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           max: MAX(SQG_WAVE_CYCLES_sum / SQG_WAVES_sum)
           unit: Cycles
   - metric_table:
       id: 705
-      title: Wave Instruction Mix
+      title: Wavefront Instruction Mix
       header:
         metric: Metric
         avg: Avg
@@ -226,12 +226,12 @@ Panel Config:
           min: MIN(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_GLOBAL_SCRATCH_ATOMIC_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - VMEM Atomic RTN:
+        Instructions - VMEM Atomic Return:
           avg: SUM(SQ_INSTS_TEX_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_RTN_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - VMEM Atomic NORTN:
+        Instructions - VMEM Atomic Non-Return:
           avg: SUM(SQ_INSTS_TEX_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_TEX_ATOMIC_NORTN_sum / $denom)
@@ -281,12 +281,12 @@ Panel Config:
           min: MIN(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_STORE_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - LDS Atomic RTN:
+        Instructions - LDS Atomic Return:
           avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_RTN_sum / $denom)
           unit: (Count + $normUnit)
-        Instructions - LDS Atomic NORTN:
+        Instructions - LDS Atomic Non-Return:
           avg: SUM(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum) / SUM($denom)
           min: MIN(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
           max: MAX(SQ_INSTS_VEC32_LDS_ATOMIC_NORTN_sum / $denom)
@@ -664,13 +664,13 @@ Panel Config:
     Scratch Allocation: >-
       Bytes of scratch (private) memory allocated per work-item.
 
-    Dispatched Waves: >-
+    Dispatched Wavefronts: >-
       Total wavefronts dispatched.
 
     Dispatched Threads: >-
       Total work-items dispatched.
 
-    Wave Life: >-
+    Wavefront Life: >-
       Average wavefront lifetime in cycles.
 
     Total Instructions: >-
@@ -727,10 +727,10 @@ Panel Config:
     Instructions - Global Scratch Atomics: >-
       Number of global/scratch atomic instructions issued.
 
-    Instructions - VMEM Atomic RTN: >-
+    Instructions - VMEM Atomic Return: >-
       Number of returning VMEM atomic instructions issued.
 
-    Instructions - VMEM Atomic NORTN: >-
+    Instructions - VMEM Atomic Non-Return: >-
       Number of non-returning VMEM atomic instructions issued.
 
     Instructions - Multicast Load: >-
@@ -754,10 +754,10 @@ Panel Config:
     Instructions - LDS Store: >-
       Number of LDS store instructions issued.
 
-    Instructions - LDS Atomic RTN: >-
+    Instructions - LDS Atomic Return: >-
       Number of returning LDS atomic instructions issued.
 
-    Instructions - LDS Atomic NORTN: >-
+    Instructions - LDS Atomic Non-Return: >-
       Number of non-returning LDS atomic instructions issued.
 
     Instructions - LDS Other: >-

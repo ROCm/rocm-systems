@@ -4,6 +4,8 @@
 #pragma once
 
 #include "policies/agent_manager_policy.hpp"
+#include "policies/trace_cache/buffer_storage.hpp"
+#include "policies/trace_cache/metadata_registry.hpp"
 
 #include <concepts>
 #include <cstddef>
@@ -11,9 +13,29 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace rocprofsys::policies::domain_service
 {
+
+namespace detail
+{
+// Derived directly from the accessors' actual return types, rather than from the
+// Externals::metadata_registry_t / buffer_storage_t aliases, so the policy check
+// verifies what get_metadata_registry()/get_buffer_storage() really hand back.
+template <typename Externals>
+using metadata_registry_return_t =
+    std::remove_cvref_t<decltype(Externals::get_metadata_registry())>;
+
+template <typename Externals>
+using buffer_storage_return_t =
+    std::remove_cvref_t<decltype(Externals::get_buffer_storage())>;
+
+template <typename Externals>
+using metadata_registry_process_t =
+    decltype(std::declval<metadata_registry_return_t<Externals>&>().get_process_info());
+}  // namespace detail
 
 /// @brief External dependencies required by rocprofsys::domain_service and its
 /// buffered/callback KFD event domains: agent lookup, PMC/thread/track reporting, and
@@ -31,15 +53,34 @@ concept externals =
         typename Externals::agent_type_t;
         typename Externals::agent_manager_t;
         typename Externals::region_sample;
+        typename Externals::metadata_registry_t;
+        typename Externals::buffer_storage_t;
         typename Externals::rocm_hip_api_category;
         typename Externals::rocm_hsa_api_category;
         typename Externals::rocm_rocjpeg_api_category;
         typename Externals::rocm_rocdecode_api_category;
         typename Externals::rocm_rocshmem_api_category;
         typename Externals::rocm_hipfile_api_category;
+        typename Externals::rocm_rccl_api_category;
+        typename Externals::state_thread;
+        typename Externals::pmc_event_with_sample;
         requires agent_manager_policy<typename Externals::agent_manager_t,
                                       typename Externals::agent_t,
                                       typename Externals::agent_type_t>;
+        requires trace_cache::metadata_registry_policy<
+            detail::metadata_registry_return_t<Externals>,
+            detail::metadata_registry_process_t<Externals>,
+            typename Externals::pmc_info_t, typename Externals::thread_info_t,
+            typename Externals::track_t, typename Externals::agent_t,
+            typename Externals::agent_type_t>;
+        requires trace_cache::buffer_storage_policy<
+            detail::buffer_storage_return_t<Externals>,
+            decltype(Externals::kfd_sample_t::type_identifier),
+            typename Externals::kfd_sample_t>;
+        requires trace_cache::buffer_storage_policy<
+            detail::buffer_storage_return_t<Externals>,
+            decltype(Externals::kfd_sample_t::type_identifier),
+            typename Externals::region_sample>;
         {
             Externals::k_agent_type_gpu
         } -> std::convertible_to<typename Externals::agent_type_t>;
@@ -112,6 +153,16 @@ concept externals =
             Externals::rocm_hipfile_api_category_name
         } -> std::convertible_to<std::string_view>;
         {
+            Externals::rocm_rccl_api_category_name
+        } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_name } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_description } -> std::convertible_to<std::string_view>;
+        { Externals::comm_data_enum_value } -> std::convertible_to<std::size_t>;
+        { Externals::rccl_send_label } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_recv_label } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_send_track_name } -> std::convertible_to<std::string_view>;
+        { Externals::rccl_recv_track_name } -> std::convertible_to<std::string_view>;
+        {
             typename Externals::pmc_info_t{
                 .type             = typename Externals::agent_type_t{},
                 .agent_type_index = std::size_t{},
@@ -153,15 +204,28 @@ concept externals =
                                               double{},
                                               std::optional<std::int64_t>{} }
         };
+        {
+            typename Externals::pmc_event_with_sample{
+                std::size_t{},      std::string_view{},
+                std::size_t{},      std::string_view{},
+                std::size_t{},      std::size_t{},
+                std::size_t{},      std::string_view{},
+                std::string_view{}, std::uint32_t{},
+                std::uint8_t{},     std::string_view{},
+                double{},           std::optional<std::int64_t>{}
+            }
+        };
     } &&
     requires(std::string_view text, Externals::thread_info_t thread_info,
              Externals::track_t track, Externals::pmc_info_t pmc_info,
              Externals::kfd_sample_t sample) {
-        { Externals::add_string(text) };
-        { Externals::add_thread_info(thread_info) };
-        { Externals::add_track(track) };
-        { Externals::add_pmc_info(pmc_info) };
-        { Externals::buffer_storage_store(std::move(sample)) };
+        { Externals::get_metadata_registry() };
+        { Externals::get_metadata_registry().add_string(text) };
+        { Externals::get_metadata_registry().add_thread_info(thread_info) };
+        { Externals::get_metadata_registry().add_track(track) };
+        { Externals::get_metadata_registry().add_pmc_info(pmc_info) };
+        { Externals::get_buffer_storage() };
+        { Externals::get_buffer_storage().store(std::move(sample)) };
         { Externals::get_pid() } -> std::convertible_to<std::int32_t>;
         { Externals::get_ppid() } -> std::convertible_to<std::int32_t>;
         {
@@ -177,16 +241,26 @@ concept externals =
     // implicit int conversion), which this Externals-only concept has no way to name
     // generically. They stay duck-typed, exactly as on_tracing_api_enter/exit already
     // uses them.
-    && requires(std::string_view text, Externals::thread_info_t thread_info,
-                Externals::region_sample         sample,
-                Externals::rocm_hip_api_category hip_category) {
-           { Externals::is_active() } -> std::convertible_to<bool>;
-           { Externals::get_use_timemory() } -> std::convertible_to<bool>;
-           { Externals::tracing_push_timemory(hip_category, text) };
-           { Externals::tracing_pop_timemory(hip_category, text) };
-           { Externals::metadata_add_string(text) };
-           { Externals::metadata_add_thread_info(thread_info) };
-           { Externals::buffer_storage_store(std::move(sample)) };
+    &&
+    requires(std::string_view text, Externals::region_sample sample,
+             Externals::rocm_hip_api_category hip_category) {
+        { Externals::is_active() } -> std::convertible_to<bool>;
+        { Externals::get_use_timemory() } -> std::convertible_to<bool>;
+        { Externals::tracing_push_timemory(hip_category, text) };
+        { Externals::tracing_pop_timemory(hip_category, text) };
+        { Externals::get_buffer_storage().store(std::move(sample)) };
+    }
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    && requires(const char* symbol_name, Externals::pmc_event_with_sample rccl_sample) {
+           {
+               Externals::get_metadata_registry()
+           } -> std::convertible_to<typename Externals::metadata_registry_t&>;
+           {
+               Externals::get_buffer_storage()
+           } -> std::convertible_to<typename Externals::buffer_storage_t&>;
+           { Externals::dlsym(symbol_name) } -> std::convertible_to<void*>;
+           { Externals::dlerror() } -> std::convertible_to<const char*>;
+           { Externals::state_thread::scoped(Externals::state_thread::Internal) };
        };
 
 }  // namespace rocprofsys::policies::domain_service

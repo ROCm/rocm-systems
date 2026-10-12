@@ -13,9 +13,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -38,7 +36,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
 
     void* _handle = nullptr;
     bool  _noload = false;
-    for(auto _mode : _open_modes)
+    for(auto const _mode : _open_modes)
     {
         _handle = dlopen(_name, _mode);
         _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -56,7 +54,7 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         {
             return path::realpath(_link_map->l_name);
         }
-        if(_noload == false)
+        if(!_noload)
         {
             dlclose(_handle);
         }
@@ -74,10 +72,10 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         _open_modes = default_link_open_modes;
     }
 
-    auto _get_chain = [&_open_modes](const char* _name) {
+    auto const _get_chain = [&_open_modes](const char* _name) {
         void* _handle = nullptr;
         bool  _noload = false;
-        for(auto _mode : _open_modes)
+        for(auto const _mode : _open_modes)
         {
             _handle = dlopen(_name, _mode);
             _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
@@ -92,7 +90,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         {
             struct link_map* _link_map = nullptr;
             dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-            struct link_map* _next = _link_map;
+            struct link_map const* _next = _link_map;
             while(_next)
             {
                 if(_name == nullptr && _next == _link_map &&
@@ -109,7 +107,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
                 _next = _next->l_next;
             }
 
-            if(_noload == false)
+            if(!_noload)
             {
                 dlclose(_handle);
             }
@@ -117,15 +115,15 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         return _chain;
     };
 
-    auto _full_chain = _get_chain(_lib);
-    auto _excl_chain = (_exclude_linked_by.empty())
-                           ? std::set<std::string>{}
-                           : _get_chain(_exclude_linked_by.c_str());
-    auto _fini_chain = std::set<link_file>{};
+    auto const _full_chain = _get_chain(_lib);
+    auto       _excl_chain = _exclude_linked_by.empty()
+                                 ? std::set<std::string>{}
+                                 : _get_chain(_exclude_linked_by.c_str());
+    auto       _fini_chain = std::set<link_file>{};
 
     for(const auto& itr : _full_chain)
     {
-        if(_excl_chain.find(itr) == _excl_chain.end())
+        if(!_excl_chain.contains(itr))
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))
             {
@@ -138,7 +136,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
         }
     }
 
-    auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
+    auto const _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
         LOG_DEBUG("[linkmap][{}]: {}", path::filename(_name), itr.real());
@@ -160,10 +158,10 @@ link_file::operator<(const link_file& _rhs) const
         return false;
     }
 
-    auto _lhs_base = base();
-    auto _lhs_real = real();
-    auto _rhs_base = _rhs.base();
-    auto _rhs_real = _rhs.real();
+    auto const _lhs_base = base();
+    auto const _lhs_real = real();
+    auto const _rhs_base = _rhs.base();
+    auto const _rhs_real = _rhs.real();
 
     if(_lhs_base == _rhs_base || _lhs_real == _rhs_real)
     {
@@ -184,5 +182,4 @@ link_file::real() const
 {
     return path::realpath(name);
 }
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

@@ -8,6 +8,9 @@
 
 ### Fixed
 
+* hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
+
+
 ### Removed
 
 ### Known issues

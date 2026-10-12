@@ -37,6 +37,10 @@ ncclResult_t ncclCommSetAsyncError(struct ncclComm* comm, ncclResult_t nextState
 ncclResult_t g_commEnsureReadyResult = ncclSuccess;
 ncclResult_t ncclCommEnsureReady(struct ncclComm*) { return g_commEnsureReadyResult; }
 
+// Only ENABLE_ROCSHMEM reaches this from enqueue.cc (collTaskAppend:3784), but
+// the symbol is unconditional in init.cc so the fake is too.
+void ncclCommPushCudaFree(struct ncclComm*, void*) {}
+
 // init.cc:231 latches NCCL_CTA_POLICY in a std::call_once; UNDEF is what an unset env yields.
 int g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
 int ncclGetEnvCtaPolicy() { return g_envCtaPolicy; }

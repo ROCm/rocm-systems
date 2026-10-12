@@ -34,6 +34,7 @@ enum class HwregState : uint8_t {
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  WgpIdGfx1250,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -351,7 +352,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::WgpIdGfx1250, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
@@ -470,6 +471,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
     return HwregAccessResult::Success;
+  case HwregState::WgpIdGfx1250:
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+      return HwregAccessResult::Unsupported;
+    // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
+    raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
+    return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -521,6 +528,7 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::WgpIdGfx1250:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -624,6 +632,13 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   }
 
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  // Only WGP_ID[13:10] has backing state; do not fabricate the other HW_ID1 fields.
+  if (desc->state == HwregState::WgpIdGfx1250 &&
+      (decoded.offset < 10 || decoded.offset + decoded.size > 14)) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }

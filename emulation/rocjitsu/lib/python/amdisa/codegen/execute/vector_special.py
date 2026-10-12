@@ -1204,10 +1204,11 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
     So for the 16-lane form on a wave64 this swaps lanes 0-15<->16-31 AND
     32-47<->48-63 (all four groups); for the 32-lane form it swaps 0-31<->32-63.
     src0[base+stride..] and vdst[base..base+stride-1] within each block are
-    UNCHANGED. EXEC mask is IGNORED. Both vdst and src0 are outputs (LLVM:
-    returns {vdst_new, src0_new}).
+    UNCHANGED. Each output write is masked by its destination lane's EXEC bit.
+    Both vdst and src0 are outputs (LLVM: returns {vdst_new, src0_new}).
     """
     L = []
+    L.append('  uint64_t exec = wf.exec();')
     L.append('  uint32_t tmp_dst[64] = {}, tmp_src[64] = {};')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append(
@@ -1221,11 +1222,13 @@ def gen_vector_permlane_swap(dst: list[str], src: list[str], stride: int) -> str
         f'  for (uint32_t base = 0; base + {stride} < wf.wf_size(); base += 2u * {stride}) {{'
     )
     L.append(f'    for (uint32_t i = 0; i < {stride}; ++i) {{')
+    L.append('      if (exec & (1ULL << (base + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[1]}, base + i, tmp_dst[base + {stride} + i]);'
     )
+    L.append(f'      if (exec & (1ULL << (base + {stride} + i)))')
     L.append(
-        f'      amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
+        f'        amdgpu::RegisterAccess(wf).write_lane({dst[0]}, base + {stride} + i, tmp_src[base + i]);'
     )
     L.append('    }')
     L.append('  }')
@@ -1379,6 +1382,7 @@ def gen_vector_cvt_pk(
     opsel: str = '0u',
     dtype: str | None = None,
     is_vop3: bool = False,
+    has_abs: bool = False,
     fp8_format_select: str | None = None,
     arch_name: str = '',
 ) -> str:
@@ -1429,11 +1433,14 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<int16_t>(util::round_to_nearest_even(std::clamp(f * 32767.0f, -32768.0f, 32767.0f)));'
+                '      return static_cast<int16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0)));'
             )
             L.append('    };')
             L.append('    int16_t lo = cvt_i16(s0);')
@@ -1442,7 +1449,7 @@ def gen_vector_cvt_pk(
             L.append('    auto cvt_u16 = [](float f) -> uint16_t {')
             L.append('      if (std::isnan(f)) return 0;')
             L.append(
-                '      return static_cast<uint16_t>(util::round_to_nearest_even(std::clamp(f * 65535.0f, 0.0f, 65535.0f)));'
+                '      return static_cast<uint16_t>(util::rndne_scalar(std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0)));'
             )
             L.append('    };')
             L.append('    uint16_t lo = cvt_u16(s0);')
@@ -1457,6 +1464,9 @@ def gen_vector_cvt_pk(
         L.append(
             f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
         )
+        if is_vop3:
+            L.extend(vop3_src_mod('s0', 0, has_abs))
+            L.extend(vop3_src_mod('s1', 1, has_abs))
         L.append(f'    uint32_t lo = util::f32_to_f16_rtz(s0);')
         L.append(f'    uint32_t hi = util::f32_to_f16_rtz(s1);')
         L.append(

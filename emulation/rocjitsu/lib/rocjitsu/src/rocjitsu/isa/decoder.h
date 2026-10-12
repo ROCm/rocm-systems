@@ -30,8 +30,9 @@ struct IsaExecutionBackend;
 /// By default, decoded instructions are heap-allocated.  Call
 /// ``enable_pool()`` to route Instruction::operator new/delete through
 /// the decoder's O(1) free-list pool.  Only enable the pool when all
-/// decoded instructions will be deleted before the decoder is destroyed
-/// (e.g., the ComputeUnit simulation loop).
+/// decoded instructions will be deleted on the bound thread before the decoder
+/// is destroyed. CU execution uses heap storage because decoded instructions
+/// can survive issue quanta and move between workers.
 class Decoder {
 public:
   using Pool = util::ArenaAlloc<512, 128>;
@@ -97,8 +98,8 @@ public:
   ///
   /// When active, Instruction::operator new/delete route through the
   /// decoder's pool for O(1) alloc/free.  Only enable when the caller
-  /// guarantees all instructions will be deleted before the decoder
-  /// is destroyed (e.g., the ComputeUnit hot path).
+  /// guarantees all instructions will be deleted on the bound thread
+  /// before the decoder is destroyed. CU execution uses heap storage.
   void enable_pool() {
     activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
                   [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, &pool_);

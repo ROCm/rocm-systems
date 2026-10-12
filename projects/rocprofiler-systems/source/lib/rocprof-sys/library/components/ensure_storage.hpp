@@ -25,9 +25,9 @@ private:
     void operator()(tim::type_list<Up>) const
     {
         using namespace tim;
-        static thread_local auto _storage = operation::get_storage<Up>{}();
-        static thread_local auto _tid     = threading::get_id();
-        static thread_local auto _dtor =
+        static thread_local auto       _storage = operation::get_storage<Up>{}();
+        static thread_local auto const _tid     = threading::get_id();
+        static thread_local auto const _dtor =
             scope::destructor{ []() { operation::set_storage<Up>{}(nullptr, _tid); } };
 
         tim::operation::set_storage<Up>{}(_storage, _tid);

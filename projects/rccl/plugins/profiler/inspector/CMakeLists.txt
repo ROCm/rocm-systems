@@ -57,6 +57,7 @@ add_library(rccl-profiler-inspector SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_json.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_prom.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/inspector_otel.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_plugin.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_cudawrap.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/inspector_ring.cc

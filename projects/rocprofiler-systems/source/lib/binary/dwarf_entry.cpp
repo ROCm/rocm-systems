@@ -10,9 +10,9 @@
 #include <dwarf.h>
 #include <elfutils/libdw.h>
 
-namespace rocprofsys
-{
-namespace binary
+#include <algorithm>
+
+namespace rocprofsys::binary
 {
 namespace
 {
@@ -37,10 +37,7 @@ get_dwarf_address_ranges(Dwarf_Die* _die)
     {
         Dwarf_Addr _entry_pc;
         dwarf_entrypc(_die, &_entry_pc);
-        if(_entry_pc < _low_pc)
-        {
-            _low_pc = _entry_pc;
-        }
+        _low_pc = std::min(_entry_pc, _low_pc);
     }
 
     if(_low_pc < _high_pc)
@@ -75,7 +72,7 @@ get_dwarf_breakpoints(Dwarf_Die* _die)
     }
 
     Dwarf_Addr* _pts  = nullptr;
-    auto        _npts = dwarf_entry_breakpoints(_die, &_pts);
+    auto const  _npts = dwarf_entry_breakpoints(_die, &_pts);
 
     if(_npts > 0 && _pts)
     {
@@ -185,8 +182,8 @@ dwarf_entry::process_dwarf(int _fd)
                            nullptr, nullptr) == 0;
             cu_off = next_cu_off)
         {
-            auto cu_die_off = cu_off + cu_header_size;
-            auto cu_die     = Dwarf_Die{};
+            auto const cu_die_off = cu_off + cu_header_size;
+            auto       cu_die     = Dwarf_Die{};
             if(dwarf_offdie(_dwarf_v, cu_die_off, &cu_die) != nullptr)
             {
                 Dwarf_Die* _die = &cu_die;
@@ -243,5 +240,4 @@ dwarf_entry::serialize<cereal::MinimalJSONOutputArchive>(
 template void
 dwarf_entry::serialize<cereal::PrettyJSONOutputArchive>(cereal::PrettyJSONOutputArchive&,
                                                         const unsigned int);
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

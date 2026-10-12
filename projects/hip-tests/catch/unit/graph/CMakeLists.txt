@@ -187,6 +187,8 @@ set(TEST_SRC
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
+    # hipLaunchAttributePriority not available on older CUDA versions
+    hipGraphKernelNodePriority.cc
     # hipGraphAddNode, hipGraphNodeParams, hipMemcpyNodeParams are not mapped to Nvidia
     hipGraphAddNode.cc
     # hipDrvGraphAddMemsetNode, HIP_MEMSET_NODE_PARAMS are not mapped to Nvidia

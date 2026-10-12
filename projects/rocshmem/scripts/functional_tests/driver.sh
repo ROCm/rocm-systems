@@ -181,6 +181,9 @@ declare -A TEST_NUMBERS=(
   ["tile_put_wg_colmajor"]="168"
   ["tile_get_wg_rowmajor"]="169"
   ["tile_get_wg_colmajor"]="170"
+  ["signaladd"]="171"
+  ["signalset"]="172"
+  ["signalwaituntil"]="173"
 )
 
 # Detect which runtime to use
@@ -797,6 +800,10 @@ TestSigOps() {
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
   ExecTest  "wavesignalfetch"  2       1            64
+
+  ExecTest  "signaladd"        2       2            32
+  ExecTest  "signalset"        2       2            32
+  ExecTest  "signalwaituntil"  2       1            1
 }
 
 TestColl() {

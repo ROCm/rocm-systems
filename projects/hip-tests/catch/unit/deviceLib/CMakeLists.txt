@@ -61,6 +61,7 @@ set(AMD_TEST_SRC
     hipVectorTypesDevice.cc
     hipTestHalf.cc
     hipTestHalfConstexpr.cc
+    hipTestHalfIntegralAssign_test.cc
     hipComplex.cc
     hipTestFMA.cc
     hipTestNativeHalf.cc

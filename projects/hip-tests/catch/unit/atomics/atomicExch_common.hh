@@ -13,7 +13,7 @@
 #include <resource_guards.hh>
 #include <hip/hip_cooperative_groups.h>
 
-enum class AtomicScopes { device, system, builtin };
+enum class AtomicScopes { device, system };
 
 template <typename T, AtomicScopes scope, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
 __device__ T perform_atomic_exch(T* address, T val) {
@@ -21,8 +21,6 @@ __device__ T perform_atomic_exch(T* address, T val) {
     return atomicExch(address, val);
   } else if (scope == AtomicScopes::system) {
     return atomicExch_system(address, val);
-  } else if (scope == AtomicScopes::builtin) {
-    return __hip_atomic_exchange(address, val, __ATOMIC_RELAXED, memory_scope);
   }
 }
 
@@ -297,28 +295,12 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
   AtomicExchParams params;
   params.num_devices = 1;
   params.kernel_count = 1;
-  if constexpr (scope == AtomicScopes::builtin && memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD) {
-    params.threads = 1;
-  } else if constexpr (scope == AtomicScopes::builtin &&
-                       memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT) {
-    int warp_size = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-    params.threads = dim3(warp_size);
-  } else {
-    params.threads = GenerateAtomicExchThreadDimensions();
-  }
+  params.threads = GenerateAtomicExchThreadDimensions();
   params.width = width;
   params.pitch = pitch;
 
   SECTION("Global memory") {
-    if constexpr (scope == AtomicScopes::builtin &&
-                  (memory_scope == __HIP_MEMORY_SCOPE_SINGLETHREAD ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WAVEFRONT ||
-                   memory_scope == __HIP_MEMORY_SCOPE_WORKGROUP)) {
-      params.blocks = dim3(1);
-    } else {
-      params.blocks = GenerateAtomicExchBlockDimensions();
-    }
+    params.blocks = GenerateAtomicExchBlockDimensions();
     using LA = LinearAllocs;
     for (const auto alloc_type :
          {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {

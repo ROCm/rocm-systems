@@ -58,6 +58,8 @@
         {"name": "AllReduce.UserBufferRegistration", "description": "AllReduce user-buffer registration path", "test_filter": "AllReduce.UserBufferRegistration"},
         {"name": "AllReduce.ROCTX", "description": "AllReduce roctx logging path", "test_filter": "AllReduce.ROCTX"},
         {"name": "AllReduce.BiasFloat32_Sum", "description": "AllReduce reduce-with-bias path (representative)", "test_filter": "AllReduce.BiasFloat32_Sum"},
+        {"name": "AllReduce.Fp8Avg", "description": "FP8 E4M3 avg (PreMulSum scalar carried as float); discriminates where the device fp8 type is FNUZ", "test_filter": "AllReduce.Fp8Avg", "timeout": 300},
+        {"name": "AllReduce.OneRankAvgTailElements", "description": "Single-rank oneRankReduce avg tail, including both FP8 types", "test_filter": "AllReduce.OneRankAvgTailElements"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.MultiRootBroadcast", "description": "Multi-root broadcast fallback (AllGatherV disabled)", "test_filter": "GroupCall.MultiRootBroadcast"},
@@ -85,6 +87,8 @@
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
+        {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson", "timeout": 60},
+        {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary", "timeout": 60},
         {"name": "ProxyTraceTestFixture.nonEmptySingleton", "description": "ProxyTrace non-empty singleton test", "test_filter": "ProxyTraceTestFixture.nonEmptySingleton", "timeout": 60},
         {"name": "ProxyTraceTestFixture.addTraceOp", "description": "ProxyTrace add trace operation test", "test_filter": "ProxyTraceTestFixture.addTraceOp", "timeout": 60},
         {"name": "ProxyTraceTestFixture.getMapSizeMB", "description": "ProxyTrace get map size test", "test_filter": "ProxyTraceTestFixture.getMapSizeMB", "timeout": 60},
@@ -106,7 +110,13 @@
         {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula", "description": "ncclGinInboxA2ACreateRequirement bufferSize/ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula"},
         {"name": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero", "description": "Pin: ncclGinInboxA2ACreateRequirement(nRanks=1) divides by zero (SIGFPE), contained by ProcessIsolatedTestRunner", "test_filter": "DeviceResourceRequirementTests.GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero"},
         {"name": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula", "description": "ncclLsaBarrierCreateRequirement bufferSize/bufferAlign/handle formula", "test_filter": "DeviceResourceRequirementTests.LsaBarrierCreateRequirement_BufferSizeFormula"},
-        {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"}
+        {"name": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula", "description": "ncclGinBarrierCreateRequirement null-comm contract and ginSignalCount formula", "test_filter": "DeviceResourceRequirementTests.GinBarrierCreateRequirement_NullCommAndSignalCountFormula"},
+        {"name": "TeamTopologyTests.OuterFactor_DividesRanksAndRankAndMultipliesStride", "description": "ncclTeamOuterFactor divides nRanks and rank by innerSize and multiplies stride, including truncation to an empty team", "test_filter": "TeamTopologyTests.OuterFactor_DividesRanksAndRankAndMultipliesStride"},
+        {"name": "TeamTopologyTests.CftMultimem_ReturnsDegenerateSingletonTeam", "description": "ncclTeamCftMultimem is a singleton team because cftMcSize is stuck at 1", "test_filter": "TeamTopologyTests.CftMultimem_ReturnsDegenerateSingletonTeam"},
+        {"name": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported", "description": "ncclTeamCft HIER_MULTIMEM factors by 1 and equals FLAT on ROCm", "test_filter": "TeamTopologyTests.Cft_HierMultimem_MatchesFlatWhenCftUnsupported"},
+        {"name": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly", "description": "Pin: a zero-stride team makes ncclTeamRankToWorld alias every team rank to self, contrasted with the linear map on a strided team", "test_filter": "TeamTopologyTests.RankToWorld_ZeroTeamAliasesSelf_OffsetTeamMapsLinearly"},
+        {"name": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange", "description": "Pin: ncclTeamRankToLsa applies lsaSelf + (rank - team.rank) * team.stride unclamped, for in-range and out-of-range team ranks alike", "test_filter": "TeamTopologyTests.RankToLsa_NoBoundsCheck_ExtrapolatesOutOfRange"},
+        {"name": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "description": "Pin: ncclTeamCft HIER_LSA truncates 1/lsaSize to 0, plus the lsaSelf term and the cftMcSize singleton at 2 ranks (needs 2 GPUs)", "test_filter": "TeamTopologyTests.Cft_HierLsa_MultiRank_ReturnsEmptyTeam_PinsKnownDefect", "env_variables": {"UT_TEAM_TOPOLOGY_REQUIRE_MULTI_GPU": "1"}}
       ]
     },
     "unit_tests_fixtures": {
@@ -123,11 +133,11 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP:ROUNDUP:u32fp*:*Hash:BitOpsTemplate*"},
+        {"name": "BitOps", "description": "Bit operation utility tests (macros and typed fixtures)", "test_filter": "ALIGN_*:DIVUP.*:ROUNDUP.*:u32fp*:getHash.*:eatHash.*:BitOpsTemplate*:Add4G.*"},
         {"name": "EnqueueCountTests", "description": "Enqueue send/recv count helpers", "test_filter": "EnqueueCountTests.*"},
         {"name": "MiscTests.Sorter", "description": "Task coll sorter unit test", "test_filter": "MiscTests.Sorter"},
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
-        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*"},
+        {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },

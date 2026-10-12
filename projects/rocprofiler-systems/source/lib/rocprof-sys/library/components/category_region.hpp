@@ -66,7 +66,7 @@ using timestamp_t = std::uint64_t;
 struct pending_cache_entry
 {
     timestamp_t start_ts = 0;
-    std::string args     = {};
+    std::string args;
 };
 
 // A type qualifies as a trace-cache argument "name" slot when it is string-like
@@ -121,7 +121,12 @@ struct thread_metadata_source
             constexpr size_t UNKNOWN_TIME = 0;
             thread_id                     = extended_info->index_data->system_value;
             rocprofsys::trace_cache::get_metadata_registry().add_thread_info(
-                { getppid(), getpid(), thread_id, UNKNOWN_TIME, UNKNOWN_TIME, "{}" });
+                { .parent_process_id = getppid(),
+                  .process_id        = getpid(),
+                  .thread_id         = thread_id,
+                  .start             = UNKNOWN_TIME,
+                  .end               = UNKNOWN_TIME,
+                  .extdata           = "{}" });
         }
         return thread_id;
     }
@@ -220,7 +225,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_name_value_pairs(Args&&... args)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         if constexpr(has_trace_cache_arg_pairs_v<Args...>)
         {
@@ -326,7 +331,7 @@ struct category_region
     template <typename... Args>
     static std::string serialize_annotation_args(Args&&... args)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string   args_str = {};
         std::uint32_t idx      = 0;
@@ -344,7 +349,7 @@ struct category_region
     template <typename T>
     static std::string serialize_return_arg(T&& value)
     {
-        auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+        auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         std::string args_str = {};
         append_serialized_arg(args_str, 0, "return", std::forward<T>(value));
@@ -361,8 +366,8 @@ struct category_region
                      std::string args_str = {})
     {
         const auto start_ts = clock_.now();
-        map_name_to_args[entry_key{ name, std::string{ category } }].push_back(
-            pending_cache_entry{ start_ts, std::move(args_str) });
+        map_name_to_args[entry_key{ .name = name, .category = std::string{ category } }]
+            .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
     }
 
     void append_cache_args(const char* name, std::string_view category,
@@ -373,8 +378,8 @@ struct category_region
             return;
         }
 
-        auto key = entry_key{ name, std::string{ category } };
-        auto itr = map_name_to_args.find(key);
+        auto const key = entry_key{ .name = name, .category = std::string{ category } };
+        auto const itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
         {
             auto& entry = itr->second.back();
@@ -392,18 +397,18 @@ struct category_region
                 }
 
                 renumber_serialized_args(args_str, *next_idx);
-                entry.args += std::move(args_str);
+                entry.args += args_str;
             }
         }
     }
 
     void cache_stop(const char* name, std::string_view category)
     {
-        const entry_key key{ name, std::string{ category } };
-        auto            x = map_name_to_args.find(key);
+        const entry_key key{ .name = name, .category = std::string{ category } };
+        auto const      x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
         {
-            auto entry = std::move(x->second.back());
+            auto const entry = std::move(x->second.back());
             x->second.pop_back();
             if(x->second.empty())
             {
@@ -451,7 +456,7 @@ private:
     Policy::clock_type                                    clock_{};
     Policy::region_sink_type                              sink_{};
     Policy::thread_metadata_type                          thread_meta_{};
-    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args{};
+    std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args;
 };
 
 }  // namespace rocprofsys::utility
@@ -586,7 +591,7 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     // the expectation here is that if the state is not active then the call
     // to rocprofsys_init_tooling_hidden will activate all the appropriate
@@ -631,8 +636,8 @@ category_region<CategoryT>::start_impl(std::string_view name, std::string cache_
         ++tracing::push_count();
     }
 
-    auto _hash = tim::add_hash_id(name);
-    name       = tim::get_hash_identifier_fast(_hash);
+    auto const _hash = tim::add_hash_id(name);
+    name             = tim::get_hash_identifier_fast(_hash);
 
     if constexpr(_ct_use_causal)
     {
@@ -688,10 +693,10 @@ category_region<CategoryT>::append_cache_args(std::string_view name,
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
-    auto _hash = tim::add_hash_id(name);
-    name       = tim::get_hash_identifier_fast(_hash);
+    auto const _hash = tim::add_hash_id(name);
+    name             = tim::get_hash_identifier_fast(_hash);
     region_cache::instance().append_cache_args(name.data(), category_name,
                                                std::move(serialized_args));
 }
@@ -712,7 +717,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     constexpr bool _ct_use_timemory =
         (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
@@ -816,7 +821,7 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
         return;
     }
 
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_use_causal())
     {
@@ -993,6 +998,6 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     void set_prefix(std::string_view _v) { m_prefix = _v; }
 
 private:
-    std::string_view m_prefix = {};
+    std::string_view m_prefix;
 };
 }  // namespace rocprofsys::component

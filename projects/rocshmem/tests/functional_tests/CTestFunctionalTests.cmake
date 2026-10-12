@@ -182,6 +182,9 @@ set(TEST_tile_put_wg_rowmajor 167)
 set(TEST_tile_put_wg_colmajor 168)
 set(TEST_tile_get_wg_rowmajor 169)
 set(TEST_tile_get_wg_colmajor 170)
+set(TEST_signaladd 171)
+set(TEST_signalset 172)
+set(TEST_signalwaituntil 173)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1034,6 +1037,10 @@ function(add_sigops_tests)
         add_rocshmem_functional_test(NAME wgsignalfetch RANKS 2 WORKGROUPS 2 THREADS 32)
         add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 32)
         add_rocshmem_functional_test(NAME wavesignalfetch RANKS 2 WORKGROUPS 1 THREADS 64)
+
+        add_rocshmem_functional_test(NAME signaladd RANKS 2 WORKGROUPS 2 THREADS 32)
+        add_rocshmem_functional_test(NAME signalset RANKS 2 WORKGROUPS 2 THREADS 32)
+        add_rocshmem_functional_test(NAME signalwaituntil RANKS 2 WORKGROUPS 1 THREADS 1)
     end_test_group()
 endfunction()
 

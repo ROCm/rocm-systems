@@ -67,4 +67,47 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
                                            rocr::llvm::amdhsa::kernel_descriptor_t &desc,
                                            uint32_t user_sgpr_count);
 
+/// @brief USER_SGPR_COUNT plus the dense system SGPRs the hardware initializes
+///        immediately after the user block: enabled workgroup IDs, then
+///        WORKGROUP_INFO. A disabled field consumes no SGPR.
+///
+/// @details One past the last SGPR the launch ABI writes, so DBT uses it as the
+/// range to repair when it inserts a kernarg pointer into the user block, and
+/// DBI as a floor below which it must not place framework storage.
+///
+/// @warning ENABLE_PRIVATE_SEGMENT is deliberately absent. On CDNA3/CDNA4 it
+/// initializes architected FLAT_SCRATCH rather than appending an ordinary system
+/// SGPR. That is not established for the older targets this is reachable from,
+/// so on CDNA1/CDNA2 the result may understate the block by two.
+[[nodiscard]] uint32_t
+kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch,
+                                     const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief Does @p desc request a kernarg segment pointer in its user SGPRs?
+[[nodiscard]] bool has_kernarg_segment_ptr(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief User-SGPR index the kernarg segment pointer would occupy in @p desc,
+///        whether or not the descriptor enables it.
+///
+/// @note Answering for a descriptor that has not enabled the pointer is the
+/// point: a caller inserting one needs the slot before setting the bit. Use
+/// @ref kernarg_segment_ptr_sgpr to ask about a descriptor as it stands.
+[[nodiscard]] uint16_t
+kernarg_segment_ptr_slot(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief User-SGPR index of @p desc's kernarg segment pointer, if it has one.
+///
+/// @warning Live only at the kernel entry: the register allocator reclaims the
+/// pair after its last use. A consumer that needs the value later must capture
+/// it at entry.
+[[nodiscard]] std::optional<uint16_t>
+kernarg_segment_ptr_sgpr(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief KERNARG_PRELOAD_SPEC_LENGTH: user SGPRs preloaded with kernarg dwords,
+///        zero when the kernel does not use preloading.
+[[nodiscard]] uint32_t kernarg_preload_length(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
+/// @brief KERNARG_PRELOAD_SPEC_OFFSET: first preloaded kernarg dword index.
+[[nodiscard]] uint32_t kernarg_preload_offset(const rocr::llvm::amdhsa::kernel_descriptor_t &desc);
+
 } // namespace rocjitsu

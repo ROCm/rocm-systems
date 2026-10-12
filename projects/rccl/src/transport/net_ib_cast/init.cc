@@ -12,14 +12,13 @@
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
-extern int64_t ncclParamIbCastResiliencyPortFailover();
-extern int64_t ncclParamIbCastResiliencyPortRecovery();
 extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
 
 bool IbCastAinicRoce = 0;
+bool IbCastMultiplaneEnable = false;
 bool IbCastOffloadEnabled = 0;
 bool IbCastUseInline = 0;
 bool IbCastAinicCtsInlineData = 0;
@@ -395,6 +394,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
   int nIbDevs = 0;
   struct ibv_device** devices = NULL;
   IbCastAinicRoce = rcclUseAinic();
+  {
+    const char* mapFile = ncclGetEnv("RCCL_MULTIPLANE_MAP_FILE");
+    IbCastMultiplaneEnable = IbCastAinicRoce && (mapFile != NULL && mapFile[0] != '\0');
+  }
 
   if (IbCastNDevs == -1) {
     std::lock_guard<std::mutex> lock(IbCastMutex);
@@ -535,6 +538,9 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             // But allow it to be overloaded by an env parameter
             IbCastDevs[IbCastNDevs].ar = (portAttr.link_layer == IBV_LINK_LAYER_INFINIBAND) ? 1 : 0;
             if (ncclParamIbCastAdaptiveRouting() != -2) IbCastDevs[IbCastNDevs].ar = ncclParamIbCastAdaptiveRouting();
+
+            NCCLCHECKGOTO(IbCastGidInfoQuery(context, port_num, &portAttr, &IbCastDevs[IbCastNDevs].gidInfo), ret,
+                          fail);
 
             INFO(NCCL_NET, "NET/IB: [%d] %s:%s:%d/%s provider=%s speed=%d context=%p pciPath=%s ar=%d oooRqSize=%d", d,
                  devices[d]->name, devices[d]->dev_name, IbCastDevs[IbCastNDevs].portNum,

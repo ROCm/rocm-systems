@@ -15,7 +15,7 @@ namespace {
 // template header. UserRegMode selects the LL128 user-buffer access path at
 // compile time (see prims_ll128.h): 0=runtime, 1=registered, 2=non-registered.
 template <typename T, typename RedOp, typename Proto, int RCCLMetadata>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -116,7 +116,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 }
 
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
 __device__ void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -186,7 +186,7 @@ __device__ __attribute__((noinline)) void runTreeUpDown(int tid, int nthreads, s
 }
 
 template <typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
 __device__ void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, struct ncclDevWorkColl* work) {

@@ -604,7 +604,7 @@ int main() {
         }
 
         // Iterate through all available accelerator partition profiles
-        amdsmi_accelerator_partition_profile_config_t profile_config;
+        amdsmi_accelerator_partition_profile_config_t profile_config = {};
         ret = amdsmi_get_gpu_accelerator_partition_profile_config(processor_handles[device_index],
                                                                   &profile_config);
         for (uint32_t profile_idx = 0; profile_idx < profile_config.num_profiles; profile_idx++) {
@@ -620,7 +620,7 @@ int main() {
                     << acceleratorPartitionString(updatePartition) << "): " << err_str << "\n\n";
 
           // Get the current accelerator partition
-          amdsmi_accelerator_partition_profile_t profile;
+          amdsmi_accelerator_partition_profile_t profile = {};
           uint32_t partition_id[AMDSMI_MAX_ACCELERATOR_PROFILE];
           ret = amdsmi_get_gpu_accelerator_partition_profile(processor_handles[device_index],
                                                              &profile, partition_id);

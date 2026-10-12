@@ -212,6 +212,7 @@ struct QueueRegistrationRequest {
   bool xcd_fanout = false;
   QueueType type = QueueType::Compute;
   QueuePacketFormat packet_format = QueuePacketFormat::Aql;
+  uint32_t scheduling_percentage = 100;
 };
 
 /// @brief Shared queue registry used by legacy and PCI/VFIO frontends.

@@ -9,11 +9,12 @@
 namespace rocjitsu::plugins::race_detector {
 
 RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-                           std::function<void(RaceViolation)> raceHandler)
+                           std::function<void(RaceViolation)> raceHandler,
+                           CounterCapacities counterCapacities)
     : workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
-    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this);
+    waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
   }
 }
 

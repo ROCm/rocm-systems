@@ -154,6 +154,8 @@ jobs:
           echo "ARTIFACT_RUN_ID=${run_id}" >> $GITHUB_ENV
 
       - name: Fetch RCCL artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \

@@ -1494,6 +1494,8 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   create.event_type = 0;
   create.auto_reset = 1;
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+  kfd_ioctl_create_event_args unsignaled{};
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &unsignaled), 0);
 
   // Register a waiter deterministically: poll the event's waiter count rather than
   // sleeping, so the SET_EVENT below is guaranteed to take the "waiters present"
@@ -1502,11 +1504,14 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   std::atomic<int> wait_rc{-1};
   std::atomic<uint32_t> wait_result{0};
   std::thread waiter([&] {
-    kfd_event_data ev{};
-    ev.event_id = create.event_id;
+    // Keep wait-all parked after the first event signals. A legacy single-event
+    // wait now correctly completes, which would race the cancellation below.
+    std::array<kfd_event_data, 2> ev{};
+    ev[0].event_id = create.event_id;
+    ev[1].event_id = unsignaled.event_id;
     kfd_ioctl_wait_events_args wait{};
-    wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
-    wait.num_events = 1;
+    wait.events_ptr = reinterpret_cast<uint64_t>(ev.data());
+    wait.num_events = ev.size();
     wait.wait_for_all = 1;
     wait.timeout = 0xFFFFFFFFu;
     wait_rc.store(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), std::memory_order_release);

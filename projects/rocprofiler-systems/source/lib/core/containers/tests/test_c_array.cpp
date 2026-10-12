@@ -118,7 +118,7 @@ TEST(CArray, range_based_for)
     const c_array<int>      arr{ data.data(), data.size() };
 
     int sum = 0;
-    for(auto value : arr)
+    for(auto const value : arr)
     {
         sum += value;
     }

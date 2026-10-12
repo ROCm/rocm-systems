@@ -8,8 +8,8 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
@@ -162,14 +162,16 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
   return amdgpu::Mtype::RW;
 }
 
-bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags) {
+bool SimulatedKfd::gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                              bool sealed_ram) {
   auto proc = find_process(local_process_id_);
   if (!proc)
     return false;
   // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
   // lifetime is tied to the GEM entry. It is not the application's CPU alias.
   map_to_gpu(*proc, gpu_va, host_ptr, size, pte_mtype_for_flags(alloc_flags),
-             KfdProcess::HostExtentOwner::Driver);
+             sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
+                        : KfdProcess::HostExtentOwner::Driver);
   return true;
 }
 
@@ -198,9 +200,8 @@ int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
     auto *cp = gpus_[ordinal].soc->assign_queue_owner_cp(0);
     if (!cp)
       return -ENODEV;
-    amdgpu::Pm4SubmitQueue queue;
+    amdgpu::ComputeQueueConfig queue;
     queue.address_space = process->gpu(ordinal).address_space;
-    queue.pm4 = std::make_shared<amdgpu::Pm4QueueState>();
     queue.process_id = local_process_id_;
     queue.queue_id = next_pm4_queue_id_++;
     const uint32_t queue_id = queue.queue_id;
@@ -1166,6 +1167,7 @@ bool SimulatedKfd::register_process_address_spaces(const std::shared_ptr<KfdProc
          .page_table_generation = proc->page_table_generation(),
          .request_mutex = proc->page_table_request_mutex(),
          .mutation_epoch = proc->page_table_mutation_epoch(),
+         .page_table_cache_state = proc->page_table_cache_state(),
          .client_pid = client_pid,
          .client_mem_fd = -1,
          .passthrough = passthrough,
@@ -2694,6 +2696,9 @@ int SimulatedKfd::unmap_memory_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_create_queue_args *>(arg);
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   auto *gpu = find_gpu(args->gpu_id);
   if (!gpu || !gpu->soc)
     return -EINVAL;
@@ -2703,9 +2708,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   const bool is_sdma = args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_XGMI ||
                        args->queue_type == KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID;
-  if (is_pm4_compute)
-    return -ENOTSUP;
-  if (!is_aql_compute && !is_sdma)
+  if (!is_aql_compute && !is_pm4_compute && !is_sdma)
     return -ENOTSUP;
 
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
@@ -2717,12 +2720,18 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   // different processes therefore share XCD resources while each process still
   // distributes additional queues across the device.
   const uint32_t queue_ordinal = proc.next_queue_id_ - 1;
+  // KFD reserves percentage bits 8..15 for a native PM4 queue's target XCC.
+  // An AQL vendor IB inherits the AQL queue's replicas instead of this placement.
+  const uint32_t owner_ordinal =
+      is_pm4_compute ? (args->queue_percentage >> 8) & 0xff : queue_ordinal;
+  if (is_pm4_compute && owner_ordinal >= gpu->soc->num_xcds())
+    return -EINVAL;
   amdgpu::CommandProcessor *target_cp =
-      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(queue_ordinal);
+      is_sdma ? nullptr : gpu->soc->assign_queue_owner_cp(owner_ordinal);
   if (!is_sdma && target_cp == nullptr)
     return -EINVAL;
   const uint32_t target_xcc_id =
-      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(queue_ordinal);
+      is_sdma ? args->sdma_engine_id : gpu->soc->queue_xcd_id(owner_ordinal);
 
   // Build the HW queue and reserve all per-process state under alloc_mutex_, then
   // register it with the CommandProcessor with the lock RELEASED. The CP thread
@@ -2796,8 +2805,9 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                           .producer_pointer_address = args->write_pointer_address};
     queue_request.binding_factory =
         is_sdma ? amdgpu::make_sdma_queue_binding_factory(gpu->soc->sdma_queue_scheduler())
-                : amdgpu::make_aql_queue_binding_factory(*target_cp);
+                : amdgpu::make_compute_queue_binding_factory(*target_cp);
     queue_request.engine_id = args->sdma_engine_id;
+    queue_request.scheduling_percentage = scheduling_percentage;
     // doorbell_base is captured here under alloc_mutex_ but register_queue() runs
     // after the lock is released. This is stable because ROCr maps the doorbell
     // page before creating queues, and queue creation for a process is single-
@@ -2809,9 +2819,10 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                               .host_base = gs.doorbell_monitor_page,
                               .last_value = ~uint64_t(0)};
     queue_request.type = is_sdma ? amdgpu::QueueType::Sdma : amdgpu::QueueType::Compute;
-    queue_request.packet_format =
-        is_sdma ? amdgpu::QueuePacketFormat::Sdma : amdgpu::QueuePacketFormat::Aql;
-    queue_request.abi = is_sdma ? amdgpu::QueueAbi::Generic : amdgpu::QueueAbi::KfdAql;
+    queue_request.packet_format = is_sdma          ? amdgpu::QueuePacketFormat::Sdma
+                                  : is_pm4_compute ? amdgpu::QueuePacketFormat::Pm4
+                                                   : amdgpu::QueuePacketFormat::Aql;
+    queue_request.abi = is_aql_compute ? amdgpu::QueueAbi::KfdAql : amdgpu::QueueAbi::Generic;
     // Queue creation initializes both SDMA pointers to zero below. Preserve that
     // device-side cursor explicitly so execution does not depend on reading the
     // writeback destination before the first packet can retire.
@@ -2828,7 +2839,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     // unsupported value silently acquires.
     queue_request.xcd_fanout = is_aql_compute;
     // amd_queue_t base: write_pointer_address points to write_dispatch_id.
-    if (!is_sdma)
+    if (is_aql_compute)
       queue_request.queue_descriptor_address =
           args->write_pointer_address - offsetof(amd_queue_t, write_dispatch_id);
     if (!is_sdma && args->ctx_save_restore_address != 0) {
@@ -2896,6 +2907,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .gpu_ordinal = gpu_ordinal(args->gpu_id),
         .doorbell_offset = queue_request.doorbell.offset,
         .queue_handle = queue_handle,
+        .pm4_target_xcc = is_pm4_compute ? std::optional(owner_ordinal) : std::nullopt,
     };
     proc.queue_snapshot_map_[queue_id] = {
         .ring_base_address = args->ring_base_address,
@@ -3009,6 +3021,10 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
 
 int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_update_queue_args *>(arg);
+  // Decode scheduling independently of the native PM4 placement field.
+  const uint32_t scheduling_percentage = args->queue_percentage & 0xff;
+  if (scheduling_percentage > 100)
+    return -EINVAL;
   const std::optional<uint32_t> ring_size = normalize_queue_ring_size(args->ring_size);
   if (!ring_size)
     return -EINVAL;
@@ -3026,12 +3042,21 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   if (!queue || queue->gpu_ordinal >= gpus_.size() || !gpus_[queue->gpu_ordinal].soc)
     return -EFAULT;
 
+  if (queue->pm4_target_xcc) {
+    const uint32_t target_xcc = (args->queue_percentage >> 8) & 0xff;
+    if (target_xcc >= gpus_[queue->gpu_ordinal].soc->num_xcds())
+      return -EINVAL;
+    // Moving a live CP record requires migrating its registers and pending streams.
+    if (target_xcc != *queue->pm4_target_xcc)
+      return -EOPNOTSUPP;
+  }
+
   amdgpu::QueueReconfigureResult update;
   try {
     update = gpus_[queue->gpu_ordinal].soc->queue_registry().reconfigure_queue(
         queue->queue_handle, {.ring_base_address = args->ring_base_address,
                               .ring_size_bytes = *ring_size,
-                              .scheduling_percentage = args->queue_percentage});
+                              .scheduling_percentage = scheduling_percentage});
   } catch (const std::bad_alloc &) {
     return -ENOMEM;
   } catch (...) {
@@ -4168,7 +4193,8 @@ void SimulatedKfd::complete_runtime_queue_exception(uint32_t process_id, uint32_
 }
 
 bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queue_id,
-                                                  uint32_t process_id, uint64_t exception_mask) {
+                                                  uint32_t process_id, uint64_t exception_mask,
+                                                  bool wait_for_ack) {
   auto *gpu = find_gpu(gpu_id);
   if (!gpu || !gpu->soc || exception_mask == 0)
     return false;
@@ -4203,7 +4229,8 @@ bool SimulatedKfd::signal_runtime_queue_exception(uint32_t gpu_id, uint32_t queu
   bool published = false;
   {
     std::lock_guard<std::mutex> lock(publication_lock->publication_mutex);
-    published = publisher->publish_queue_exception(queue_id, process_id, exception_mask);
+    published =
+        publisher->publish_queue_exception(queue_id, process_id, exception_mask, wait_for_ack);
   }
   if (queue_exception_cleanup_hook_for_testing_)
     queue_exception_cleanup_hook_for_testing_(false);
@@ -6068,18 +6095,24 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
       auto *gpu = find_gpu(event.gpu_id);
       if (!gpu || !gpu->soc)
         return -ENODEV;
-      // Drop debug_sessions_mutex_ first: signal_queue_exception() takes the CU
-      // wave-state lock and waits up to a second for the target to observe the
-      // exception word, while the engine thread runs its issue loop under that
-      // same wave-state lock and calls back into the trap/watchpoint handlers,
-      // which take debug_sessions_mutex_. Holding it across the call inverts
-      // that order -- the inversion DISABLE and SUSPEND_QUEUES both avoid -- and
-      // would additionally stall every trap callback for the duration of the
-      // wait. Nothing below this point reads debug_sessions_ or session_it.
+      // Drop debug_sessions_mutex_ before entering the CU wave-state locks:
+      // trap callbacks acquire these in the opposite order. Nothing below
+      // this point reads debug_sessions_ or session_it.
       lk.unlock();
-      const bool delivered = signal_runtime_queue_exception(
-          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask);
-      return delivered ? 0 : -ENOENT;
+      // KFD's SEND_RUNTIME_EVENT publishes the status and event without
+      // waiting for ROCr to acknowledge them. ROCr removes its async exception
+      // handler after a fatal error, so later waves forwarding their aborts
+      // cannot satisfy such a wait. A debugger can also have the host stopped.
+      const bool published = signal_runtime_queue_exception(
+          event.gpu_id, event.queue_id, target_proc->process_id(), event.exception_mask,
+          /*wait_for_ack=*/false);
+      if (published)
+        return 0;
+      // The runtime may already have destroyed this queue after the first
+      // forwarded abort. KFD accepts that stale request too. Keep reporting
+      // actual publication failures for queues that still exist.
+      std::lock_guard<std::mutex> alloc_lock(target_proc->alloc_mutex_);
+      return target_proc->queue_snapshot_map_.contains(event.queue_id) ? -ENOENT : 0;
     }
     std::lock_guard<std::mutex> runtime_lock(runtime_handshake_mutex_);
     runtime_acked_.insert(target_pid);

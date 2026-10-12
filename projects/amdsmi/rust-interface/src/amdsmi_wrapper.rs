@@ -3409,7 +3409,9 @@ pub struct AmdsmiNpmInfoT {
     pub status: AmdsmiNpmStatusT,
     pub limit: u64,
     pub ubb_power_threshold: u32,
-    pub reserved: [u64; 5usize],
+    pub max_node_power_limit: u64,
+    pub current_node_power: u32,
+    pub reserved: [u64; 3usize],
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
@@ -3421,8 +3423,12 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiNpmInfoT, limit) - 8usize];
     ["Offset of field: AmdsmiNpmInfoT::ubb_power_threshold"]
         [::std::mem::offset_of!(AmdsmiNpmInfoT, ubb_power_threshold) - 16usize];
+    ["Offset of field: AmdsmiNpmInfoT::max_node_power_limit"]
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, max_node_power_limit) - 24usize];
+    ["Offset of field: AmdsmiNpmInfoT::current_node_power"]
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, current_node_power) - 32usize];
     ["Offset of field: AmdsmiNpmInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiNpmInfoT, reserved) - 24usize];
+        [::std::mem::offset_of!(AmdsmiNpmInfoT, reserved) - 40usize];
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
@@ -5144,6 +5150,9 @@ extern "C" {
         node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiTrayInfoT,
     ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_npm_limit(node_handle: AmdsmiNodeHandle, limit: u64) -> AmdsmiStatusT;
 }
 extern "C" {
     pub fn amdsmi_get_fw_info(

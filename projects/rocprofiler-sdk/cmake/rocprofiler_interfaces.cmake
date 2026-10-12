@@ -75,6 +75,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-elfio "ELFIO header-only C++ l
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-yaml-cpp "YAML CPP Parser" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-json "nlohmann json" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-sha256 "SHA-256 hashing library"
+                                  INTERNAL)
 
 #
 # interface for libraries (ROCm-specific)

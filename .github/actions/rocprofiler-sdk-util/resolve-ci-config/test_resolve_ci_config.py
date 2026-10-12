@@ -92,7 +92,7 @@ def _write_config(tmpdir: Path, config: dict) -> None:
         from typing import Any
 
         @dataclass
-        class ConfigV1:
+        class Config:
             build_runners: dict
             gpu_families: dict
             _raw: dict
@@ -104,12 +104,12 @@ def _write_config(tmpdir: Path, config: dict) -> None:
                             result[name] = cfg
                 return result
 
-        def load_config_v1(config_path=None):
+        def load_config(version=2, config_path=None):
             if config_path is None:
                 config_path = Path(__file__).parent
             with open(config_path / "runner-config.json") as f:
                 raw = json.load(f)
-            return ConfigV1(
+            return Config(
                 build_runners=raw["build_runners"],
                 gpu_families=raw["gpu_families"],
                 _raw=raw,

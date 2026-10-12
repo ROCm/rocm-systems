@@ -28,6 +28,7 @@ void L1ScalarCache::set_l2(L2Cache *l2) {
 void L1ScalarCache::set_gpu_vm(GpuVm *gpu_vm) {
   invalidate_all_lines();
   gpu_vm_ = gpu_vm;
+  mtype_cache_ = {};
 }
 
 VmAccessOutcome L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
@@ -85,7 +86,7 @@ void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint3
 VmAccessOutcome L1ScalarCache::store(uint64_t addr, uint32_t num_dwords, const uint32_t *src,
                                      uint32_t vmid) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4];
@@ -171,9 +172,9 @@ void L1ScalarCache::flush_line(uint64_t addr, uint32_t vmid) {
 }
 
 VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t *dst,
-                                    uint32_t vmid) {
+                                    uint32_t vmid, bool allow_private_batch) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_);
   for (uint32_t i = 0; i < num_dwords; ++i) {
     uint64_t ea = addr + i * 4;
     uint8_t buf[4]{};
@@ -188,6 +189,11 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 
       if (mtype == Mtype::UC) {
         flush_line(chunk_addr, vmid);
+        if (allow_private_batch && i == 0 && copied == 0 && num_dwords >= 2 && num_dwords <= 16 &&
+            (addr & 3) == 0 && num_dwords * 4 <= CacheStore::LINE_SIZE - line_offset &&
+            mtypes.cached_private_uc_hint(addr) &&
+            l2_->try_read_scalar_ram(addr, dst, num_dwords, vmid))
+          return VmAccessOutcome::Complete;
         const VmAccessOutcome outcome = l2_->read(chunk_addr, buf + copied, chunk, Mtype::UC, vmid);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
@@ -226,7 +232,7 @@ VmAccessOutcome L1ScalarCache::load(uint64_t addr, uint32_t num_dwords, uint32_t
 VmAccessOutcome L1ScalarCache::load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst,
                                           uint32_t vmid) {
   synchronize_epoch();
-  RequestMtypeResolver mtypes(gpu_vm_, vmid);
+  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_);
   uint32_t copied = 0;
   while (copied < num_bytes) {
     uint64_t ea = addr + copied;

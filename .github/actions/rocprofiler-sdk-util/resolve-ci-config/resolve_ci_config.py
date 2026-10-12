@@ -32,9 +32,9 @@ def load_ci_configs(
 
     sys.path.insert(0, str(config_path))
     try:
-        from ci_config_api import load_config_v1
+        from ci_config_api import load_config
 
-        config = load_config_v1(config_path)
+        config = load_config(version=2, config_path=config_path)
         all_families = config.get_gpu_families(TRIGGER_TYPES)
         gpu_configs = {
             family: all_families.get(family, {}).get("linux", {})

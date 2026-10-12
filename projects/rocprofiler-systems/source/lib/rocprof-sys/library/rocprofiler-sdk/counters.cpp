@@ -28,7 +28,8 @@ metadata_initialize_counter_category()
 void
 metadata_initialize_counter_track(const char* name)
 {
-    trace_cache::get_metadata_registry().add_track({ name, std::nullopt, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { .track_name = name, .thread_id = std::nullopt, .extdata = "{}" });
 }
 
 void
@@ -120,7 +121,7 @@ counter_event::operator()(const client_data* tool_data, ::perfetto::CounterTrack
         const size_t      agent_handle    = record.record_counter.agent_id.handle;
         const size_t      value           = record.record_counter.counter_value;
 
-        auto agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
+        auto const agent = get_agent_manager_instance().get_agent_by_handle(agent_handle);
 
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(

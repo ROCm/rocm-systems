@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <msgpack.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -72,6 +73,92 @@ class TempFile {
  private:
   std::filesystem::path path_;
 };
+
+enum class NumericTocField {
+  Offset,
+  Size,
+  ZstdOffset,
+  ZstdSize,
+  Ordinal,
+  OriginalSize,
+};
+
+static void pack_numeric(msgpack::packer<msgpack::sbuffer>& packer,
+                         NumericTocField field, NumericTocField invalid_field,
+                         uint64_t value) {
+  if (field == invalid_field) {
+    packer.pack("not-an-integer");
+  } else {
+    packer.pack(value);
+  }
+}
+
+static std::string make_kpack_with_invalid_field(
+    NumericTocField invalid_field) {
+  msgpack::sbuffer toc;
+  msgpack::packer<msgpack::sbuffer> packer(&toc);
+  bool is_zstd = invalid_field == NumericTocField::ZstdOffset ||
+                 invalid_field == NumericTocField::ZstdSize;
+
+  packer.pack_map(is_zstd ? 4 : 3);
+  packer.pack("compression_scheme");
+  packer.pack(is_zstd ? "zstd-per-kernel" : "none");
+
+  if (is_zstd) {
+    packer.pack("zstd_offset");
+    pack_numeric(packer, NumericTocField::ZstdOffset, invalid_field, 16);
+    packer.pack("zstd_size");
+    pack_numeric(packer, NumericTocField::ZstdSize, invalid_field, 0);
+  } else {
+    packer.pack("blobs");
+    packer.pack_array(1);
+    packer.pack_map(2);
+    packer.pack("offset");
+    pack_numeric(packer, NumericTocField::Offset, invalid_field, 16);
+    packer.pack("size");
+    pack_numeric(packer, NumericTocField::Size, invalid_field, 0);
+  }
+
+  packer.pack("toc");
+  packer.pack_map(1);
+  packer.pack("kernel.co");
+  packer.pack_map(1);
+  packer.pack("gfx942");
+  packer.pack_map(3);
+  packer.pack("ordinal");
+  pack_numeric(packer, NumericTocField::Ordinal, invalid_field, 0);
+  packer.pack("original_size");
+  pack_numeric(packer, NumericTocField::OriginalSize, invalid_field, 0);
+  packer.pack("type");
+  packer.pack("hsaco");
+
+  std::string archive(16, '\0');
+  std::memcpy(archive.data(), KPACK_MAGIC, KPACK_MAGIC_SIZE);
+  uint32_t version = KPACK_CURRENT_VERSION;
+  uint64_t toc_offset = 16;
+  std::memcpy(archive.data() + 4, &version, sizeof(version));
+  std::memcpy(archive.data() + 8, &toc_offset, sizeof(toc_offset));
+  archive.append(toc.data(), toc.size());
+  return archive;
+}
+
+class InvalidNumericTocFieldTest
+    : public testing::TestWithParam<NumericTocField> {};
+
+TEST_P(InvalidNumericTocFieldTest, ReturnsParseError) {
+  TempFile file(make_kpack_with_invalid_field(GetParam()));
+  kpack_archive_t archive = nullptr;
+
+  EXPECT_EQ(kpack_open(file.str().c_str(), &archive),
+            KPACK_ERROR_MSGPACK_PARSE_FAILED);
+  EXPECT_EQ(archive, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    InvalidType, InvalidNumericTocFieldTest,
+    testing::Values(NumericTocField::Offset, NumericTocField::Size,
+                    NumericTocField::ZstdOffset, NumericTocField::ZstdSize,
+                    NumericTocField::Ordinal, NumericTocField::OriginalSize));
 
 // Test that library links and basic error handling works
 TEST(KpackAPITest, NullArguments) {

@@ -158,6 +158,8 @@ public:
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
 
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override;
+
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
   enum ExportMemoryFlags : uint32_t {

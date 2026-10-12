@@ -155,6 +155,8 @@ struct ncclCeBatchOpsParams {
   void** srcs;
   size_t* sizes;
   size_t numOps;
+  // Split operations into stream-ordered round-robin waves.
+  bool chunking;
   bool intraBatchSync;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   hipMemcpyAttributes* attrs;

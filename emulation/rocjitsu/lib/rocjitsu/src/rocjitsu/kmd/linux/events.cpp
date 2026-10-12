@@ -59,6 +59,23 @@ bool EventState::release_page(void *ptr) {
   return true;
 }
 
+void EventState::activate_waiters(GpuEvent &event) {
+  // KFD delivers a signal to every waiter registered for signals. In particular,
+  // auto-reset clears the shared flag, not these per-wait activations: otherwise
+  // legacy waits lose the wake, and wait-all forgets signals received earlier.
+  for (auto *waiter : event.waiters) {
+    if (waiter->listen_for_signals) {
+      waiter->activated = true;
+      waiter->cv->notify_one();
+    }
+  }
+}
+
+bool EventState::has_signal_waiters(const GpuEvent &event) {
+  return std::any_of(event.waiters.begin(), event.waiters.end(),
+                     [](const EventWaiter *waiter) { return waiter->listen_for_signals; });
+}
+
 /// @brief Signal event(s) from the CP's interrupt callback.
 /// @details When event_id is non-zero, signals that specific event. When
 ///          event_id is zero, broadcasts to all type-0 events — matching real
@@ -68,28 +85,26 @@ void EventState::signal_interrupt(uint32_t event_id) {
   if (event_id == 0) {
     for (auto &[id, ev] : events_) {
       if (ev.event_type == 0) {
-        ev.signaled = !ev.auto_reset || ev.waiters.empty();
+        ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
         if (!(++ev.event_age))
           ev.event_age = 2;
         write_event_slot(page_, page_size_, id, ev.event_age);
         util::Logger::cp("SIGNAL_BROADCAST: event_id=", id, " age=", ev.event_age,
                          " waiters=", ev.waiters.size());
-        for (auto *cv : ev.waiters)
-          cv->notify_one();
+        activate_waiters(ev);
       }
     }
     return;
   }
   auto it = events_.find(event_id);
   if (it != events_.end() && it->second.event_type == 0) {
-    it->second.signaled = !it->second.auto_reset || it->second.waiters.empty();
+    it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
     if (!(++it->second.event_age))
       it->second.event_age = 2;
     write_event_slot(page_, page_size_, event_id, it->second.event_age);
     util::Logger::cp("SIGNAL_INTERRUPT: event_id=", event_id, " age=", it->second.event_age,
                      " waiters=", it->second.waiters.size(), " page=", page_ ? "valid" : "null");
-    for (auto *cv : it->second.waiters)
-      cv->notify_one();
+    activate_waiters(it->second);
   } else {
     util::Logger::cp("SIGNAL_INTERRUPT_MISS: event_id=", event_id,
                      " NOT FOUND or wrong type, events_.size()=", events_.size());
@@ -106,9 +121,8 @@ bool EventState::signal_memory_fault(const MemoryFault &fault) {
     // the shared page and the runtime does not poll it, it parks a thread in
     // WAIT_EVENTS. Record the payload for that thread to collect and wake it.
     ev.fault = fault;
-    ev.signaled = true;
-    for (auto *cv : ev.waiters)
-      cv->notify_one();
+    ev.signaled = !ev.auto_reset || !has_signal_waiters(ev);
+    activate_waiters(ev);
     delivered = true;
   }
   return delivered;
@@ -119,8 +133,8 @@ void EventState::notify_closing() {
   std::lock_guard<std::mutex> lock(mutex_);
   closing_.store(true, std::memory_order_release);
   for (auto &[id, ev] : events_) {
-    for (auto *cv : ev.waiters)
-      cv->notify_one();
+    for (auto *waiter : ev.waiters)
+      waiter->cv->notify_one();
   }
 }
 
@@ -145,8 +159,8 @@ void EventState::begin_wait_cancel() {
   std::lock_guard<std::mutex> lock(mutex_);
   wait_cancelled_.store(true, std::memory_order_release);
   for (auto &[id, ev] : events_) {
-    for (auto *cv : ev.waiters)
-      cv->notify_one();
+    for (auto *waiter : ev.waiters)
+      waiter->cv->notify_one();
   }
 }
 
@@ -224,15 +238,15 @@ int EventState::destroy_event(void *arg) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = events_.find(args->event_id);
   if (it != events_.end()) {
-    for (auto *cv : it->second.waiters)
-      cv->notify_one();
+    for (auto *waiter : it->second.waiters)
+      waiter->cv->notify_one();
     events_.erase(it);
   }
   write_event_slot(page_, page_size_, args->event_id, KFD_SIGNAL_EVENT_LIMIT);
   return 0;
 }
 
-/// @brief Signal an event: set signaled flag, increment age, wake waiters.
+/// @brief Advance the event age and deliver to waiting or future callers.
 int EventState::set_event(void *arg) {
   assert(arg && "set_event called with null arg");
   auto *args = static_cast<kfd_ioctl_set_event_args *>(arg);
@@ -243,18 +257,17 @@ int EventState::set_event(void *arg) {
                        " events_.size()=", events_.size());
     return -EINVAL;
   }
-  it->second.signaled = !it->second.auto_reset || it->second.waiters.empty();
+  it->second.signaled = !it->second.auto_reset || !has_signal_waiters(it->second);
   if (!(++it->second.event_age))
     it->second.event_age = 2;
   write_event_slot(page_, page_size_, args->event_id, it->second.event_age);
   util::Logger::cp("SET_EVENT: event_id=", args->event_id, " age=", it->second.event_age,
                    " waiters=", it->second.waiters.size());
-  for (auto *cv : it->second.waiters)
-    cv->notify_one();
+  activate_waiters(it->second);
   return 0;
 }
 
-/// @brief Reset an event's age to 0 (unsignaled).
+/// @brief Clear an event's signaled flag without revoking waiter activations.
 int EventState::reset_event(void *arg) {
   assert(arg && "reset_event called with null arg");
   auto *args = static_cast<kfd_ioctl_reset_event_args *>(arg);
@@ -296,29 +309,46 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   });
 
   auto satisfied = [](const GpuEvent &ev, const kfd_event_data &ed) -> bool {
-    if (ev.event_type == 0) {
-      uint64_t caller_age = ed.signal_event_data.last_event_age;
-      if (caller_age == 0)
-        return ev.signaled;
-      return ev.event_age != caller_age;
-    }
-    return ev.signaled;
+    return ev.signaled ||
+           (ev.event_type == KFD_IOC_EVENT_SIGNAL && ed.signal_event_data.last_event_age != 0 &&
+            ev.event_age != ed.signal_event_data.last_event_age);
   };
 
   std::condition_variable my_cv;
+  std::vector<EventWaiter> waiters(args->num_events);
   std::unique_lock<std::mutex> lock(mutex_);
+
+  // A cancelled/closing call must not consume pending auto-reset signals.
+  if (closing_)
+    return -EBADF;
+  if (wait_cancelled_) {
+    args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
+    return 0;
+  }
 
   for (uint32_t i = 0; i < args->num_events; ++i) {
     auto it = events_.find(ev_data[i].event_id);
-    if (it != events_.end())
-      it->second.waiters.push_back(&my_cv);
+    if (it == events_.end())
+      continue;
+    auto &ev = it->second;
+    const bool activated = satisfied(ev, ev_data[i]);
+    waiters[i] = {&my_cv, activated, !activated,
+                  ev.event_type == KFD_IOC_EVENT_SIGNAL &&
+                      ev_data[i].signal_event_data.last_event_age != 0};
+    // Consume an already-pending auto-reset signal when this waiter takes it,
+    // so a later legacy wait cannot steal it while a wait-all is still parked.
+    if (ev.auto_reset)
+      ev.signaled = false;
+    // Even an initially satisfied entry must wake if its event is destroyed
+    // while a wait-all call is still blocked on a different event.
+    ev.waiters.push_back(&waiters[i]);
   }
 
   auto unregister_waiters = [&]() {
     for (uint32_t i = 0; i < args->num_events; ++i) {
       auto it = events_.find(ev_data[i].event_id);
       if (it != events_.end())
-        std::erase(it->second.waiters, &my_cv);
+        std::erase(it->second.waiters, &waiters[i]);
     }
   };
 
@@ -331,7 +361,7 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
       auto it = events_.find(ev_data[i].event_id);
       if (it == events_.end())
         return true;
-      if (satisfied(it->second, ev_data[i]))
+      if (waiters[i].activated)
         any_satisfied = true;
       else
         all_satisfied = false;
@@ -372,34 +402,9 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
   bool any_destroyed = false;
   bool all_ready = true;
   for (uint32_t i = 0; i < args->num_events; ++i) {
-    auto it = events_.find(ev_data[i].event_id);
-    if (it == events_.end()) {
-      any_destroyed = true;
-      all_ready = false;
-      continue;
-    }
-    if (satisfied(it->second, ev_data[i])) {
-      any_ready = true;
-      if (it->second.event_type == 0)
-        ev_data[i].signal_event_data.last_event_age = it->second.event_age;
-      if (it->second.event_type == KFD_IOC_EVENT_MEMORY) {
-        // The union member the runtime reads for this event type. Report the
-        // address that faulted so the failure names its own cause.
-        auto &exception = ev_data[i].memory_exception_data;
-        exception = {};
-        exception.va = it->second.fault.va;
-        exception.gpu_id = it->second.fault.gpu_id;
-        exception.failure.NotPresent = it->second.fault.not_present ? 1u : 0u;
-        exception.failure.ReadOnly = it->second.fault.read_only ? 1u : 0u;
-      }
-      if (it->second.auto_reset) {
-        it->second.signaled = false;
-        if (it->second.event_type == 0)
-          write_event_slot(page_, page_size_, it->second.event_id, KFD_SIGNAL_EVENT_LIMIT);
-      }
-    } else {
-      all_ready = false;
-    }
+    any_destroyed |= !events_.contains(ev_data[i].event_id);
+    any_ready |= waiters[i].activated;
+    all_ready &= waiters[i].activated;
   }
 
   if (any_destroyed)
@@ -408,6 +413,30 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     args->wait_result = KFD_IOC_WAIT_RESULT_COMPLETE;
   else
     args->wait_result = KFD_IOC_WAIT_RESULT_TIMEOUT;
+
+  // KFD copies event data only on completion. Advancing ages on a partial
+  // wait-all timeout would make a retry forget signals it already observed.
+  if (args->wait_result == KFD_IOC_WAIT_RESULT_COMPLETE) {
+    for (uint32_t i = 0; i < args->num_events; ++i) {
+      if (!waiters[i].activated)
+        continue;
+      auto &ev = events_.find(ev_data[i].event_id)->second;
+      if (waiters[i].event_age_enabled)
+        ev_data[i].signal_event_data.last_event_age = ev.event_age;
+      if (ev.event_type == KFD_IOC_EVENT_MEMORY) {
+        // The union member the runtime reads for this event type. Report the
+        // address that faulted so the failure names its own cause.
+        auto &exception = ev_data[i].memory_exception_data;
+        exception = {};
+        exception.va = ev.fault.va;
+        exception.gpu_id = ev.fault.gpu_id;
+        exception.failure.NotPresent = ev.fault.not_present ? 1u : 0u;
+        exception.failure.ReadOnly = ev.fault.read_only ? 1u : 0u;
+      }
+      if (ev.auto_reset && !ev.signaled && ev.event_type == KFD_IOC_EVENT_SIGNAL)
+        write_event_slot(page_, page_size_, ev.event_id, KFD_SIGNAL_EVENT_LIMIT);
+    }
+  }
 
   static thread_local uint32_t wait_log_counter = 0;
   if (args->wait_result == KFD_IOC_WAIT_RESULT_COMPLETE) {

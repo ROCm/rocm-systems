@@ -39,7 +39,8 @@ TEST(code_object_test, on_code_object_enter_handles_call_without_crashing)
     const mock_sdk::callback_tracing_record_t record{};
     mock_sdk::user_data_t                     user_data{};
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 }
 
 TEST(code_object_test, on_code_object_exit_handles_call_without_crashing)
@@ -47,7 +48,8 @@ TEST(code_object_test, on_code_object_exit_handles_call_without_crashing)
     const mock_sdk::callback_tracing_record_t record{};
     mock_sdk::user_data_t                     user_data{};
 
-    on_code_object_exit<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_exit<mock_sdk, externals>(record, &user_data, nullptr,
+                                             mock_sdk::get_timestamp());
 }
 
 TEST(code_object_test, on_record_dispatches_by_phase_without_crashing)

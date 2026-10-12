@@ -138,8 +138,11 @@ public:
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
     ++epoch_;
-    for (Line &line : lines_)
-      line.valid = false;
+    if (has_cached_lines_) {
+      for (Line &line : lines_)
+        line.valid = false;
+      has_cached_lines_ = false;
+    }
     coherence_epoch_ = coherence_->current_instruction_epoch();
   }
 
@@ -185,6 +188,7 @@ private:
     line.cache_namespace = {};
     line.translated = false;
     line.valid = true;
+    has_cached_lines_ = true;
     return line.data;
   }
 
@@ -211,6 +215,7 @@ private:
     line.cache_namespace = cache_namespace;
     line.translated = true;
     line.valid = true;
+    has_cached_lines_ = true;
     data = line.data;
     return VmAccessOutcome::Complete;
   }
@@ -219,6 +224,9 @@ private:
   uint64_t epoch_ = 0;
   std::shared_ptr<DeviceCacheCoherence> coherence_;
   uint64_t coherence_epoch_ = 0;
+  // Only successful fills make a line valid. Repeated maintenance still
+  // advances the public epoch, but need not revisit already invalid lines.
+  bool has_cached_lines_ = false;
 };
 
 } // namespace amdgpu

@@ -20,6 +20,8 @@ extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort;
 
 extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclCollPreconnect;
 
+extern std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches;
+
 void ResetGroupFakes();
 
 #endif  // RCCL_TEST_HOST_GROUP_FAKES_H_

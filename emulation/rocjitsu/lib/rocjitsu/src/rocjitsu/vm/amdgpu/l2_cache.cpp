@@ -191,7 +191,7 @@ VmAccessOutcome L2Cache::publish_dirty_bytes_to_legacy_backing(uint64_t line_add
         clear_dirty_bytes(line_addr, start, static_cast<uint32_t>(completed_bytes), vmid);
       if (outcome != VmAccessOutcome::Complete)
         return outcome;
-      backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+      diagnostics(line_addr + start).backing_writes.fetch_add(1, std::memory_order_relaxed);
     }
   }
   return VmAccessOutcome::Complete;
@@ -220,17 +220,18 @@ VmAccessOutcome L2Cache::access_outcome(simdojo::MessageStatus status) {
 bool L2Cache::can_fetch_range(uint64_t addr, uint32_t size, uint32_t vmid) const {
   if (vmid == 0 || gpu_vm_ == nullptr)
     return true;
-  const std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-  return vm_access &&
-         vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+    return vm_access &&
+           vm_access->query_access(addr, size, VmAccessKind::Read) == VmAccessOutcome::Complete;
+  });
 }
 
 VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t size,
                                       simdojo::MessageOp op, uint32_t vmid) {
   if (op == simdojo::MessageOp::WRITE)
-    backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
   else
-    backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
   if (backing_memory_) {
     if (vmid == 0 && op == simdojo::MessageOp::WRITE) {
       thread_local uint64_t wb_count = 0;
@@ -246,14 +247,13 @@ VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t siz
     }
     if (gpu_vm_ == nullptr)
       return VmAccessOutcome::Unavailable;
-    std::optional<GpuVmAccess> vm_access = gpu_vm_->snapshot_vmid(vmid);
-    if (!vm_access)
-      return VmAccessOutcome::Faulted;
-    const VmAccessOutcome outcome =
-        op == simdojo::MessageOp::WRITE
-            ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
-            : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
-    return outcome;
+    return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *vm_access) {
+      if (!vm_access)
+        return VmAccessOutcome::Faulted;
+      return op == simdojo::MessageOp::WRITE
+                 ? vm_access->write(addr, std::as_bytes(std::span<const uint8_t>(data, size)))
+                 : vm_access->read(addr, std::as_writable_bytes(std::span<uint8_t>(data, size)));
+    });
   }
   assert(req_port_ != nullptr && "L2Cache: req_port_ not set");
   if (req_port_->link() == nullptr ||
@@ -275,8 +275,8 @@ VmAccessOutcome L2Cache::send_backing(uint64_t addr, uint8_t *data, uint32_t siz
 VmAccessOutcome L2Cache::send_atomic_backing(uint64_t addr, uint32_t size,
                                              const simdojo::MemoryAtomicMutation &mutation,
                                              uint32_t vmid) {
-  backing_read_transactions_.fetch_add(1, std::memory_order_relaxed);
-  backing_write_transactions_.fetch_add(1, std::memory_order_relaxed);
+  diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
+  diagnostics(addr).backing_writes.fetch_add(1, std::memory_order_relaxed);
   assert(req_port_ != nullptr && "L2Cache: req_port_ not set");
   if (req_port_->link() == nullptr ||
       req_port_->link()->exec_mode() != simdojo::ExecMode::FUNCTIONAL)
@@ -396,6 +396,30 @@ VmAccessOutcome L2Cache::cache_partial_bytes(uint64_t addr, const uint8_t *src, 
   return VmAccessOutcome::Complete;
 }
 
+bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwords,
+                                  uint32_t vmid) {
+  if (!backing_memory_ || !gpu_vm_ || vmid == 0 || num_dwords < 2 || num_dwords > 16 ||
+      (addr & 3) || num_dwords * 4 > 64 - (addr & 63))
+    return false;
+  // Discover the snapshot before cache admission: a cold quantum snapshot may
+  // allocate its retained entry. The optional copy itself cannot allocate.
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *access) {
+    if (!access)
+      return false;
+    auto maintenance_lock = acquire_cache_access();
+    std::lock_guard set_lock(set_mutex(addr));
+    // Resident lines retain the existing flush/fault path. A miss neither
+    // updates replacement state nor publishes or invalidates cached bytes.
+    if (cache_.peek(addr, vmid))
+      return false;
+    const bool copied =
+        access->try_read_uncached_ram(addr, std::as_writable_bytes(std::span(dst, num_dwords)));
+    if (copied)
+      diagnostics(addr).backing_reads.fetch_add(1, std::memory_order_relaxed);
+    return copied;
+  });
+}
+
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,
                               uint32_t vmid) {
   auto maintenance_lock = acquire_cache_access();
@@ -464,6 +488,43 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
   return VmAccessOutcome::Complete;
 }
 
+bool L2Cache::try_write_private_dwords(std::span<const VmRamDwordStore> stores,
+                                       Mtype instruction_mtype, Mtype mtype, uint32_t vmid) {
+  if (!backing_memory_ || !gpu_vm_ || !vmid || stores.size() < 2 ||
+      stores.size() > VmRamDwordStore::kMaxBatch)
+    return false;
+  const uint64_t address = stores.front().address;
+  for (const auto &store : stores)
+    if ((store.address & 3) ||
+        CacheStore::line_address(store.address) != CacheStore::line_address(address))
+      return false;
+  // A cold snapshot can allocate retained storage; prepare it before cache admission.
+  return gpu_vm_->with_vmid_snapshot(vmid, [&](const GpuVmAccess *access) {
+    if (!access)
+      return false;
+    auto maintenance_lock = acquire_cache_access();
+    std::lock_guard set_lock(set_mutex(address));
+    const auto *resident = cache_.peek(address, vmid);
+    if (mtype == Mtype::UC ? resident != nullptr : !resident || resident->dirty)
+      return false;
+    if (!access->try_write_private_dwords(stores, instruction_mtype, mtype))
+      return false;
+    diagnostics(address).backing_writes.fetch_add(stores.size(), std::memory_order_relaxed);
+    if (mtype != Mtype::UC) {
+      for (const auto &store : stores) {
+        simdojo::CacheTag *tag = nullptr;
+        cache_.lookup(store.address, &tag, vmid);
+        cache_.write_line(store.address, store.source, CacheStore::line_offset(store.address),
+                          sizeof(uint32_t), vmid);
+        tag->coherence = mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
+                                            : simdojo::CoherenceState::EXCLUSIVE;
+      }
+      diagnostics(address).writes.fetch_add(stores.size(), std::memory_order_relaxed);
+    }
+    return true;
+  });
+}
+
 VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size, Mtype mtype,
                                uint32_t vmid) {
   auto maintenance_lock = acquire_cache_access();
@@ -518,7 +579,7 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
                                 : (mtype == Mtype::CC ? simdojo::CoherenceState::SHARED
                                                       : simdojo::CoherenceState::EXCLUSIVE);
 
-    write_count_.fetch_add(1, std::memory_order_relaxed);
+    diagnostics(ea).writes.fetch_add(1, std::memory_order_relaxed);
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -632,8 +693,7 @@ VmAccessOutcome L2Cache::flush_dirty_locked() {
   });
   if (dirty_count != 0)
     util::Logger::vm("L2 flush: ", dirty_count, " dirty lines [0x", std::hex, min_addr, "-0x",
-                     max_addr, "]", std::dec,
-                     " total_writes=", write_count_.load(std::memory_order_relaxed));
+                     max_addr, "]", std::dec, " total_writes=", write_count());
   return outcome;
 }
 

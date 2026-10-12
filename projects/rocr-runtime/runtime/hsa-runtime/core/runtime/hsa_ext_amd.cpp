@@ -203,6 +203,19 @@ bool IsValidQueuePriority(hsa_amd_queue_priority_t priority) {
          priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
 }
 
+core::MemoryRegion::AllocateFlags MemoryPoolFlagsToAllocateFlags(uint64_t flags) {
+  core::MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
+  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
+  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateContiguous;
+  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateExecutable;
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  return alloc_flag;
+}
+
 }  // namespace
 
 hsa_status_t handleException() {
@@ -1368,19 +1381,8 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     return (hsa_status_t)HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateRestrict;
-
-  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
-
-  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateContiguous;
-
-  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateExecutable;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateRestrict | MemoryPoolFlagsToAllocateFlags(flags);
 
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
@@ -1843,6 +1845,25 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(value);
+  const rocr::core::Agent* base_agent = rocr::core::Agent::Convert(agent);
+  if (base_agent == NULL || !base_agent->IsValid() ||
+      base_agent->device_type() != rocr::core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  rocr::AMD::GpuAgent* agent =
+      const_cast<rocr::AMD::GpuAgent*>(
+          static_cast<const rocr::AMD::GpuAgent*>(base_agent));
+  return agent->SetAgentAttribute(
+      static_cast<hsa_agent_info_t>(attribute), value);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
   uint64_t* offset) {
 TRY;
@@ -1952,11 +1973,9 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateMemoryOnly | MemoryPoolFlagsToAllocateFlags(flags);
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
 
   if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
     alloc_flag |= core::MemoryRegion::AllocateNonPaged;

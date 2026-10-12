@@ -16,5 +16,10 @@ namespace metadata {
 // APIs that would re-enter hip::init().
 std::string collect_json();
 
+// Escapes `s` for use inside a JSON string literal (quotes not included):
+// backslash, double quote, the short control escapes and any other byte below
+// 0x20 as \u00XX. A null `s` yields "".
+std::string json_escape(const char* s);
+
 }  // namespace metadata
 }  // namespace hrr_cap

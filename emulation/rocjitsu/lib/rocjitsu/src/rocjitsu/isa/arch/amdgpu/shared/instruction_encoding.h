@@ -24,6 +24,17 @@ constexpr uint32_t SRC_DPP8_HI = SRC_DPP8_FI_1;
 
 namespace dpp {
 
+/// @brief Floating source modifiers decoded from a DPP16 extension.
+struct SourceModifiers {
+  uint32_t absolute = 0;
+  uint32_t negate = 0;
+
+  template <typename Encoding> static SourceModifiers decode(const Encoding &encoding) {
+    return {.absolute = uint32_t{encoding.src0_abs} | (uint32_t{encoding.src1_abs} << 1),
+            .negate = uint32_t{encoding.src0_neg} | (uint32_t{encoding.src1_neg} << 1)};
+  }
+};
+
 /// @brief DPP control value ranges encoded in VOP instruction modifiers.
 enum DppCtrl : uint32_t {
   QUAD_PERM_MAX = 0xFF,

@@ -128,7 +128,7 @@ struct collector
      */
     void sample(std::int64_t timestamp)
     {
-        auto new_end = std::remove_if(
+        auto const new_end = std::remove_if(
             m_device_entries.begin(), m_device_entries.end(),
             [this, timestamp](const device_entry& entry) {
                 const auto _timestamp = static_cast<std::uint64_t>(timestamp);
@@ -232,10 +232,10 @@ struct collector
         const auto current_timestamp = static_cast<std::uint64_t>(timestamp);
         for(const auto& entry : m_device_entries)
         {
-            auto device_id   = entry.device->get_index();
-            auto device_name = entry.device->get_name();
+            auto const device_id   = entry.device->get_index();
+            auto const device_name = entry.device->get_name();
 
-            metrics_t zero_metrics{};
+            metrics_t const zero_metrics{};
 
             CacheApi::store_sample(device_id, device_name, m_enabled_metrics,
                                    entry.supported_metrics, zero_metrics,

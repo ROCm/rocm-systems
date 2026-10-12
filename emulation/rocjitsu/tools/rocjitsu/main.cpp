@@ -25,6 +25,7 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "launch_preload.h"
@@ -506,11 +507,13 @@ int main(int argc, char *argv[]) {
   // Applying the budget to a copy keeps the override inside this launch: the
   // config the user named is never rewritten, and simulations built from other
   // configs in the same process tree keep the budgets their own configs ask for.
-  auto config_json_for_this_launch = [&]() {
+  util::StringDiagnostic launch_config_diagnostic;
+  auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
     std::string json = rocjitsu::config::read_config_file(abs_config);
-    if (cpu_thread_budget)
-      json = rocjitsu::config::json_with_cpu_thread_budget(json, *cpu_thread_budget);
-    return json;
+    if (!cpu_thread_budget)
+      return json;
+    return rocjitsu::config::json_with_cpu_thread_budget(json, *cpu_thread_budget,
+                                                         launch_config_diagnostic.emitter());
   };
 
   if (thread_budget_table) {
@@ -519,8 +522,14 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     try {
+      rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
+      if (json.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
       auto settings = rocjitsu::config::load_execution_thread_settings_from_string(
-          config_json_for_this_launch(), rocjitsu::kEmbeddedSchema);
+          json.value(), rocjitsu::kEmbeddedSchema);
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
@@ -561,13 +570,15 @@ int main(int argc, char *argv[]) {
   auto write_config_for_this_launch = [&]() {
     if (!cpu_thread_budget)
       return true;
-    try {
-      abs_config = rocjitsu::config::write_effective_config(abs_config, *cpu_thread_budget, my_pid);
-    } catch (const std::exception &e) {
-      std::cerr << std::format("rocjitsu: {}\n", e.what());
+    util::StringDiagnostic diagnostic;
+    rocjitsu::FailureOr<std::string> written = rocjitsu::config::write_effective_config(
+        abs_config, *cpu_thread_budget, my_pid, diagnostic.emitter());
+    if (written.failed()) {
+      std::cerr << std::format("rocjitsu: {}\n", diagnostic.message());
       cleanup_runtime_files(my_pid);
       return false;
     }
+    abs_config = std::move(written.value());
     return true;
   };
 
