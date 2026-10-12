@@ -142,6 +142,43 @@ def test_rma_v15_is_selected_and_preserves_opt_flags(paths):
     table = _RmaV15.in_dll(plugin, "ncclRmaPlugin_v15")
     assert table.name == b"Example"
 
+    # The logger is variadic; the two counts are its first variadic arguments, which
+    # x86-64 and aarch64 Linux pass like fixed integer arguments.
+    logged = []
+    logger = ctypes.CFUNCTYPE(
+        None, ctypes.c_int, ctypes.c_ulong, ctypes.c_char_p, ctypes.c_int,
+        ctypes.c_char_p, ctypes.c_uint64, ctypes.c_uint64,
+    )(lambda level, flags, file, line, fmt, ops, agg: logged.append((level, fmt, ops, agg)))
+    init = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint64,
+                            ctypes.c_void_p)(table.init)
+    finalize = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(table.finalize)
+
+    def finalize_counts(log_fn):
+        """Run an init/finalize pair and return the (ops, aggregated) it logged, if any."""
+        ctx = ctypes.c_void_p()
+        assert init(ctypes.byref(ctx), 0, log_fn) == 0
+        del logged[:]
+        assert finalize(ctx) == 0
+        if not logged:
+            return None
+        level, fmt, ops, agg = logged[-1]
+        assert fmt == b"RMA/Example: %lu data ops, %lu aggregated"
+        assert level == 4, f"finalize logged at level {level}, expected NCCL_LOG_INFO (4)"
+        return ops, agg
+
+    before = finalize_counts(ctypes.cast(logger, ctypes.c_void_p))
+    try:
+        _issue_hinted_rma_ops(table)
+        after = finalize_counts(ctypes.cast(logger, ctypes.c_void_p))
+    finally:
+        finalize_counts(None)
+    assert (after[0] - before[0], after[1] - before[1]) == (3, 3), (
+        f"iput, iputSignal and iget should each count one hinted data op: {before} -> {after}"
+    )
+
+
+def _issue_hinted_rma_ops(table):
+    """Call iput, iputSignal and iget once each with the aggregation hint set."""
     complete = ctypes.CFUNCTYPE(
         ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
         ctypes.POINTER(ctypes.c_int),
