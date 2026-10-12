@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-side tests for nccl::utility (nccl_device/utility.h). bitops.h has same-named copies, so every call is qualified.
+// Host-side tests for nccl::utility (nccl_device/utility.h). bitops.h has same-named copies, so calls are qualified.
 
 #include <algorithm>
 #include <array>
@@ -31,7 +31,7 @@ namespace nu = nccl::utility;
 
 // xorshift64: deterministic sweep inputs without <random> distribution differences across libstdc++ versions.
 class XorShift64 {
- public:
+public:
   explicit XorShift64(uint64_t seed) : s_(seed) {}
   uint64_t next() {
     s_ ^= s_ << 13;
@@ -40,16 +40,50 @@ class XorShift64 {
     return s_;
   }
 
- private:
+private:
   uint64_t s_;
 };
 
+// Schoolbook high word from half-width limbs: shares no expression with utility.h's wide-multiply host branch.
+template <typename U, typename Half, int kHalfBits>
+U refMulHi(U a, U b) {
+  const U mask = static_cast<U>(static_cast<Half>(~Half(0)));
+  const U aLo = a & mask;
+  const U aHi = a >> kHalfBits;
+  const U bLo = b & mask;
+  const U bHi = b >> kHalfBits;
+  const U lolo = aLo * bLo;
+  const U lohi = aLo * bHi;
+  const U hilo = aHi * bLo;
+  const U mid = (lolo >> kHalfBits) + (lohi & mask) + (hilo & mask);
+  return aHi * bHi + (lohi >> kHalfBits) + (hilo >> kHalfBits) + (mid >> kHalfBits);
+}
+
 uint32_t refMul32hi(uint32_t a, uint32_t b) {
-  return static_cast<uint32_t>((static_cast<uint64_t>(a) * b) >> 32);
+  return refMulHi<uint32_t, uint16_t, 16>(a, b);
 }
 
 uint64_t refMul64hi(uint64_t a, uint64_t b) {
-  return static_cast<uint64_t>((static_cast<unsigned __int128>(a) * b) >> 64);
+  return refMulHi<uint64_t, uint32_t, 32>(a, b);
+}
+
+bool refIsPow2(uint64_t y) {
+  while (y > 1 && (y % 2) == 0) {
+    y /= 2;
+  }
+  return y == 1;
+}
+
+// Defining property of idivRcp: rcp * y <= 2^bits - 1 < (rcp + 1) * y, except a power of 2 gets 2^bits / y (mod 2^bits).
+template <int kBits>
+void expectRcpProperty(uint64_t y, uint64_t rcp) {
+  const unsigned __int128 two = static_cast<unsigned __int128>(1) << kBits;
+  if (refIsPow2(y)) {
+    EXPECT_EQ((static_cast<unsigned __int128>(rcp) + (y == 1 ? two : 0)) * y, two) << "y=" << y << " rcp=" << rcp;
+  } else {
+    EXPECT_LE(static_cast<unsigned __int128>(rcp) * y, two - 1) << "y=" << y << " rcp=" << rcp;
+    EXPECT_GT((static_cast<unsigned __int128>(rcp) + 1) * y, two - 1) << "y=" << y << " rcp=" << rcp;
+  }
 }
 
 // Divisors that hit every reciprocal regime: y=1 (rcp wraps to 0), powers of 2 (+1 term), odd, and near-max.
@@ -129,12 +163,17 @@ TEST(NcclUtilityIntRound, MatchesDivisionReference) {
   for (uint64_t y = 1; y <= 33; ++y) {
     for (uint64_t x = 0; x <= 300; ++x) {
       SCOPED_TRACE(::testing::Message() << "x=" << x << " y=" << y);
-      const uint64_t q = (x + y - 1) / y;
+      // Smallest q with q * y >= x, found by counting, so no reference shares divUp's (x + y - 1) / y.
+      uint64_t q = 0;
+      while (q * y < x) {
+        ++q;
+      }
+      const uint64_t down = (x == q * y) ? x : (q - 1) * y;
       EXPECT_EQ(nu::divUp(x, y), q);
       EXPECT_EQ(nu::roundUp(x, y), q * y);
-      EXPECT_EQ(nu::roundDown(x, y), (x / y) * y);
+      EXPECT_EQ(nu::roundDown(x, y), down);
       EXPECT_EQ(nu::divUp(static_cast<uint32_t>(x), static_cast<int>(y)), static_cast<uint32_t>(q));
-      EXPECT_EQ(nu::roundDown(static_cast<int>(x), static_cast<int>(y)), static_cast<int>((x / y) * y));
+      EXPECT_EQ(nu::roundDown(static_cast<int>(x), static_cast<int>(y)), static_cast<int>(down));
     }
   }
 }
@@ -200,7 +239,7 @@ static_assert(std::is_same<AlignDownResult<char*>::Type, char*>::value, "alignDo
 static_assert(std::is_same<AlignDownResult<char const*>::Type, char const*>::value, "keeps const");
 static_assert(std::is_same<AlignDownResult<uint8_t*>::Type, uint8_t*>::value, "uint8_t deduces T*");
 static_assert(std::is_same<AlignUpResult<char const*>::Type, char const*>::value, "alignUp keeps const");
-// void const* overloads have a non-deducible T: a plain call picks T* with T = const void, so only alignDown<AnyT>(p, a) works.
+// void const* overloads have a non-deducible T: a plain call picks T* with T = const void, so pass alignDown<AnyT>.
 static_assert(std::is_same<AlignDownResult<void const*>::Type, void const*>::value,
               "plain call resolves to T* with T = const void, not to the void const* overload");
 static_assert(std::is_same<AlignUpResult<void const*>::Type, void const*>::value,
@@ -352,12 +391,23 @@ static_assert(std::is_same<decltype(nu::idivFast64(0, 1, 0)), uint32_t>::value,
 
 TEST(NcclUtilityRcp, ReciprocalFormula) {
   for (uint32_t y : divisors32()) {
-    const uint32_t want = static_cast<uint32_t>(0xFFFFFFFFu / y + (__builtin_popcount(y) == 1 ? 1u : 0u));
-    EXPECT_EQ(nu::idivRcp32(y), want) << "y=" << y;
+    expectRcpProperty<32>(y, nu::idivRcp32(y));
   }
   for (uint64_t y : divisors64()) {
-    const uint64_t want = ~uint64_t{0} / y + (__builtin_popcountll(y) == 1 ? 1u : 0u);
-    EXPECT_EQ(nu::idivRcp64(y), want) << "y=" << y;
+    expectRcpProperty<64>(y, nu::idivRcp64(y));
+  }
+  for (uint32_t y = 1; y <= 5000; ++y) {
+    expectRcpProperty<32>(y, nu::idivRcp32(y));
+    expectRcpProperty<64>(y, nu::idivRcp64(y));
+  }
+  XorShift64 rng(0x7E57AB1Eull);
+  for (int i = 0; i < 20000; ++i) {
+    const uint64_t y = std::max<uint64_t>(1u, rng.next() >> (rng.next() % 64));
+    expectRcpProperty<32>(static_cast<uint32_t>(y) | 1u, nu::idivRcp32(static_cast<uint32_t>(y) | 1u));
+    expectRcpProperty<64>(y, nu::idivRcp64(y));
+  }
+  for (int s = 1; s < 64; ++s) {
+    EXPECT_EQ(nu::idivRcp64(uint64_t{1} << s), uint64_t{1} << (64 - s)) << "s=" << s;
   }
   for (int s = 1; s < 32; ++s) {
     EXPECT_EQ(nu::idivRcp32(1u << s), 1u << (32 - s)) << "s=" << s;
@@ -519,7 +569,7 @@ TEST(NcclUtilityRcp, ImulRcpReturnsZeroWhenTrueReciprocalIsOne) {
   const uint32_t d = x * y;  // 4198627394, so the true reciprocal is 1.
   ASSERT_EQ(nu::idivRcp32(d), 1u);
   const uint32_t rcp = nu::imulRcp32(x, nu::idivRcp32(x), y, nu::idivRcp32(y));
-  EXPECT_EQ(rcp, 0u);
+  EXPECT_EQ(rcp, 0u) << "imulRcp32 now returns the true reciprocal: delete this pin and uncomment the check below";
   // EXPECT_EQ(rcp, 1u);  // Correct with `if (rcp == 0 || x * y <= rem) rcp += 1;` in imulRcp32.
   EXPECT_EQ(nu::idivFast32(0xFFFFFFFFu, d, rcp), 0xFFFFFFFFu);
   // EXPECT_EQ(nu::idivFast32(0xFFFFFFFFu, d, rcp), 1u);  // Correct once imulRcp32 returns 1 here.
