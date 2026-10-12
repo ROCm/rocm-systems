@@ -14,8 +14,6 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
-- `rdci` no longer crashes with a segmentation fault when it exits. The crash could cut off part or all of a command's output when that output was piped or redirected.
-
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
