@@ -40,6 +40,19 @@ namespace dda::common {
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 
+// Bytes one bank occupies: nRanks slots at the fixed stride. The host passes
+// ddaBankSize() as bankSize; bank 1 starts there, not after this many bytes.
+constexpr size_t ddaLLRsBankBytes(int nRanks) {
+  return (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
+}
+
+// Packet offset of the bank selected by this epoch. Odd epochs start at
+// bankSize, the same byte as all-reduce and all-gather LL. The kernel and the
+// layout test both call this.
+constexpr size_t ddaLLRsBankOffsetPkts(uint32_t flag, size_t bankSize) {
+  return (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
+}
+
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).
 //
@@ -72,7 +85,7 @@ __launch_bounds__(512)
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   // ddaBankSize() floors the bank to a multiple of 16B, so this is a whole
   // number of LL packets and bank 1 starts at the same byte as all-reduce LL.
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
+  const size_t bankOffsetPkts = ddaLLRsBankOffsetPkts(flag, bankSize);
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;

@@ -25,12 +25,10 @@
 namespace {
 
 using dda::common::kDdaLLRsMaxBytes;
-using dda::common::kDdaLLRsSlotStridePkts;
-using dda::common::LLPacket16;
 
-// LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
+// LL scratch footprint: two banks of ddaLLRsBankBytes.
 static inline size_t ddaLLRsScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
+  return (size_t)2 * dda::common::ddaLLRsBankBytes(nRanks);
 }
 
 template <typename T>
