@@ -101,10 +101,10 @@ class TestRocattach:
 
             # Re-attaching to the same process reuses the output directory set
             # on the first attach; each session is distinguished by a run-counter
-            # suffix (perfetto-trace-<pid>-<n>.proto), not a fresh session_N dir.
-            traces = sorted(test_output_dir.rglob("perfetto-trace*.proto"))
+            # suffix (perfetto-trace-<pid>-<n>.pftrace), not a fresh session_N dir.
+            traces = sorted(test_output_dir.rglob("perfetto-trace*.pftrace"))
             assert len(traces) >= n_sessions, (
-                f"expected at least {n_sessions} perfetto-trace*.proto file(s) under "
+                f"expected at least {n_sessions} perfetto-trace*.pftrace file(s) under "
                 f"{test_output_dir}, found {len(traces)}: {traces}"
             )
         finally:
