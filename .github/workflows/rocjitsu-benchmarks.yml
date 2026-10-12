@@ -106,7 +106,8 @@ jobs:
             -DRJ_ENABLE_MSAN=OFF \
             -DRJ_ENABLE_TSAN=OFF \
             -DRJ_ENABLE_UBSAN=OFF \
-            -DROCM_PATH="${ROCM_PATH}"
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++"
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_bin rocjitsu_shared
 
@@ -170,7 +171,7 @@ jobs:
           repository: ROCm/rocm-systems
           path: dashboard
           persist-credentials: false
-          sparse-checkout: emulation/rocjitsu/website
+          sparse-checkout: emulation/rocjitsu/website/dashboard
 
       - name: Set up publisher Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -233,7 +234,7 @@ jobs:
                 --is-beta
             )
 
-            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/scripts/validate-dashboard-data.mjs" \
+            node "${GITHUB_WORKSPACE}/dashboard/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs" \
               "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data"
 
             git add rocjitsu-dashboard/data

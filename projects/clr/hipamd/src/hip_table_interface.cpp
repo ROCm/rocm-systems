@@ -3192,6 +3192,11 @@ HIP_PUBLIC_API hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLi
   return hip::GetHipDispatchTable()->hipLibraryGetManaged_fn(dptr, bytes, library, name);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipLibraryGetModule_fn(pMod, library);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
                                  hipDevice_t dev) {
   TRY;
@@ -3258,12 +3263,6 @@ HIP_PUBLIC_API hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
 HIP_PUBLIC_API hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
-  CATCH;
-}
-HIP_PUBLIC_API hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr,
-                                                         int value, int device) {
-  TRY;
-  return hip::GetHipDispatchTable()->hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {

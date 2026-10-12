@@ -755,9 +755,9 @@ uint64_t SystemClockFrequency() {
 }
 
 bool ParseCpuID(cpuid_t* cpuinfo) {
+  memset(cpuinfo, 0, sizeof(*cpuinfo));
 #if defined(__i386__) || defined(__x86_64__)
   uint32_t eax, ebx, ecx, edx, max_eax = 0;
-  memset(cpuinfo, 0, sizeof(*cpuinfo));
 
   /* Make sure current CPU supports at least EAX 4 */
   if (!__get_cpuid_max(0x80000004, NULL)) return false;

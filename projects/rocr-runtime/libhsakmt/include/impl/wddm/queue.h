@@ -269,12 +269,13 @@ private:
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
   uint64_t doorbell_signal_value_;
-  volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;
-  bool thread_stop_;
+  std::thread fault_monitor_thread_;
+  std::atomic<bool> thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
+  static void FaultMonitorThread(ComputeQueue *queue);
 
   uint64_t scratch_waves_;
   uint64_t dispatch_waves_;

@@ -405,7 +405,7 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
     assert not Rdna4Profile().ds_addtid_uses_m0_byte_base
     assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
     for name in names[1:]:
-        assert rdna4[name].semantic_class == 'ds_atomic'
+        assert rdna4[name].semantic_class == 'ds_atomic2'
 
 
 @pytest.mark.parametrize(
@@ -3141,13 +3141,12 @@ def test_ds_swizzle_generator_uses_addr_source_for_ds_and_vds():
     vds_body = body_for('ENC_VDS')
     ds_body = body_for('ENC_DS')
 
-    assert 'src_data[i] = regs.read_lane(addr, i);' in vds_body
-    assert 'src_data[i] = regs.read_lane(data0, i);' not in vds_body
-    assert 'regs.write_lane(vdst, lane, src_data[src_lane]);' in vds_body
-    assert 'src_data[i] = regs.read_lane(addr, i);' in ds_body
-    assert 'src_data[i] = regs.read_lane(data0, i);' not in ds_body
-    assert '2u * (lane & 0x3u)' in vds_body
-    assert '2u * (lane & 0x3u)' in ds_body
+    for body in (vds_body, ds_body):
+        assert 'regs.read_lane(addr, source);' in body
+        assert 'regs.read_lane(data0' not in body
+        assert 'regs.write_lane(vdst, lane, tmp[lane]);' in body
+        assert 'amdgpu::ds_swizzle_lane(lane, offset)' in body
+        assert 'if (exec & (uint64_t{1} << source))' in body
 
 
 def test_packed_16bit_source_gate_is_limited_to_e32_16bit_sources():
@@ -3352,7 +3351,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
         assert 'regs.write_lane(inst.vdst' in body
         assert 'vb + inst.inst_' not in body
 
-    assert 'src_data[i] = regs.read_lane(inst.data0, i);' in shared
+    assert 'regs.read_lane(inst.data0, source);' in shared
     assert (
         'd->dst_reg_base =\n'
         '      wf.vgpr_alloc().base +\n'
@@ -8103,8 +8102,7 @@ def test_generated_operands_validate_vgpr_source_selectors(
     validation = (
         'case OperandType::OPR_SRC_VGPR:\n'
         '    if (!((encoding_value >= 256 && encoding_value <= 511)))\n'
-        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);\n'
-        '    break;'
+        '      defer_encoding_error(EncodingError::InvalidVgprSourceSelector);'
     )
     for arch in (
         'cdna1',
@@ -8145,6 +8143,22 @@ def test_generated_operand_validation_switch_is_shared_by_constructors(
         operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
         assert operand.count('switch (opr_type) {') == 1
         assert literal16_constructor in operand
+
+
+def test_all_mfma_constructors_declare_complete_matrix_register_accesses(
+    amdgpu_generated_root: Path,
+):
+    constructors = 0
+    for path in amdgpu_generated_root.glob('*/vop3p.cpp'):
+        source = path.read_text()
+        for class_name in re.findall(r'(\w+)::\1\(const MachineInst \*inst\)', source):
+            body = _generated_constructor_body(source, class_name)
+            if 'flags_ |= MFMA;' not in body:
+                continue
+            constructors += 1
+            assert 'MATRIX_REGISTER_ACCESSES' in body, (path, class_name)
+            assert 'DIRECT_REGISTER_ACCESSES' in body, (path, class_name)
+    assert constructors > 100
 
 
 def test_cdna4_mfma_f8f6f4_decodes_dense_and_exact_abid1_scaled_encodings(
@@ -8396,7 +8410,8 @@ def test_generated_flat_saddr_null_selector_follows_encoding(
     amdgpu_generated_root: Path,
 ):
     rdna3_flat = (amdgpu_generated_root / 'rdna3' / 'flat.cpp').read_text()
-    assert 'inst_.saddr != 0x7F' in rdna3_flat
+    assert 'inst_.saddr != 0x7C' in rdna3_flat
+    assert 'inst_.saddr != 127' in rdna3_flat
     assert 'inst_.saddr != OPR_SREG_NULL' not in rdna3_flat
     assert (
         'if (inst_.seg != 2)\n'
@@ -8609,7 +8624,8 @@ def test_cdna4_d16_load_does_not_preserve_destination(
     class_name = 'BufferLoadUbyteD16Mubuf'
     ctor = _generated_constructor_body(cpp, class_name)
 
-    assert 'dst_operands_[0] = &vdata;' in ctor
+    assert 'if (!inst_.lds)' in ctor
+    assert 'dst_operands_[num_dst_++] = &vdata;' in ctor
     assert not re.search(r'src_operands_\[[^\]]*\]\s*=\s*&vdata;', ctor)
     assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' not in cpp
 

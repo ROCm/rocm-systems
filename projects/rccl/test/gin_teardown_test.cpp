@@ -310,9 +310,7 @@ TEST(SkipCuMemFreePolicy, IsolatedArchAndEnvBranches) {
 // ncclDevrGetWinOffset: the window's position inside its backing allocation.
 //
 // The RMA memory region is registered on the backing allocation's primaryAddr,
-// so a put has to add this delta to the caller's in-window offset. Both
-// ncclRmaProxyPutBuildOp callers depend on it, including the single-put path
-// through ncclRmaProxyPutBuildDesc, and neither asserts the arithmetic.
+// so a put has to add this delta to the caller's in-window offset.
 TEST(DevrGetWinOffsetTest, OffsetIsWindowPositionWithinBackingMemory) {
   EXPECT_EQ(ncclDevrGetWinOffset(nullptr), 0u);
 

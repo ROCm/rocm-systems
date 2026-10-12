@@ -979,10 +979,10 @@ aql_queue_t::~aql_queue_t ()
 {
   process_t &process = this->process ();
 
-  /* Destruct all waves, workgroups, and dispatches associated with this queue.
-     Waves that are executing a displaced stepped instruction will release the
-     displaced stepping buffer when destructed, and raise a command terminated
-     event if single-stepping (see wave_t::~wave_t).  */
+  /* Destruct all waves, workgroups, clusters, and dispatches associated with
+     this queue.  Waves that are executing a displaced stepped instruction
+     will release the displaced stepping buffer when destructed, and raise a
+     command terminated event if single-stepping (see wave_t::~wave_t).  */
 
   auto &&wave_range = process.range<wave_t> ();
   for (auto it = wave_range.begin (); it != wave_range.end ();)
