@@ -85,6 +85,8 @@ cases:
   Unit_HRR_DiskSpace_BufferedEventsCounted_Direct: {}
   Unit_HRR_DiskSpace_CrashAfterStop: {}
   Unit_HRR_DiskSpace_CrashAfterStop_Direct: {}
+  Unit_HRR_DiskSpace_DuplicateChargedOnce: {}
+  Unit_HRR_DiskSpace_DuplicateChargedOnce_Direct: {}
   Unit_HRR_DiskSpace_DuplicateRacingStop: {}
   Unit_HRR_DiskSpace_DuplicateRacingStop_Direct: {}
   Unit_HRR_DiskSpace_EventsCheckedAcrossInterval: {}
@@ -103,6 +105,10 @@ cases:
   Unit_HRR_DiskSpace_StopWhileExiting_Direct: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
+  Unit_HRR_DispatchSwap_Direct: {}
+  Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer: {}
+  Unit_HRR_DispatchSwap_Unreplayable_Direct: {}
+  Unit_HRR_DispatchSwap_WrapperOutlivesCapture: {}
   Unit_HRR_DivergenceAbortRoundtrip: {}
   Unit_HRR_DrvMemcpy2DUnalignedRoundtrip: {}
   Unit_HRR_DrvMemcpy2DUnaligned_Direct: {}
@@ -116,6 +122,10 @@ cases:
   Unit_HRR_ExtMalloc_Direct: {}
   Unit_HRR_ExtModuleLaunchKernelRoundtrip: {}
   Unit_HRR_ExtModuleLaunchKernel_Direct: {}
+  Unit_HRR_FailedBlobClose_Direct: {}
+  Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete: {}
+  Unit_HRR_FailedBlobWrite_Direct: {}
+  Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete: {}
   Unit_HRR_FailedMemcpy3DNotRecorded: {}
   Unit_HRR_FailedMemcpy3D_Direct: {}
   Unit_HRR_FailedShimCallsNotRecorded: {}
@@ -134,6 +144,9 @@ cases:
   Unit_HRR_ForkWhileRecording_Direct: {}
   Unit_HRR_ForkWhileWriterHoldsLock: {}
   Unit_HRR_ForkWhileWriterHoldsLock_Direct: {}
+  Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure: {}
+  Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis: {}
+  Unit_HRR_Fork_Direct: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown_Direct: {}
   Unit_HRR_GpuWorkload_Direct: {}
