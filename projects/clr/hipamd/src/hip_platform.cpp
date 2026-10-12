@@ -540,56 +540,6 @@ hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, con
 }  // namespace hip
 
 namespace hip_impl {
-namespace {
-// based register usage for the device symbol and device capabilities, returns the maximum number
-// of threads that could be utilized
-int maxThreadsPerCU(const amd::device::Info& deviceInfo,
-                    const device::Kernel::WorkGroupInfo& wrkGrpInfo, amd::Isa isa) {
-  // Find wave occupancy per CU => simd_per_cu * GPR usage
-  size_t MaxWavesPerSimd;
-
-  if (isa.versionMajor() <= 9) {
-    MaxWavesPerSimd = 8;  // Limited by SPI 32 per CU, hence 8 per SIMD
-  } else {
-    MaxWavesPerSimd = 16;
-  }
-  size_t VgprWaves = MaxWavesPerSimd;
-  uint32_t VgprGranularity = deviceInfo.vgprAllocGranularity_;
-  size_t maxVGPRs = deviceInfo.vgprsPerSimd_;
-  size_t wavefrontSize = wrkGrpInfo.wavefrontSize_;
-  if (isa.versionMajor() >= 10) {
-    if (wavefrontSize == 64) {
-      maxVGPRs = maxVGPRs >> 1;
-      VgprGranularity = VgprGranularity >> 1;
-    }
-  }
-  if (wrkGrpInfo.usedVGPRs_ > 0) {
-    VgprWaves = maxVGPRs / amd::alignUp(wrkGrpInfo.usedVGPRs_, VgprGranularity);
-  }
-
-  if (VgprWaves == 0) {
-    // This should not happen ideally, but in case the value is
-    // incorrect, it can lead to a crash. By returning error, API can exit gracefully.
-    return hipErrorUnknown;
-  }
-
-  size_t GprWaves = VgprWaves;
-  if (wrkGrpInfo.usedSGPRs_ > 0) {
-    size_t maxSGPRs = deviceInfo.sgprsPerSimd_;
-    const size_t SgprWaves = maxSGPRs / amd::alignUp(wrkGrpInfo.usedSGPRs_, 16);
-    GprWaves = std::min(VgprWaves, SgprWaves);
-  }
-
-  // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
-  uint32_t simdPerCU = isa.simdPerCU();
-  if (wrkGrpInfo.isWGPMode_) {
-    simdPerCU *= 2;
-  }
-
-  const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
-  return alu_occupancy * wrkGrpInfo.wavefrontSize_;
-}
-}  // namespace
 
 // ================================================================================================
 // @launchConfig  a launch configuration that might have the cluster size unconfigured
@@ -1100,8 +1050,44 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 }
 
 // ================================================================================================
+hipError_t PlatformState::RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dynCO) {
+  if (hmod == nullptr || dynCO == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  std::scoped_lock lock(lock_);
+
+  const auto [it, inserted] = dynCO_map_.try_emplace(hmod, dynCO);
+  if (!inserted) {
+    return (it->second == dynCO) ? hipSuccess : hipErrorAlreadyMapped;
+  }
+  library_modules_.insert(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::UnregisterLibraryModule(hipModule_t hmod) {
+  std::scoped_lock lock(lock_);
+
+  if (library_modules_.erase(hmod) == 0) {
+    return;
+  }
+
+  dynCO_map_.erase(hmod);
+  RemoveTexRefs(hmod);
+}
+
+// ================================================================================================
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
   std::scoped_lock lock(lock_);
+
+  // Modules returned by hipLibraryGetModule() are owned by their library.
+  // Unloading them should be done via hipLibraryUnload(), which also tears down the library's DynCO.
+  if (library_modules_.find(hmod) != library_modules_.end()) {
+    LogPrintfError("Module %p is owned by a library, unload it with hipLibraryUnload", hmod);
+    return hipErrorNotPermitted;
+  }
 
   if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
@@ -1110,7 +1096,13 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
     dynCO_map_.erase(it);  // Iterator-based erase avoids second lookup
   }
 
-  // Remove all texture references associated with this module
+  RemoveTexRefs(hmod);
+
+  return hipSuccess;
+}
+
+// ================================================================================================
+void PlatformState::RemoveTexRefs(hipModule_t hmod) {
   for (auto tex_it = texRef_map_.begin(); tex_it != texRef_map_.end(); ) {
     if (tex_it->second.first == hmod) {
       tex_it = texRef_map_.erase(tex_it);
@@ -1118,8 +1110,6 @@ hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
       ++tex_it;
     }
   }
-
-  return hipSuccess;
 }
 
 // ================================================================================================

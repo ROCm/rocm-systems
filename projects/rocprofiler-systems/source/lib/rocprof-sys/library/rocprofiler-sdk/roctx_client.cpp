@@ -4,6 +4,8 @@
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
 
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/common_types.hpp"
 #include "core/control/triggers/roctx.hpp"
 #include "core/demangler.hpp"
@@ -31,6 +33,9 @@
 
 namespace rocprofsys::rocprofiler_sdk
 {
+
+using sdk_backend_t =
+    backends::rocprofiler_sdk::backend<rocprofsys::rocprofiler_sdk::wrapper>;
 
 namespace
 {
@@ -162,9 +167,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
         {
             if(should_write())
             {
-                const auto& name =
-                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                const auto& name = sdk_backend_t::get_callback_tracing_names().at(
+                    record.kind, record.operation);
                 m_writer.write_begin(name);
             }
             break;
@@ -258,9 +262,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         {
             if(should_write())
             {
-                const auto& name =
-                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                const auto& name = sdk_backend_t::get_callback_tracing_names().at(
+                    record.kind, record.operation);
                 m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;

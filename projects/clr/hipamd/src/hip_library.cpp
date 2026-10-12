@@ -99,6 +99,23 @@ hipError_t LibraryContainer::GetManaged(const std::string& name, void** dptr, si
   return dynco_->GetManaged(name, dptr, bytes);
 }
 
+hipError_t LibraryContainer::Module(hipModule_t* module) {
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
+  if (dynco_ == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  hipModule_t mod = dynco_->getModule();
+  if (mod == nullptr) {
+    return hipErrorNotFound;
+  }
+  if (!module_registered_) {
+    IHIP_RETURN_ONFAIL(hip::PlatformState::Instance().RegisterLibraryModule(mod, dynco_.get()));
+    module_registered_ = true;
+  }
+  *module = mod;
+  return hipSuccess;
+}
+
 LibraryContainer::LibraryContainer(const char* code_object) : image_(code_object) {}
 
 LibraryContainer::LibraryContainer(const std::string &file_name) : filename_(file_name) {}
@@ -112,6 +129,11 @@ LibraryContainer::~LibraryContainer() {
     (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
   kernels_.clear();
+
+  if (module_registered_) {
+    hip::PlatformState::Instance().UnregisterLibraryModule(dynco_->getModule());
+    module_registered_ = false;
+  }
   // dynco_ unique_ptr destruction frees vars, functions, and the underlying fatbin.
 }
 
@@ -241,6 +263,22 @@ hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library
     HIP_RETURN(ret);
   }
   HIP_RETURN(l->GetManaged(std::string{name}, dptr, bytes));
+}
+
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library) {
+  HIP_INIT_API(hipLibraryGetModule, pMod, library);
+  if (pMod == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (library == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  auto* l = reinterpret_cast<hip::LibraryContainer*>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  HIP_RETURN(l->Module(pMod));
 }
 
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,

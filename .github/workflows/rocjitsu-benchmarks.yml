@@ -106,7 +106,8 @@ jobs:
             -DRJ_ENABLE_MSAN=OFF \
             -DRJ_ENABLE_TSAN=OFF \
             -DRJ_ENABLE_UBSAN=OFF \
-            -DROCM_PATH="${ROCM_PATH}"
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++"
           cmake --build "${ROCJITSU_BUILD_DIR}" \
             --target rocjitsu_bin rocjitsu_shared
 

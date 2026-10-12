@@ -56,6 +56,7 @@
 #include <atomic>
 #include <cctype>
 #include <climits>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -87,6 +88,7 @@ std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
 
 HipCompilerDispatchTable g_real_compiler_table{};
+static HipCompilerDispatchTable g_cap_compiler_table{};  // the shims, kept for uninstall
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
 // TLS dims saved by __hipPushCallConfiguration — used only as a fallback by
@@ -1367,9 +1369,10 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // hipModuleLoadData, making all kernel names resolvable.
 // ---------------------------------------------------------------------------
 
-// Compute the total byte size of a clang offload bundle blob.
-// Supports both uncompressed ("__CLANG_OFFLOAD_BUNDLE__") and compressed ("CCOB") formats.
-// Returns 0 if the format is unrecognised.
+// Byte size of a clang offload bundle, or 0 when the header is not one or fails
+// the checks HIP applies to it. HIP receives a registered fat binary as a bare
+// pointer, so it knows no image bound (image_bound in hip_fatbin.cpp) and these
+// checks are all that stands between the header and the read.
 static size_t compute_bundle_size(const void* blob) {
   if (!blob) return 0;
   const char* p = static_cast<const char*>(blob);
@@ -1377,7 +1380,16 @@ static size_t compute_bundle_size(const void* blob) {
   // Compressed format: magic "CCOB", header contains totalSize at byte 8.
   if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
                   hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
+    constexpr size_t kHeaderSize =
+        offsetof(hip::symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
     const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleCompressedHeader*>(blob);
+    if (hdr->totalSize < kHeaderSize) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: compressed bundle "
+          "totalSize %u is smaller than its %zu-byte header",
+          blob, static_cast<unsigned>(hdr->totalSize), kHeaderSize);
+      return 0;
+    }
     return static_cast<size_t>(hdr->totalSize);
   }
 
@@ -1390,30 +1402,38 @@ static size_t compute_bundle_size(const void* blob) {
   uint64_t n = hdr->numOfCodeObjects;
   if (n == 0) return 0;
 
-  // Walk entries to find the last offset + size (that is the blob end).
-  // Guard against corrupt bundles: bundleEntryIdSize is read from untrusted
-  // memory (fires at static-init before any error handler is installed).
-  // A sane bundle ID is never > 4 KB; anything larger indicates corruption.
-  static constexpr uint64_t kMaxBundleIdSize = 4096;
-  static constexpr uint64_t kMaxEntries      = 4096;
-  size_t end = 0;
-  const uint8_t* cur = reinterpret_cast<const uint8_t*>(&hdr->desc[0]);
-  uint64_t safe_n = (n < kMaxEntries) ? n : kMaxEntries;
-  for (uint64_t i = 0; i < safe_n; i++) {
-    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(cur);
-    if (entry->bundleEntryIdSize > kMaxBundleIdSize) {
-      LogPrintfWarning("[HRR capture] compute_bundle_size: bundleEntryIdSize %llu too large"
-                       " — stopping walk at entry %llu",
-                       (unsigned long long)entry->bundleEntryIdSize,
-                       (unsigned long long)i);
-      break;
+  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
+  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
+  // no length, so this bound is also what keeps the walk below in range.
+  constexpr size_t kEntryTableLimit = 4096;
+  constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
+  size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
+  uint64_t end = 0;
+  for (uint64_t i = 0; i < n; i++) {
+    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(p + pos);
+    if (kEntryTableLimit - pos < kEntryHeaderSize ||
+        entry->bundleEntryIdSize > kEntryTableLimit - pos - kEntryHeaderSize) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu ends "
+          "past the first %zu bytes, where HIP looks for it",
+          blob, static_cast<unsigned long long>(i), kEntryTableLimit);
+      return 0;
     }
-    size_t entry_end = static_cast<size_t>(entry->offset) + static_cast<size_t>(entry->size);
+    pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
+    // HIP makes this check only for the code objects it picks for this host's GPUs.
+    // Every entry counts towards the end here, so capture checks them all.
+    const uint64_t entry_end = entry->offset + entry->size;
+    if (entry_end < entry->offset) {
+      LogPrintfWarning(
+          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu has "
+          "an offset and size that overflow",
+          blob, static_cast<unsigned long long>(i));
+      return 0;
+    }
     if (entry_end > end) end = entry_end;
-    // Advance past this entry: three uint64_t fields + bundleEntryIdSize bytes
-    cur += 3 * sizeof(uint64_t) + entry->bundleEntryIdSize;
   }
-  return end;
+  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
+  return static_cast<size_t>(end);
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
@@ -1427,6 +1447,17 @@ void** capture___hipRegisterFatBinary(const void* data) {
   const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
                                    wrapper->magic == 0x4B504948u /*HIPK*/))
                      ? wrapper->binary : nullptr;
+  // PlatformState is initialized before this shim is installed, so HIP has already
+  // digested the bundle, and no handle means it could not load it on this host: a bad
+  // header or, more often, no code object for any GPU here. Then no launch from it can
+  // succeed and be recorded, so replay never needs the blob.
+  if (blob && !r) {
+    LogPrintfWarning(
+        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
+        "(no code object for any GPU here, or a bad header)",
+        blob);
+    blob = nullptr;
+  }
   size_t blob_size = blob ? compute_bundle_size(blob) : 0;
 
   hrr_args___hipRegisterFatBinary a{};
@@ -2478,16 +2509,100 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Other threads keep calling through the live dispatch tables while the shims go
+// in and out, so the tables are written one slot at a time with atomic operations
+// and never copied over as a whole. Outside Windows, function-pointer slots are
+// accessed through a may_alias view so the store is well-defined against the typed
+// table fields; MSVC does no type-based alias analysis and clang-cl disables it by
+// default.
+template <typename Table> constexpr size_t kDispatchSlots =
+    (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
+
+#if IS_WINDOWS
+struct DispatchSlot {
+  void* value;
+};
+
+void store_slot(DispatchSlot* slot, void* value) {
+  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
+      expected, desired, std::memory_order_release, std::memory_order_relaxed);
+}
+#elif defined(__GNUC__) || defined(__clang__)
+struct DispatchSlot {
+  void* value;
+} __attribute__((__may_alias__));
+
+void store_slot(DispatchSlot* slot, void* value) {
+  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
+                              __ATOMIC_RELAXED);
+}
+#else
+#error "Outside Windows, HRR dispatch slots need GCC or Clang"
+#endif
+
+template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
+  static_assert(sizeof(void (*)()) == sizeof(void*),
+                "dispatch slot atomics need function pointers the size of void*");
+  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
+                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
+                "layout must match HIP dispatch tables: size_t size then void* slots");
+  static_assert(sizeof(DispatchSlot) == sizeof(void*), "DispatchSlot must be a single pointer");
+  return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
+}
+
+// Unlike uninstall this does not compare first: a slot that changed since the
+// snapshot still gets its shim, or the archive would silently miss that API.
+template <typename Table>
+void install_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) store_slot(&slot[i], shim[i].value);
+  }
+}
+
+// A slot that another component changed after install keeps its new value.
+template <typename Table>
+void uninstall_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) replace_slot(&slot[i], shim[i].value, orig[i].value);
+  }
+}
+
+}  // namespace
+
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_cap_table, sizeof(HipDispatchTable));
+  install_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
 }
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_real_table, sizeof(HipDispatchTable));
+  uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  // The compiler shims go as well, or a capture refused at init or in a forked
+  // child keeps running them with capture off. Shutdown leaves them.
+  if (g_compiler_installed.exchange(false))
+    uninstall_shims(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
+                    g_real_compiler_table);
+}
+
+void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
+  g_cap_compiler_table = shims;
+  install_shims(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
 }
 
 // ---------------------------------------------------------------------------
@@ -2496,6 +2611,9 @@ void hip_capture_uninstall() {
 
 // Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
 // blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
+// These were registered before HIP initialized and are not digested yet, so
+// unlike the live shim there is no HIP verdict to check, only the header, and a
+// bundle with no code object for this host is still recorded.
 static void record_fat_binary_blob(const void* blob_ptr) {
   if (!blob_ptr) return;
   size_t blob_size = compute_bundle_size(blob_ptr);
@@ -2609,8 +2727,9 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    // A refused open leaves capture off, so take the shims out of the dispatch
-    // table too rather than leave every call going through them for nothing.
+    // A refused open leaves capture off. Without a writer the shims would only
+    // cost time, and the D2H ones still synchronize streams, so take them out
+    // of the dispatch table again.
     if (!hrr_cap::writer::open(hip_capture_output_dir())) {
       hip_capture_uninstall();
       return;
@@ -2656,7 +2775,10 @@ void hip_capture_init() {
 }
 
 void hip_capture_shutdown() {
-  hip_capture_uninstall();
+  // Only the runtime shims: the compiler table keeps its shims, so a fat binary
+  // unregistered after this still goes through them, and the writer drops it.
+  if (g_installed.exchange(false))
+    uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

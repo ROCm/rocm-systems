@@ -57,6 +57,12 @@
 // 32-bit targets.
 static_assert(sizeof(void*) == 8, "the statvfs fake assumes an LP64 target");
 
+// Set by a workload in another file of this binary. Each statvfs and statvfs64
+// call runs it first, faked or not. The capture writer reads free space on its
+// pid-<pid> directory while it opens the archive, after it has removed a stale
+// active marker and before it creates its own.
+std::atomic<void (*)(const char*)> g_hrr_statvfs_hook{nullptr};
+
 namespace {
 
 constexpr uint64_t kBlock = 4096;
@@ -147,6 +153,7 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
 }
 
 int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+  if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
   if (!is_faked(path)) {
     using Fn = int (*)(const char*, struct statvfs*);
     static Fn real[2] = {reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs")),
@@ -194,7 +201,11 @@ extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf) {
   return fake_statvfs("statvfs64", path, buf);
 }
 
+// Defined in hrr_workload_test.cc: the fork cases there hold a thread in fsync.
+extern "C" void hrr_workload_fsync_hook(int fd);
+
 extern "C" int hrr_disk_space_fsync(int fd) {
+  hrr_workload_fsync_hook(fd);
   using Fn = int (*)(int);
   static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "fsync"));
   if (g_fsync_hold.exchange(false)) {
@@ -263,6 +274,17 @@ std::vector<unsigned char> pattern(size_t len, uint32_t seed) {
 void copy_to_device(void* dev, uint32_t seed, size_t len) {
   const std::vector<unsigned char> host = pattern(len, seed);
   HRR_HIP_CHECK(hipMemcpy(dev, host.data(), len, hipMemcpyHostToDevice));
+}
+
+// A forked child opens its archive on its first record, not at fork. This
+// records one without touching the device, which a forked child must not use:
+// a launch configuration pushed and popped through the compiler dispatch table.
+void record_in_child() {
+  dim3 grid, block;
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  (void)__hipPushCallConfiguration(dim3(1), dim3(1), 0, nullptr);
+  (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
 }
 
 // Wait for a forked child for at most 60 s; -1 when it had to be killed.
@@ -336,12 +358,18 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, 1u << 20));
   // Larger than the interval, so it is checked and the count starts from zero.
   copy_to_device(dev, 100, 1u << 20);
+  const fs::path active =
+      fs::path(fake_root()) / ("pid-" + std::to_string(getpid())) / "active";
+  REQUIRE(fs::exists(active));
 
   const int64_t headroom = 2 << 20;
   arm_shrinking(headroom);
   for (int i = 0; i < kStepCount; ++i) copy_to_device(dev, 200 + i, kStepCopy);
   const uint64_t used = used_bytes() - g_used_base.load();
   disarm();
+
+  // Stopped while the program runs on, so producers must stop writing sidecars.
+  CHECK_FALSE(fs::exists(active));
 
   // The capture went no further into the reserve than one check interval.
   INFO("used " << used << " headroom " << headroom << " interval " << interval);
@@ -389,6 +417,7 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
@@ -417,6 +446,8 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
+    // Its open, and so the refusal, comes with its first record.
+    record_in_child();
     std::exit(0);
   }
   REQUIRE(child > 0);
@@ -468,8 +499,12 @@ TEST_CASE("Unit_HRR_DiskSpace_StopWhileExiting_Direct", "[.][hrr-direct]") {
   std::exit(0);
 }
 
-TEST_CASE("Unit_HRR_DiskSpace_DuplicateRacingStop_Direct", "[.][hrr-direct]") {
-  begin_workload();
+namespace {
+
+// Two threads copy the same new bytes, free space `headroom` above the reserve.
+// The first copy parks in its free-space check; the second gets a second to
+// finish before the first is let go, ample unless it waits for the first.
+void copy_same_bytes_twice(int64_t headroom) {
   void* dev_a = nullptr;
   void* dev_b = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev_a, kBigCopy));
@@ -477,19 +512,23 @@ TEST_CASE("Unit_HRR_DiskSpace_DuplicateRacingStop_Direct", "[.][hrr-direct]") {
   const std::vector<unsigned char> a = pattern(kBigCopy, 800);
   const std::vector<unsigned char> b = a;
 
-  // The first copy parks in its free-space check. The second copy of the same
-  // bytes must not take the hash as written while that blob may never be.
-  arm_fixed(kBelowReserve);
+  arm_fixed(headroom);
   g_statvfs_hold.store(true);
   hipError_t first = hipErrorUnknown;
-  std::thread worker([&] {
+  std::thread first_copy([&] {
     first = hipMemcpy(dev_a, a.data(), kBigCopy, hipMemcpyHostToDevice);
   });
   const bool parked = wait_for(g_statvfs_entered, 10000);
   hipError_t second = hipErrorUnknown;
-  if (parked) second = hipMemcpy(dev_b, b.data(), kBigCopy, hipMemcpyHostToDevice);
+  std::atomic<bool> second_done{false};
+  std::thread second_copy([&] {
+    if (parked) second = hipMemcpy(dev_b, b.data(), kBigCopy, hipMemcpyHostToDevice);
+    second_done.store(true);
+  });
+  (void)wait_for(second_done, 1000);
   g_statvfs_release.store(true);
-  worker.join();
+  first_copy.join();
+  second_copy.join();
   disarm();
 
   REQUIRE(parked);
@@ -497,6 +536,21 @@ TEST_CASE("Unit_HRR_DiskSpace_DuplicateRacingStop_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(second);
   HRR_HIP_CHECK(hipFree(dev_a));
   HRR_HIP_CHECK(hipFree(dev_b));
+}
+
+}  // namespace
+
+TEST_CASE("Unit_HRR_DiskSpace_DuplicateRacingStop_Direct", "[.][hrr-direct]") {
+  begin_workload();
+  // The first copy's check fails. The second copy must not take the hash as
+  // written while that blob may never be.
+  copy_same_bytes_twice(kBelowReserve);
+}
+
+TEST_CASE("Unit_HRR_DiskSpace_DuplicateChargedOnce_Direct", "[.][hrr-direct]") {
+  begin_workload();
+  // Room for one copy of the blob above the reserve, not for two.
+  copy_same_bytes_twice(static_cast<int64_t>(kBigCopy + kBigCopy / 2));
 }
 
 TEST_CASE("Unit_HRR_DiskSpace_LargeEventCheckedBeforeWrite_Direct", "[.][hrr-direct]") {
@@ -594,7 +648,7 @@ struct WorkloadRun {
 
 WorkloadRun run_workload(const std::string& name, const fs::path& cap, uint64_t total,
                          uint64_t avail = 0) {
-  hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true, /*capture_stderr=*/true);
+  hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   proc.setEnv("HRR_TEST_FAKE_FS_TOTAL", std::to_string(total));
   if (avail != 0) proc.setEnv("HRR_TEST_FAKE_FS_AVAIL", std::to_string(avail));
@@ -767,6 +821,29 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_DuplicateRacingStop) {
   REQUIRE(run.rc == 0);
   hrr::Archive arc;
   load_stopped_archive(cap.path, run, arc);
+}
+
+// Two threads copy the same new bytes with room for one blob above the reserve.
+// Deduplication writes one file, so only one reservation is charged and the
+// capture runs on.
+HRR_TEST_CASE(Unit_HRR_DiskSpace_DuplicateChargedOnce) {
+  ScopedDir cap(cap_dir("duplicate_once"));
+  const WorkloadRun run =
+      run_workload("Unit_HRR_DiskSpace_DuplicateChargedOnce_Direct", cap.path, kTotal64M);
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  CHECK(count_of(run.out, kStopped) == 0);
+  const fs::path proc_dir = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(proc_dir.string(), arc));
+  CHECK(arc.complete);
+  REQUIRE(count_h2d(arc, kBigCopy) == 2);
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPMEMCPY || ev.memcpy_ev.size != kBigCopy) continue;
+    std::vector<uint8_t> data;
+    CHECK(hrr::read_blob(arc, ev.memcpy_ev.hash_lo, ev.memcpy_ev.hash_hi, data));
+    CHECK(data.size() == kBigCopy);
+  }
 }
 
 // A record of at least the check interval is checked before it is written, so

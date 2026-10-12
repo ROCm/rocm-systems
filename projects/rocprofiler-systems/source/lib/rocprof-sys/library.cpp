@@ -24,6 +24,7 @@
 #include "core/config/trace_period_config.hpp"
 #include "core/control/clocks/posix.hpp"
 #include "core/control/clocks/steady.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/control/session.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include "core/cpu.hpp"
@@ -150,18 +151,6 @@ set_metadata_environment_json(const std::string& _environment_json)
     auto process_info        = trace_cache::get_metadata_registry().get_process_info();
     process_info.environment = _environment_json;
     trace_cache::get_metadata_registry().set_process(process_info);
-}
-
-std::string
-escape_quotes(std::string str)
-{
-    std::string::size_type pos = 0;
-    while((pos = str.find('"', pos)) != std::string::npos)
-    {
-        str.replace(pos, 1, "\"\"");
-        pos += 2;
-    }
-    return str;
 }
 
 bool
@@ -417,14 +406,13 @@ rocprofsys_preinit_cache()
     std::stringstream _extdata_stream;
     config::print_settings_json(_extdata_stream);
 
-    trace_cache::get_metadata_registry().set_process(
-        { .pid         = getpid(),
-          .ppid        = getppid(),
-          .command     = _command,
-          .environment = "",
-          .extdata     = escape_quotes(_extdata_stream.str()),
-          .start       = 0,
-          .end         = 0 });
+    trace_cache::get_metadata_registry().set_process({ .pid         = getpid(),
+                                                       .ppid        = getppid(),
+                                                       .command     = _command,
+                                                       .environment = "",
+                                                       .extdata = _extdata_stream.str(),
+                                                       .start   = 0,
+                                                       .end     = 0 });
 }
 
 void
@@ -755,7 +743,7 @@ rocprofsys_init_tooling_hidden(void)
             _environment_json["MPI_COMM_WORLD_SIZE"] = size;
             _environment_json["MPI_COMM_WORLD_RANK"] = rank;
 
-            set_metadata_environment_json(escape_quotes(_environment_json.dump()));
+            set_metadata_environment_json(_environment_json.dump());
         });
 #endif
 
@@ -1058,7 +1046,7 @@ rocprofsys_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _
         }
     });
 
-    set_metadata_process_start_timestamp(comp::wall_clock::record());
+    set_metadata_process_start_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
     if(get_debug_env() || get_verbose_env() > 2)
     {
@@ -1129,7 +1117,7 @@ rocprofsys_finalize_hidden(void)
         return;
     }
 
-    set_metadata_process_end_timestamp(comp::wall_clock::record());
+    set_metadata_process_end_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
     if(_is_child)
     {
@@ -1160,7 +1148,7 @@ rocprofsys_finalize_hidden(void)
 
     sampling::block_samples();
 
-    thread_info::set_stop(comp::wall_clock::record());
+    thread_info::set_stop(control::clocks::timeline_ns());
 
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);

@@ -59,6 +59,7 @@
 #include "inc/amd_hsa_elf.h"
 #include "inc/amd_hsa_kernel_code.h"
 #include "core/inc/amd_hsa_code.hpp"
+#include "core/inc/isa.h"
 #include "amd_hsa_code_util.hpp"
 #include "amd_options.hpp"
 #include "core/util/utils.h"
@@ -1754,7 +1755,20 @@ hsa_status_t ExecutableImpl::LoadDefinitionSymbol(hsa_agent_t agent,
     uint32_t group_segment_size = kd.group_segment_fixed_size;
     uint32_t private_segment_size = kd.private_segment_fixed_size;
     bool is_dynamic_callstack = AMDHSA_BITS_GET(kd.kernel_code_properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK);
-    bool uses_wave32 = AMDHSA_BITS_GET( kd.kernel_code_properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
+    // A registry wavefront size of 32 means the target is wave32-only.
+    // ENABLE_WAVEFRONT_SIZE32 is reserved on those targets and stays 0.
+    bool wave32_only = false;
+    std::string codeIsa;
+    if (code && code->GetIsa(codeIsa)) {
+      const rocr::core::Isa* isa = rocr::core::IsaRegistry::GetIsa(codeIsa);
+      uint32_t wavefront_size = 0;
+      if (isa != nullptr &&
+          isa->GetWavefront().GetInfo(HSA_WAVEFRONT_INFO_SIZE, &wavefront_size)) {
+        wave32_only = wavefront_size == 32;
+      }
+    }
+    bool uses_wave32 = wave32_only ||
+        AMDHSA_BITS_GET(kd.kernel_code_properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32);
 
     uint64_t size = sym->Size();
 

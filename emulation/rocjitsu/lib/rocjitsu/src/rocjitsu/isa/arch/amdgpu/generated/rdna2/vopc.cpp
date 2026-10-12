@@ -53,6 +53,7 @@ VCmpFF32Vopc::VCmpFF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -114,6 +115,7 @@ VCmpLtF32Vopc::VCmpLtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -175,6 +177,7 @@ VCmpEqF32Vopc::VCmpEqF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -236,6 +239,7 @@ VCmpLeF32Vopc::VCmpLeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -297,6 +301,7 @@ VCmpGtF32Vopc::VCmpGtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -358,6 +363,7 @@ VCmpLgF32Vopc::VCmpLgF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -419,6 +425,7 @@ VCmpGeF32Vopc::VCmpGeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -479,6 +486,7 @@ VCmpOF32Vopc::VCmpOF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -539,6 +547,7 @@ VCmpUF32Vopc::VCmpUF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -600,6 +609,7 @@ VCmpNgeF32Vopc::VCmpNgeF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -661,6 +671,7 @@ VCmpNlgF32Vopc::VCmpNlgF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -722,6 +733,7 @@ VCmpNgtF32Vopc::VCmpNgtF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -783,6 +795,7 @@ VCmpNleF32Vopc::VCmpNleF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -844,6 +857,7 @@ VCmpNeqF32Vopc::VCmpNeqF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -905,6 +919,7 @@ VCmpNltF32Vopc::VCmpNltF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -966,6 +981,7 @@ VCmpTruF32Vopc::VCmpTruF32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2049,6 +2065,7 @@ VCmpFF64Vopc::VCmpFF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2084,6 +2101,7 @@ VCmpLtF64Vopc::VCmpLtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2119,6 +2137,7 @@ VCmpEqF64Vopc::VCmpEqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2154,6 +2173,7 @@ VCmpLeF64Vopc::VCmpLeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2189,6 +2209,7 @@ VCmpGtF64Vopc::VCmpGtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2224,6 +2245,7 @@ VCmpLgF64Vopc::VCmpLgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2259,6 +2281,7 @@ VCmpGeF64Vopc::VCmpGeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2294,6 +2317,7 @@ VCmpOF64Vopc::VCmpOF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2329,6 +2353,7 @@ VCmpUF64Vopc::VCmpUF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2364,6 +2389,7 @@ VCmpNgeF64Vopc::VCmpNgeF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2399,6 +2425,7 @@ VCmpNlgF64Vopc::VCmpNlgF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2434,6 +2461,7 @@ VCmpNgtF64Vopc::VCmpNgtF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2469,6 +2497,7 @@ VCmpNleF64Vopc::VCmpNleF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2504,6 +2533,7 @@ VCmpNeqF64Vopc::VCmpNeqF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2539,6 +2569,7 @@ VCmpNltF64Vopc::VCmpNltF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -2574,6 +2605,7 @@ VCmpTruF64Vopc::VCmpTruF64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3264,6 +3296,7 @@ VCmpFI32Vopc::VCmpFI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3325,6 +3358,7 @@ VCmpLtI32Vopc::VCmpLtI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3386,6 +3420,7 @@ VCmpEqI32Vopc::VCmpEqI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3447,6 +3482,7 @@ VCmpLeI32Vopc::VCmpLeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3508,6 +3544,7 @@ VCmpGtI32Vopc::VCmpGtI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3569,6 +3606,7 @@ VCmpNeI32Vopc::VCmpNeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3630,6 +3668,7 @@ VCmpGeI32Vopc::VCmpGeI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3690,6 +3729,7 @@ VCmpTI32Vopc::VCmpTI32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3814,6 +3854,7 @@ VCmpLtI16Vopc::VCmpLtI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3876,6 +3917,7 @@ VCmpEqI16Vopc::VCmpEqI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -3938,6 +3980,7 @@ VCmpLeI16Vopc::VCmpLeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4000,6 +4043,7 @@ VCmpGtI16Vopc::VCmpGtI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4062,6 +4106,7 @@ VCmpNeI16Vopc::VCmpNeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -4124,6 +4169,7 @@ VCmpGeI16Vopc::VCmpGeI16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5272,6 +5318,7 @@ VCmpFI64Vopc::VCmpFI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5307,6 +5354,7 @@ VCmpLtI64Vopc::VCmpLtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5342,6 +5390,7 @@ VCmpEqI64Vopc::VCmpEqI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5377,6 +5426,7 @@ VCmpLeI64Vopc::VCmpLeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5412,6 +5462,7 @@ VCmpGtI64Vopc::VCmpGtI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5447,6 +5498,7 @@ VCmpNeI64Vopc::VCmpNeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5482,6 +5534,7 @@ VCmpGeI64Vopc::VCmpGeI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5517,6 +5570,7 @@ VCmpTI64Vopc::VCmpTI64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5614,6 +5668,7 @@ VCmpLtU16Vopc::VCmpLtU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5676,6 +5731,7 @@ VCmpEqU16Vopc::VCmpEqU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5738,6 +5794,7 @@ VCmpLeU16Vopc::VCmpLeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5800,6 +5857,7 @@ VCmpGtU16Vopc::VCmpGtU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5862,6 +5920,7 @@ VCmpNeU16Vopc::VCmpNeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -5924,6 +5983,7 @@ VCmpGeU16Vopc::VCmpGeU16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6732,6 +6792,7 @@ VCmpFU32Vopc::VCmpFU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6793,6 +6854,7 @@ VCmpLtU32Vopc::VCmpLtU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6854,6 +6916,7 @@ VCmpEqU32Vopc::VCmpEqU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6915,6 +6978,7 @@ VCmpLeU32Vopc::VCmpLeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -6976,6 +7040,7 @@ VCmpGtU32Vopc::VCmpGtU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7037,6 +7102,7 @@ VCmpNeU32Vopc::VCmpNeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7098,6 +7164,7 @@ VCmpGeU32Vopc::VCmpGeU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7158,6 +7225,7 @@ VCmpTU32Vopc::VCmpTU32Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7219,6 +7287,7 @@ VCmpFF16Vopc::VCmpFF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7281,6 +7350,7 @@ VCmpLtF16Vopc::VCmpLtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7343,6 +7413,7 @@ VCmpEqF16Vopc::VCmpEqF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7405,6 +7476,7 @@ VCmpLeF16Vopc::VCmpLeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7467,6 +7539,7 @@ VCmpGtF16Vopc::VCmpGtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7529,6 +7602,7 @@ VCmpLgF16Vopc::VCmpLgF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7591,6 +7665,7 @@ VCmpGeF16Vopc::VCmpGeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -7652,6 +7727,7 @@ VCmpOF16Vopc::VCmpOF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8736,6 +8812,7 @@ VCmpFU64Vopc::VCmpFU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8771,6 +8848,7 @@ VCmpLtU64Vopc::VCmpLtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8806,6 +8884,7 @@ VCmpEqU64Vopc::VCmpEqU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8841,6 +8920,7 @@ VCmpLeU64Vopc::VCmpLeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8876,6 +8956,7 @@ VCmpGtU64Vopc::VCmpGtU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8911,6 +8992,7 @@ VCmpNeU64Vopc::VCmpNeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8946,6 +9028,7 @@ VCmpGeU64Vopc::VCmpGeU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -8981,6 +9064,7 @@ VCmpTU64Vopc::VCmpTU64Vopc(const MachineInst *inst)
         static_cast<uint32_t>(reinterpret_cast<const VopcInstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
   vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9041,6 +9125,7 @@ VCmpUF16Vopc::VCmpUF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9103,6 +9188,7 @@ VCmpNgeF16Vopc::VCmpNgeF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9165,6 +9251,7 @@ VCmpNlgF16Vopc::VCmpNlgF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9227,6 +9314,7 @@ VCmpNgtF16Vopc::VCmpNgtF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9289,6 +9377,7 @@ VCmpNleF16Vopc::VCmpNleF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9351,6 +9440,7 @@ VCmpNeqF16Vopc::VCmpNeqF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9413,6 +9503,7 @@ VCmpNltF16Vopc::VCmpNltF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -9475,6 +9566,7 @@ VCmpTruF16Vopc::VCmpTruF16Vopc(const MachineInst *inst)
   }
   if (!(reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA))
     vcc.apply_fieldless_caps(false, false, false);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
