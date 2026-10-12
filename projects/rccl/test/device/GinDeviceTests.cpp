@@ -2133,4 +2133,77 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
   queues.ExpectUnchanged();
 }
 
+// Busy-waits ticks of wall_clock64 (constant rate on every arch, unlike clock64 on gfx11).
+static __device__ void spinWallTicks(uint64_t ticks) {
+  const uint64_t startTick = wall_clock64();
+  while (wall_clock64() - startTick < ticks) {
+  }
+}
+
+// Block 0 raises state[2] and flushes pe; block 1 waits for state[2], gives flush graceTicks to read pis[pe], posts one
+// GFD (pi + 1), then consumes only up to the old pi. state is {returned, rescued, entered}; only the timed arm sets
+// outResult. A flush that re-reads pi never sees ci reach it, so it times out or is rescued by the watchdog.
+__global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint32_t pe, bool timed,
+                                                 uint64_t timeoutCycles, uint64_t graceTicks, uint64_t watchdogTicks,
+                                                 ncclResult_t* outResult, uint32_t* state) {
+  if (threadIdx.x != 0) {
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> entered(state[2]);
+  if (blockIdx.x == 0) {
+    entered.store(1u, cuda::memory_order_release);
+    if (timed) {
+      *outResult = nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, /*abortFlag=*/nullptr, clock64(),
+                                           timeoutCycles);
+    } else {
+      nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, /*abortFlag=*/nullptr);
+    }
+    cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).store(1u, cuda::memory_order_release);
+    return;
+  }
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(ctx->pis[pe]);
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(ctx->cis[pe]);
+  const uint64_t startTick = wall_clock64();
+  while (entered.load(cuda::memory_order_acquire) == 0u && wall_clock64() - startTick < watchdogTicks) {
+  }
+  // The pi read is the first thing flush does, so a grace of 1 ms after entry orders the post after the snapshot.
+  spinWallTicks(graceTicks);
+  const uint32_t snapshot = pi.fetch_add(1u, cuda::memory_order_acq_rel);
+  // A second grace lets the post become visible first, so a re-reading flush cannot pair the old pi with the new ci.
+  spinWallTicks(graceTicks);
+  ci.store(snapshot, cuda::memory_order_release);
+  drainAfterDeadline(ctx, static_cast<int>(pe), /*nDone=*/1u, watchdogTicks, state);
+}
+
+TEST_F(GinDeviceTest, ProxyFlush_IgnoresGfdPostedAfterPiSnapshot) {
+  constexpr uint32_t kPe = 1;
+  constexpr uint32_t kSnapshot = 0xFFFFFFFFu; // The later post wraps pi to 0, so the wait also crosses the uint32 wrap.
+  int rateKhz = 0;
+  ASSERT_EQ(hipDeviceGetAttribute(&rateKhz, hipDeviceAttributeWallClockRate, 0), hipSuccess);
+  const uint64_t graceTicks = static_cast<uint64_t>(std::max(rateKhz, 1)); // 1 ms
+  for (bool timed : {false, true}) {
+    SCOPED_TRACE(testing::Message() << (timed ? "timeout overload" : "blocking overload"));
+    if (timed && clock64Wraps()) {
+      continue; // A 20-bit clock64 would fire the production timeout during the grace periods.
+    }
+    // Peer 0 is a decoy with one GFD pending; peer 1 has one GFD in flight at the snapshot.
+    ProxyFlushQueues queues({4u, kSnapshot}, {3u, kSnapshot - 1u});
+    DeviceBuffer<ncclResult_t> d_result(1);
+    DeviceBuffer<uint32_t> d_state(3);
+    d_result.upload(ncclInProgress);
+    d_state.zero();
+
+    kernelProxyFlushIgnoresLaterPost<<<2, 1>>>(queues.d_ctx.ptr, kPe, timed, kProxyFlushLongTimeoutCycles, graceTicks,
+                                               watchdogDeadlineTicks(), d_result.ptr, d_state.ptr);
+    syncAndCheck();
+    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u, 1u}))
+      << "{returned, rescued, entered}: rescued=1 means flush waited for a GFD posted after it read pi";
+    if (timed) {
+      EXPECT_EQ(d_result.download(), ncclSuccess) << "flush must return once ci reaches the pi it read on entry";
+    }
+    EXPECT_EQ(queues.d_pis.copyTo(), (std::vector<uint32_t>{4u, kSnapshot + 1u})) << "exactly the one later post";
+    EXPECT_EQ(queues.d_cis.copyTo(), (std::vector<uint32_t>{3u, kSnapshot})) << "ci consumed only up to the snapshot";
+  }
+}
+
 } // namespace RcclUnitTesting
