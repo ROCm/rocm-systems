@@ -6692,13 +6692,23 @@ def amdsmi_status_code_to_string(status: amdsmi_wrapper.amdsmi_status_t) -> Unio
 
 
 def amdsmi_get_gpu_compute_process_info() -> List[Dict[str, int]]:
-    num_items = ctypes.c_uint32(0)
     nullptr = POINTER(amdsmi_wrapper.amdsmi_process_info_t)()
-    _check_res(amdsmi_wrapper.amdsmi_get_gpu_compute_process_info(nullptr, ctypes.byref(num_items)))
+    # A process that starts between the count and the read makes the read
+    # return INSUFFICIENT_SIZE; count again. Processes that keep starting make
+    # the call fail after count_attempts instead of looping.
+    count_attempts = 3
+    for _ in range(count_attempts):
+        num_items = ctypes.c_uint32(0)
+        _check_res(
+            amdsmi_wrapper.amdsmi_get_gpu_compute_process_info(nullptr, ctypes.byref(num_items))
+        )
+        procs = (amdsmi_wrapper.amdsmi_process_info_t * num_items.value)()
+        ret = amdsmi_wrapper.amdsmi_get_gpu_compute_process_info(procs, ctypes.byref(num_items))
+        if ret != amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE:
+            break
+    _check_res(ret)
 
-    procs = (amdsmi_wrapper.amdsmi_process_info_t * num_items.value)()
-    _check_res(amdsmi_wrapper.amdsmi_get_gpu_compute_process_info(procs, ctypes.byref(num_items)))
-
+    # The read lowers num_items when processes exited after the count.
     return [
         {
             "process_id": proc.process_id,
@@ -6707,7 +6717,7 @@ def amdsmi_get_gpu_compute_process_info() -> List[Dict[str, int]]:
             "cu_occupancy": proc.cu_occupancy,
             "evicted_time": proc.evicted_time,
         }
-        for proc in procs
+        for proc in procs[: num_items.value]
     ]
 
 
