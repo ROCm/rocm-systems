@@ -89,6 +89,11 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
                          std::unordered_set<uint64_t>* gpu_set);
 
+// Whether KFD has a process directory named pid, which it removes when the
+// process exits. Only meaningful outside a PID namespace: inside one, pid is
+// not the PID that KFD uses.
+bool KfdProcessExists(uint32_t pid);
+
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 
