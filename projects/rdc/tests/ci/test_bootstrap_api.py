@@ -2,8 +2,9 @@
 4.7  Bootstrap API Tests
 ========================
 Validates the librdc_bootstrap entry points that load librdc_client.so and
-librdc.so: the library loader under concurrent loads, and an embedded handle and
-a standalone handle in one process.
+librdc.so: the library loader under concurrent loads, an embedded handle and a
+standalone handle in one process, and device attributes for GPU indexes that do
+not exist.
 """
 
 import json
@@ -54,6 +55,35 @@ os._exit(0)  # skip unloading the client library at exit, which is not under tes
 )
 
 
+# Attributes of GPU indexes that do not exist: an error status and an empty name.
+_INVALID_GPU_ATTRIBUTES_PROBE = (
+    _PREAMBLE
+    + """
+class Attributes(ctypes.Structure):
+    _fields_ = [
+        ("device_name", ctypes.c_char * 256),
+        ("device_id", ctypes.c_uint64),
+        ("num_of_compute_units", ctypes.c_uint32),
+        ("target_graphics_version", ctypes.c_uint64),
+    ]
+
+
+rdc.rdc_device_get_attributes.argtypes = [P, ctypes.c_uint32, ctypes.POINTER(Attributes)]
+handle = start_embedded()
+results = []
+for index in (9999, 4242, 100000):
+    attributes = Attributes()
+    attributes.device_name = b"X" * 255
+    status = rdc.rdc_device_get_attributes(handle, index, ctypes.byref(attributes))
+    name = ctypes.string_at(ctypes.addressof(attributes), 256).split(b"\\0")[0]
+    results.append({"index": index, "status": status, "name": name.hex()})
+assert rdc.rdc_stop_embedded(handle) == 0
+assert rdc.rdc_shutdown() == 0
+print(json.dumps(results))
+"""
+)
+
+
 def _run_probe(probe, lib_dir):
     """Run a probe in a child process; return its parsed JSON result line."""
     env = dict(os.environ)
@@ -97,3 +127,17 @@ class TestBootstrapLoader:
         if "skip" in result:
             pytest.skip(result["skip"])
         assert result["get_all"] == 0 and result["count"] > 0
+
+
+class TestDeviceAttributes:
+    """rdc_device_get_attributes() must never hand back uninitialized bytes."""
+
+    def test_invalid_gpu_has_empty_name(self, lib_dir, has_gpu):
+        if not has_gpu:
+            pytest.skip("No GPU -- embedded mode needs one")
+        results = _run_probe(_INVALID_GPU_ATTRIBUTES_PROBE, lib_dir)
+        if "skip" in results:
+            pytest.skip(results["skip"])
+        for result in results:
+            assert result["status"] != 0, result
+            assert result["name"] == "", result

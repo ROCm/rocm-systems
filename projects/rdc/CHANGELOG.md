@@ -16,6 +16,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_connect()` no longer breaks other RDC handles in the same process. Stopping an embedded handle after `rdc_connect()` no longer crashes, and `rdc_connect()` calls from several threads at once no longer fail at random.
 
+- `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. `rdc_device_get_attributes()` no longer returns uninitialized memory as the GPU name when it fails.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added

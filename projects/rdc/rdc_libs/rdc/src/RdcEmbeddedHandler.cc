@@ -214,6 +214,11 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   }
   rdc_field_value device_name;
   rdc_status_t status = metric_fetcher_->fetch_smi_field(gpu_index, RDC_FI_DEV_NAME, &device_name);
+  if (status != RDC_ST_OK) {
+    // A failed fetch leaves the value unset; return an empty name, not stack contents.
+    p_rdc_attr->device_name[0] = '\0';
+    return status;
+  }
   strncpy_with_null(p_rdc_attr->device_name, device_name.value.str, RDC_MAX_STR_LENGTH);
   return status;
 }

@@ -107,7 +107,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
   uint32_t gpu_index = request->gpu_index();
-  rdc_device_attributes_t attribute;
+  rdc_device_attributes_t attribute = {};
   rdc_status_t result = rdc_device_get_attributes(rdc_handle_, gpu_index, &attribute);
 
   ::rdc::DeviceAttributes* attr = reply->mutable_attributes();
