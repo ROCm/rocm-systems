@@ -157,7 +157,7 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = false;
   std::vector<amd::CommandQueue*> activeQueues;
-  void* fence_signal = nullptr;
+  void* wait_signal = nullptr;
 
   auto waitForStream = [&](hip::Stream* stream) {
     if (amd::Command* command = stream->getLastQueuedCommand(true)) {
@@ -168,21 +168,20 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
       if (!ready) {
         ready = (command->status() == CL_COMPLETE);
       }
-      // Cache maintenance, not ordering: never skipped by the fence memo.
+      // Cache maintenance, not ordering: never skipped by the blocking tracker.
       submitMarker |= stream->vdev()->isFenceDirty();
       if (!ready) {
         command->notifyCmdQueue();
         if (wait_null_stream) {
-          // The HW signal the fence below would wait on (as in IsHwEventReady).
+          // The HW signal the marker below would wait on (as in IsHwEventReady).
           void* signal =
               (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
-          if (blocking_stream->IsFencedOn(signal)) {
-            // An earlier fence on this stream already waits on the same signal.
-            // Skipping keeps later dispatches free of a redundant barrier packet.
+          if (blocking_stream->IsBlockedOn(signal)) {
+            // This stream already waits on the same signal; skip the redundant marker.
             command->release();
             return;
           }
-          fence_signal = signal;
+          wait_signal = signal;
         }
         eventWaitList.push_back(command);
       } else {
@@ -219,9 +218,9 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
     marker->release();
   }
 
-  // Publish only once the fence is queued, so a racing launch can't skip ahead of it
-  if (fence_signal != nullptr) {
-    blocking_stream->SetFencedOn(fence_signal);
+  // Publish only once the marker is queued, so a racing launch can't skip ahead of it
+  if (wait_signal != nullptr) {
+    blocking_stream->SetBlockedOn(wait_signal);
   }
 
   // Release all active commands; safe after the marker was enqueued

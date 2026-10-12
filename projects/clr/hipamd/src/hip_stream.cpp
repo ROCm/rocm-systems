@@ -53,22 +53,22 @@ Stream::Stream(hip::Device* dev, Priority p, unsigned int f, bool null_stream,
 
 // ================================================================================================
 // Out of line so that captureGraph_'s deleter is instantiated where hip::Graph is complete.
-Stream::~Stream() { device().ReleaseGlobalSignal(null_fence_signal_); }
+Stream::~Stream() { device().ReleaseGlobalSignal(blocked_on_signal_); }
 
 // ================================================================================================
-bool Stream::IsFencedOn(void* signal) const {
-  std::lock_guard<std::mutex> lock(null_fence_lock_);
-  return signal != nullptr && signal == null_fence_signal_;
+bool Stream::IsBlockedOn(void* signal) const {
+  std::lock_guard<std::mutex> lock(blocked_on_lock_);
+  return signal != nullptr && signal == blocked_on_signal_;
 }
 
 // ================================================================================================
-void Stream::SetFencedOn(void* signal) {
+void Stream::SetBlockedOn(void* signal) {
   device().RetainGlobalSignal(signal);
   void* old = nullptr;
   {
-    std::lock_guard<std::mutex> lock(null_fence_lock_);
-    old = null_fence_signal_;
-    null_fence_signal_ = signal;
+    std::lock_guard<std::mutex> lock(blocked_on_lock_);
+    old = blocked_on_signal_;
+    blocked_on_signal_ = signal;
   }
   device().ReleaseGlobalSignal(old);
 }
