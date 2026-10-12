@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/common/container/record_header_buffer.hpp"
 #include "lib/common/container/ring_buffer.hpp"
+#include "lib/common/container/record_header_buffer.hpp"
 #include "lib/common/units.hpp"
 
 #include <gtest/gtest.h>
