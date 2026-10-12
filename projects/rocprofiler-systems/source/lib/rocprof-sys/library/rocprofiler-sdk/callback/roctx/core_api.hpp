@@ -14,7 +14,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <optional>
 #include <stack>
 #include <string>
 #include <string_view>
@@ -412,7 +411,7 @@ inline constexpr auto k_core_api = callback_domain_definition<SdkBackend>{
     .meta      = domain_descriptor{ .name  = "marker_core_api",
                                     .id    = SdkBackend::CALLBACK_TRACING_MARKER_CORE_API,
                                     .mode  = collection_mode::callback,
-                                    .group = std::nullopt },
+                                    .group = domain_group{ .name = "roctx" } },
     .on_record = tracing_callback_dispatcher<
         SdkBackend, on_roctx_core_enter<SdkBackend, Externals, roctx_api_category>,
         on_roctx_core_exit<SdkBackend, Externals, roctx_api_category>>::callback,

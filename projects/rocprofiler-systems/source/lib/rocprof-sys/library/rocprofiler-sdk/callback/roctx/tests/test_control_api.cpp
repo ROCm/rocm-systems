@@ -67,7 +67,8 @@ TEST_F(roctx_control_api_test, control_api_descriptor_reports_marker_control_met
     EXPECT_EQ(k_domain.meta.name, "marker_control_api");
     EXPECT_EQ(k_domain.meta.id, sdk::CALLBACK_TRACING_MARKER_CONTROL_API);
     EXPECT_EQ(k_domain.meta.mode, collection_mode::callback);
-    EXPECT_FALSE(k_domain.meta.group.has_value());
+    ASSERT_TRUE(k_domain.meta.group.has_value());
+    EXPECT_EQ(k_domain.meta.group->name, "roctx");
     EXPECT_NE(k_domain.on_record, nullptr);
     EXPECT_EQ(k_domain.on_configure, nullptr);
 }

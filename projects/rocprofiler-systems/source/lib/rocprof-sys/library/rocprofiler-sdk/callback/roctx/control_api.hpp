@@ -7,7 +7,7 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
-#include <optional>
+#include <string_view>
 
 namespace rocprofsys::domains::callback::roctx
 {
@@ -52,7 +52,7 @@ inline constexpr auto k_control_api = callback_domain_definition<SdkBackend>{
             .name  = "marker_control_api",
             .id    = SdkBackend::CALLBACK_TRACING_MARKER_CONTROL_API,
             .mode  = collection_mode::callback,
-            .group = std::nullopt,
+            .group = domain_group{ .name = "roctx" },
         },
     .on_record = tracing_callback_dispatcher<
         SdkBackend, on_roctx_control_enter<SdkBackend, Externals>,
