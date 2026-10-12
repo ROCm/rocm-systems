@@ -64,7 +64,7 @@ class Workload:
     path: str = field(default_factory=str)
     # Marker CSV / counter CSV pairs, one entry per profiling pass.
     ml_api_trace_pairs: list[MlApiTracePair] = field(default_factory=list)
-    # Dispatches unmatched on Correlation_ID, plus GUID when both frames have it.
+    # Dispatches unmatched on Correlation_ID and GUID.
     unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
     # Consolidated marker rows after matching operator calls across passes.
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)

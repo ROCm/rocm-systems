@@ -11,7 +11,7 @@ class MlApiTraceError(Exception):
 
 
 class UnaccountedKernelError(MlApiTraceError):
-    """Dispatch unmatched on Correlation_ID, plus GUID when both frames have it."""
+    """Dispatch unmatched on Correlation_ID and GUID."""
 
     def __init__(self, unmatched_rows: pd.DataFrame) -> None:
         self.unmatched_rows = unmatched_rows

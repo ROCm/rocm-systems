@@ -1014,7 +1014,7 @@ when that suffix is absent (user-defined ROCTX ranges).
 
 The on-disk per-pass join column is ``Correlation_Id``. Analyze canonicalizes
 it to ``Correlation_ID`` and joins a marker range to kernel dispatches on
-that column, plus ``GUID`` when both files have that column.
+``Correlation_ID`` and ``GUID``.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).

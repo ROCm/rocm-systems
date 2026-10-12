@@ -91,8 +91,8 @@ between those formats.
 
 Profile copies marker CSVs unchanged. `--list-*-operators` / `--*-operator`
 rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
-`Correlation_ID`, plus `GUID` when both frames have that column, parse
-Function, then nest marker intervals per `Thread_Id`.
+`Correlation_ID` and `GUID`, parse Function, then nest marker intervals
+per `Thread_Id`.
 
 Coverage issues warn during join and attach, before the call tree is
 printed. Integrity failures abort analyze, so no tree is printed. Plain
