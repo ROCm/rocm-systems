@@ -63,8 +63,10 @@ fi
 export RCCL_BUILD_JOBS
 build_jobs="${RCCL_BUILD_JOBS}"
 
-# --- build phase -> build-%j.{out,err}. Runs in a subshell so any failure (a
-# hard `exit` or a set -e abort) is caught below and skips the test phase. ---
+# --- build phase -> build-%j.{out,err}. Runs in a subshell so a hard `exit` or
+# a failing final command is caught below and skips the test phase. `set -e` is
+# ignored inside the subshell (it is the left operand of `||`), so each step
+# relies on the explicit check that follows it. ---
 build_rc=0
 (
 # 1) ROCm: provisioned on the head node from TheRock CI artifacts; consume the
@@ -278,6 +280,12 @@ if [[ "${nongin_rc}" -ne 0 || "${gin_rc}" -ne 0 ]]; then
   echo "ERROR: device-api tests failed (nongin_rc=${nongin_rc} gin_rc=${gin_rc})" >&2
   echo "----- last 60 lines of ${test_err} -----" >&2
   tail -n 60 "${test_err}" >&2 || true
+  # run-device-api-ci.sh writes "=== FAILED RUNS" to stdout. The non-GIN matrix
+  # is followed by the GIN matrix, so that summary can sit above the last 60 lines.
+  echo "----- FAILED RUNS in ${test_out} -----" >&2
+  grep -E -A 30 '^=== FAILED RUNS' "${test_out}" >&2 || true
+  echo "----- last 60 lines of ${test_out} -----" >&2
+  tail -n 60 "${test_out}" >&2 || true
   if [[ "${nongin_rc}" -ne 0 ]]; then
     exit "${nongin_rc}"
   fi
