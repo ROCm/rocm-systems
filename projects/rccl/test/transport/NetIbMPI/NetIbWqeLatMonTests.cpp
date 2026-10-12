@@ -8,6 +8,10 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include <sstream>
+#include <string>
+
+#include "LogCapture.hpp"
 #include "NetIbWqeLatInspect.hpp"
 
 /*
@@ -20,7 +24,8 @@
  * stamps the first signaled WQE on an idle QP at post time and closes the
  * sample when ncclIbTest polls its CQE. The CQ is only polled from test(), so
  * a test that posts and then sleeps before polling produces a known minimum
- * latency.
+ * latency. Closing a send comm logs one NET INFO summary per QP that holds
+ * samples, unless NCCL_IB_WQE_LATENCY_REPORT=0.
  *
  * The monitor's switches are process globals set once from the environment.
  * Tests that need it on (or off) regardless of the launch environment
@@ -33,6 +38,14 @@
 namespace {
 
 constexpr uint64_t kNoSlowThresholdNs = UINT64_MAX;
+constexpr const char* kSummaryPrefix = "NET/IB: WQE latency summary [";
+
+// What NCCL_IB_WQE_LATENCY_REPORT should resolve to, worked out from the
+// environment independently of the library's parsing: on unless set to 0.
+bool envReportExpected() {
+    const char* repEnv = getenv("NCCL_IB_WQE_LATENCY_REPORT");
+    return repEnv ? strtoll(repEnv, nullptr, 0) != 0 : true;
+}
 
 struct WqeLatTotals {
     uint64_t count = 0;
@@ -118,10 +131,56 @@ protected:
         }
     }
 
+    // Closes sendComm with NET INFO logging raised and checks the close-time
+    // summaries against st, the comm's state after its last transfer. With
+    // reporting on there is exactly one per QP holding samples, carrying that
+    // QP's sample count; with it off there are none. RCCL logs to stdout
+    // unless NCCL_DEBUG_FILE redirects it, so the log is only checked then.
+    void CloseSendAndCheckSummaries(void* sendComm, const struct ncclIbWqeLatCommState& st, bool expectSummaries) {
+        ncclResult_t closeResult = ncclSuccess;
+        std::string log;
+        {
+            RcclUnitTesting::ScopedDebugLogging logging(NCCL_LOG_INFO, NCCL_NET);
+            log = RcclUnitTesting::CaptureStdout([&]() { closeResult = net_->closeSend(sendComm); });
+        }
+        EXPECT_EQ(closeResult, ncclSuccess);
+        if (getenv("NCCL_DEBUG_FILE") != nullptr) {
+            TEST_INFO("Rank %d: NCCL_DEBUG_FILE is set, close-time summaries not checked",
+                      MPIEnvironment::world_rank);
+            return;
+        }
+
+        std::vector<std::string> summaries;
+        std::istringstream in(log);
+        for (std::string line; std::getline(in, line);) {
+            if (line.find(kSummaryPrefix) != std::string::npos) summaries.push_back(line);
+        }
+        int sampledQps = 0;
+        for (int q = 0; q < st.nqps; q++) {
+            const struct ncclIbWqeLatQpState& s = st.qps[q];
+            if (s.stats.count == 0) continue;
+            sampledQps++;
+            if (!expectSummaries) continue;
+            const std::string qpnField = "qpn=" + std::to_string(s.qpNum) + " ";
+            const std::string countField = "]: n=" + std::to_string(s.stats.count) + " ";
+            int matches = 0;
+            for (const std::string& line : summaries) {
+                if (line.find(qpnField) == std::string::npos) continue;
+                matches++;
+                EXPECT_NE(line.find(std::string(kSummaryPrefix) + "send "), std::string::npos) << line;
+                EXPECT_NE(line.find(countField), std::string::npos) << "qp " << q << ": " << line;
+            }
+            EXPECT_EQ(matches, 1) << "qp " << q << " qpn " << s.qpNum;
+        }
+        EXPECT_GT(sampledQps, 0);
+        EXPECT_EQ(summaries.size(), expectSummaries ? (size_t)sampledQps : 0u) << log;
+    }
+
     // Sync transfers followed by the per-QP accounting every enabled run must
     // satisfy: one sample per signaled WQE, nothing left in flight, and no
     // samples on the receive side (which never posts through ncclIbMultiSend).
-    void CheckSyncTransfersAreCounted(const char* tag, bool expectNoSlow) {
+    // Then the sender closes its comm and checks the close-time summaries.
+    void CheckSyncTransfersAreCounted(const char* tag, bool expectNoSlow, bool expectSummaries) {
         const int rank = MPIEnvironment::world_rank;
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
@@ -181,6 +240,16 @@ protected:
             EXPECT_EQ(t.count, 0u);
         }
         MPI_Barrier(MPI_COMM_WORLD);
+
+        if (rank == 1) {
+            // Deregister before the explicit close: the guard would otherwise
+            // deregister on scope exit, against an already closed comm.
+            mhandleGuard.reset();
+            void* sendComm = pair.sendComm;
+            connGuard.setSendComm(nullptr);
+            CloseSendAndCheckSummaries(sendComm, st, expectSummaries);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 };
 
@@ -200,7 +269,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvKnobs) {
     const char* thrEnv = getenv("NCCL_IB_WQE_LATENCY_THRESHOLD_NS");
     const char* repEnv = getenv("NCCL_IB_WQE_LATENCY_REPORT");
     const long long thr = thrEnv ? strtoll(thrEnv, nullptr, 0) : 0;
-    const bool report = repEnv ? strtoll(repEnv, nullptr, 0) != 0 : true;
+    const bool report = envReportExpected();
     TEST_INFO("Rank %d: NCCL_IB_WQE_LATENCY_THRESHOLD_NS=%s NCCL_IB_WQE_LATENCY_REPORT=%s -> enabled=%d thr=%lu "
               "report=%d",
               MPIEnvironment::world_rank, thrEnv ? thrEnv : "(unset)", repEnv ? repEnv : "(unset)",
@@ -260,14 +329,29 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDisabledRecordsNothing) {
 // With nothing else in flight, every signaled WQE is tracked, so after N
 // synchronous sends the send comm holds exactly N * nqpsPerRequest samples
 // (N per QP when each request uses every QP), with percentiles bounded by max.
-// A threshold no completion can exceed keeps slow at 0.
+// A threshold no completion can exceed keeps slow at 0. Closing the send comm
+// logs one summary per sampled QP.
 // =============================================================================
 TEST_F(NetIbWqeLatMonTest, WqeLatMonSyncSendsCountEverySignaledWqe) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
     ScopedWqeLatGlobals g(true, kNoSlowThresholdNs);
     AssertInitAndGetDevices(nullptr);
 
-    CheckSyncTransfersAreCounted("sync", /*expectNoSlow=*/true);
+    CheckSyncTransfersAreCounted("sync", /*expectNoSlow=*/true, /*expectSummaries=*/true);
+}
+
+// =============================================================================
+// Test: WqeLatMonReportOffSuppressesSummaries
+//
+// With reporting off the monitor still records every sample, but closing the
+// send comm logs no summary.
+// =============================================================================
+TEST_F(NetIbWqeLatMonTest, WqeLatMonReportOffSuppressesSummaries) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
+    ScopedWqeLatGlobals g(true, kNoSlowThresholdNs, /*report=*/false);
+    AssertInitAndGetDevices(nullptr);
+
+    CheckSyncTransfersAreCounted("report-off", /*expectNoSlow=*/true, /*expectSummaries=*/false);
 }
 
 // =============================================================================
@@ -419,7 +503,9 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
 //
 // End-to-end enablement through the environment alone (no global overrides):
 // when NCCL_IB_WQE_LATENCY_THRESHOLD_NS > 0 the monitor must record every
-// signaled WQE of synchronous sends. Skipped when the variable is unset.
+// signaled WQE of synchronous sends, and closing the send comm must log
+// summaries exactly when NCCL_IB_WQE_LATENCY_REPORT leaves reporting on.
+// Skipped when the threshold is unset.
 // =============================================================================
 TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
@@ -434,7 +520,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     AssertInitAndGetDevices(nullptr);
     ASSERT_TRUE(ncclIbWqeLatEnabled);
 
-    CheckSyncTransfersAreCounted("env", /*expectNoSlow=*/false);
+    CheckSyncTransfersAreCounted("env", /*expectNoSlow=*/false, /*expectSummaries=*/envReportExpected());
 }
 
 #endif  // MPI_TESTS_ENABLED

@@ -19,13 +19,14 @@
  * std::call_once (ensureInitialized, triggered by ncclIbWqeLatMonInit), so that
  * is fired first: otherwise the first QP created under the override would run
  * it and overwrite the override. When used around live connections the guard
- * must outlive every connection created under it.
+ * must outlive every connection created under it. report only matters when
+ * enabled: the library never reports with the monitor off.
  */
 struct ScopedWqeLatGlobals {
     bool savedEnabled;
     uint64_t savedThresholdNs;
     bool savedReport;
-    ScopedWqeLatGlobals(bool enabled, uint64_t thresholdNs) {
+    ScopedWqeLatGlobals(bool enabled, uint64_t thresholdNs, bool report = true) {
         struct ncclIbWqeLatMon dummy;
         ncclIbWqeLatMonInit(&dummy);
         savedEnabled = ncclIbWqeLatEnabled;
@@ -33,7 +34,7 @@ struct ScopedWqeLatGlobals {
         savedReport = ncclIbWqeLatReportEnabled;
         ncclIbWqeLatEnabled = enabled;
         ncclIbWqeLatThresholdNs = enabled ? thresholdNs : 0;
-        ncclIbWqeLatReportEnabled = enabled;
+        ncclIbWqeLatReportEnabled = enabled && report;
     }
     ~ScopedWqeLatGlobals() {
         ncclIbWqeLatEnabled = savedEnabled;

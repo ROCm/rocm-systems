@@ -501,6 +501,16 @@
       }
     },
 
+    "net_ib_wqe_lat_env_report_off": {
+      "extends": "net_ib_wqe_lat",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET",
+        "NCCL_IB_WQE_LATENCY_THRESHOLD_NS": "1000000",
+        "NCCL_IB_WQE_LATENCY_REPORT": "0"
+      }
+    },
+
     "cast_base": {
       "extends": "net_ib_base",
       "env_variables": {
@@ -1657,6 +1667,12 @@
       "name": "NET IB - WQE Latency Monitor Env-Enabled",
       "description": "AICOMRCCL-2013: monitor enabled only through NCCL_IB_WQE_LATENCY_THRESHOLD_NS=1000000, summary lines in NET INFO log",
       "config": "net_ib_wqe_lat_env",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor Env-Enabled Report-Off",
+      "description": "AICOMRCCL-2013: monitor enabled through NCCL_IB_WQE_LATENCY_THRESHOLD_NS=1000000 with NCCL_IB_WQE_LATENCY_REPORT=0: samples recorded, no close-time summary lines",
+      "config": "net_ib_wqe_lat_env_report_off",
       "enabled": true
     },
     {
