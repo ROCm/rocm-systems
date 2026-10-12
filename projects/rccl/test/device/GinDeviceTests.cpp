@@ -821,10 +821,9 @@ static uint64_t watchdogDeadlineTicks() {
   return 2000ULL * static_cast<uint64_t>(std::max(rateKhz, 1));
 }
 
-// Watchdog for one block: until state[0] reaches nDone, after ticks it records a rescue in state[1] and keeps
-// cis[pe] at pis[pe], so a wait that ignores abortFlag ends as a test failure instead of a hang.
+// Until state[0] hits nDone; after ticks it sets state[1], drains cis[pe] and raises abortFlag, so stuck waits fail.
 static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe, uint32_t nDone, uint64_t ticks,
-                                          uint32_t* state) {
+                                          uint32_t* state, uint32_t* abortFlag = nullptr) {
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> done(state[0]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> pi(proxyCtx->pis[pe]);
   cuda::atomic_ref<uint32_t, cuda::thread_scope_system> ci(proxyCtx->cis[pe]);
@@ -833,6 +832,9 @@ static __device__ void drainAfterDeadline(ncclGinProxyGpuCtx_t* proxyCtx, int pe
     if (wall_clock64() - startTick >= ticks) {
       state[1] = 1u;
       ci.store(pi.load(cuda::memory_order_acquire), cuda::memory_order_release);
+      if (abortFlag != nullptr) {
+        cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(*abortFlag).store(1u, cuda::memory_order_release);
+      }
     }
   }
 }
@@ -2140,10 +2142,10 @@ static __device__ void spinWallTicks(uint64_t ticks) {
   }
 }
 
-// Block 1 posts a GFD after block 0's flush read pi, then sets ci to the old pi; state is {returned, rescued, entered}.
+// Block 1 posts a GFD after flush read pi, then sets ci to the old pi; state is {returned, rescued, entered, early}.
 __global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint32_t pe, bool timed,
                                                  uint64_t timeoutCycles, uint64_t graceTicks, uint64_t watchdogTicks,
-                                                 ncclResult_t* outResult, uint32_t* state) {
+                                                 uint32_t* abortFlag, ncclResult_t* outResult, uint32_t* state) {
   if (threadIdx.x != 0) {
     return;
   }
@@ -2151,10 +2153,9 @@ __global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint
   if (blockIdx.x == 0) {
     entered.store(1u, cuda::memory_order_release);
     if (timed) {
-      *outResult = nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, /*abortFlag=*/nullptr, clock64(),
-                                           timeoutCycles);
+      *outResult = nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag, clock64(), timeoutCycles);
     } else {
-      nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, /*abortFlag=*/nullptr);
+      nccl::gin::proxy::flush(ctx, pe, cuda::memory_order_acquire, abortFlag);
     }
     cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).store(1u, cuda::memory_order_release);
     return;
@@ -2169,8 +2170,10 @@ __global__ void kernelProxyFlushIgnoresLaterPost(ncclGinProxyGpuCtx_t* ctx, uint
   const uint32_t snapshot = pi.fetch_add(1u, cuda::memory_order_acq_rel);
   // A second grace lets the post become visible first, so a re-reading flush cannot pair the old pi with the new ci.
   spinWallTicks(graceTicks);
+  // A flush that returned before ci reached its snapshot did not wait at all.
+  state[3] = cuda::atomic_ref<uint32_t, cuda::thread_scope_system>(state[0]).load(cuda::memory_order_acquire);
   ci.store(snapshot, cuda::memory_order_release);
-  drainAfterDeadline(ctx, static_cast<int>(pe), /*nDone=*/1u, watchdogTicks, state);
+  drainAfterDeadline(ctx, static_cast<int>(pe), /*nDone=*/1u, watchdogTicks, state, abortFlag);
 }
 
 TEST_F(GinDeviceTest, ProxyFlush_IgnoresGfdPostedAfterPiSnapshot) {
@@ -2187,15 +2190,17 @@ TEST_F(GinDeviceTest, ProxyFlush_IgnoresGfdPostedAfterPiSnapshot) {
     // Peer 0 is a decoy with one GFD pending; peer 1 has one GFD in flight at the snapshot.
     ProxyFlushQueues queues({4u, kSnapshot}, {3u, kSnapshot - 1u});
     DeviceBuffer<ncclResult_t> d_result(1);
-    DeviceBuffer<uint32_t> d_state(3);
+    DeviceBuffer<uint32_t> d_state(4);
+    DeviceBuffer<uint32_t> d_abort(1);
     d_result.upload(ncclInProgress);
     d_state.zero();
+    d_abort.zero();
 
     kernelProxyFlushIgnoresLaterPost<<<2, 1>>>(queues.d_ctx.ptr, kPe, timed, kProxyFlushLongTimeoutCycles, graceTicks,
-                                               watchdogDeadlineTicks(), d_result.ptr, d_state.ptr);
+                                               watchdogDeadlineTicks(), d_abort.ptr, d_result.ptr, d_state.ptr);
     syncAndCheck();
-    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u, 1u}))
-      << "{returned, rescued, entered}: rescued=1 means flush waited for a GFD posted after it read pi";
+    EXPECT_EQ(d_state.copyTo(), (std::vector<uint32_t>{1u, 0u, 1u, 0u}))
+      << "{returned, rescued, entered, early}: rescued=1: flush outlived the watchdog; early=1: it never waited";
     if (timed) {
       EXPECT_EQ(d_result.download(), ncclSuccess) << "flush must return once ci reaches the pi it read on entry";
     }
