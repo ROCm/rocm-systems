@@ -107,29 +107,6 @@ auto s_consumer_transition_in_progress = std::atomic<bool>{false};
 // virtual_wptr after unlock (seen as GPU-busy hangs with stalled tracers).
 auto s_bypass_inflight = std::atomic<uint32_t>{0};
 
-struct bypass_inflight_guard
-{
-    bypass_inflight_guard() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }
-    ~bypass_inflight_guard() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); }
-    bypass_inflight_guard(const bypass_inflight_guard&)            = delete;
-    bypass_inflight_guard& operator=(const bypass_inflight_guard&) = delete;
-};
-
-void
-wait_for_bypass_quiesce()
-{
-    while(s_bypass_inflight.load(std::memory_order_acquire) > 0)
-    {
-#if defined(__x86_64__) || defined(__i386__)
-        __builtin_ia32_pause();
-#elif defined(__aarch64__)
-        asm volatile("yield" ::: "memory");
-#else
-        std::this_thread::yield();
-#endif
-    }
-}
-
 bool
 has_active_queue_interposition_consumers()
 {
@@ -415,6 +392,15 @@ resolve_ring_properties(const void* ring_buf)
 
     ring_props.host = resolve_host_link(owner);
     return ring_props;
+}
+
+// Wait until no bypass write-index/doorbell call is in flight. New bypass
+// calls may still start after this returns.
+void
+wait_for_bypass_idle()
+{
+    while(s_bypass_inflight.load(std::memory_order_acquire) > 0)
+        cpu_relax();
 }
 
 // Per-thread handoff from process_doorbell_impl() to ring_buffer_writer().
@@ -1997,7 +1983,9 @@ namespace impl
     {                                                                                              \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            bypass_inflight_guard _bypass_guard{};                                                 \
+            auto _bypass_guard = common::scope_destructor{                                         \
+                []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
+                []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
             return get_next_table()->hsa_queue_add_write_index_##SUFFIX##_fn(q, v);                \
         }                                                                                          \
         if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s) \
@@ -2018,7 +2006,9 @@ ROCP_QUEUE_ADD_WRITE_INDEX(screlease, std::memory_order_release)
     {                                                                                              \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            bypass_inflight_guard _bypass_guard{};                                                 \
+            auto _bypass_guard = common::scope_destructor{                                         \
+                []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
+                []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
             get_next_table()->hsa_queue_store_write_index_##SUFFIX##_fn(q, v);                     \
             return;                                                                                \
         }                                                                                          \
@@ -2042,7 +2032,9 @@ ROCP_QUEUE_STORE_WRITE_INDEX(screlease, std::memory_order_release)
     {                                                                                              \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            bypass_inflight_guard _bypass_guard{};                                                 \
+            auto _bypass_guard = common::scope_destructor{                                         \
+                []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
+                []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
             return get_next_table()->hsa_queue_cas_write_index_##SUFFIX##_fn(q, expected, value);  \
         }                                                                                          \
         if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s) \
@@ -2083,7 +2075,9 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
         /* inbox lock and disposes of its own batch if it lost the race. */                        \
         if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
-            bypass_inflight_guard _bypass_guard{};                                                 \
+            auto _bypass_guard = common::scope_destructor{                                         \
+                []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
+                []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
             get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
             return;                                                                                \
         }                                                                                          \
@@ -2128,7 +2122,7 @@ drain_intercept_work(bool sync_async_handlers)
     fence_all_queue_gates();
     // Bypass write-index / doorbell paths do not take gate_lock; wait for any
     // that already sampled should_bypass==true to finish before resync.
-    wait_for_bypass_quiesce();
+    wait_for_bypass_idle();
 
     if(sync_async_handlers) interposition_sync();
 }
@@ -2164,35 +2158,41 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
 
     const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
 
-    // Resync while the consumer count is still zero (bypass active), then
-    // increment. Increment-before-resync closes the old bypass window but
-    // enables intercept on stale shadow state; resync-then-increment without
-    // a lock recreates the bypass window (ring underflow / stalled waiters).
+    // First consumer only. Resync shadow from hardware before trusting intercept.
+    // Increment-before-resync turns intercept on with a stale shadow; a plain
+    // resync-then-increment without holding bypass open races live doorbells.
     if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
     {
         auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
         if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
         {
-            // Force bypass across drain, resyncs, and the absorb fence so intercept
-            // doorbells cannot interleave with shadow updates. Clear the flag only
-            // after that absorb, then quiesce+resync once more for any TOCTOU
-            // bypass that raced the clear (otherwise hw_wdid can stay ahead of
-            // virtual_wptr and hang the next tracer session).
+            // Keep bypass forced while shadow catches up so producers are not
+            // stalled. wait_for_bypass_idle() only means "no bypass call in
+            // flight right now"; a doorbell can still finish between that wait
+            // and the following resync, so one wait+resync can miss an update.
+            // The repeated wait+resync pairs reduce that gap (chosen from hang
+            // repro; not a formal bound). fence_all_queue_gates() waits out
+            // intercept workers that hold gate_lock; bypass does not take that
+            // lock, so another wait+resync follows the fence. After clearing
+            // the force-bypass flag, one more wait+resync covers threads that
+            // already entered bypass and are still in the next-table call.
+            //
+            // Tradeoff: a few dispatches during this window may not be traced.
+            // Prefer a stable application and later sessions over capturing
+            // every record on the cutover.
             s_consumer_transition_in_progress.store(true, std::memory_order_release);
             drain_intercept_work(true);
             resync_all_queue_shadow_states();
             s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
-            wait_for_bypass_quiesce();
+            wait_for_bypass_idle();
             resync_all_queue_shadow_states();
-            wait_for_bypass_quiesce();
+            wait_for_bypass_idle();
             resync_all_queue_shadow_states();
             fence_all_queue_gates();
-            wait_for_bypass_quiesce();
+            wait_for_bypass_idle();
             resync_all_queue_shadow_states();
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
-            // Threads that sampled bypass while transition was true may still be
-            // inside next-table write-index/doorbell. Wait them out, then absorb.
-            wait_for_bypass_quiesce();
+            wait_for_bypass_idle();
             resync_all_queue_shadow_states();
             return;
         }
