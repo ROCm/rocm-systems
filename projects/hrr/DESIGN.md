@@ -312,9 +312,9 @@ a slot that another component changed after install keeps its new value. The com
 dispatch table receives its shims the same way. It loses them, the same way, only when
 the archive cannot be opened, at init or in a forked child, never at shutdown.
 
-The live tables follow one contract between writers and readers:
+HRR's writes to the live tables and the HIP entry points follow one contract:
 
-- A writer changes one slot at a time with a single atomic store of the aligned pointer,
+- HRR changes one slot at a time with a single atomic store of the aligned pointer,
   with release order or stronger. It never copies a table over as a whole.
 - Every HIP entry point in `hip_table_interface.cpp` loads its slot with an acquire load,
   `hip::LoadDispatchSlot` from `projects/clr/hipamd/src/hip_dispatch_load.hpp`, through
@@ -327,6 +327,12 @@ with the release store, so a shim also sees what was written before its install,
 as `g_real_table`. An acquire load of a pointer is a plain load on x86-64 and `LDAR` on
 AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSanitizer.
 `hrr-unit-tests-dispatch-readers` fails if an entry point reads its slot directly.
+
+Other writers do not follow the contract yet. The CLR profiler
+(`projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp`) installs and removes
+its wrappers with a whole-table `memcpy`. rocprofiler-register tools write slots with
+ordinary stores during `ToolsInit()` in `hip_api_trace.cpp`. Those writes can race
+with the entry points.
 
 ### `<<<>>>` Launch Path — Compiler Dispatch Table
 
