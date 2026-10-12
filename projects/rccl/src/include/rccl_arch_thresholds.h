@@ -71,7 +71,7 @@ struct rcclArchThresholds {
 
   // CE registered-window upper bound per collective, total bytes.
   // For AllReduce: registered CE copies through user symmetric windows (tuning cap only).
-  // For AllGather: upper bound for CE-registered (R=2). 0 means no upper bound.
+  // For AllGather: upper bound for CE-registered (R=2).
   size_t ceRegMax[RCCL_DDA_FUNC_COUNT];
 
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
