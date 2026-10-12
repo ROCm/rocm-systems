@@ -815,7 +815,7 @@ Operator analyze exits when:
 * kernel-name and timestamp lists on a marker have unequal lengths
 * operator calls or kernel names disagree across passes
 
-Operator analyze warns during the join and continues when:
+Operator analyze warns before the tree is printed and continues when:
 
 * a kernel dispatch does not match any ROCTX range
 * attach cannot find the launcher thread
