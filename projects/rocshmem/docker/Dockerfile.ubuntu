@@ -17,9 +17,9 @@ ENV PATH="${PATH}:/app/"
 
 # Enable CRB and install system dependencies
 RUN apt-get update \
- && apt-get install -y software-properties-common \
+ && apt-get install -y --no-install-recommends software-properties-common \
  && apt-get update \
- && apt-get install -y \
+ && apt-get install -y --no-install-recommends \
       build-essential autoconf libtool flex bison pkg-config cmake git wget curl ca-certificates \
       libibverbs-dev ibverbs-utils libibumad-dev libpci-dev librdmacm-dev rdma-core infiniband-diags \
       python3-venv \
@@ -123,3 +123,6 @@ ENV OMPI_MCA_plm_rsh_args=-p$SSH_PORT \
 # System dependent: Ignore service/backend RoCE ifaces
 #ENV ROCSHMEM_HCA_LIST=^mlx5_6
 
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

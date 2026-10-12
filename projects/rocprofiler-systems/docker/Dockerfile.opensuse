@@ -27,6 +27,7 @@ RUN zypper --non-interactive update -y && \
         gcc-c++ gcc-fortran git gmock gtest iproute2 libdrm-devel libnuma-devel \
         ninja nlohmann_json-devel openmpi3-devel python3-pip rpm-build \
         sqlite3-devel wget libucp-devel libuct-devel && \
+    zypper clean --all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25'
 
@@ -45,7 +46,7 @@ RUN if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
         zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION_URL}/sle/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         zypper --non-interactive install -y rocm-dev rccl-devel libpciaccess0 && \
-        zypper --non-interactive clean --all; \
+        zypper clean --all; \
     fi
 
 ARG PYTHON_VERSIONS="8 9 10 11 12 13"
@@ -74,3 +75,7 @@ RUN if python3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)"
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

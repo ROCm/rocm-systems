@@ -133,3 +133,6 @@ ENV OMPI_ALLOW_RUN_AS_ROOT=1
 ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
 ENV NCCL_DEBUG=VERSION
 
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root
