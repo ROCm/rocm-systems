@@ -33,6 +33,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
   - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
 
+- **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
+  - When processes exited between its count and its read, the list ended with entries of undefined content.
+
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
