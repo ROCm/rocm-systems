@@ -30,6 +30,9 @@ Options:
 
 Environment (common):
   HRR_TRIAGE_WORKDIR   Output directory for findings and replay logs
+                       (default: $TMPDIR/hrr-triage-<uid>, mode 0700, never the
+                       archive; /tmp if TMPDIR is inside the archive, and a
+                       mktemp directory if that one is not ours)
   HRR_DOCKER_IMAGE     Docker image for --replay docker / auto
   HRR_DOCKER_MOUNT_CLR=1  Overlay host CLR for docker replay (dev builds)
   GPU                  Replay GPU ordinal (default: auto-pick)
@@ -39,17 +42,21 @@ Environment (common):
 EOF
 }
 
+needs_value() {
+  (( $2 >= 2 )) || { echo "error: $1 needs a value" >&2; exit 1; }
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
-    --archive) ARCHIVE="$2"; shift 2 ;;
+    --archive) needs_value --archive $#; ARCHIVE="$2"; shift 2 ;;
     --replay)
       if [[ $# -lt 2 || "$2" == --* ]]; then REPLAY_MODE="native"; shift
       else REPLAY_MODE="$2"; shift 2; fi ;;
     --no-replay) REPLAY_MODE="skip"; shift ;;
     --no-sync) NO_SYNC=1; shift ;;
-    -o|--output) OUTPUT="$2"; shift 2 ;;
-    --format) FORMAT="$2"; shift 2 ;;
+    -o|--output) needs_value --output $#; OUTPUT="$2"; shift 2 ;;
+    --format) needs_value --format $#; FORMAT="$2"; shift 2 ;;
     *) echo "error: unknown arg: $1" >&2; exit 1 ;;
   esac
 done
@@ -59,12 +66,61 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 [[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $ARCHIVE" >&2; exit 1; }
 
 name="$(basename "$ARCHIVE")"
-ts="$(date -u +%Y%m%dT%H%M%SZ)"
-WORKDIR="${HRR_TRIAGE_WORKDIR:-$(pwd)}"
-mkdir -p "$WORKDIR"
+# The pid keeps two runs in the same second from sharing a log and a finding.
+ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+# Never the current directory by default: run from inside a customer's archive
+# and the finding and the replay log land in it, against this skill's own rule
+# that the archive is not to be written to. Per user, because a shared /tmp
+# directory belongs to whoever ran first and the next user cannot write in it.
+# The archive here is the pid directory and, for a pid-<n> one, the capture
+# directory holding it. Paths are resolved before anything is created, so
+# TMPDIR=. from inside the archive is caught before it writes there.
+ARCHIVE_ROOT="$ARCHIVE"
+[[ "$name" == pid-* ]] && ARCHIVE_ROOT="$(dirname "$ARCHIVE")"
+in_archive() {
+  local p
+  p="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1")"
+  [[ "$p" == "$ARCHIVE_ROOT" || "$p" == "$ARCHIVE_ROOT"/* ]]
+}
+if [[ -n "${HRR_TRIAGE_WORKDIR:-}" ]]; then
+  WORKDIR="$HRR_TRIAGE_WORKDIR"
+  if in_archive "$WORKDIR"; then
+    echo "error: HRR_TRIAGE_WORKDIR is inside the archive: $WORKDIR" >&2
+    exit 1
+  fi
+  # Created private when we are the one creating it. An existing directory is
+  # the caller's business, but the finding inside it is not: see the chmod
+  # where it is written.
+  mkdir -p -m 700 "$WORKDIR"
+else
+  tmp_base="${TMPDIR:-/tmp}"
+  in_archive "$tmp_base" && tmp_base=/tmp
+  if in_archive "$tmp_base"; then
+    echo "error: the archive holds /tmp; set HRR_TRIAGE_WORKDIR outside it" >&2
+    exit 1
+  fi
+  WORKDIR="$tmp_base/hrr-triage-$(id -u)"
+  # 0700 and ours, or somewhere else entirely. The name is predictable, so on a
+  # shared host another user can get there first, and a finding names a
+  # customer's kernels and addresses. The capture itself can carry that name
+  # too, and then it is ours and writable and still the archive.
+  mkdir -p -m 700 "$WORKDIR" 2>/dev/null || true
+  if [[ -L "$WORKDIR" || ! -d "$WORKDIR" || ! -O "$WORKDIR" || ! -w "$WORKDIR" ]] ||
+     in_archive "$WORKDIR"; then
+    WORKDIR="$(mktemp -d "$tmp_base/hrr-triage-XXXXXX")"
+  else
+    chmod 700 "$WORKDIR" 2>/dev/null || true
+  fi
+fi
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
 FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
+# -o is checked too: a finding named into the archive writes there as surely
+# as a work directory inside it does. /dev/stdout is the caller's own stream.
+if [[ -n "$OUTPUT" ]] && ! [[ "$FINDING" -ef /dev/stdout ]] && in_archive "$FINDING"; then
+  echo "error: --output is inside the archive: $OUTPUT" >&2
+  exit 1
+fi
 
 pick_replay_mode() {
   if [[ "$REPLAY_MODE" != "auto" ]]; then echo "$REPLAY_MODE"; return; fi
@@ -80,25 +136,49 @@ setup_library_path() {
   if [[ "$bin_dir" == */bin ]]; then
     lib_dirs+=("$(cd "$bin_dir/../lib" 2>/dev/null && pwd || true)")
   fi
-  # A packaged playback ships as bin/ and lib/ siblings rather than inside a
-  # build tree. Without this its libamdhip64 is never on the path, so the
-  # binary loads the system one and fails on the symbols it was built against.
-  if [[ -d "$bin_dir/../lib" ]]; then
-    lib_dirs+=("$(cd "$bin_dir/../lib" && pwd)")
-  fi
+  # A packaged playback ships as bin/, lib/ and runtime-lib/ siblings rather
+  # than inside a build tree. Without these its libamdhip64 and libhsa are
+  # never on the path, so the binary loads the system ones and dies on the
+  # symbols it was built against. runtime-lib was missing here while the
+  # sibling skill's inspector had it, so `verify` could launch a reader that
+  # `triage` could not.
+  for p in lib runtime-lib; do
+    [[ -d "$bin_dir/../$p" ]] && lib_dirs+=("$(cd "$bin_dir/../$p" && pwd)")
+  done
   repo="$(cd "$SCRIPT_DIR/../../../../.." 2>/dev/null && pwd || true)"
   for p in "${ROCR_LIB:-}" "${repo:+$repo/projects/rocr-runtime/build-local/rocr/lib}"; do
     [[ -n "$p" && -f "$p/libhsa-runtime64.so.1" ]] || continue
     lib_dirs+=("$p"); break
   done
-  lib_dirs+=("$ROCM_PATH/lib")
-  for p in "${lib_dirs[@]}"; do
+  for p in ${lib_dirs[@]+"${lib_dirs[@]}"}; do
     [[ -d "$p" ]] || continue
     [[ ":$seen:" == *":$p:"* ]] && continue
     seen="${seen:+$seen:}$p"
     built="${built:+$built:}$p"
   done
-  export LD_LIBRARY_PATH="${built}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH:-}}"
+  # The caller's own value next, and $ROCM_PATH/lib last. Putting the ROCm
+  # install ahead of an explicitly set LD_LIBRARY_PATH bound libhsa from the
+  # system release in front of the reader's own, and a newer libamdhip64 then
+  # fails on a symbol that release does not have.
+  # Assembled a component at a time. An empty component, which is what
+  # "${built}:..." leaves when nothing was found, means the current directory
+  # to the loader, and this script is run from inside customer archives: a
+  # shared object sitting in one would be loaded ahead of ROCm. The caller's
+  # value can hold empty components of its own (/mine: or a::b), so it is
+  # split too.
+  local joined="" part parts=()
+  for p in "$built" "${LD_LIBRARY_PATH:-}" "${ROCM_PATH:+$ROCM_PATH/lib}"; do
+    IFS=: read -r -a parts <<< "$p"
+    for part in ${parts[@]+"${parts[@]}"}; do
+      [[ -n "$part" ]] || continue
+      joined="${joined:+$joined:}$part"
+    done
+  done
+  if [[ -n "$joined" ]]; then
+    export LD_LIBRARY_PATH="$joined"
+  else
+    unset LD_LIBRARY_PATH
+  fi
 }
 
 pick_gpu() {
@@ -113,6 +193,8 @@ pick_gpu() {
       # word Total and must be tested first. Total and used arrive on separate
       # lines whose order is not guaranteed, so collect both per device and
       # subtract at END rather than on whichever line happens to land last.
+      # printf, because mawk, the Ubuntu default, prints a difference that size
+      # as 2.73804e+11, which the bash arithmetic above cannot read.
       /GPU\[/ {
         id = $1; gsub(/[^0-9]/, "", id)
         if ($0 ~ /Total Used Memory/) used[id] = $NF
@@ -120,7 +202,7 @@ pick_gpu() {
       }
       END {
         for (id in total)
-          if (id in used) print id, total[id] - used[id]
+          if (id in used) printf "%s %.0f\n", id, total[id] - used[id]
       }')
     [[ -n "$best" ]] && { echo "[triage] GPU $best (most free VRAM)" >&2; echo "$best"; return; }
   fi
@@ -258,6 +340,11 @@ elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSUR
   export HRR_PLAYBACK
 fi
 
+# The replay log and the finding name a customer's kernels and addresses, so
+# they are private from the moment they exist, not only after the chmod at the
+# end. Set here rather than at the top, so a playback built above is untouched.
+umask 077
+
 REPLAY_GPU=""
 if [[ "$mode" != "skip" ]]; then
   # Only when a device is actually going to be used: metadata-only needs no GPU
@@ -277,10 +364,16 @@ elif [[ "$mode" == "native" ]]; then
   record_replay_stop "$replay_rc" "$LOG"
 fi
 
-CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE" -o "$FINDING")
+# The analyzer prints the finding as well as writing it, so it is the only
+# thing on stdout, and -o naming stdout itself would print it twice.
+CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE")
+[[ "$FINDING" -ef /dev/stdout ]] || CMD+=(-o "$FINDING")
 [[ -n "${HRR_PLAYBACK:-}" ]] && CMD+=(--hrr-playback "$HRR_PLAYBACK")
 [[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
 "${CMD[@]}"
 
+# A regular file only: -o can name a device such as /dev/stdout or /dev/null,
+# and -f follows a link, so /dev/stdout redirected to a file would pass it.
+[[ -f "$FINDING" && ! -L "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
+[[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
 echo "[triage] finding=$FINDING" >&2
-cat "$FINDING"

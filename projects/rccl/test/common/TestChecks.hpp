@@ -18,6 +18,7 @@
  * - MPI-aware assertions (ASSERT_MPI_*)
  * - Rank-local MPI checks (ASSERT_MPI_*_ON_RANK)
  * - MPI-coordinated skip reasons (mpiCoordinatedSkipReason)
+ * - GIN communicator skip (SKIP_IF_GIN_UNSUPPORTED)
  * - Debug logging (TEST_WARN, TEST_INFO, TEST_ABORT, TEST_TRACE)
  */
 
@@ -295,6 +296,50 @@ inline std::string mpiCoordinatedSkipReason(bool localSkip, const char* localRea
         return localReason ? localReason : "skip";
     return "Skipping: prerequisite failed on another rank";
 }
+
+/**
+ * @def SKIP_IF_GIN_REQUIRES
+ * @brief Coordinated skip when the communicator cannot satisfy a GIN connection type.
+ *
+ * Expand after createTestCommunicator() on every rank. The skip is an
+ * MPI_Allreduce; a rank that does not reach it will hang. GTEST_SKIP() only
+ * returns from the enclosing function, so expand it in the test body or in a
+ * helper whose call is the last statement of that body.
+ *
+ * NCCL_GIN_CONNECTION_FULL skips unless globalGinSupport is FULL. RAIL-only
+ * communicators make ncclDevCommCreate(FULL) return ncclInvalidArgument.
+ * Any other required type skips only on NCCL_GIN_CONNECTION_NONE, so a RAIL
+ * test can still run on a rail-only communicator. Requires comm.h. Does not
+ * replace ginProxyTestSkipReason env gates.
+ */
+#define SKIP_IF_GIN_REQUIRES(requiredType)                                                         \
+    do                                                                                             \
+    {                                                                                              \
+        ncclComm_t skipGinComm = getActiveCommunicator();                                          \
+        const ncclGinConnectionType_t skipGinRequired = (requiredType);                            \
+        const bool skipGinNeedsFull = skipGinRequired == NCCL_GIN_CONNECTION_FULL;                 \
+        const bool skipGinLocal =                                                                  \
+            skipGinComm != nullptr &&                                                              \
+            (skipGinNeedsFull ? skipGinComm->globalGinSupport != NCCL_GIN_CONNECTION_FULL          \
+                              : skipGinComm->globalGinSupport == NCCL_GIN_CONNECTION_NONE);        \
+        const std::string skipGinReason = mpiCoordinatedSkipReason(                                \
+            skipGinLocal,                                                                          \
+            skipGinNeedsFull                                                                       \
+                ? "GIN full connectivity is required; communicator is NONE or RAIL"                \
+                : "GIN not supported on this communicator (plugin missing or NET backend has no GIN)"); \
+        if(!skipGinReason.empty())                                                                 \
+            GTEST_SKIP() << skipGinReason;                                                         \
+    } while(0)
+
+/**
+ * @def SKIP_IF_GIN_UNSUPPORTED
+ * @brief Skip unless the communicator has full GIN connectivity.
+ *
+ * Callers that pass defaultGinReqs() request NCCL_GIN_CONNECTION_FULL. A
+ * RAIL-only communicator must skip here rather than fail ncclDevCommCreate.
+ * Tests that request RAIL should use SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_RAIL).
+ */
+#define SKIP_IF_GIN_UNSUPPORTED() SKIP_IF_GIN_REQUIRES(NCCL_GIN_CONNECTION_FULL)
 
 // Debug Logging Macros (TEST_*)
 

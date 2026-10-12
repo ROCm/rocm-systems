@@ -5,7 +5,6 @@
 #  ************************************************************************
 
 import os
-import subprocess
 import pytest
 
 # Like AllGather, RCCL only routes ReduceScatter through the tuner when the rank
@@ -46,20 +45,9 @@ def test_valid_config_with_wildcards(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_valid_config_with_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -99,20 +87,9 @@ def test_valid_config_without_wildcards(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_valid_config_without_wildcards.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -156,20 +133,9 @@ def test_no_matching_config(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_no_matching_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -209,20 +175,9 @@ def test_incorrect_values_config(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_incorrect_values_config.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded some configurations (plugin should handle invalid values gracefully)
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -263,20 +218,9 @@ def test_unsupported_algo_proto_config(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_unsupported_algo_proto.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -321,20 +265,9 @@ def test_singlenode_config(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_singlenode.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Single-node CSV Plugin reducescatter test failed, see {log_file}"
-
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Single-node CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \
@@ -398,20 +331,9 @@ def test_multinode_config(paths):
     os.makedirs(reducescatter_log_dir, exist_ok=True)
 
     log_file = os.path.join(reducescatter_log_dir, "test_reducescatter_multinode.log")
-    with open(log_file, "w") as logfile:
-        rccl_test = subprocess.run(
-            args,
-            env=env,
-            stdout=logfile,
-            stderr=subprocess.STDOUT,
-            universal_newlines=True
-        )
+    rc, log_content = paths.run_tuner_mpirun(args, env, log_file)
 
-    assert rccl_test.returncode == 0, f"Multi-node CSV Plugin reducescatter test failed, see {log_file}"
-    
-    # Read and validate log content
-    with open(log_file, "r") as logfile:
-        log_content = logfile.read()
+    assert rc == 0, f"Multi-node CSV Plugin reducescatter test failed, see {log_file}"
     
     # Check that plugin loaded configurations
     assert "TUNER/ExamplePlugin: Loaded" in log_content and "tuning configurations" in log_content, \

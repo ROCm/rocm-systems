@@ -155,7 +155,7 @@ protected:
     const uint32_t nop = build_s_nop(0, a_.arch);
 
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::search(sabotaged.begin(), sabotaged.end(), arg_write.begin(), arg_write.end());
+    auto it = std::ranges::search(sabotaged, arg_write).begin();
     ASSERT_NE(it, sabotaged.end()) << "argument materialization not found in the patched text";
     for (size_t i = 0; i < arg_write.size(); ++i)
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;

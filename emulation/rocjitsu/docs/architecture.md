@@ -49,8 +49,8 @@ See [simdojo.md](simdojo.md) for the full design.
 See [vm-design.md](vm-design.md) for the full hardware model design.
 Models the GPU hardware pipeline:
 
-- **CommandProcessor** — Monitors compute doorbells, fetches AQL and supported
-  PM4 packets from ring buffers, parses kernel descriptors, and dispatches
+- **CommandProcessor** — Monitors compute doorbells, fetches AQL packets, prepares native
+  PM4 ring submissions for the PM4 processor, parses kernel descriptors, and dispatches
   workgroups to CUs. It does not own or execute SDMA queues.
 - **ComputeUnit** — Executes wavefronts. Manages SGPR/VGPR register
   files, LDS, and scratch memory. Supports functional and cycle-accurate
@@ -94,16 +94,33 @@ Models the GPU hardware pipeline:
   continuation, retirement publication, and terminal state. Legacy KFD and PCI/MES
   create queues through `GpuQueueRegistry` and the same SDMA binding factory; the command
   processor is not part of the SDMA path.
-- **Packet processors** — `AqlPacketProcessor`, `Pm4PacketProcessor`, and
-  `SdmaPacketProcessor` implement the same compile-time, one-head-packet
+- **Packet processors** — `AqlPacketProcessor` and `SdmaPacketProcessor` implement
+  the same compile-time, one-head-packet
   processing contract while retaining protocol-specific request and diagnostic
   state. An SDMA request carries caller-owned opaque continuation state because
-  an SDMA packet may block after a partial effect; AQL and PM4 retries are
+  an SDMA packet may block after a partial effect; AQL retries are
   restartable and require no continuation. Packet processors
   do not own queue registration, scheduling, ring lifetime, or completion
   tracking. Expected guest-packet and descriptor failures are returned as typed
   per-queue results; they do not escape as simulator exceptions or stop unrelated
   queues.
+- **PM4 packet processing** — `pm4/pm4_packet_processor` processes production
+  compute rings and DRM indirect-buffer streams. It owns packet fetching, opcode
+  effects, register updates, nested IB traversal, and cursor publication over
+  CP-owned queue state. CP supplies architecture, cache flushing, dispatch
+  admission, retry scheduling, and synchronous fault cancellation callbacks.
+  Temporary unavailability retains command and cursor-publication state for retry;
+  cancellation stops resident waves before submission resources are released.
+  CP retains queue scheduling and dispatch completion. For native rings, CP captures
+  the VM snapshot, initializes the consumer cursor, builds root submissions from
+  doorbells, and retries pending cursor publication even while execution is suspended.
+  The processor traverses submitted packets and IBs and commits/publishes their
+  retirement through the shared cursor journal. Its `retry` callback must set
+  `command_retry_pending`; CP clears it when resuming. The `dispatch` callback adds
+  admitted work to `dispatches.entries`, which CP retires before processing resumes.
+  The processor sets `publication_faulted` before requesting cancellation on a
+  terminal publication failure; the cancellation callback marks the queue faulted,
+  cancels pending work, and notifies failed submissions.
 - **PCI/VFIO adapters** — PCI configuration, BAR/MMIO, DMA, interrupts, and
   transport-session lifetime. These adapt accesses into `GpuVm` and the shared
   block models; they do not contain alternate CP, MES, SDMA, or shader models.
@@ -139,18 +156,18 @@ corresponding core model.
 The firmware-free non-AQL compute ring follows the same boundary. MES
 maps the queue and selects its `GpuVm` address space, then registers it with the
 selected command processor through `GpuQueueRegistry`. The registry binding is
-only a lifetime and notification adapter. The CP-owned `Pm4QueueController`
-holds each queue's ring traversal, cursor publication, retry state, and concrete
-`Pm4PacketProcessor`, which implements the exact NOP/SET_UCONFIG_REG subset. The
-MMIO model supplies only the supported register-write sink. This is deliberately
-not a general PM4 implementation.
+only a lifetime and notification adapter. `CommandProcessor` owns AQL, native
+PM4 and DRM compute queues in `ComputeQueueRecord`. Each record retains ring
+configuration, shader registers, command streams, dispatches and cursor publication.
+Native register writes require the MMIO model's supported register-write sink;
+unsupported writes fault the queue. DRM submissions may ignore unused graphics state.
 
-The PM4 controller leases a queue under its management lock, then releases that
-lock before VM access or register callbacks. Removal and reconfiguration wait for
-an active lease to quiesce, so frontend callbacks cannot stall unrelated queue
-registration or notification and queue state cannot be destroyed during service.
-The CP invokes PM4 service outside its AQL queue lock, and each PM4 queue turn is
-bounded so a large PM4 ring cannot monopolize the CP event.
+Queue service, removal and reconfiguration serialize under `hw_queue_mutex_`.
+VM and register callbacks execute under that lock, so callbacks must not acquire
+frontend locks whose holders can enter the CP. Each PM4 service turn is bounded.
+Graceful removal waits for command streams, shader dispatches and durable
+publications; forced removal cancels them. VM-polled native PM4 rings are rejected
+until they have an execution poller; explicit and host-polled rings are supported.
 Each service transaction pins both its `GpuVmAccess` and producer boundary; work
 announced after a root replacement is deferred to a new snapshot rather than
 being appended to an older blocked transaction.
@@ -181,15 +198,15 @@ Queue lifecycle is shared without forcing unrelated protocols into one execution
 engine. AQL, PM4, and SDMA use `GpuQueueRegistry`, reusable `QueueBindingFactory` objects,
 and unique per-registration `QueueBinding` objects. PM4 and SDMA share
 `ConsumerCursorJournal` for retry-safe consumer publication; SDMA and the
-restricted PM4 compute-queue path share `CircularRingReader` for wrap-safe
-fetches. AQL, PM4, and SDMA expose the same `PacketProcessResult` envelope
+production PM4 compute-ring path share `CircularRingReader` for wrap-safe
+fetches. AQL and SDMA expose the same `PacketProcessResult` envelope
 and core processor operation. The common layer validates only
 protocol-independent status,
 retirement, and input-growth invariants. `required_bytes` is the fetch extent
 needed to process the head packet, while `retirement_bytes` is the cursor advance
 requested after processing and may include protocol-defined skipped commands. The
 ring owner validates that retirement extent against its capacity and the
-producer-visible cursor. All three remain concrete protocol
+producer-visible cursor. The protocols remain concrete protocol
 implementations because their request, scheduling, retry, and completion
 semantics differ; SDMA continuation lifetime remains with its ring consumer.
 
@@ -216,9 +233,10 @@ RISC-V. Most files are autogenerated from the MR ISA XML spec by the
 `amdisa` codegen pipeline.
 
 - **Decoder** — Decodes variable-length instructions from code objects.
-- **Concrete target legality** — Variant-aware decoders combine immutable
-  target capabilities with generated instruction-and-encoding requirements;
-  architecture-only lookup uses an explicit fail-closed default.
+- **Concrete target capabilities** — Variant-aware consumers combine generated
+  instruction-and-encoding legality with provider-authored behavioral and
+  execution capabilities. Architecture-only lookup uses an explicit concrete
+  default, while capability fields default to the fail-closed behavior.
 - **Instruction** — Per-encoding instruction structs with typed fields.
 - **Execute** — Instruction semantics (shared templates across ISAs
   where possible).

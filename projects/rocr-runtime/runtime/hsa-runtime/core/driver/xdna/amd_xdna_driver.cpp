@@ -1276,6 +1276,41 @@ hsa_status_t XdnaDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   return DestroyBOHandle(fd_, dev_heap_vaddr, bo_handle);
 }
 
+hsa_status_t XdnaDriver::QueryPointerInfo(const void* /*ptr*/, const core::MemoryRegion* region,
+                                          core::MemoryRegion::AllocateFlags alloc_flags,
+                                          const core::DriverMemoryHandle* handle,
+                                          HsaPointerInfo* info) const {
+  if (region == nullptr || handle == nullptr || handle->vaddr == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  amdxdna_drm_get_bo_info bo_info;
+  const hsa_status_t err = GetBOInfo(fd_, static_cast<uint32_t>(handle->handle), &bo_info);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  HsaMemFlags mem_flags = static_cast<const MemoryRegion*>(region)->mem_flags();
+  mem_flags.ui32.ExecuteAccess = !!(alloc_flags & core::MemoryRegion::AllocateExecutable);
+  mem_flags.ui32.Contiguous = !!(alloc_flags & core::MemoryRegion::AllocateContiguous);
+  mem_flags.ui32.NonPaged = !!(alloc_flags & core::MemoryRegion::AllocateNonPaged);
+
+  *info = {};
+  info->Type = HSA_POINTER_ALLOCATED;
+  info->Node = region->owner()->node_id();
+  info->MemFlags = mem_flags;
+  info->CPUAddress = handle->vaddr;
+  // A BO with no device address is reached through the host page tables, at its host address.
+  info->GPUAddress = (bo_info.xdna_addr != AMDXDNA_INVALID_ADDR)
+      ? bo_info.xdna_addr
+      : reinterpret_cast<uint64_t>(handle->vaddr);
+  info->SizeInBytes = handle->size;
+  // Only the owning agent can access the BO.
+  info->NMappedNodes = 1;
+  info->MappedNodes = &info->Node;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                      HSA::hsa_amd_queue_priority_internal_t priority,
                                      uint32_t sdma_engine_id, void* queue_addr,
@@ -1480,7 +1515,11 @@ hsa_status_t XdnaDriver::Map(const core::DriverMemoryHandle& handle, void* mem, 
 hsa_status_t XdnaDriver::Unmap(const core::DriverMemoryHandle& handle, void* mem, size_t offset,
                                size_t size, uint32_t node_id) {
   (void)node_id;
-  if (munmap(mem, size) != 0) {
+  // Map placed the BO at a VA the caller reserved, and the NPU shares the host's page tables, so
+  // that mapping is also every other agent's view of the range. Put the range back to a bare
+  // reservation instead of unmapping it: a hole would let an unrelated mmap claim the range before
+  // hsa_amd_vmem_address_free releases it.
+  if (!os::UncommitMemory(mem, size)) {
     return HSA_STATUS_ERROR;
   }
 

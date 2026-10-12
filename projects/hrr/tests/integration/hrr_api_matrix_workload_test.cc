@@ -1250,10 +1250,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
 //
 // The other graph coverage in this suite builds graphs by stream capture,
 // which is how PyTorch, vLLM and llama.cpp build theirs. This workload builds
-// one the other way, node by node, because that is the half of the graph
-// surface HRR answers with ERROR_STUB: "explicit (node-API) graph construction
-// is NOT supported". Around 55 APIs sit behind that sentence, and a matrix
-// that never calls them cannot notice if one quietly starts doing something.
+// one the other way, node by node. Around 55 APIs sit on that path; most now
+// replay for real, and the handful that do not answer with ERROR_STUB and
+// poison the graph so instantiating it fails loudly. A matrix that never
+// calls them cannot notice if one quietly starts doing something else.
 //
 // The external-semaphore node family is absent on purpose: those nodes need an
 // imported semaphore, which needs a real fd from another process, and a call
@@ -2602,11 +2602,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
   }
 
   // ---- Driver-flavoured array creation ------------------------------------
-  // Deliberately outside the image-support guard below. gfx950 reports no
-  // image support and both of these return hipErrorNotSupported, but unlike
-  // their runtime counterparts the capture shim records the call before the
-  // runtime rejects it, so they are the only two members of the array family
-  // that reach an archive at all.
+  // Deliberately outside the image-support guard below, so they run on every
+  // device. Capture records them only when they succeed; gfx950 reports no
+  // image support and returns hipErrorNotSupported for both, so there they
+  // reach no archive and the T5 floor does not count them.
   {
     HIP_ARRAY_DESCRIPTOR desc{};
     desc.Width = 64;

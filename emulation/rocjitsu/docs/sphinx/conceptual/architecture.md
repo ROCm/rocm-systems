@@ -85,14 +85,16 @@ This layer handles loading, decoding, and transforming GPU code objects:
 
 **Source directory:** `lib/rocjitsu/src/rocjitsu/isa/`
 
-Instruction decoding and execution for AMD GPU architectures (CDNA1
-through CDNA4, RDNA1 through RDNA4, gfx1250) plus RISC-V. Most files in
-this layer are auto-generated from AMD Machine-Readable ISA XML
-specifications by the amdisa Python codegen pipeline
-(`lib/python/amdisa/`). The layer contains per-architecture
-subdirectories with decoders, encoding structs, and execution bodies,
-along with hand-written files for address calculation, matrix math, and
-ISA-specific traits.
+Instruction models for AMD GPU architectures (CDNA1 through CDNA5 and
+RDNA1 through RDNA4) plus RISC-V. Most files in this layer are
+auto-generated from AMD Machine-Readable ISA XML specifications by the
+amdisa Python codegen pipeline (`lib/python/amdisa/`). The layer contains
+per-architecture subdirectories with decoders, encoding structs, and
+execution bodies, along with hand-written files for address calculation,
+matrix math, and ISA-specific traits. Concrete CDNA5 bindings distinguish
+gfx1250 from gfx1251 for target legality and behavior. Both concrete targets
+have full functional-execution bindings; decoder-only consumers select the
+separate model provider, which omits execution callbacks for both targets.
 
 ### VM and hardware model
 

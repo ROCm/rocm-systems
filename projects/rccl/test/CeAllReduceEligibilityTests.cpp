@@ -224,14 +224,22 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         std::string                                  archName;
     };
 
+    // The 2-shot cap is part of the opt-in env, not the suite. gfx1250's table
+    // leaves ceNonRegMax[AllReduce] at 0, so a suite-wide RCCL_CE_AR_MAX_MSG_BYTES
+    // would make DefaultOff_2Shot_Gfx1250 look enabled.
     const std::unordered_map<std::string, std::string> baseEnv = {
         {"RCCL_CE_ALLREDUCE", "1"},
+        {"RCCL_CE_AR_MAX_MSG_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
     };
 
     const std::vector<UseCeArCase> cases = {
         // Per-arch default for 2-shot (staging buffer): off on gfx1250 (ceNonRegMax[AR]=0;
         // gfx1250 uses registered CE instead) and off on gfx950. No env override.
         {"DefaultOff_2Shot_Gfx1250_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx1250"},
+        // RCCL_CE_ALLREDUCE=-1 (default) is auto-on for gfx1250; overriding
+        // RCCL_CE_AR_MAX_MSG_BYTES lifts the ceNonRegMax=0 cap so rcclUseCeAr2Shot
+        // returns true, confirming the default-on wiring.
+        {"DefaultOn_2Shot_Gfx1250_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, true, {{"RCCL_CE_AR_MAX_MSG_BYTES", "1048576"}}, "gfx1250"},
         {"DefaultOff_Gfx950_Isolated",  4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}, "gfx950"},
         // Null archName (zero-initialised mock) also falls through to off.
         {"DisabledByDefault_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, {}},
@@ -254,18 +262,17 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
     for(const auto& tc : cases)
     {
         auto env = tc.extraEnv;
-        ProcessIsolatedTestRunner::registerTest(
+        auto cfg =
             ProcessIsolatedTestRunner::TestConfig(
                 tc.name,
                 [tc]()
                 {
                     CeAllReduceMockComm mock;
+                    mock.reset(tc.archName.empty() ? nullptr : tc.archName.c_str());
                     mock.comm.nRanks           = tc.nRanks;
                     mock.comm.nNodes           = tc.nNodes;
                     mock.comm.symmetricSupport = tc.symmetricSupport;
                     mock.comm.config.CTAPolicy = tc.ctaPolicy;
-                    if (!tc.archName.empty())
-                        strncpy(mock.comm.archName, tc.archName.c_str(), sizeof(mock.comm.archName) - 1);
 
                     const bool result =
                         rcclUseCeAr2Shot(mock.get(), tc.count, tc.datatype, tc.op, /*acc=*/nullptr);
@@ -273,7 +280,16 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
                 })
                 .withEnvironment(env)
                 .withTimeout(std::chrono::seconds(30))
-                .withNumGpus(0));
+                .withNumGpus(0);
+        // Isolated children inherit the parent env. A case that does not set the
+        // cap must not see a suite or shell override, or gfx1250's table default
+        // (off) becomes on. RCCL_CE_ALLREDUCE is env-first, so an inherited 0
+        // fails DefaultOn, which expects the gfx1250 default (unset).
+        if (env.find("RCCL_CE_AR_MAX_MSG_BYTES") == env.end())
+            cfg.clearVariable("RCCL_CE_AR_MAX_MSG_BYTES");
+        if (env.find("RCCL_CE_ALLREDUCE") == env.end())
+            cfg.clearVariable("RCCL_CE_ALLREDUCE");
+        ProcessIsolatedTestRunner::registerTest(cfg);
     }
 
     ProcessIsolatedTestRunner::ExecutionOptions options;

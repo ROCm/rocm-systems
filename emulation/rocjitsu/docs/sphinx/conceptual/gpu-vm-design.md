@@ -51,14 +51,27 @@ embedded in the code object, determines the grid and workgroup
 dimensions, and dispatches workgroups to available CUs across the shader
 engines within its XCD.
 
-AQL, PM4, and SDMA use a common compile-time packet-processor contract but
-retain distinct concrete processors. The command processor owns the AQL and
-PM4 processors; the SoC-owned SDMA scheduler owns the SDMA processor. Queue
+AQL and SDMA use a common compile-time packet-processor contract but
+retain distinct concrete processors. The command processor owns the AQL
+processor; the SoC-owned SDMA scheduler owns the SDMA processor. Queue
 owners, rather than packet processors or PCI/VFIO adapters, retain ring cursors,
 VM snapshots, retry state (including SDMA's opaque typed continuation), and
 scheduling policy. They also retain a VM binding lease until detach, preventing
 address-space teardown while future snapshots can still be created without
 conflating execution lifetime with frontend references.
+
+PM4 compute rings and DRM indirect-buffer submissions are processed in
+`pm4/pm4_packet_processor`. Packet fetching, opcode effects, register updates,
+IB traversal, and cursor publication operate on CP-owned queue state. CP supplies
+cache flushing, dispatch admission, retry scheduling, and fault cancellation.
+For native rings, CP captures the VM snapshot, initializes the consumer cursor,
+builds root submissions from doorbells, and retries pending cursor publication
+even while execution is suspended. The processor traverses those submissions and
+nested IBs and commits/publishes packet retirement through the shared cursor journal.
+Retry sets `command_retry_pending` until CP resumes the queue; dispatch admission
+appends to `dispatches.entries` until CP retires the work. The processor marks
+`publication_faulted` before requesting cancellation on a terminal publication
+failure.
 
 SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
 packet processor; no SDMA packet logic is part of the CP. A completion tracker
@@ -168,7 +181,7 @@ architectures and RISC-V:
 | RDNA3 | gfx1100 | GFX11 |
 | RDNA3.5 | gfx1150 | GFX11 |
 | RDNA4 | gfx1200 | GFX12 |
-| gfx1250 | gfx1250 | GFX12 |
+| CDNA5 | gfx1250 | GFX12.5 |
 | RISC-V | RV32IMAFDC | RV |
 
 The architecture is selected through the `vm.arch` field in the JSON

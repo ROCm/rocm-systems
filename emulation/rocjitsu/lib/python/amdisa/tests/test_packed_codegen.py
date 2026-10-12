@@ -3,6 +3,8 @@
 
 """Tests for packed execute code generation."""
 
+from amdisa.isa_profile import FloatDotAccumulation
+
 from amdisa.codegen.execute.packed import (
     gen_dot2,
     gen_dot2_true16,
@@ -67,7 +69,8 @@ def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
     assert 'sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>' in cpp
     assert (
         cpp.count(
-            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf))'
+            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
         )
         == 2
     )
@@ -100,7 +103,8 @@ def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
     assert 'wf.fp_round_mode_f16_f64()' in cpp
     assert 'wf.fp_denorm_mode_f16_f64()' in cpp
     assert (
-        ', 0, inst_.clamp, wf.fp16_ovfl(), ' 'amdgpu::floating_clamp_nan_to_zero(wf))'
+        ', 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
     ) in cpp
 
 
@@ -259,6 +263,41 @@ def test_dot2_half_forms_narrow_inline_float_constants():
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
         # src2 is an f32 accumulator on this family, so it stays 32-bit.
         assert 'raw2' not in cpp
+        assert (
+            'isa_properties(wf.cu().arch()).float_dot_accumulation == FloatDotAccumulation::Gfx11'
+            in cpp
+        )
+        assert 'amdgpu::gfx11_dot2_f32<' in cpp
+        if cls == 'dot2_f32_bf16':
+            for index in range(2):
+                assert f'dot2_src_needs_half_replication(inst_.src{index})' in cpp
+                assert (
+                    f'raw{index} = (amdgpu::RegisterAccess(wf).read_lane(src{index}, lane) >> 16) * 0x10001u;'
+                    in cpp
+                )
+
+
+def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
+    for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        cpp = gen_dot2(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            cls,
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+            dot_accumulation=FloatDotAccumulation.GFX12,
+        )
+        assert 'amdgpu::gfx12_dot2_f32<' in cpp
+        assert 'gfx11_dot2_f32' not in cpp
+        assert 'float result = a0 * b0' not in cpp
+        for index in range(2):
+            if cls == 'dot2_f32_f16':
+                assert f'dot2_src_needs_half_replication(inst_.src{index})' not in cpp
+            else:
+                raw = f'amdgpu::RegisterAccess(wf).read_lane(src{index}, lane)'
+                assert (
+                    f'raw{index} = (amdgpu::is_inline_float_src(inst_.src{index}) ? '
+                    f'({raw} >> 16) : ({raw} & 0xffffu)) * 0x10001u;' in cpp
+                )
 
 
 def test_dot2_true16_narrows_inline_float_constants():
@@ -498,10 +537,11 @@ def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
         use_cdna5_helpers=True,
+        fused_result=True,
     )
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
-    assert 'std::fma(a, b, c)' in cpp
+    assert 'arithmetic<amdgpu::fp_mode::Arithmetic::FMA>' in cpp
     assert 'a * b + c' not in cpp
 
 
@@ -533,7 +573,8 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
     assert 'std::fma(a, b, c)' in cpp
-    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in cpp
+    assert 'amdgpu::pseudo_scalar::round_f16_result(' in cpp
+    assert 'result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false' in cpp
 
 
 def test_mad_mixhi_f16_uses_true16_high_write():

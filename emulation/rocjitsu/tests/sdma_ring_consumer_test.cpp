@@ -44,7 +44,8 @@ public:
       return outcome;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(), bytes.begin());
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
     return VmAccessOutcome::Complete;
   }
 
@@ -52,7 +53,7 @@ public:
                         std::span<const std::byte> bytes) override {
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
-    std::copy(bytes.begin(), bytes.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(address));
+    std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
@@ -385,6 +386,23 @@ TEST(SdmaRingConsumerTest, RetriesBlockedInitialLoadFetchPacketProcessingAndPubl
   EXPECT_EQ(processor_retry.cursor(), 16u);
   EXPECT_EQ(processor_retry.service(48), SdmaRingStatus::Idle);
   EXPECT_EQ(processor_retry.cursor(), 48u);
+}
+
+TEST(SdmaRingConsumerTest, RevokedTransactionBecomesTerminalInsteadOfBlocked) {
+  RingConsumerFixture fixture;
+  fixture.memory->store<uint64_t>(RingConsumerFixture::kReadPointer, 0);
+  fixture.memory->store<uint32_t>(RingConsumerFixture::kRing, 0);
+  fixture.memory->return_next_atomic_load(RingConsumerFixture::kReadPointer,
+                                          VmAccessOutcome::Unavailable);
+  SdmaRingConsumer consumer = fixture.make_consumer(std::nullopt);
+
+  EXPECT_EQ(consumer.service(sizeof(uint32_t)), SdmaRingStatus::Blocked);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  EXPECT_EQ(consumer.service(sizeof(uint32_t)), SdmaRingStatus::Faulted);
+  ASSERT_TRUE(consumer.terminal());
+  EXPECT_EQ(*consumer.terminal(), SdmaRingStatus::Faulted);
+  EXPECT_FALSE(consumer.in_flight());
 }
 
 TEST(SdmaRingConsumerTest, PublishesRetiredPacketBeforeLatchingTerminalOutcome) {

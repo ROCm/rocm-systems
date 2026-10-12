@@ -528,6 +528,7 @@ hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipLibraryGetGlobal
 hipLibraryGetManaged
+hipLibraryGetModule
 hipStreamCopyAttributes
 hipLibraryEnumerateKernels
 hipKernelGetLibrary
@@ -563,4 +564,6 @@ hipExecutionCtxSynchronize
 hipExecutionCtxWaitEvent
 hipMemGetDefaultMemPool
 hipKernelNameRefByPtr
+hipModuleEnumerateFunctions
+hipDeviceFlushGPUDirectRDMAWrites
 @HSA_EXPORTS@

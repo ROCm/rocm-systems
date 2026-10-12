@@ -835,7 +835,7 @@ void run_dynamic_copy_loop(const std::vector<uint8_t> &elf_bytes, const Dispatch
 
     for (uint32_t i = 0; i < kMaxN; ++i)
       src_host[i] = 0x12340000u ^ (static_cast<uint32_t>(iter) << 12) ^ i;
-    std::fill(dst_init.begin(), dst_init.end(), kSentinel);
+    std::ranges::fill(dst_init, kSentinel);
 
     ASSERT_EQ(synchronized_hsa_memory_copy(src_dev, src_host.data(), kMaxBytes),
               HSA_STATUS_SUCCESS);
@@ -1638,7 +1638,7 @@ void run_buffer_async_triton_matmul(const std::vector<uint8_t> &elf_bytes,
   if (reference) {
     // An identity RHS gives every output element a cheap closed-form CPU
     // reference while still exercising the full translated 1024^3 kernel.
-    std::fill(b_host.begin(), b_host.end(), 0);
+    std::ranges::fill(b_host, 0);
     for (uint32_t i = 0; i < kK; ++i)
       b_host[static_cast<size_t>(i) * kN + i] = 0x3c00; // fp16 1.0
     reference->resize(kCElements);

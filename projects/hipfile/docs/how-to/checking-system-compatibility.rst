@@ -10,7 +10,7 @@ The ``ais-check`` tool reports whether the kernel, driver, runtime, and mounted 
 meet hipFile fastpath requirements. If any component is missing or if no volume qualifies, hipFile uses the fallback path
 instead.
 
-``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``AIS_INSTALL_TOOLS=OFF``.
+``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``HIPFILE_INSTALL_TOOLS=OFF``.
 
 ``ais-check`` must be run as root to produce accurate information. 
 
@@ -51,7 +51,10 @@ For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligi
 
    For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
    the volume as capable only when every layer is an LVM target and all of the
-   underlying physical volumes are local NVMe.
+   underlying physical volumes are local NVMe. RAID logical volumes are
+   reported as capable on this basis, because LVM builds each RAID member as an
+   LVM sub-volume. ``md`` backing is MD software RAID, a different block layer,
+   and is always reported as not capable.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or

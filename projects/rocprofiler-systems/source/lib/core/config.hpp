@@ -96,17 +96,29 @@ set_setting_value(const std::string& _name, Tp&& _v,
                   settings::update_type _upd = settings::update_type::user)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return false;
+    if(!_instance)
+    {
+        return false;
+    }
 
-    auto _setting = _instance->find(_name);
-    if(_setting == _instance->end()) return false;
-    if(!_setting->second) return false;
+    auto const _setting = _instance->find(_name);
+    if(_setting == _instance->end())
+    {
+        return false;
+    }
+    if(!_setting->second)
+    {
+        return false;
+    }
 
-    auto& itr      = _setting->second;
-    auto  _old_upd = itr->get_updated_type();
+    auto const& itr      = _setting->second;
+    auto const  _old_upd = itr->get_updated_type();
 
-    auto _success = itr->set(std::forward<Tp>(_v), _upd);
-    if(!_success) itr->set_updated(_old_upd);
+    auto const _success = itr->set(std::forward<Tp>(_v), _upd);
+    if(!_success)
+    {
+        itr->set_updated(_old_upd);
+    }
 
     return _success;
 }
@@ -116,14 +128,25 @@ bool
 set_default_setting_value(const std::string& _name, Tp&& _v)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return false;
+    if(!_instance)
+    {
+        return false;
+    }
 
-    auto _setting = _instance->find(_name);
-    if(_setting == _instance->end()) return false;
-    if(!_setting->second) return false;
+    auto const _setting = _instance->find(_name);
+    if(_setting == _instance->end())
+    {
+        return false;
+    }
+    if(!_setting->second)
+    {
+        return false;
+    }
 
     if(_setting->second->get_config_updated() || _setting->second->get_environ_updated())
+    {
         return false;
+    }
     return _setting->second->set(std::forward<Tp>(_v));
 }
 
@@ -132,13 +155,19 @@ std::optional<Tp>
 get_setting_value(const std::string& _name)
 {
     auto* _instance = tim::settings::instance();
-    if(!_instance) return std::nullopt;
+    if(!_instance)
+    {
+        return std::nullopt;
+    }
 
-    auto _setting = _instance->find(_name);
-    if(_setting == _instance->end() || !_setting->second) return std::optional<Tp>{};
+    auto const _setting = _instance->find(_name);
+    if(_setting == _instance->end() || !_setting->second)
+    {
+        return std::optional<Tp>{};
+    }
 
     auto&& _ret = _setting->second->get<Tp>();
-    return (_ret.first) ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
+    return _ret.first ? std::optional<Tp>{ _ret.second } : std::optional<Tp>{};
 }
 
 //
@@ -191,6 +220,9 @@ get_use_causal() ROCPROFSYS_HOT;
 
 bool
 get_use_amd_smi() ROCPROFSYS_HOT;
+
+bool
+get_use_hipfile() ROCPROFSYS_HOT;
 
 bool&
 get_use_sampling() ROCPROFSYS_HOT;
@@ -251,12 +283,6 @@ get_perfetto_combined_traces();
 
 std::string
 get_perfetto_fill_policy();
-
-std::set<std::string>
-get_enabled_categories();
-
-std::set<std::string>
-get_disabled_categories();
 
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
@@ -426,9 +452,9 @@ struct tmp_file
 
     explicit operator bool() const;
 
-    std::string  filename = {};
-    std::fstream stream   = {};
-    int          fd       = -1;
+    std::string  filename;
+    std::fstream stream;
+    int          fd = -1;
 
 private:
     void touch() const;

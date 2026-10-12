@@ -186,7 +186,8 @@ class DeviceTableGenerationTest(unittest.TestCase):
     def test_sendrecv_ll128_is_arch_guarded_and_ll_is_not(self):
         # Every reg=1 (LL128) SendRecv declaration must sit inside the arch guard...
         guarded = re.findall(
-            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\) \|\| defined\(__gfx1250__\)\)"
+            r"#if \(defined\(__gfx942__\) \|\| defined\(__gfx950__\) \|\| "
+            r"\(defined\(__gfx1250__\) \|\| defined\(__gfx1250_strict__\)\)\)"
             r" && defined\(ENABLE_LL128\)\n"
             r"__device__ void (ncclDevFunc_SendRecv\w*_1)\(\);\n#endif",
             self.header,
@@ -263,7 +264,9 @@ class DeviceTableGenerationTest(unittest.TestCase):
             list(pinned.values()),
             "BUILD_ALL_UNROLLS compiles every unroll for the target, so none stays pinned",
         )
-        self.assertNotIn("#if defined(__gfx1250__)\n", header)
+        self.assertNotIn(
+            "#if (defined(__gfx1250__) || defined(__gfx1250_strict__))\n", header
+        )
 
     # ---- unroll arch restriction (host/device agreement) ---------------------
     # commSetUnrollFactor rejects an RCCL_UNROLL_FACTOR whose device functions were
@@ -273,7 +276,8 @@ class DeviceTableGenerationTest(unittest.TestCase):
     # degrade to the arch-blind behaviour that dispatched into an empty table and
     # trapped. These tests hold host and device sides in lockstep.
 
-    _ARCH_MACRO = re.compile(r"__(gfx\w+)__")
+    # __gfx1250_strict__ is the same arch built in strict mode, so it folds to gfx1250; a literal \w+ would read it as a second, distinct arch.
+    _ARCH_MACRO = re.compile(r"__(gfx\w+?)(?:_strict)?__")
 
     def _unroll_table(self, name, value_pattern, host_table=None):
         """Parse a `<name>[NCCL_NUM_UNROLLS]` initializer into {unroll: raw value}."""

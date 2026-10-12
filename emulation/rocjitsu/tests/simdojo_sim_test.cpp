@@ -416,9 +416,7 @@ TEST(TopologyPartitionTest, RepartitionRetainsExternalLinkOwnerOnce) {
     SCOPED_TRACE(::testing::Message() << "pass=" << pass);
     topology.partition_manual(2, [](Component *) { return PartitionID{0}; });
     EXPECT_EQ(external.partition_id(), 0u);
-    EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
-                         topology.partitions()[0].components.end(), &external),
-              1);
+    EXPECT_EQ(std::ranges::count(topology.partitions()[0].components, &external), 1);
   }
 }
 
@@ -463,9 +461,7 @@ TEST(TopologyPartitionTest, BalancedSinglePartitionIncludesExternalLinkOwner) {
 
   ASSERT_EQ(topology.partitions().size(), 1u);
   EXPECT_EQ(external.partition_id(), 0u);
-  EXPECT_EQ(std::count(topology.partitions()[0].components.begin(),
-                       topology.partitions()[0].components.end(), &external),
-            1);
+  EXPECT_EQ(std::ranges::count(topology.partitions()[0].components, &external), 1);
 }
 
 TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
@@ -488,8 +484,7 @@ TEST(TopologyPartitionTest, BalancedRepartitionRetainsExternalLinkOwnerOnce) {
 
     size_t occurrences = 0;
     for (const auto &partition : topology.partitions())
-      occurrences +=
-          std::count(partition.components.begin(), partition.components.end(), &external);
+      occurrences += std::ranges::count(partition.components, &external);
     EXPECT_EQ(occurrences, 1u);
   }
 }
@@ -1694,7 +1689,7 @@ TEST(CacheStorageTest, InitialBytesAreZeroAndInvalidationRetainsData) {
       ASSERT_NE(allocation.data, nullptr);
       for (uint32_t i = 0; i < TestCache::LINE_SIZE; ++i)
         EXPECT_EQ(allocation.data[i], 0);
-      std::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
+      std::ranges::fill_n(allocation.data, TestCache::LINE_SIZE, 0xA5);
     }
   }
   cache.invalidate_all();
@@ -1765,6 +1760,33 @@ TEST(CacheMaintenanceTest, FullInvalidationClearsRetainedMetadataAfterRefill) {
     EXPECT_FALSE(tag->dirty);
     EXPECT_EQ(tag->coherence, CoherenceState::INVALID);
     EXPECT_EQ(tag->coherence_epoch, 0u);
+    cache.invalidate_all();
+  }
+}
+
+TEST(CacheMaintenanceTest, FullInvalidationVisitsSparseAndBoundarySets) {
+  Cache<6, 32, 2> cache;
+  constexpr std::array<uint32_t, 5> sets{0, 7, 8, 24, 31};
+  std::array<CacheTag *, sets.size()> retained{};
+  for (uint32_t round = 0; round != 3; ++round) {
+    for (size_t index = 0; index != sets.size(); ++index) {
+      const uint64_t address = uint64_t{sets[index]} * 64;
+      auto *tag = cache.allocate(address, round);
+      tag->dirty = true;
+      tag->coherence_epoch = 17;
+      tag->coherence = CoherenceState::MODIFIED;
+      retained[index] = tag;
+      if (index % 2 == 0)
+        cache.invalidate(address, round);
+    }
+    cache.invalidate_all();
+    for (size_t index = 0; index != sets.size(); ++index) {
+      EXPECT_FALSE(cache.lookup(uint64_t{sets[index]} * 64, nullptr, round));
+      EXPECT_FALSE(retained[index]->valid);
+      EXPECT_FALSE(retained[index]->dirty);
+      EXPECT_EQ(retained[index]->coherence_epoch, 0u);
+      EXPECT_EQ(retained[index]->coherence, CoherenceState::INVALID);
+    }
     cache.invalidate_all();
   }
 }
@@ -1902,7 +1924,7 @@ TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
   ASSERT_NE(first.tag, nullptr);
   ASSERT_NE(first.data, nullptr);
   first.tag->dirty = true;
-  std::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
+  std::ranges::fill_n(first.data, TestCache::LINE_SIZE, 0xA5);
   cache.allocate(kAddrB, /*vmid=*/8);
 
   CacheTag evicted;
@@ -1914,8 +1936,7 @@ TEST(CacheVmidTest, AllocateWithDataReturnsWritableLineAndEvictedBytes) {
   EXPECT_TRUE(evicted.valid);
   EXPECT_TRUE(evicted.dirty);
   EXPECT_EQ(evicted.vmid, 7u);
-  EXPECT_TRUE(std::all_of(evicted_data.begin(), evicted_data.end(),
-                          [](uint8_t byte) { return byte == 0xA5; }));
+  EXPECT_TRUE(std::ranges::all_of(evicted_data, [](uint8_t byte) { return byte == 0xA5; }));
 }
 
 TEST(CacheVmidTest, InvalidateAllVmidsRemovesEveryAliasedLine) {

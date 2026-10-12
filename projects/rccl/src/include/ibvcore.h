@@ -63,6 +63,20 @@ union ibv_gid {
 	} global;
 };
 
+enum ibv_gid_type {
+	IBV_GID_TYPE_IB,
+	IBV_GID_TYPE_ROCE_V1,
+	IBV_GID_TYPE_ROCE_V2,
+};
+
+struct ibv_gid_entry {
+	union ibv_gid gid;
+	uint32_t gid_index;
+	uint32_t port_num;
+	uint32_t gid_type; /* enum ibv_gid_type */
+	uint32_t ndev_ifindex;
+};
+
 #ifndef container_of
 /**
   * container_of - cast a member of a structure out to the containing structure
@@ -368,6 +382,7 @@ enum ibv_access_flags {
 	IBV_ACCESS_REMOTE_READ		= (1<<2),
 	IBV_ACCESS_REMOTE_ATOMIC	= (1<<3),
 	IBV_ACCESS_MW_BIND		= (1<<4),
+	IBV_ACCESS_ZERO_BASED		= (1<<5),
 	IBV_ACCESS_RELAXED_ORDERING     = (1<<20),
 };
 
@@ -1058,6 +1073,58 @@ struct ibv_context {
 	int			num_comp_vectors;
 	pthread_mutex_t		mutex;
 	void		       *abi_compat;
+};
+
+enum ibv_cq_init_attr_mask {
+	IBV_CQ_INIT_ATTR_MASK_FLAGS	= 1 << 0,
+	IBV_CQ_INIT_ATTR_MASK_PD	= 1 << 1,
+};
+
+enum ibv_create_cq_attr_flags {
+	IBV_CREATE_CQ_ATTR_SINGLE_THREADED = 1 << 0,
+	IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN  = 1 << 1,
+};
+
+struct ibv_cq_init_attr_ex {
+	/* Minimum number of entries required for CQ */
+	uint32_t			cqe;
+	/* Consumer-supplied context returned for completion events */
+	void			*cq_context;
+	/* Completion channel where completion events will be queued.
+	 * May be NULL if completion events will not be used.
+	 */
+	struct ibv_comp_channel *channel;
+	/* Completion vector used to signal completion events.
+	 *  Must be < context->num_comp_vectors.
+	 */
+	uint32_t			comp_vector;
+	 /* Or'ed bit of enum ibv_create_cq_wc_flags. */
+	uint64_t		wc_flags;
+	/* compatibility mask (extended verb). Or'd flags of
+	 * enum ibv_cq_init_attr_mask
+	 */
+	uint32_t		comp_mask;
+	/* create cq attr flags - one or more flags from
+	 * enum ibv_create_cq_attr_flags
+	 */
+	uint32_t		flags;
+	struct ibv_pd		*parent_domain;
+};
+
+enum ibv_parent_domain_init_attr_mask {
+	IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS = 1 << 0,
+	IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT = 1 << 1,
+};
+
+struct ibv_parent_domain_init_attr {
+	struct ibv_pd *pd; /* reference to a protection domain object, can't be NULL */
+	struct ibv_td *td; /* reference to a thread domain object, or NULL */
+	uint32_t comp_mask;
+	void *(*alloc)(struct ibv_pd *pd, void *pd_context, size_t size,
+		       size_t alignment, uint64_t resource_type);
+	void (*free)(struct ibv_pd *pd, void *pd_context, void *ptr,
+		     uint64_t resource_type);
+	void *pd_context;
 };
 
 enum verbs_context_mask {

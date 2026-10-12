@@ -269,43 +269,43 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Unit
+        unit: Unit
       metric:
         Req:
           avg: SUM(TCP_UTCL1_REQUEST_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_REQUEST_sum / $denom)
           max: MAX(TCP_UTCL1_REQUEST_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
         Inflight Req:
           avg: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
           min: MIN(TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom)
           max: MAX(TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
         Hit Ratio:
           avg: 100 * SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
           min: 100 * MIN(TCP_UTCL1_TRANSLATION_HIT_sum / TCP_UTCL1_REQUEST_sum)
           max: 100 * MAX(TCP_UTCL1_TRANSLATION_HIT_sum / TCP_UTCL1_REQUEST_sum)
-          units: Percent
+          unit: Percent
         Hits:
           avg: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_TRANSLATION_HIT_sum / $denom)
           max: MAX(TCP_UTCL1_TRANSLATION_HIT_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
         Translation Misses:
           avg: SUM(TCP_UTCL1_TRANSLATION_MISS_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_TRANSLATION_MISS_sum / $denom)
           max: MAX(TCP_UTCL1_TRANSLATION_MISS_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
         Misses under Translation Miss:
           avg: SUM(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom)
           max: MAX(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
         Permission Misses:
           avg: SUM(TCP_UTCL1_PERMISSION_MISS_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_PERMISSION_MISS_sum / $denom)
           max: MAX(TCP_UTCL1_PERMISSION_MISS_sum / $denom)
-          units: (Requests + $normUnit)
+          unit: (Requests + $normUnit)
   - metric_table:
       id: 1606
       title: L1D Addr Translation Stalls
@@ -314,43 +314,43 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Unit
+        unit: Unit
       metric:
         Cache Full Stall:
           avg: SUM(TCP_UTCL1_STALL_INFLIGHT_MAX_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom)
           max: MAX(TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         Cache Miss Stall:
           avg: SUM(TCP_UTCL1_STALL_MULTI_MISS_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_STALL_MULTI_MISS_sum / $denom)
           max: MAX(TCP_UTCL1_STALL_MULTI_MISS_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         Serialization Stall:
           avg: SUM(TCP_UTCL1_SERIALIZATION_STALL_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_SERIALIZATION_STALL_sum / $denom)
           max: MAX(TCP_UTCL1_SERIALIZATION_STALL_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         Thrashing Stall:
           avg: SUM(TCP_UTCL1_THRASHING_STALL_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_THRASHING_STALL_sum / $denom)
           max: MAX(TCP_UTCL1_THRASHING_STALL_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         Latency FIFO Stall:
           avg: SUM(TCP_UTCL1_LFIFO_FULL_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_LFIFO_FULL_sum / $denom)
           max: MAX(TCP_UTCL1_LFIFO_FULL_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         Resident Page Full Stall:
           avg: SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
           max: MAX(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
         UTCL2 Stall:
           avg: SUM(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum) / SUM($denom)
           min: MIN(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom)
           max: MAX(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom)
-          units: (Cycles + $normUnit)
+          unit: (Cycles + $normUnit)
   metrics_description:
     Hit rate: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.

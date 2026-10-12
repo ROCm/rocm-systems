@@ -136,6 +136,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
 /// requiring subnormal rounding, overflow or exceptional-value handling use
 /// the scalar architectural primitive.
 template <typename Float>
+  requires(!(UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
 inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
                            util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
   using F = DivisionFormat<Float>;
@@ -171,10 +172,8 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   post = post || large_delta;
   I ve = exp(v), scaled_exp = ve + adjustment;
   U result = (v & U(~F::infinity)) | (util::stdx::static_simd_cast<U>(scaled_exp) << F::fraction);
-  uint64_t post_bits = 0;
+  uint64_t post_bits = util::simd_mask_to_bits(post);
   for (std::size_t i = 0; i < U::size(); ++i) {
-    if (post[i])
-      post_bits |= uint64_t{1} << i;
     if (ve[i] == 0 || ve[i] == int(F::infinity >> F::fraction) || scaled_exp[i] <= 0 ||
         scaled_exp[i] >= int(F::infinity >> F::fraction) || (d[i] & ~F::sign) == 0 ||
         (n[i] & ~F::sign) == 0) {
@@ -186,6 +185,23 @@ inline auto div_scale_simd(util::native<Float> value, util::native<Float> denomi
   }
   return std::pair{std::bit_cast<util::native<Float>>(result), post_bits};
 }
+
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+template <typename Float>
+  requires(sizeof(Float) == 8)
+inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
+                           util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
+  util::native<Float> result(0);
+  uint64_t post_bits = 0;
+  for (std::size_t lane = 0; lane < result.size(); ++lane) {
+    const auto scalar =
+        div_scale<Float>(value[lane], denominator[lane], numerator[lane], rounding, denorm);
+    result[lane] = scalar.value;
+    post_bits |= uint64_t{scalar.post_scale} << lane;
+  }
+  return std::pair{result, post_bits};
+}
+#endif
 
 template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)
@@ -341,7 +357,7 @@ template <bool Extended, typename Slot>
     if (slot.op == 0)
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
-        slot.op == 9 ? (slot.uses_vcc ? wf.vcc() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
+        slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -360,20 +376,20 @@ template <bool Extended, typename Slot>
       U result;
       switch (slot.op) {
       case 0:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, acc->template load_native<float>(base)));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, acc->template load_native<float>(base), wf));
         break;
       case 1:
       case 19:
-        result = std::bit_cast<U>(util::stdx::fma(af, bf, cf));
+        result = std::bit_cast<U>(fma_f32_simd(af, bf, cf, wf));
         break;
       case 2:
-        result = std::bit_cast<U>(util::stdx::fma(af, cf, bf));
+        result = std::bit_cast<U>(fma_f32_simd(af, cf, bf, wf));
         break;
       case 3:
-        result = std::bit_cast<U>(af * bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::MUL>(af, bf, wf));
         break;
       case 4:
-        result = std::bit_cast<U>(af + bf);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
         result = std::bit_cast<U>(af - bf);
@@ -390,9 +406,8 @@ template <bool Extended, typename Slot>
         result = av;
         break;
       case 9: {
-        U choose([&](auto i) { return uint32_t((condition >> (base + i)) & 1u); });
         result = av;
-        util::stdx::where(choose != U(0), result) = bv;
+        util::stdx::where(util::simd_mask_from_bits<U>(condition >> base), result) = bv;
         break;
       }
       case 10:
@@ -527,7 +542,8 @@ template <bool Vop3, typename Inst>
       return fma_f16_mode_simd(
           (av >> shift) & U(0xffffu), (bv >> shift) & U(0xffffu), (cv >> shift) & U(0xffffu),
           abs & 1, abs & 2, false, neg & 1, neg & 2, false, wf.fp_round_mode_f16_f64(),
-          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf));
+          wf.fp_denorm_mode_f16_f64(), omod, clamp, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
+          fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
     };
     U low = compute(0), high = compute(16);
     dst.template store_native<uint32_t>(base, low | (high << 16), mask);

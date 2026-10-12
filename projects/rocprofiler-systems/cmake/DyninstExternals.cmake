@@ -11,7 +11,7 @@
 # This module:
 # - Maps deprecated DYNINST_BUILD_* variables to ROCPROFSYS_BUILD_* variables
 # - Sets up TPL_STAGING_PREFIX for third-party library installation
-# - Includes and configures Dyninst dependencies (TBB, ElfUtils, LibIberty)
+# - Includes and configures Dyninst dependencies (ElfUtils, LibIberty)
 # - Creates build targets with serialized dependency chains
 # - Creates external-prebuild and external-deps-complete targets for coordination
 #
@@ -20,7 +20,7 @@
 include(MacroUtilities)
 
 # Map deprecated DYNINST_BUILD_* variables to new ROCPROFSYS_BUILD_* variables
-foreach(dep TBB ELFUTILS LIBIBERTY)
+foreach(dep ELFUTILS LIBIBERTY)
     if(DYNINST_BUILD_${dep})
         message(
             WARNING
@@ -41,16 +41,6 @@ file(MAKE_DIRECTORY "${TPL_STAGING_PREFIX}/include")
 add_custom_target(external-prebuild)
 
 # Add external dependencies to be built
-include(DyninstTBB)
-if(TARGET rocprofiler-systems-tbb-build AND TARGET external-prebuild)
-    # Make TBB build serially
-    set_target_properties(
-        rocprofiler-systems-tbb-build
-        PROPERTIES JOB_POOL_COMPILE external_deps_pool JOB_POOL_LINK external_deps_pool
-    )
-    add_dependencies(external-prebuild rocprofiler-systems-tbb-build)
-endif()
-
 include(DyninstElfUtils)
 if(TARGET rocprofiler-systems-elfutils-build AND TARGET external-prebuild)
     set_target_properties(

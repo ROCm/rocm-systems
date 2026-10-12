@@ -106,6 +106,9 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
 ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* recoveryContext) {
   if (!IbCastAinicRoce) return ncclSuccess;
   uint nqps = recoveryContext->resCtx->baseComm->nqps;
+  struct ncclIbNetCommDevBase* devBase =
+    IbCastGetNetCommDevBase(recoveryContext->resCtx->baseComm, recoveryContext->devIndex);
+  if (devBase == NULL) return ncclInternalError;
 
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     ncclIbQp* localQp = &recoveryContext->resCtx->baseComm->qps[qpIndex];
@@ -129,6 +132,8 @@ ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* r
     }
 
     localQp->rtrAttr.remoteQpNum = remoteQpn;
+    localQp->rtrAttr.localGid = devBase->gidInfo.localGid;
+    localQp->rtrAttr.localGidIndex = devBase->gidInfo.localGidIndex;
     INFO(NCCL_NET, "NET/IB: %s: QP %d RTR with remoteQpn=%u (comm=%p, qp_num=%u)", __func__, qpIndex, remoteQpn,
          recoveryContext->resCtx->baseComm, localQp->qp->qp_num);
 
@@ -156,6 +161,9 @@ ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* r
         struct ncclIbRecvCommDev* rCommDev = &recvComm->devs[i];
         ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
         flushQp->rtrAttr.remoteQpNum = flushQp->qp->qp_num;
+        flushQp->rtrAttr.localGid = rCommDev->base.gidInfo.localGid;
+        flushQp->rtrAttr.localGidIndex = rCommDev->base.gidInfo.localGidIndex;
+        flushQp->rtrAttr.remoteGid = rCommDev->base.gidInfo.localGid;
         NCCLCHECK(IbCastQpRtr(flushQp));
         NCCLCHECK(IbCastQpRts(flushQp));
         INFO(NCCL_NET, "NET/IB: %s: Restored Flush QP on device %d (comm=%p, qp_num=%u)", __func__, i,
