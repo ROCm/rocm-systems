@@ -942,16 +942,7 @@ extern hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pay
 
 extern hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipFreeHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipFreeMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -2435,19 +2426,7 @@ static hipError_t playback_hipHostGetFlags(PlaybackContext& ctx, const uint8_t* 
   return hipSuccess;
 }
 
-static hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(payload);
-  void* _out_ptr = nullptr;
-  hipError_t _r = (hipError_t)hipHostMalloc((void**)&_out_ptr, (size_t)a->size, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-  }
-  return _r;
-}
+extern hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* payload);
 
@@ -2604,16 +2583,7 @@ extern hipError_t playback_hipMallocAsync(PlaybackContext& ctx, const uint8_t* p
 
 extern hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* payload);
 

@@ -665,14 +665,18 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
     }
   }
 
-  // From here until this function returns the thread is inside its call. The
-  // sequence waits of the other threads do not count while it is (see
-  // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
+  // An ordered event holds the turn until its call returns. The sequence waits
+  // of the other threads do not count while it does (see hrr::wait_for_turn):
+  // a long recorded synchronize is not a missing event. An unordered event
+  // hands the turn on at once and holds nothing, so it is not counted: a call
+  // of it that never returns must not hide a later gap from --max-seq-waits.
   struct InFlight {
-    std::atomic<int>& n;
-    explicit InFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
-    ~InFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
-  } in_flight{ctx.turns_in_flight};
+    std::atomic<int>* n;
+    InFlight(std::atomic<int>& c, bool held) : n(held ? &c : nullptr) {
+      if (n) n->fetch_add(1, std::memory_order_acq_rel);
+    }
+    ~InFlight() { if (n) n->fetch_sub(1, std::memory_order_acq_rel); }
+  } in_flight{ctx.turns_in_flight, order};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
@@ -1453,7 +1457,9 @@ static void print_usage(const char* argv0) {
     "                        duplicate in the recorded sequence). Default 5000000.\n"
     "  --max-query-attempts N\n"
     "                        Stop retrying hipEventQuery/hipStreamQuery after N\n"
-    "                        attempts that return hipErrorNotReady. Default 5000000.\n"
+    "                        attempts that return hipErrorNotReady. Default: no\n"
+    "                        limit (a query that spins is waiting for replayed work,\n"
+    "                        as a synchronize does).\n"
     "  --max-file-bytes N    Refuse a blob or code object larger than N bytes.\n"
     "                        Default 4294967296 (4 GiB).\n"
     "  --max-threads N       Refuse a --multi-thread replay of an archive recording\n"
@@ -1462,7 +1468,8 @@ static void print_usage(const char* argv0) {
     "  --max-host-bytes N    End the replay when host memory held for the archive\n"
     "                        (blob caches, pinned buffers, read-backs) would pass N\n"
     "                        bytes. Default 17179869184 (16 GiB).\n"
-    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit).\n"
+    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit; at most\n"
+    "                        31536000, 365 days).\n"
     "                        Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
@@ -1570,7 +1577,14 @@ int main(int argc, char** argv) {
       if      (!strcmp(flag, "--max-threads"))      max_threads   = n;
       else if (!strcmp(flag, "--max-events"))       hrr::set_max_events(n);
       else if (!strcmp(flag, "--max-host-bytes"))   ctx.host_budget.set_cap(n);
-      else                                          max_wall_secs = n;
+      else {
+        if (n > hrr::kMaxWallSecs) {
+          fprintf(stderr, "[HRR] --max-wall-seconds accepts at most %llu (use 0 for no limit)\n",
+                  (unsigned long long)hrr::kMaxWallSecs);
+          return 1;
+        }
+        max_wall_secs = n;
+      }
     }
     else if ((!strcmp(argv[i], "--max-seq-waits") ||
               !strcmp(argv[i], "--max-query-attempts") ||
@@ -1731,7 +1745,7 @@ int main(int argc, char** argv) {
   // Wall-clock limit for the whole replay. The replay can be blocked inside a
   // HIP call that no flag interrupts, so the watchdog ends the process.
   hrr::WallClockWatchdog wall_watchdog(
-      std::chrono::milliseconds(std::min<uint64_t>(max_wall_secs, 31536000ull) * 1000), [max_wall_secs] {
+      std::chrono::milliseconds(max_wall_secs * 1000), [max_wall_secs] {
         fprintf(stderr,
                 "[HRR] Fatal: replay still running after %llu s "
                 "(--max-wall-seconds); ending it\n",
@@ -1757,6 +1771,20 @@ int main(int argc, char** argv) {
   for (uint64_t tid : archive.threads) thread_events[tid];
   for (const auto& ev : archive.events)
     thread_events[ev.header().thread_id].push_back(&ev);
+
+  {
+    std::vector<uint64_t> ids;
+    ids.reserve(archive.events.size());
+    for (const auto& ev : archive.events) ids.push_back(ev.header().sequence_id);
+    uint64_t dup = 0;
+    if (hrr::find_duplicate_seq(std::move(ids), &dup)) {
+      fprintf(stderr,
+              "[HRR] Fatal: malformed event stream: sequence number %llu occurs "
+              "more than once, so the replay order is not defined\n",
+              (unsigned long long)dup);
+      return 1;
+    }
+  }
 
   const bool use_mt = !single_thread && archive.threads.size() > 1;
   printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
