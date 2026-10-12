@@ -629,7 +629,6 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Give kernel-launch handlers the sequence ID so they can wait and advance
   // next_seq at the exact point of the HIP call.
   hrr_dispatch_seq = ev.header().sequence_id;
-  hrr_dispatch_index = idx;
   auto order = needs_ordering(etype);
 
   // Wait for our turn in global capture order.
@@ -650,10 +649,10 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
       case hrr::TurnResult::Stalled: {
         const uint64_t seq = ev.header().sequence_id;
         fprintf(stderr,
-                "[HRR] Fatal: malformed event stream: event %zu (%s, thread %llu) has "
+                "[HRR] Fatal: malformed event stream: event (%s, thread %llu) has "
                 "sequence number %llu but the replay is at %llu (%s); no event "
                 "supplies the turn after %llu waits (--max-seq-waits)\n",
-                idx, hrr::event_type_name(etype),
+                hrr::event_type_name(etype),
                 (unsigned long long)ev.header().thread_id,
                 (unsigned long long)seq, (unsigned long long)observed,
                 observed > seq ? "duplicate or out-of-order sequence number"
