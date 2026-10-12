@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""``amd-smi static --numa`` on a Linux guest (SR-IOV VF, not passthrough).
+"""``amd-smi static --numa`` on a Linux virtual OS (not passthrough).
 
 The parser must register ``-u``/``--numa`` and ``static_gpu`` must report the
 NUMA section on a virtual OS, not only on baremetal.
@@ -37,8 +37,27 @@ class _FakeLibraryException(Exception):
         return _STATUS_NOT_SUPPORTED
 
 
+class _FakeInterface(types.ModuleType):
+    """``amdsmi_interface`` stub whose unmocked ``amdsmi_*`` calls raise the library error."""
+
+    def __init__(self, **attrs):
+        super().__init__("amdsmi.amdsmi_interface")
+        for key, value in attrs.items():
+            setattr(self, key, value)
+
+    # A class-level hook, unlike a module __getattr__, also works on Python 3.6.
+    def __getattr__(self, name):
+        if not name.startswith("amdsmi_"):
+            raise AttributeError(name)
+
+        def _raise(*_args):
+            raise _FakeLibraryException(f"mock: {name} not supported")
+
+        return _raise
+
+
 class _GuestHelpers:
-    """Linux SR-IOV guest: virtual OS, neither baremetal nor passthrough."""
+    """Linux virtual OS guest, neither baremetal nor passthrough."""
 
     convert_clock_type = dict.fromkeys(
         ["sys", "mem", "df", "soc", "dcef", "vclk0", "vclk1", "dclk0", "dclk1"], 0
@@ -88,22 +107,26 @@ class _GuestHelpers:
 
 
 class _FakeLogger:
-    def __init__(self):
+    def __init__(self, fmt="human"):
+        self._fmt = fmt
         self.captured_values = None
         self.store_gpu_json_output = []
 
     def is_json_format(self):
-        return False
+        return self._fmt == "json"
 
     def is_csv_format(self):
-        return False
+        return self._fmt == "csv"
 
     def is_human_readable_format(self):
-        return True
+        return self._fmt == "human"
 
     def store_output(self, _gpu, key, value):
         if key == "values":
             self.captured_values = value
+
+    def store_multiple_device_output(self):
+        pass
 
     def print_output(self, *args, **kwargs):
         pass
@@ -168,19 +191,8 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         def _no_cpu_affinity(_handle, _scope):
             raise _FakeLibraryException("mock: no NUMA node in guest")
 
-        def _unsupported(name):
-            # Every other static section degrades to N/A instead of needing a stub.
-            if not name.startswith("amdsmi_"):
-                raise AttributeError(name)
-
-            def _raise(*_args):
-                raise _FakeLibraryException(f"mock: {name} not supported")
-
-            return _raise
-
-        interface = fake_module(
-            "amdsmi.amdsmi_interface",
-            __getattr__=_unsupported,
+        # Every other default static section degrades to N/A instead of needing a stub.
+        interface = _FakeInterface(
             amdsmi_wrapper=types.SimpleNamespace(AMDSMI_STATUS_NOT_SUPPORTED=_STATUS_NOT_SUPPORTED),
             AmdSmiAffinityScope=types.SimpleNamespace(NUMA_SCOPE=0, SOCKET_SCOPE=1),
             # No host NUMA topology: PCI numa_node is -1 and KFD falls back to
@@ -208,9 +220,9 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         )
         cls.static_module = load_cli_module("static_numa_guest_under_test", STATIC_PATH)
 
-    def _run_static(self, numa):
+    def _run_static(self, numa, fmt="human"):
         commands = object.__new__(self.static_module.StaticCommands)
-        commands.logger = _FakeLogger()
+        commands.logger = _FakeLogger(fmt)
         commands.helpers = _GuestHelpers()
         commands.group_check_printed = True
         args = argparse.Namespace(
@@ -247,3 +259,11 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
         static_dict = self._run_static(numa=False)
 
         self.assertIn("numa", static_dict)
+
+    def test_numa_csv_row_on_guest(self):
+        # --csv flattens NUMA into node/affinity columns and keeps -1 rather than NONE.
+        row = self._run_static(numa=True, fmt="csv")
+
+        self.assertEqual(row["node"], 0)
+        self.assertEqual(row["affinity"], -1)
+        self.assertEqual(row["cpu_list"], "N/A")
