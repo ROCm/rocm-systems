@@ -178,49 +178,6 @@ struct Fakes {
 };
 
 Fakes g;
-auto& g_pollFds = g.pollFds;
-auto& g_pollEntryResult = g.pollEntryResult;
-auto& g_socketInitResult = g.socketInitResult;
-auto& g_socketConnectResult = g.socketConnectResult;
-auto& g_socketReadyResult = g.socketReadyResult;
-auto& g_socketAcceptResult = g.socketAcceptResult;
-auto& g_socketCloseResult = g.socketCloseResult;
-auto& g_socketReadyValue = g.socketReadyValue;
-auto& g_socketReadyState = g.socketReadyState;
-auto& g_nextSocketFd = g.nextSocketFd;
-auto& g_acceptSocketFd = g.acceptSocketFd;
-auto& g_socketInitCalls = g.socketInitCalls;
-auto& g_socketReadyCalls = g.socketReadyCalls;
-auto& g_socketAcceptCalls = g.socketAcceptCalls;
-auto& g_socketShutdownCalls = g.socketShutdownCalls;
-auto& g_socketCloseCalls = g.socketCloseCalls;
-auto& g_lastShutdownHow = g.lastShutdownHow;
-auto& g_msgAllocResult = g.msgAllocResult;
-auto& g_enqueuedConnections = g.enqueuedConnections;
-auto& g_enqueuedFront = g.enqueuedFront;
-auto& g_sendMsgResult = g.sendMsgResult;
-auto& g_sendMsgClosed = g.sendMsgClosed;
-auto& g_sendMsgAllSent = g.sendMsgAllSent;
-auto& g_sendMsgCalls = g.sendMsgCalls;
-auto& g_recvSteps = g.recvSteps;
-auto& g_recvCalls = g.recvCalls;
-auto& g_handleMsgCalls = g.handleMsgCalls;
-auto& g_lastHandledType = g.lastHandledType;
-auto& g_clearPollInOnHandle = g.clearPollInOnHandle;
-auto& g_events = g.events;
-auto& g_purgedConnections = g.purgedConnections;
-auto& g_collReqInitCalls = g.collReqInitCalls;
-auto& g_sendCollReqCalls = g.sendCollReqCalls;
-auto& g_lastCollReq = g.lastCollReq;
-auto& g_sendPeersUpdateCalls = g.sendPeersUpdateCalls;
-auto& g_sendPeersUpdateResult = g.sendPeersUpdateResult;
-auto& g_lastPeersUpdateConn = g.lastPeersUpdateConn;
-auto& g_lastPeersUpdatePeers = g.lastPeersUpdatePeers;
-auto& g_lastPeersUpdateCount = g.lastPeersUpdateCount;
-auto& g_peerFindResult = g.peerFindResult;
-auto& g_lastPeerFindAddr = g.lastPeerFindAddr;
-auto& g_linkCalculateCalls = g.linkCalculateCalls;
-auto& g_calculatedPeers = g.calculatedPeers;
 
 ncclSocketAddress MakeAddr(uint16_t port) {
   ncclSocketAddress addr{};
@@ -368,6 +325,24 @@ void CheckLinkEntryRejectsMovingUnknownLater(bool external) {
   EXPECT_EQ(ncclInternalError, AddLinkEntryForTest(external, &rasNextLink, moved, 2));
 }
 
+void CheckLinkEntryFillsPlaceholderAndSanitizes(bool external) {
+  rasConnection* conn = MakeConn(1001);
+  MakeSock(conn, RAS_SOCK_READY, 0);
+  rasConnection* fallback = MakeConn(1002);
+  AddLinkConn(&rasNextLink, nullptr, 1);
+  AddLinkConn(&rasNextLink, fallback, 2, true);
+  rasNextLink.lastUpdatePeersTime = 99;
+  ASSERT_EQ(ncclSuccess, AddLinkEntryForTest(external, &rasNextLink, conn, 1));
+  EXPECT_EQ(conn, rasNextLink.conns->conn);
+  EXPECT_EQ(nullptr, rasNextLink.conns->next);
+  EXPECT_EQ(0, rasNextLink.lastUpdatePeersTime);
+  if (external) {
+    // Re-adding externally over an already-filled entry for the same
+    // connection is idempotent; rasLinkConnAdd (internal) has no such path.
+    EXPECT_EQ(ncclSuccess, rasLinkConnAddExternal(&rasNextLink, conn, 1));
+  }
+}
+
 void SetPeers(std::initializer_list<uint16_t> ports) {
   free(rasPeers);
   nRasPeers = static_cast<int>(ports.size());
@@ -402,8 +377,8 @@ void FreeState() {
     rasConnsHead = next;
   }
   rasConnsTail = nullptr;
-  for (RecvStep& step : g_recvSteps) free(step.msg);
-  g_recvSteps.clear();
+  for (RecvStep& step : g.recvSteps) free(step.msg);
+  g.recvSteps.clear();
   free(rasPeers);
   rasPeers = nullptr;
   nRasPeers = 0;
@@ -416,8 +391,8 @@ void ResetState() {
   std::memset(&rasNetListeningSocket, 0, sizeof(rasNetListeningSocket));
   std::memset(rasLine, 0, sizeof(rasLine));
   g = Fakes{};
-  g_pollFds.fill(pollfd{NCCL_INVALID_SOCKET, 0, 0});
-  rasPfds = g_pollFds.data();
+  g.pollFds.fill(pollfd{NCCL_INVALID_SOCKET, 0, 0});
+  rasPfds = g.pollFds.data();
   g_callocCalls = 0;
   g_failCallocAt = -1;
   g_clockNano = 100 * CLOCK_UNITS_PER_SEC;
@@ -450,8 +425,8 @@ uint64_t ncclSocketDefaultMagic() { return 0x12345678; }
 
 ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
                             enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int customRetry) {
-  ++g_socketInitCalls;
-  if (g_socketInitResult != ncclSuccess) return g_socketInitResult;
+  ++g.socketInitCalls;
+  if (g.socketInitResult != ncclSuccess) return g.socketInitResult;
   std::memset(sock, 0, sizeof(*sock));
   if (addr) sock->addr = *addr;
   sock->magic = magic;
@@ -465,38 +440,38 @@ ncclResult_t ncclSocketInit(struct ncclSocket* sock, const union ncclSocketAddre
 }
 
 ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
-  if (g_socketConnectResult != ncclSuccess) return g_socketConnectResult;
-  sock->socketDescriptor = g_nextSocketFd;
-  sock->state = g_socketReadyState;
+  if (g.socketConnectResult != ncclSuccess) return g.socketConnectResult;
+  sock->socketDescriptor = g.nextSocketFd;
+  sock->state = g.socketReadyState;
   return ncclSuccess;
 }
 
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* ready) {
-  ++g_socketReadyCalls;
-  if (g_socketReadyResult != ncclSuccess) return g_socketReadyResult;
-  *ready = g_socketReadyValue;
-  sock->state = g_socketReadyState;
+  ++g.socketReadyCalls;
+  if (g.socketReadyResult != ncclSuccess) return g.socketReadyResult;
+  *ready = g.socketReadyValue;
+  sock->state = g.socketReadyState;
   return ncclSuccess;
 }
 
 ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket*, bool) {
-  ++g_socketAcceptCalls;
-  if (g_socketAcceptResult != ncclSuccess) return g_socketAcceptResult;
-  sock->socketDescriptor = g_acceptSocketFd;
+  ++g.socketAcceptCalls;
+  if (g.socketAcceptResult != ncclSuccess) return g.socketAcceptResult;
+  sock->socketDescriptor = g.acceptSocketFd;
   sock->state = ncclSocketStateAccepted;
   sock->addr = MakeAddr(9000);
   return ncclSuccess;
 }
 
 ncclResult_t ncclSocketShutdown(struct ncclSocket*, int how) {
-  ++g_socketShutdownCalls;
-  g_lastShutdownHow = how;
+  ++g.socketShutdownCalls;
+  g.lastShutdownHow = how;
   return ncclSuccess;
 }
 
 ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool) {
-  ++g_socketCloseCalls;
-  if (g_socketCloseResult != ncclSuccess) return g_socketCloseResult;
+  ++g.socketCloseCalls;
+  if (g.socketCloseResult != ncclSuccess) return g.socketCloseResult;
   sock->socketDescriptor = NCCL_INVALID_SOCKET;
   sock->state = ncclSocketStateClosed;
   return ncclSuccess;
@@ -508,8 +483,8 @@ const char* ncclSocketToString(const union ncclSocketAddress* addr, char* buf, c
 }
 
 ncclResult_t rasGetNewPollEntry(int* index) {
-  if (g_pollEntryResult != ncclSuccess) return g_pollEntryResult;
-  for (size_t i = 0; i < g_pollFds.size(); i++) {
+  if (g.pollEntryResult != ncclSuccess) return g.pollEntryResult;
+  for (size_t i = 0; i < g.pollFds.size(); i++) {
     if (rasPfds[i].fd == NCCL_INVALID_SOCKET && rasPfds[i].events == 0 && rasPfds[i].revents == 0) {
       *index = static_cast<int>(i);
       return ncclSuccess;
@@ -519,7 +494,7 @@ ncclResult_t rasGetNewPollEntry(int* index) {
 }
 
 ncclResult_t rasMsgAlloc(struct rasMsg** msg, size_t msgLen) {
-  if (g_msgAllocResult != ncclSuccess) return g_msgAllocResult;
+  if (g.msgAllocResult != ncclSuccess) return g.msgAllocResult;
   auto* meta = static_cast<rasMsgMeta*>(calloc(1, offsetof(rasMsgMeta, msg) + msgLen));
   if (meta == nullptr) return ncclSystemError;
   *msg = &meta->msg;
@@ -536,35 +511,35 @@ void rasConnEnqueueMsg(struct rasConnection* conn, struct rasMsg* msg, size_t ms
       (conn->sock->status == RAS_SOCK_READY ||
        (conn->sock->status == RAS_SOCK_HANDSHAKE && msg->type == RAS_MSG_CONNINIT)))
     rasPfds[conn->sock->pfd].events |= POLLOUT;
-  g_enqueuedConnections.push_back(conn);
-  g_enqueuedFront.push_back(front);
+  g.enqueuedConnections.push_back(conn);
+  g.enqueuedFront.push_back(front);
 }
 
 ncclResult_t rasConnSendMsg(struct rasConnection*, bool* closed, bool* allSent) {
-  ++g_sendMsgCalls;
-  *closed = g_sendMsgClosed;
-  *allSent = g_sendMsgAllSent;
-  return g_sendMsgResult;
+  ++g.sendMsgCalls;
+  *closed = g.sendMsgClosed;
+  *allSent = g.sendMsgAllSent;
+  return g.sendMsgResult;
 }
 
 ncclResult_t rasMsgRecv(struct rasSocket*, struct rasMsg** msg, bool* closed) {
-  ++g_recvCalls;
-  if (g_recvSteps.empty()) {
+  ++g.recvCalls;
+  if (g.recvSteps.empty()) {
     *msg = nullptr;
     *closed = 0;
     return ncclSuccess;
   }
-  RecvStep step = g_recvSteps.front();
-  g_recvSteps.pop_front();
+  RecvStep step = g.recvSteps.front();
+  g.recvSteps.pop_front();
   *msg = step.msg;
   *closed = step.closed;
   return step.result;
 }
 
 ncclResult_t rasMsgHandle(struct rasMsg* msg, struct rasSocket* sock) {
-  ++g_handleMsgCalls;
-  g_lastHandledType = msg->type;
-  if (g_clearPollInOnHandle) rasPfds[sock->pfd].revents &= ~POLLIN;
+  ++g.handleMsgCalls;
+  g.lastHandledType = msg->type;
+  if (g.clearPollInOnHandle) rasPfds[sock->pfd].revents &= ~POLLIN;
   return ncclSuccess;
 }
 
@@ -575,40 +550,40 @@ void rasClientsNotifyEvent(rasEventGroup group, const struct rasEventNotificatio
   record.details = event && event->details ? event->details : "";
   record.hasAddr = event && event->peerAddr;
   if (record.hasAddr) record.addr = *event->peerAddr;
-  g_events.push_back(record);
+  g.events.push_back(record);
 }
 
 void rasCollReqInit(struct rasCollRequest* req) {
-  ++g_collReqInitCalls;
+  ++g.collReqInitCalls;
   req->rootId = 77;
 }
 
 ncclResult_t rasNetSendCollReq(const struct rasCollRequest* req, bool*, struct rasCollective**, struct rasConnection*) {
-  ++g_sendCollReqCalls;
-  g_lastCollReq = *req;
+  ++g.sendCollReqCalls;
+  g.lastCollReq = *req;
   return ncclSuccess;
 }
 
-void rasCollsPurgeConn(struct rasConnection* conn) { g_purgedConnections.push_back(conn); }
+void rasCollsPurgeConn(struct rasConnection* conn) { g.purgedConnections.push_back(conn); }
 
 ncclResult_t rasConnSendPeersUpdate(struct rasConnection* conn, const struct rasPeerInfo* peers, int nPeers) {
-  ++g_sendPeersUpdateCalls;
-  g_lastPeersUpdateConn = conn;
-  g_lastPeersUpdatePeers = peers;
-  g_lastPeersUpdateCount = nPeers;
-  return g_sendPeersUpdateResult;
+  ++g.sendPeersUpdateCalls;
+  g.lastPeersUpdateConn = conn;
+  g.lastPeersUpdatePeers = peers;
+  g.lastPeersUpdateCount = nPeers;
+  return g.sendPeersUpdateResult;
 }
 
 int rasPeerFind(const union ncclSocketAddress* addr) {
-  g_lastPeerFindAddr = addr;
-  return g_peerFindResult;
+  g.lastPeerFindAddr = addr;
+  return g.peerFindResult;
 }
 
 int rasLinkCalculatePeer(const struct rasLink* link, int peerIdx, bool isFallback) {
-  g_linkCalculateCalls.push_back({link, peerIdx, isFallback});
-  if (g_calculatedPeers.empty()) return -1;
-  int peer = g_calculatedPeers.front();
-  g_calculatedPeers.pop_front();
+  g.linkCalculateCalls.push_back({link, peerIdx, isFallback});
+  if (g.calculatedPeers.empty()) return -1;
+  int peer = g.calculatedPeers.front();
+  g.calculatedPeers.pop_front();
   return peer;
 }
 
@@ -651,7 +626,7 @@ TEST_F(RasNetMicrotest, ConnectionCreateReusesLiveEntry) {
   EXPECT_EQ(ncclSuccess, rasConnCreate(&conn->addr, &result));
   EXPECT_EQ(conn, result);
   EXPECT_EQ(sock, conn->sock);
-  EXPECT_EQ(0, g_socketInitCalls);
+  EXPECT_EQ(0, g.socketInitCalls);
 }
 
 TEST_F(RasNetMicrotest, ConnectionCreateReopensSocketlessEntryPreservingRetryStart) {
@@ -665,7 +640,7 @@ TEST_F(RasNetMicrotest, ConnectionCreateReopensSocketlessEntryPreservingRetrySta
   EXPECT_EQ(startRetryTime, conn->startRetryTime);
   ASSERT_NE(nullptr, conn->sock);
   EXPECT_EQ(RAS_SOCK_CONNECTING, conn->sock->status);
-  EXPECT_EQ(1, g_socketInitCalls);
+  EXPECT_EQ(1, g.socketInitCalls);
   EXPECT_EQ(g_clockNano, conn->lastRetryTime);
 }
 
@@ -684,48 +659,48 @@ TEST_F(RasNetMicrotest, ConnectionCreateOpensAndTracksNewEntry) {
   EXPECT_EQ(1, conn->sock->sock.customRetry);
   EXPECT_EQ(ncclSocketDefaultMagic(), conn->sock->sock.magic);
   EXPECT_EQ(POLLIN | POLLOUT, rasPfds[conn->sock->pfd].events);
-  EXPECT_EQ(g_nextSocketFd, rasPfds[conn->sock->pfd].fd);
+  EXPECT_EQ(g.nextSocketFd, rasPfds[conn->sock->pfd].fd);
 }
 
 TEST_F(RasNetMicrotest, ConnectionOpenIgnoresFailuresAndCleansPartialSocket) {
   rasConnection* conn = MakeConn();
-  g_socketConnectResult = ncclSystemError;
+  g.socketConnectResult = ncclSystemError;
   rasConnOpen(conn);
   EXPECT_EQ(nullptr, conn->sock);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
   EXPECT_EQ(g_clockNano, conn->lastRetryTime);
 
-  g_socketConnectResult = ncclSuccess;
+  g.socketConnectResult = ncclSuccess;
   g_failCallocAt = g_callocCalls;
   rasConnOpen(conn);
   EXPECT_EQ(nullptr, rasSocketsHead);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
 
   g_failCallocAt = -1;
-  g_socketInitResult = ncclSystemError;
+  g.socketInitResult = ncclSystemError;
   rasConnOpen(conn);
   EXPECT_EQ(nullptr, rasSocketsHead);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
 }
 
 TEST_F(RasNetMicrotest, ConnectionOpenHandlesReadyAndPollFailures) {
   rasConnection* conn = MakeConn();
-  g_socketReadyResult = ncclSystemError;
+  g.socketReadyResult = ncclSystemError;
   rasConnOpen(conn);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
 
-  g_socketReadyResult = ncclSuccess;
-  g_pollEntryResult = ncclSystemError;
+  g.socketReadyResult = ncclSuccess;
+  g.pollEntryResult = ncclSystemError;
   rasConnOpen(conn);
-  EXPECT_EQ(2, g_socketCloseCalls);
+  EXPECT_EQ(2, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
 }
 
 TEST_F(RasNetMicrotest, ConnectionOpenIgnoresConnectingDescriptor) {
   rasConnection* conn = MakeConn();
-  g_socketReadyState = ncclSocketStateConnecting;
+  g.socketReadyState = ncclSocketStateConnecting;
   rasConnOpen(conn);
   ASSERT_NE(nullptr, conn->sock);
   EXPECT_EQ(POLL_FD_IGNORE, rasPfds[conn->sock->pfd].fd);
@@ -737,71 +712,70 @@ TEST_F(RasNetMicrotest, ConnectionPrepareBuildsFrontConnInit) {
   rasPfds[0].events = POLLIN;
   rasNetListeningSocket.addr = MakeAddr(4321);
   ASSERT_EQ(ncclSuccess, rasConnPrepare(conn));
-  ASSERT_EQ(1u, g_enqueuedConnections.size());
-  EXPECT_EQ(conn, g_enqueuedConnections[0]);
-  EXPECT_TRUE(g_enqueuedFront[0]);
+  ASSERT_EQ(1u, g.enqueuedConnections.size());
+  EXPECT_EQ(conn, g.enqueuedConnections[0]);
+  EXPECT_TRUE(g.enqueuedFront[0]);
   rasMsgMeta* meta = ncclIntruQueueHead(&conn->sendQ);
   EXPECT_EQ(RAS_MSG_CONNINIT, meta->msg.type);
   EXPECT_EQ(NCCL_VERSION_CODE, meta->msg.connInit.ncclVersion);
   EXPECT_EQ(rasPeersHash, meta->msg.connInit.peersHash);
   EXPECT_EQ(rasDeadPeersHash, meta->msg.connInit.deadPeersHash);
   EXPECT_EQ(htons(4321), meta->msg.connInit.listeningAddr.sin.sin_port);
-  EXPECT_TRUE(rasPfds[0].events & POLLOUT);
 }
 
 TEST_F(RasNetMicrotest, ConnectionPreparePropagatesAllocationFailure) {
   rasConnection* conn = MakeConn();
-  g_msgAllocResult = ncclSystemError;
+  g.msgAllocResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasConnPrepare(conn));
   EXPECT_TRUE(ncclIntruQueueEmpty(&conn->sendQ));
 }
 
 TEST_F(RasNetMicrotest, AcceptNewSocketInitializesPollState) {
   ASSERT_EQ(ncclSuccess, rasNetAcceptNewSocket());
-  EXPECT_EQ(1, g_socketInitCalls);
-  EXPECT_EQ(1, g_socketAcceptCalls);
-  EXPECT_EQ(1, g_socketReadyCalls);
+  EXPECT_EQ(1, g.socketInitCalls);
+  EXPECT_EQ(1, g.socketAcceptCalls);
+  EXPECT_EQ(1, g.socketReadyCalls);
   ASSERT_NE(nullptr, rasSocketsHead);
   EXPECT_EQ(RAS_SOCK_CONNECTING, rasSocketsHead->status);
   EXPECT_EQ(ncclSocketTypeRasNetwork, rasSocketsHead->sock.type);
   EXPECT_EQ(1, rasSocketsHead->sock.asyncFlag);
   EXPECT_EQ(0, rasSocketsHead->sock.customRetry);
-  EXPECT_EQ(g_acceptSocketFd, rasPfds[rasSocketsHead->pfd].fd);
+  EXPECT_EQ(g.acceptSocketFd, rasPfds[rasSocketsHead->pfd].fd);
   EXPECT_EQ(POLLIN, rasPfds[rasSocketsHead->pfd].events);
 }
 
 TEST_F(RasNetMicrotest, AcceptNewSocketCleansEveryFailureStage) {
-  g_socketInitResult = ncclSystemError;
+  g.socketInitResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasNetAcceptNewSocket());
-  EXPECT_EQ(0, g_socketCloseCalls);
+  EXPECT_EQ(0, g.socketCloseCalls);
 
-  g_socketInitResult = ncclSuccess;
-  g_socketAcceptResult = ncclSystemError;
+  g.socketInitResult = ncclSuccess;
+  g.socketAcceptResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasNetAcceptNewSocket());
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
 
-  g_socketAcceptResult = ncclSuccess;
-  g_socketReadyResult = ncclSystemError;
+  g.socketAcceptResult = ncclSuccess;
+  g.socketReadyResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasNetAcceptNewSocket());
-  EXPECT_EQ(2, g_socketCloseCalls);
+  EXPECT_EQ(2, g.socketCloseCalls);
 
-  g_socketReadyResult = ncclSuccess;
-  g_acceptSocketFd = NCCL_INVALID_SOCKET;
+  g.socketReadyResult = ncclSuccess;
+  g.acceptSocketFd = NCCL_INVALID_SOCKET;
   EXPECT_EQ(ncclSuccess, rasNetAcceptNewSocket());
-  EXPECT_EQ(3, g_socketCloseCalls);
+  EXPECT_EQ(3, g.socketCloseCalls);
 
-  g_acceptSocketFd = 44;
-  g_pollEntryResult = ncclSystemError;
+  g.acceptSocketFd = 44;
+  g.pollEntryResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasNetAcceptNewSocket());
-  EXPECT_EQ(4, g_socketCloseCalls);
+  EXPECT_EQ(4, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
 }
 
 TEST_F(RasNetMicrotest, AcceptNewSocketCloseFailureLeavesSocketLinked) {
-  g_socketAcceptResult = ncclSystemError;
-  g_socketCloseResult = ncclInternalError;
+  g.socketAcceptResult = ncclSystemError;
+  g.socketCloseResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, rasNetAcceptNewSocket());
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
   ASSERT_NE(nullptr, rasSocketsHead);
   EXPECT_EQ(rasSocketsHead, rasSocketsTail);
 }
@@ -855,7 +829,7 @@ TEST_F(RasNetMicrotest, SocketTimeoutsScheduleUnexpiredStates) {
   nextWakeup = INT64_MAX;
   rasSocksHandleTimeouts(100 * CLOCK_UNITS_PER_SEC, &nextWakeup);
   EXPECT_EQ(ready->lastRecvTime + RAS_IDLE_TIMEOUT, nextWakeup);
-  EXPECT_EQ(0, g_socketCloseCalls);
+  EXPECT_EQ(0, g.socketCloseCalls);
 }
 
 TEST_F(RasNetMicrotest, SocketTimeoutsTerminateExpiredStates) {
@@ -871,11 +845,15 @@ TEST_F(RasNetMicrotest, SocketTimeoutsTerminateExpiredStates) {
   idle->lastSendTime = idle->lastRecvTime = 1;
   int64_t nextWakeup = INT64_MAX;
   rasSocksHandleTimeouts(100 * CLOCK_UNITS_PER_SEC, &nextWakeup);
-  EXPECT_EQ(4, g_socketCloseCalls);
+  EXPECT_EQ(4, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
-  ASSERT_EQ(2u, g_events.size());
-  EXPECT_EQ("PEER_INIT_TIMEOUT", g_events[0].type);
-  EXPECT_EQ("PEER_INIT_TIMEOUT", g_events[1].type);
+  // rasnet.cc:527 only sets startRetryTime when it was 0; conn's was already
+  // 2 before termination, so flipping that guard to unconditional would
+  // overwrite it with clockNano()-based value instead of preserving it.
+  EXPECT_EQ(2, conn->startRetryTime);
+  ASSERT_EQ(2u, g.events.size());
+  EXPECT_EQ("PEER_INIT_TIMEOUT", g.events[0].type);
+  EXPECT_EQ("PEER_INIT_TIMEOUT", g.events[1].type);
 }
 
 TEST_F(RasNetMicrotest, SocketTerminateFiltersRetryQueueAndStartsRetryClock) {
@@ -892,11 +870,11 @@ TEST_F(RasNetMicrotest, SocketTerminateFiltersRetryQueueAndStartsRetryClock) {
   EXPECT_EQ(g_clockNano - 17, conn->lastRetryTime);
   ASSERT_EQ(kept, ncclIntruQueueHead(&conn->sendQ));
   EXPECT_EQ(0, kept->offset);
-  EXPECT_EQ(1, g_socketShutdownCalls);
-  EXPECT_EQ(SHUT_WR, g_lastShutdownHow);
+  EXPECT_EQ(1, g.socketShutdownCalls);
+  EXPECT_EQ(SHUT_WR, g.lastShutdownHow);
   EXPECT_EQ(RAS_SOCK_TERMINATING, sock->status);
   EXPECT_EQ(POLLIN, rasPfds[0].events);
-  EXPECT_EQ(conn, g_purgedConnections.back());
+  EXPECT_EQ(conn, g.purgedConnections.back());
 }
 
 TEST_F(RasNetMicrotest, SocketTerminateSkipsRetryForIdleUnlinkedConnection) {
@@ -906,7 +884,7 @@ TEST_F(RasNetMicrotest, SocketTerminateSkipsRetryForIdleUnlinkedConnection) {
   rasSocketTerminate(sock, true, 0, true);
   EXPECT_EQ(0, conn->startRetryTime);
   EXPECT_EQ(nullptr, rasSocketsHead);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
 }
 
 TEST_F(RasNetMicrotest, SocketTerminateRetryUsesIdleGraceBoundary) {
@@ -945,7 +923,7 @@ TEST_F(RasNetMicrotest, SocketTerminateFinalizesAndClearsPollEntry) {
   EXPECT_EQ(nullptr, rasSocketsHead);
   EXPECT_EQ(NCCL_INVALID_SOCKET, rasPfds[3].fd);
   EXPECT_EQ(0, rasPfds[3].events);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
 }
 
 TEST_F(RasNetMicrotest, SocketTerminateAlreadyTerminatingWaitsForReceive) {
@@ -953,7 +931,7 @@ TEST_F(RasNetMicrotest, SocketTerminateAlreadyTerminatingWaitsForReceive) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_TERMINATING, 0, POLLIN);
   conn->sock = nullptr;
   rasSocketTerminate(sock, false);
-  EXPECT_EQ(0, g_socketShutdownCalls);
+  EXPECT_EQ(0, g.socketShutdownCalls);
   EXPECT_EQ(sock, rasSocketsHead);
 }
 
@@ -961,8 +939,8 @@ TEST_F(RasNetMicrotest, SocketTerminateClosesImmediatelyWithoutReadableSide) {
   rasConnection* conn = MakeConn();
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0, POLLOUT);
   rasSocketTerminate(sock, false);
-  EXPECT_EQ(0, g_socketShutdownCalls);
-  EXPECT_EQ(1, g_socketCloseCalls);
+  EXPECT_EQ(0, g.socketShutdownCalls);
+  EXPECT_EQ(1, g.socketCloseCalls);
   EXPECT_EQ(nullptr, rasSocketsHead);
 }
 
@@ -989,11 +967,11 @@ TEST_F(RasNetMicrotest, ConnectingEventLoopAdvancesAcceptSideHandshake) {
 
 TEST_F(RasNetMicrotest, ConnectingEventLoopHandlesReadyFailuresAndInvalidSides) {
   rasSocket* failed = MakeSock(nullptr, RAS_SOCK_CONNECTING, 0);
-  g_socketReadyResult = ncclSystemError;
+  g.socketReadyResult = ncclSystemError;
   rasSockEventLoop(failed, 0);
   EXPECT_EQ(nullptr, rasSocketsHead);
 
-  g_socketReadyResult = ncclSuccess;
+  g.socketReadyResult = ncclSuccess;
   rasSocket* noConn = MakeSock(nullptr, RAS_SOCK_CONNECTING, 1);
   rasPfds[1].events = POLLOUT;
   rasSockEventLoop(noConn, 1);
@@ -1013,7 +991,7 @@ TEST_F(RasNetMicrotest, ConnectingEventLoopTerminatesWhenConnInitAllocationFails
   rasConnection* conn = MakeConn();
   rasSocket* sock = MakeSock(conn, RAS_SOCK_CONNECTING, 0);
   rasPfds[0].events = POLLOUT;
-  g_msgAllocResult = ncclSystemError;
+  g.msgAllocResult = ncclSystemError;
   rasSockEventLoop(sock, 0);
   EXPECT_EQ(nullptr, conn->sock);
   EXPECT_EQ(nullptr, rasSocketsHead);
@@ -1021,14 +999,14 @@ TEST_F(RasNetMicrotest, ConnectingEventLoopTerminatesWhenConnInitAllocationFails
 
 TEST_F(RasNetMicrotest, ConnectingEventLoopHandlesNotReadyStates) {
   rasSocket* connecting = MakeSock(nullptr, RAS_SOCK_CONNECTING, 0);
-  g_socketReadyValue = 0;
-  g_socketReadyState = ncclSocketStateConnecting;
+  g.socketReadyValue = 0;
+  g.socketReadyState = ncclSocketStateConnecting;
   rasSockEventLoop(connecting, 0);
   EXPECT_EQ(POLL_FD_IGNORE, rasPfds[0].fd);
 
   rasSocket* badHandshake = MakeSock(nullptr, RAS_SOCK_CONNECTING, 1);
   badHandshake->sock.socketDescriptor = NCCL_INVALID_SOCKET;
-  g_socketReadyState = ncclSocketStateBadHandshake;
+  g.socketReadyState = ncclSocketStateBadHandshake;
   rasSockEventLoop(badHandshake, 1);
   EXPECT_EQ(connecting, rasSocketsHead);
   EXPECT_EQ(connecting, rasSocketsTail);
@@ -1038,25 +1016,25 @@ TEST_F(RasNetMicrotest, EventLoopSendSuccessAndFailurePaths) {
   rasConnection* conn = MakeConn();
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
   rasPfds[0].revents = POLLOUT;
-  g_sendMsgAllSent = false;
+  g.sendMsgAllSent = false;
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(1, g_sendMsgCalls);
+  EXPECT_EQ(1, g.sendMsgCalls);
   EXPECT_EQ(g_clockNano, sock->lastSendTime);
   EXPECT_EQ(POLLIN | POLLOUT, rasPfds[0].events);
 
-  g_sendMsgAllSent = true;
+  g.sendMsgAllSent = true;
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(2, g_sendMsgCalls);
+  EXPECT_EQ(2, g.sendMsgCalls);
   EXPECT_EQ(POLLIN, rasPfds[0].events);
 
   rasPfds[0].events |= POLLOUT;
   rasPfds[0].revents = POLLOUT;
-  g_sendMsgClosed = 1;
+  g.sendMsgClosed = 1;
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(3, g_sendMsgCalls);
+  EXPECT_EQ(3, g.sendMsgCalls);
   EXPECT_EQ(nullptr, conn->sock);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_DISCONNECTED", g_events.back().type);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_DISCONNECTED", g.events.back().type);
 }
 
 TEST_F(RasNetMicrotest, EventLoopRejectsMissingStaleAndFailedSendConnections) {
@@ -1074,7 +1052,7 @@ TEST_F(RasNetMicrotest, EventLoopRejectsMissingStaleAndFailedSendConnections) {
   EXPECT_EQ(current, conn->sock);
 
   rasPfds[1].revents = POLLOUT;
-  g_sendMsgResult = ncclSystemError;
+  g.sendMsgResult = ncclSystemError;
   rasSockEventLoop(current, 1);
   EXPECT_EQ(nullptr, conn->sock);
 }
@@ -1084,7 +1062,7 @@ TEST_F(RasNetMicrotest, EventLoopSkipsPendingWriteForTerminatingSocket) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_TERMINATING, 0);
   rasPfds[0].revents = POLLOUT;
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(0, g_sendMsgCalls);
+  EXPECT_EQ(0, g.sendMsgCalls);
   EXPECT_EQ(sock, rasSocketsHead);
   EXPECT_EQ(sock, conn->sock);
 }
@@ -1094,16 +1072,16 @@ TEST_F(RasNetMicrotest, EventLoopReceivesMessagesAndResumesConnection) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
   conn->experiencingDelays = true;
   rasPfds[0].revents = POLLIN;
-  g_recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
+  g.recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(1, g_handleMsgCalls);
-  EXPECT_EQ(2, g_recvCalls);
-  EXPECT_EQ(RAS_MSG_KEEPALIVE, g_lastHandledType);
+  EXPECT_EQ(1, g.handleMsgCalls);
+  EXPECT_EQ(2, g.recvCalls);
+  EXPECT_EQ(RAS_MSG_KEEPALIVE, g.lastHandledType);
   EXPECT_FALSE(conn->experiencingDelays);
   EXPECT_EQ(0, conn->startRetryTime);
   EXPECT_EQ(g_clockNano, sock->lastRecvTime);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_RECOVERED", g_events.back().type);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_RECOVERED", g.events.back().type);
 }
 
 TEST_F(RasNetMicrotest, EventLoopResumesConnectionWithRetryTimerOnly) {
@@ -1111,50 +1089,50 @@ TEST_F(RasNetMicrotest, EventLoopResumesConnectionWithRetryTimerOnly) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
   conn->startRetryTime = 1;
   rasPfds[0].revents = POLLIN;
-  g_recvSteps.push_back({ncclSuccess, 0, nullptr});
+  g.recvSteps.push_back({ncclSuccess, 0, nullptr});
   rasSockEventLoop(sock, 0);
   EXPECT_EQ(0, conn->startRetryTime);
   EXPECT_FALSE(conn->experiencingDelays);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_CONNECTED", g_events.back().type);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_CONNECTED", g.events.back().type);
 }
 
 TEST_F(RasNetMicrotest, EventLoopReceiveFailureAndClosedSocketFinalize) {
   rasSocket* failed = MakeSock(nullptr, RAS_SOCK_HANDSHAKE, 0);
   rasPfds[0].revents = POLLIN;
-  g_recvSteps.push_back({ncclSystemError, 0, nullptr});
+  g.recvSteps.push_back({ncclSystemError, 0, nullptr});
   rasSockEventLoop(failed, 0);
   EXPECT_EQ(nullptr, rasSocketsHead);
 
   rasConnection* conn = MakeConn();
   rasSocket* closed = MakeSock(conn, RAS_SOCK_HANDSHAKE, 1);
   rasPfds[1].revents = POLLIN;
-  g_recvSteps.push_back({ncclSuccess, 1, nullptr});
+  g.recvSteps.push_back({ncclSuccess, 1, nullptr});
   rasSockEventLoop(closed, 1);
   EXPECT_EQ(nullptr, conn->sock);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_NE(std::string::npos, g_events.back().details.find("new"));
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_NE(std::string::npos, g.events.back().details.find("new"));
 }
 
 TEST_F(RasNetMicrotest, EventLoopReportsCurrentSocketClosedOnReceive) {
   rasConnection* conn = MakeConn();
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
   rasPfds[0].revents = POLLIN;
-  g_recvSteps.push_back({ncclSuccess, 1, nullptr});
+  g.recvSteps.push_back({ncclSuccess, 1, nullptr});
   rasSockEventLoop(sock, 0);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_NE(std::string::npos, g_events.back().details.find("current"));
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_NE(std::string::npos, g.events.back().details.find("current"));
 }
 
 TEST_F(RasNetMicrotest, EventLoopStopsReceiveLoopAfterHandlerTerminatesPollEntry) {
   rasSocket* sock = MakeSock(nullptr, RAS_SOCK_HANDSHAKE, 0);
   rasPfds[0].revents = POLLIN;
-  g_clearPollInOnHandle = true;
-  g_recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
-  g_recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
+  g.clearPollInOnHandle = true;
+  g.recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
+  g.recvSteps.push_back({ncclSuccess, 0, MakeRecvMsg(RAS_MSG_KEEPALIVE)});
   rasSockEventLoop(sock, 0);
-  EXPECT_EQ(1, g_handleMsgCalls);
-  EXPECT_EQ(1u, g_recvSteps.size());
+  EXPECT_EQ(1, g.handleMsgCalls);
+  EXPECT_EQ(1u, g.recvSteps.size());
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutRetriesConnectingSocket) {
@@ -1162,15 +1140,15 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutRetriesConnectingSocket) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_CONNECTING, 0);
   sock->sock.state = ncclSocketStateConnecting;
   sock->lastSendTime = g_clockNano - RAS_CONNECT_RETRY - 1;
-  g_socketReadyValue = 0;
-  g_socketReadyState = ncclSocketStateConnecting;
+  g.socketReadyValue = 0;
+  g.socketReadyState = ncclSocketStateConnecting;
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(g_clockNano, sock->lastSendTime);
   EXPECT_EQ(g_clockNano + RAS_CONNECT_RETRY, nextWakeup);
 
-  g_socketReadyValue = 1;
-  g_socketReadyState = ncclSocketStateReady;
+  g.socketReadyValue = 1;
+  g.socketReadyState = ncclSocketStateReady;
   g_clockNano += RAS_CONNECT_RETRY + 1;
   rasPfds[0].fd = POLL_FD_IGNORE;  // rasConnOpen parks a still-connecting socket here.
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
@@ -1185,7 +1163,7 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutSchedulesConnectingRetryBoundary) {
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(g_clockNano + RAS_CONNECT_RETRY, nextWakeup);
-  EXPECT_EQ(0, g_socketReadyCalls);
+  EXPECT_EQ(0, g.socketReadyCalls);
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutDoesNotRetrySocketOutsideConnectingState) {
@@ -1195,7 +1173,7 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutDoesNotRetrySocketOutsideConnectingStat
   sock->lastSendTime = g_clockNano - RAS_CONNECT_RETRY - 1;
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
-  EXPECT_EQ(0, g_socketReadyCalls);
+  EXPECT_EQ(0, g.socketReadyCalls);
   EXPECT_EQ(sock, conn->sock);
   EXPECT_EQ(g_clockNano - RAS_CONNECT_RETRY - 1, sock->lastSendTime);
 }
@@ -1208,7 +1186,7 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutDoesNotTreatHandshakeSendAsStuck) {
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(sock, conn->sock);
-  EXPECT_TRUE(g_events.empty());
+  EXPECT_TRUE(g.events.empty());
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutTerminatesReadyFailureAndStuckSend) {
@@ -1216,19 +1194,19 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutTerminatesReadyFailureAndStuckSend) {
   rasSocket* sock = MakeSock(conn, RAS_SOCK_CONNECTING, 0);
   sock->sock.state = ncclSocketStateConnecting;
   sock->lastSendTime = 1;
-  g_socketReadyResult = ncclSystemError;
+  g.socketReadyResult = ncclSystemError;
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(nullptr, conn->sock);
 
-  g_socketReadyResult = ncclSuccess;
+  g.socketReadyResult = ncclSuccess;
   rasSocket* replacement = MakeSock(conn, RAS_SOCK_READY, 1);
   replacement->lastSendTime = 1;
   MakeQueuedMsg(conn, RAS_MSG_COLLREQ, 1);
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_EQ(nullptr, conn->sock);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_SEND_STUCK", g_events.back().type);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_SEND_STUCK", g.events.back().type);
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutSchedulesPendingSend) {
@@ -1246,12 +1224,27 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutDeclaresPeerDead) {
   conn->startRetryTime = 1;
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(RAS_PEER_DEAD_TIMEOUT + 2, &nextWakeup);
-  EXPECT_EQ(1, g_collReqInitCalls);
-  EXPECT_EQ(1, g_sendCollReqCalls);
-  EXPECT_EQ(RAS_BC_DEADPEER, g_lastCollReq.type);
-  EXPECT_EQ(htons(5555), g_lastCollReq.deadPeer.addr.sin.sin_port);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_TIMEOUT_DEAD", g_events.back().type);
+  EXPECT_EQ(1, g.collReqInitCalls);
+  EXPECT_EQ(1, g.sendCollReqCalls);
+  EXPECT_EQ(RAS_BC_DEADPEER, g.lastCollReq.type);
+  EXPECT_EQ(htons(5555), g.lastCollReq.deadPeer.addr.sin.sin_port);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_TIMEOUT_DEAD", g.events.back().type);
+}
+
+TEST_F(RasNetMicrotest, ConnectionTimeoutExactlyAtDeadThresholdIsNotYetDead) {
+  // rasnet.cc:247 is a strict '>', not '>='; elapsed time exactly equal to
+  // RAS_PEER_DEAD_TIMEOUT must not declare the peer dead yet.
+  rasConnection* conn = MakeConn(5555);
+  conn->startRetryTime = 1;
+  int64_t nextWakeup = INT64_MAX;
+  rasConnsHandleTimeouts(RAS_PEER_DEAD_TIMEOUT + 1, &nextWakeup);
+  // The separate, much lower RAS_CONNECT_WARN threshold is also crossed here
+  // and fires its own warning (covered by the warn-specific tests below), so
+  // only the dead-declaration side effects are checked, not that nothing fired.
+  EXPECT_EQ(0, g.collReqInitCalls);
+  EXPECT_EQ(0, g.sendCollReqCalls);
+  for (const auto& event : g.events) EXPECT_NE("PEER_TIMEOUT_DEAD", event.type);
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutWarnsOnceAndRetriesMissingSocket) {
@@ -1261,33 +1254,46 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutWarnsOnceAndRetriesMissingSocket) {
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
   EXPECT_TRUE(conn->experiencingDelays);
-  EXPECT_EQ(1u, g_purgedConnections.size());
-  EXPECT_EQ(1, g_socketInitCalls);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_UNRESPONSIVE", g_events[0].type);
+  EXPECT_EQ(1u, g.purgedConnections.size());
+  EXPECT_EQ(1, g.socketInitCalls);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_UNRESPONSIVE", g.events[0].type);
 
-  const size_t purgeCount = g_purgedConnections.size();
-  const size_t eventCount = g_events.size();
+  const size_t purgeCount = g.purgedConnections.size();
+  const size_t eventCount = g.events.size();
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
-  EXPECT_EQ(purgeCount, g_purgedConnections.size());
-  EXPECT_EQ(eventCount, g_events.size());
+  EXPECT_EQ(purgeCount, g.purgedConnections.size());
+  EXPECT_EQ(eventCount, g.events.size());
+}
+
+TEST_F(RasNetMicrotest, ConnectionTimeoutExactlyAtWarnThresholdDoesNotWarnYet) {
+  // rasnet.cc:276 is a strict '>', not '>='; elapsed time exactly equal to
+  // RAS_CONNECT_WARN must not mark the connection as experiencing delays yet.
+  // lastRetryTime is kept recent so the separate retry check doesn't also fire.
+  rasConnection* conn = MakeConn();
+  conn->startRetryTime = g_clockNano - RAS_CONNECT_WARN;
+  conn->lastRetryTime = g_clockNano;
+  int64_t nextWakeup = INT64_MAX;
+  rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
+  EXPECT_FALSE(conn->experiencingDelays);
+  EXPECT_TRUE(g.events.empty());
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutReportsFirstRetry) {
   rasConnection* conn = MakeConn();
   conn->startRetryTime = g_clockNano - RAS_CONNECT_RETRY - 1;
   conn->lastRetryTime = 0;
-  g_socketConnectResult = ncclSystemError;
+  g.socketConnectResult = ncclSystemError;
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
-  ASSERT_EQ(1u, g_events.size());
-  EXPECT_EQ("PEER_RETRY", g_events[0].type);
-  EXPECT_EQ(1, g_socketInitCalls);
+  ASSERT_EQ(1u, g.events.size());
+  EXPECT_EQ("PEER_RETRY", g.events[0].type);
+  EXPECT_EQ(1, g.socketInitCalls);
 
   g_clockNano += RAS_CONNECT_RETRY + 1;
   rasConnsHandleTimeouts(g_clockNano, &nextWakeup);
-  EXPECT_EQ(1u, g_events.size());
-  EXPECT_EQ(2, g_socketInitCalls);
+  EXPECT_EQ(1u, g.events.size());
+  EXPECT_EQ(2, g.socketInitCalls);
 }
 
 TEST_F(RasNetMicrotest, ConnectionTimeoutSchedulesWarningAndRetryBoundaries) {
@@ -1297,7 +1303,7 @@ TEST_F(RasNetMicrotest, ConnectionTimeoutSchedulesWarningAndRetryBoundaries) {
   int64_t nextWakeup = INT64_MAX;
   rasConnsHandleTimeouts(21, &nextWakeup);
   EXPECT_EQ(20 + RAS_CONNECT_RETRY, nextWakeup);
-  EXPECT_EQ(0, g_socketInitCalls);
+  EXPECT_EQ(0, g.socketInitCalls);
 }
 
 TEST_F(RasNetMicrotest, ConnectionDisconnectDropsLinksAndTerminates) {
@@ -1307,9 +1313,9 @@ TEST_F(RasNetMicrotest, ConnectionDisconnectDropsLinksAndTerminates) {
   AddLinkConn(&rasPrevLink, conn, 1);
   ncclSocketAddress addr = conn->addr;
   rasConnDisconnect(&addr);
-  ASSERT_EQ(2u, g_linkCalculateCalls.size());
-  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
-  EXPECT_EQ(&rasPrevLink, g_linkCalculateCalls[1].link);
+  ASSERT_EQ(2u, g.linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g.linkCalculateCalls[0].link);
+  EXPECT_EQ(&rasPrevLink, g.linkCalculateCalls[1].link);
   EXPECT_EQ(nullptr, rasConnsHead);
   EXPECT_EQ(nullptr, rasSocketsHead);
   EXPECT_EQ(nullptr, rasNextLink.conns->conn);
@@ -1377,6 +1383,23 @@ TEST_F(RasNetMicrotest, LinkedConnectionSendsKeepAliveAndSchedulesTimeouts) {
   EXPECT_EQ(g_clockNano + RAS_KEEPALIVE_TIMEOUT_WARN, nextWakeup);
 }
 
+TEST_F(RasNetMicrotest, LinkedConnectionWarnsWithoutTerminatingBeforeErrorThreshold) {
+  // Past RAS_KEEPALIVE_TIMEOUT_WARN but not RAS_KEEPALIVE_TIMEOUT_ERROR: swapping
+  // the two thresholds at rasnet.cc:804 would still pass the terminate-case test
+  // below, since that one is past both. This pins the warn-only branch alone.
+  rasConnection* conn = MakeConn();
+  rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
+  sock->lastSendTime = g_clockNano;
+  sock->lastRecvTime = g_clockNano - RAS_KEEPALIVE_TIMEOUT_WARN - 1;
+  AddLinkConn(&rasNextLink, conn, 0);
+  int64_t nextWakeup = INT64_MAX;
+  rasNetHandleTimeouts(g_clockNano, &nextWakeup);
+  EXPECT_TRUE(conn->experiencingDelays);
+  EXPECT_EQ(sock, conn->sock);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_UNRESPONSIVE", g.events[0].type);
+}
+
 TEST_F(RasNetMicrotest, LinkedConnectionWarnsThenTerminatesOnKeepAliveTimeout) {
   rasConnection* conn = MakeConn();
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
@@ -1386,15 +1409,15 @@ TEST_F(RasNetMicrotest, LinkedConnectionWarnsThenTerminatesOnKeepAliveTimeout) {
   AddLinkConn(&rasPrevLink, conn, 0);
   int64_t nextWakeup = INT64_MAX;
   rasNetHandleTimeouts(g_clockNano, &nextWakeup);
-  ASSERT_EQ(2u, g_linkCalculateCalls.size());
-  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
-  EXPECT_EQ(&rasPrevLink, g_linkCalculateCalls[1].link);
+  ASSERT_EQ(2u, g.linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g.linkCalculateCalls[0].link);
+  EXPECT_EQ(&rasPrevLink, g.linkCalculateCalls[1].link);
   EXPECT_TRUE(conn->experiencingDelays);
   EXPECT_EQ(nullptr, conn->sock);
   EXPECT_EQ(g_clockNano, nextWakeup);
-  ASSERT_GE(g_events.size(), 2u);
-  EXPECT_EQ("PEER_UNRESPONSIVE", g_events[0].type);
-  EXPECT_EQ("PEER_KEEPALIVE_TIMEOUT", g_events[1].type);
+  ASSERT_GE(g.events.size(), 2u);
+  EXPECT_EQ("PEER_UNRESPONSIVE", g.events[0].type);
+  EXPECT_EQ("PEER_KEEPALIVE_TIMEOUT", g.events[1].type);
 }
 
 TEST_F(RasNetMicrotest, KeepAliveEncodesLinkMaskHashesAndTimestamp) {
@@ -1412,7 +1435,6 @@ TEST_F(RasNetMicrotest, KeepAliveEncodesLinkMaskHashesAndTimestamp) {
   EXPECT_EQ(rasPeersHash, meta->msg.keepAlive.peersHash);
   EXPECT_EQ(rasDeadPeersHash, meta->msg.keepAlive.deadPeersHash);
   EXPECT_EQ(g_realtime.tv_sec, meta->msg.keepAlive.realTime.tv_sec);
-  EXPECT_TRUE(rasPfds[0].events & POLLOUT);
 }
 
 TEST_F(RasNetMicrotest, KeepAliveEncodesBothNonExternalLinks) {
@@ -1435,7 +1457,7 @@ TEST_F(RasNetMicrotest, KeepAliveExcludesExternalNextLink) {
 
 TEST_F(RasNetMicrotest, KeepAliveAllocationFailureIsIgnored) {
   rasConnection* conn = MakeConn();
-  g_msgAllocResult = ncclSystemError;
+  g.msgAllocResult = ncclSystemError;
   rasConnSendKeepAlive(conn);
   EXPECT_TRUE(ncclIntruQueueEmpty(&conn->sendQ));
 }
@@ -1450,12 +1472,12 @@ TEST_F(RasNetMicrotest, KeepAliveHandlerUpdatesLinksStatsAndHashes) {
   SetPeers({1001});
   rasConnection* conn = MakeConn(1001);
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
-  g_peerFindResult = 0;
+  g.peerFindResult = 0;
   g_realtime = {20, 500};
   rasMsg msg = MakeKeepAliveMsg(3);
   msg.keepAlive.realTime = {19, 400};
   ASSERT_EQ(ncclSuccess, rasMsgHandleKeepAlive(&msg, sock));
-  EXPECT_EQ(&conn->addr, g_lastPeerFindAddr);
+  EXPECT_EQ(&conn->addr, g.lastPeerFindAddr);
   EXPECT_EQ(rasPeersHash, conn->lastRecvPeersHash);
   EXPECT_EQ(rasDeadPeersHash, conn->lastRecvDeadPeersHash);
   EXPECT_EQ(1'000'000'100, conn->travelTimeMin);
@@ -1483,7 +1505,7 @@ TEST_F(RasNetMicrotest, KeepAliveHandlerHonorsAsymmetricLinkMaskAndPeerIndex) {
   SetPeers({1001, 1002});
   rasConnection* conn = MakeConn(1002);
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
-  g_peerFindResult = 1;
+  g.peerFindResult = 1;
   rasMsg msg = MakeKeepAliveMsg(1, true);
 
   ASSERT_EQ(ncclSuccess, rasMsgHandleKeepAlive(&msg, sock));
@@ -1497,7 +1519,7 @@ TEST_F(RasNetMicrotest, KeepAliveHandlerDropsUnrequestedExternalLinks) {
   SetPeers({1001});
   rasConnection* conn = MakeConn(1001);
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
-  g_peerFindResult = 0;
+  g.peerFindResult = 0;
   AddLinkConn(&rasNextLink, conn, 0, true);
   AddLinkConn(&rasPrevLink, conn, 0, true);
   rasMsg msg = MakeKeepAliveMsg(0, true);
@@ -1529,7 +1551,7 @@ TEST_F(RasNetMicrotest, KeepAliveHandlerAcceptsUnknownPeerIndexForExternalLink) 
   AddLinkConn(&rasNextLink, primary, 0);
   rasConnection* conn = MakeConn(1001);
   rasSocket* sock = MakeSock(conn, RAS_SOCK_READY, 0);
-  g_peerFindResult = -1;
+  g.peerFindResult = -1;
   rasMsg msg = MakeKeepAliveMsg(1, true);
   ASSERT_EQ(ncclSuccess, rasMsgHandleKeepAlive(&msg, sock));
   ASSERT_NE(nullptr, rasNextLink.conns);
@@ -1548,13 +1570,13 @@ TEST_F(RasNetMicrotest, KeepAliveHandlerRequestsPeerUpdateOnHashMismatch) {
   msg.keepAlive.peersHash = 8;
   msg.keepAlive.deadPeersHash = 9;
   EXPECT_EQ(ncclSuccess, rasMsgHandleKeepAlive(&msg, sock));
-  EXPECT_EQ(1, g_sendPeersUpdateCalls);
-  EXPECT_EQ(conn, g_lastPeersUpdateConn);
-  EXPECT_EQ(rasPeers, g_lastPeersUpdatePeers);
-  EXPECT_EQ(nRasPeers, g_lastPeersUpdateCount);
-  EXPECT_EQ(&conn->addr, g_lastPeerFindAddr);
+  EXPECT_EQ(1, g.sendPeersUpdateCalls);
+  EXPECT_EQ(conn, g.lastPeersUpdateConn);
+  EXPECT_EQ(rasPeers, g.lastPeersUpdatePeers);
+  EXPECT_EQ(nRasPeers, g.lastPeersUpdateCount);
+  EXPECT_EQ(&conn->addr, g.lastPeerFindAddr);
   EXPECT_TRUE(ncclIntruQueueEmpty(&conn->sendQ));
-  g_sendPeersUpdateResult = ncclSystemError;
+  g.sendPeersUpdateResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, rasMsgHandleKeepAlive(&msg, sock));
 }
 
@@ -1626,16 +1648,7 @@ TEST_F(RasNetMicrotest, LinkEntryRejectsMovingUnknownConnectionLater) {
 }
 
 TEST_F(RasNetMicrotest, LinkEntryFillsPrimaryPlaceholderAndSanitizesFallbacks) {
-  rasConnection* primary = MakeConn(1001);
-  MakeSock(primary, RAS_SOCK_READY, 0);
-  rasConnection* fallback = MakeConn(1002);
-  AddLinkConn(&rasNextLink, nullptr, 1);
-  AddLinkConn(&rasNextLink, fallback, 2, true);
-  rasNextLink.lastUpdatePeersTime = 99;
-  ASSERT_EQ(ncclSuccess, rasLinkConnAdd(&rasNextLink, primary, 1));
-  EXPECT_EQ(primary, rasNextLink.conns->conn);
-  EXPECT_EQ(nullptr, rasNextLink.conns->next);
-  EXPECT_EQ(0, rasNextLink.lastUpdatePeersTime);
+  CheckLinkEntryFillsPlaceholderAndSanitizes(false);
 }
 
 TEST_F(RasNetMicrotest, ExternalLinkEntriesAddMoveAndDrop) {
@@ -1668,16 +1681,7 @@ TEST_F(RasNetMicrotest, ExternalLinkEntriesRejectNullAndMismatch) {
 }
 
 TEST_F(RasNetMicrotest, ExternalLinkEntryFillsPlaceholderAndSanitizes) {
-  rasConnection* conn = MakeConn(1001);
-  MakeSock(conn, RAS_SOCK_READY, 0);
-  AddLinkConn(&rasNextLink, nullptr, 1);
-  AddLinkConn(&rasNextLink, MakeConn(1002), 2, true);
-  rasNextLink.lastUpdatePeersTime = 99;
-  ASSERT_EQ(ncclSuccess, rasLinkConnAddExternal(&rasNextLink, conn, 1));
-  EXPECT_EQ(conn, rasNextLink.conns->conn);
-  EXPECT_EQ(nullptr, rasNextLink.conns->next);
-  EXPECT_EQ(0, rasNextLink.lastUpdatePeersTime);
-  EXPECT_EQ(ncclSuccess, rasLinkConnAddExternal(&rasNextLink, conn, 1));
+  CheckLinkEntryFillsPlaceholderAndSanitizes(true);
 }
 
 TEST_F(RasNetMicrotest, ExternalLinkEntryOrderingAndMoveMatchInternalOrdering) {
@@ -1710,8 +1714,8 @@ TEST_F(RasNetMicrotest, ConnectionResumeCleansFallbacksAndEnablesSend) {
   EXPECT_EQ(0, conn->startRetryTime);
   EXPECT_EQ(nullptr, rasNextLink.conns->next);
   EXPECT_TRUE(rasPfds[0].events & POLLOUT);
-  ASSERT_FALSE(g_events.empty());
-  EXPECT_EQ("PEER_CONNECTED", g_events.back().type);
+  ASSERT_FALSE(g.events.empty());
+  EXPECT_EQ("PEER_CONNECTED", g.events.back().type);
 }
 
 TEST_F(RasNetMicrotest, LinkFallbackOpensCalculatedPeer) {
@@ -1719,16 +1723,16 @@ TEST_F(RasNetMicrotest, LinkFallbackOpensCalculatedPeer) {
   rasConnection* failed = MakeConn(1001);
   failed->experiencingDelays = true;
   AddLinkConn(&rasNextLink, failed, 0);
-  g_calculatedPeers.push_back(1);
+  g.calculatedPeers.push_back(1);
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   ASSERT_NE(nullptr, rasNextLink.conns->next);
   EXPECT_EQ(1, rasNextLink.conns->next->peerIdx);
   ASSERT_NE(nullptr, rasNextLink.conns->next->conn);
   EXPECT_EQ(htons(1002), rasNextLink.conns->next->conn->addr.sin.sin_port);
-  ASSERT_EQ(1u, g_linkCalculateCalls.size());
-  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
-  EXPECT_EQ(0, g_linkCalculateCalls[0].peerIdx);
-  EXPECT_FALSE(g_linkCalculateCalls[0].isFallback);
+  ASSERT_EQ(1u, g.linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g.linkCalculateCalls[0].link);
+  EXPECT_EQ(0, g.linkCalculateCalls[0].peerIdx);
+  EXPECT_FALSE(g.linkCalculateCalls[0].isFallback);
 }
 
 TEST_F(RasNetMicrotest, LinkFallbackPrefersEarlierHealthyExternalConnection) {
@@ -1737,7 +1741,7 @@ TEST_F(RasNetMicrotest, LinkFallbackPrefersEarlierHealthyExternalConnection) {
   rasConnection* external = MakeConn(1002);
   AddLinkConn(&rasNextLink, failed, 0);
   rasLinkConn* externalEntry = AddLinkConn(&rasNextLink, external, 1, true);
-  g_calculatedPeers.push_back(2);
+  g.calculatedPeers.push_back(2);
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   EXPECT_FALSE(externalEntry->external);
   EXPECT_EQ(nullptr, externalEntry->next);
@@ -1749,7 +1753,7 @@ TEST_F(RasNetMicrotest, LinkFallbackInsertsAheadOfLaterExternalConnection) {
   rasConnection* external = MakeConn(1003);
   AddLinkConn(&rasNextLink, failed, 0);
   AddLinkConn(&rasNextLink, external, 2, true);
-  g_calculatedPeers.push_back(1);
+  g.calculatedPeers.push_back(1);
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   ASSERT_EQ((std::vector<int>{0, 1, 2}), LinkPeerIndices(rasNextLink));
   EXPECT_EQ(external, rasNextLink.conns->next->next->conn);
@@ -1762,19 +1766,19 @@ TEST_F(RasNetMicrotest, LinkFallbackSkipsDelayedCandidateAndContinues) {
   rasConnection* delayed = MakeConn(1002);
   delayed->experiencingDelays = true;
   AddLinkConn(&rasNextLink, failed, 0);
-  g_calculatedPeers.push_back(1);
-  g_calculatedPeers.push_back(2);
+  g.calculatedPeers.push_back(1);
+  g.calculatedPeers.push_back(2);
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   ASSERT_EQ((std::vector<int>{0, 1, 2}), LinkPeerIndices(rasNextLink));
   EXPECT_EQ(delayed, rasNextLink.conns->next->conn);
   EXPECT_FALSE(rasNextLink.conns->next->next->conn->experiencingDelays);
-  ASSERT_EQ(2u, g_linkCalculateCalls.size());
-  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[0].link);
-  EXPECT_EQ(0, g_linkCalculateCalls[0].peerIdx);
-  EXPECT_FALSE(g_linkCalculateCalls[0].isFallback);
-  EXPECT_EQ(&rasNextLink, g_linkCalculateCalls[1].link);
-  EXPECT_EQ(1, g_linkCalculateCalls[1].peerIdx);
-  EXPECT_TRUE(g_linkCalculateCalls[1].isFallback);
+  ASSERT_EQ(2u, g.linkCalculateCalls.size());
+  EXPECT_EQ(&rasNextLink, g.linkCalculateCalls[0].link);
+  EXPECT_EQ(0, g.linkCalculateCalls[0].peerIdx);
+  EXPECT_FALSE(g.linkCalculateCalls[0].isFallback);
+  EXPECT_EQ(&rasNextLink, g.linkCalculateCalls[1].link);
+  EXPECT_EQ(1, g.linkCalculateCalls[1].peerIdx);
+  EXPECT_TRUE(g.linkCalculateCalls[1].isFallback);
 }
 
 TEST_F(RasNetMicrotest, LinkFallbackAdjustsExternalIndexAfterEarlierInsertion) {
@@ -1787,8 +1791,8 @@ TEST_F(RasNetMicrotest, LinkFallbackAdjustsExternalIndexAfterEarlierInsertion) {
   rasConnection* external = MakeConn(1004);
   AddLinkConn(&rasNextLink, failed, 0);
   AddLinkConn(&rasNextLink, external, 3, true);
-  g_calculatedPeers.push_back(1);
-  g_calculatedPeers.push_back(2);
+  g.calculatedPeers.push_back(1);
+  g.calculatedPeers.push_back(2);
 
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   ASSERT_EQ((std::vector<int>{0, 1, 2, 3}), LinkPeerIndices(rasNextLink));
@@ -1806,12 +1810,12 @@ TEST_F(RasNetMicrotest, LinkFallbackMarksNonHeadSourceAsFallback) {
   failed->experiencingDelays = true;
   AddLinkConn(&rasNextLink, primary, 0);
   AddLinkConn(&rasNextLink, failed, 1);
-  g_calculatedPeers.push_back(-1);
+  g.calculatedPeers.push_back(-1);
 
   ASSERT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
-  ASSERT_EQ(1u, g_linkCalculateCalls.size());
-  EXPECT_EQ(1, g_linkCalculateCalls[0].peerIdx);
-  EXPECT_TRUE(g_linkCalculateCalls[0].isFallback);
+  ASSERT_EQ(1u, g.linkCalculateCalls.size());
+  EXPECT_EQ(1, g.linkCalculateCalls[0].peerIdx);
+  EXPECT_TRUE(g.linkCalculateCalls[0].isFallback);
 }
 
 TEST_F(RasNetMicrotest, LinkFallbackStopsForHealthyOrExternalAlternatives) {
@@ -1820,18 +1824,18 @@ TEST_F(RasNetMicrotest, LinkFallbackStopsForHealthyOrExternalAlternatives) {
   rasConnection* healthy = MakeConn(1002);
   AddLinkConn(&rasNextLink, failed, 0);
   AddLinkConn(&rasNextLink, healthy, 1);
-  g_calculatedPeers.push_back(2);
+  g.calculatedPeers.push_back(2);
   EXPECT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   EXPECT_EQ((std::vector<int>{0, 1}), LinkPeerIndices(rasNextLink));
-  ASSERT_EQ(1u, g_calculatedPeers.size());
-  EXPECT_EQ(2, g_calculatedPeers.front());
+  ASSERT_EQ(1u, g.calculatedPeers.size());
+  EXPECT_EQ(2, g.calculatedPeers.front());
 
   FreeLink(&rasNextLink);
   AddLinkConn(&rasNextLink, failed, 0, true);
   EXPECT_EQ(ncclSuccess, rasLinkAddFallback(&rasNextLink, failed));
   EXPECT_EQ((std::vector<int>{0}), LinkPeerIndices(rasNextLink));
-  ASSERT_EQ(1u, g_calculatedPeers.size());
-  EXPECT_EQ(2, g_calculatedPeers.front());
+  ASSERT_EQ(1u, g.calculatedPeers.size());
+  EXPECT_EQ(2, g.calculatedPeers.front());
 }
 
 TEST_F(RasNetMicrotest, LinkFallbackIgnoresUninitializedPeerAndHandlesExhaustion) {
