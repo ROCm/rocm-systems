@@ -51,7 +51,8 @@
  *   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles:
  *     resuming an archive whose directories and events.bin are readable by
  *     others makes them private again, and a hard-linked blob found there is
- *     written again rather than trusted (POSIX).
+ *     written again rather than trusted, and leaves the archive marked
+ *     incomplete (POSIX).
  *
  *   Unit_HRR_CaptureResumeChecksBlobBytes:
  *     resuming an archive with a blob whose bytes no longer hash to its name,
@@ -1045,7 +1046,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
  *     archive; the run then resumes that archive.
  *   - The archive is resumed (events.bin grows), its directories end up 0700
  *     and events.bin and manifest.json 0600, and the hard-linked blob is not
- *     trusted: it is written again, so neither name shares its inode any more.
+ *     trusted: it is written again, so neither name shares its inode any more,
+ *     and the archive is marked incomplete, since events from the first run
+ *     named bytes nothing vouches for.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
 #ifdef _WIN32
@@ -1099,6 +1102,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
   CHECK(fs::hard_link_count(archive / linked) == 1);
   CHECK(fs::hard_link_count(victim) == 1);
   CHECK(file_holds(victim, victim_contents));
+  CHECK(manifest_says_complete(archive, false));
 #endif
 }
 

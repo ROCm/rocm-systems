@@ -790,15 +790,14 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   g_written_blobs.clear();
   g_blob_claims.clear();  // as in the fresh-archive path of open()
   size_t mismatched = 0;
-  // Ours, but holding other bytes than its name says, or filed under a
+  // Not ours, holding other bytes than its name says, or filed under a
   // blobs/<xx> that is not the first two digits of its name, where playback
-  // does not look: left unindexed like a file that is not ours, so the next
-  // write of that hash makes it again, and the archive is incomplete, since
-  // its events may name the lost bytes.
+  // does not look: left unindexed, so the next write of that hash makes it
+  // again, and the archive is incomplete, since its events may name bytes
+  // nothing vouches for.
   const auto trust = [&](const fs::path& p, const std::string& key, const std::string& hex,
                          bool in_place) {
-    if (!resumed_file_is_ours(p)) return;
-    if (in_place && resumed_file_matches(p, hex))
+    if (resumed_file_is_ours(p) && in_place && resumed_file_matches(p, hex))
       g_written_blobs.insert(key);
     else
       ++mismatched;
@@ -844,11 +843,12 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   }
 
   if (mismatched) {
-    LogPrintfWarning("[HRR capture] %zu blob or code object files in %s do not hold the bytes "
-                     "their names are the hash of, or are not where playback looks for them",
-                     mismatched, output_dir.c_str());
+    LogPrintfWarning("[HRR capture] %zu blob or code object files in %s are not ours, do not "
+                     "hold the bytes their names are the hash of, or are not where playback "
+                     "looks for them", mismatched, output_dir.c_str());
     mark_incomplete_locked(
-        "a blob or code object found on resume does not match its hash or its place");
+        "a blob or code object found on resume is not ours, or does not match its hash or "
+        "its place");
   }
 }
 
