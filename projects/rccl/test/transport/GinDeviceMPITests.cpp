@@ -905,6 +905,31 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
   }
 }
 
+// Each DevComm names the backend it bound to. That line is INIT-only, so
+// NCCL_DEBUG_SUBSYS must include INIT. The proxy's name comes from the RMA
+// plugin, so the line is matched on type.
+TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+  MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "INIT");
+  MPIHelpers::TestLogAssertionContext logCtx(
+      MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+  runBasicPutSelfCheck();
+  if (HasFatalFailure() || IsSkipped()) return;
+
+  const std::string log = logCtx.readNcclDebugLog();
+  const size_t pos = log.find("GIN: using backend ");
+  ASSERT_NE(std::string::npos, pos) << "actual log:\n" << log;
+  const std::string line = log.substr(pos, log.find('\n', pos) - pos);
+  const std::string type = " type " + std::to_string(requestedGinType());
+  EXPECT_NE(std::string::npos, line.find(type)) << "actual log:\n" << log;
+}
+
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
   int n = ginEnvContextCount();
   if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";

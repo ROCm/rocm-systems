@@ -447,6 +447,9 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
     }
 
     if (ncclSuccess == ginDevCommSetupWithBackend(comm, reqs, devComm, deviceCodeVersion, candidate)) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      INFO(NCCL_INIT, "GIN: using backend %s type %d", candidate->ncclGin->name, candidate->ginType);
+#endif
       return ncclSuccess;
     }
 
