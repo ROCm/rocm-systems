@@ -9,8 +9,8 @@
   --mem-hit: #816904;
   --mem-stall: #b44444;
   --mem-bw: #087da3;
-  --mem-gpu-bg: #eee8f7;
-  --mem-memory-bg: #f7f0e3;
+  --mem-gpu-bg: #e8edf2;
+  --mem-memory-bg: #efefef;
 }
 
 :root.report-theme-dark {
@@ -21,8 +21,8 @@
   --mem-hit: #e9d477;
   --mem-stall: #f09595;
   --mem-bw: #5dc7e9;
-  --mem-gpu-bg: #292139;
-  --mem-memory-bg: #2b2418;
+  --mem-gpu-bg: #252c34;
+  --mem-memory-bg: #303030;
 }
 
 .mem-chart-cat-read { --mem-category: var(--mem-read); }
@@ -282,6 +282,7 @@
   white-space: pre-line;
 }
 .mem-chart-guidance p:last-child { margin-bottom: 0; }
+.mem-chart-guidance .mem-chart-table td { white-space: pre-line; }
 .mem-chart-empty { color: var(--report-muted); font-size: 12px; }
 .mem-chart-app noscript { padding: 8px; }
 

@@ -677,7 +677,17 @@
       }
       var target = block.querySelector("[data-annotations-for]");
       var row = element("div", "mem-chart-annotation");
-      row.appendChild(element("span", "", annotation.label));
+      var label = element("span", "");
+      if (annotation.label.startsWith("[!]")) {
+        var warning = element("span", "", "⚠\uFE0E");
+        warning.setAttribute("role", "img");
+        warning.setAttribute("aria-label", "Warning");
+        label.appendChild(warning);
+        label.appendChild(document.createTextNode(annotation.label.slice(3)));
+      } else {
+        label.textContent = annotation.label;
+      }
+      row.appendChild(label);
       row.appendChild(element("strong", "", annotation.value));
       target.appendChild(row);
     });
@@ -724,6 +734,27 @@
     });
   }
 
+  function guidanceCells(block) {
+    var lines = block.split(/\r?\n/).map(function (line) { return line.trim(); })
+      .filter(function (line) { return line; });
+    if (lines.length !== 4) {
+      return null;
+    }
+    var fields = new Map();
+    for (var line of lines.slice(1)) {
+      var colon = line.indexOf(":");
+      var name = line.slice(0, colon).trim();
+      if (colon < 0 || !["Condition", "Measured", "Impact"].includes(name) || fields.has(name)) {
+        return null;
+      }
+      fields.set(name, line.slice(colon + 1).trim());
+    }
+    var heading = lines[0].match(/^(\[[^\]]+\])\s*(.*)$/);
+    var measured = fields.get("Measured").replace(/\s*\(threshold:\s*[^)]*\)\s*$/, "");
+    return [heading ? heading[1] : "", heading ? heading[2] : lines[0],
+      fields.get("Impact"), fields.get("Condition"), measured];
+  }
+
   function updateGuidance(view) {
     guidance.replaceChildren();
     var detail = view.membw;
@@ -735,9 +766,43 @@
     if (detail.status) {
       guidance.appendChild(element("p", "mem-chart-status", detail.status));
     }
-    detail.guidanceBlocks.forEach(function (block) {
-      guidance.appendChild(element("p", "mem-chart-guidance-block", block));
+    if (!detail.guidanceBlocks.length) {
+      return;
+    }
+    var scroll = element("div", "mem-chart-table-scroll");
+    var table = element("table", "mem-chart-table");
+    var colgroup = element("colgroup", "");
+    [8, 24, 32, 26, 10].forEach(function (width) {
+      var col = element("col", "");
+      col.style.width = width + "%";
+      colgroup.appendChild(col);
     });
+    table.appendChild(colgroup);
+    var head = element("thead", "");
+    var header = element("tr", "");
+    ["Block", "Bottleneck", "Impact", "Condition", "Measured"].forEach(function (name) {
+      var cell = element("th", "", name);
+      cell.scope = "col";
+      header.appendChild(cell);
+    });
+    head.appendChild(header);
+    table.appendChild(head);
+    var body = element("tbody", "");
+    detail.guidanceBlocks.forEach(function (block) {
+      var row = element("tr", "mem-chart-guidance-block");
+      var cells = guidanceCells(block);
+      if (cells) {
+        cells.forEach(function (value) { row.appendChild(element("td", "", value)); });
+      } else {
+        var cell = element("td", "", block);
+        cell.colSpan = 5;
+        row.appendChild(cell);
+      }
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    scroll.appendChild(table);
+    guidance.appendChild(scroll);
   }
 
   function selectView(key) {
