@@ -846,11 +846,11 @@ Display all PyTorch operators captured during profiling:
 
    nn.Module.Net.forward main.py:60 (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
       ├─ aten::convolution (calls: 20)
-      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
+      |  └─ conv2d_fwd (id 0) (dispatches: 40, total: 27.08 ms)
       ├─ aten::addmm (calls: 20)
-      |  └─ gemm (dispatches: 20, total: 15.41 ms)
+      |  └─ gemm (id 1) (dispatches: 20, total: 15.41 ms)
       └─ aten::relu (calls: 40)
-         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+         └─ relu_kernel (id 2) (dispatches: 30, total: 0.31 ms)
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
    ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
