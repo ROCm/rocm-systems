@@ -838,6 +838,12 @@ TEST_F(RasNetMicrotest, SocketTimeoutsTerminateExpiredStates) {
   rasConnection* conn = MakeConn();
   rasSocket* outgoing = MakeSock(conn, RAS_SOCK_HANDSHAKE, 1);
   outgoing->createTime = 1;
+  // Recent, not calloc-zero: rasnet.cc:521's retry-eligibility check is
+  // clockNano() - max(lastSendTime, lastRecvTime) < RAS_IDLE_TIMEOUT -
+  // RAS_IDLE_GRACE_PERIOD, which a zeroed timestamp would fail at this test's
+  // 100s now -- skipping the startRetryTime guard below entirely and making
+  // the assertion on it pass vacuously.
+  outgoing->lastSendTime = outgoing->lastRecvTime = g_clockNano;
   conn->startRetryTime = 2;
   rasSocket* terminating = MakeSock(nullptr, RAS_SOCK_TERMINATING, 2);
   terminating->lastSendTime = terminating->lastRecvTime = 1;
