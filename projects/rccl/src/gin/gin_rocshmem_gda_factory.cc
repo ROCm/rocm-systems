@@ -940,6 +940,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
                          ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
       bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
       attr.ah_attr.is_global = 0;
+      memset(&attr.ah_attr.grh, 0, sizeof(attr.ah_attr.grh));
       attr.ah_attr.dlid = remote_info[i].lid;
       if (needGlobal) {
         if (!sameSubnet) {
@@ -1105,7 +1106,7 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
       // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
-      uint32_t mtu         = 128 << negotiated_mtu[idx]; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
+      uint32_t mtu         = ginIbvMtuToInt(negotiated_mtu[idx]);
 
       void*    cq_buf   = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;
