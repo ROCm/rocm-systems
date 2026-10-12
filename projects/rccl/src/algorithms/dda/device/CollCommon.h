@@ -23,6 +23,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hip/amd_detail/amd_hip_bf16.h>
+#include "rccl_float8.h"
 using bf16 = __hip_bfloat16;
 #else
 #include <cuda.h>
@@ -36,11 +37,25 @@ using bf162 = __nv_bfloat162;
 
 namespace dda::common {
 
+// fp8 element tags. rccl_float8 / rccl_bfloat8 are different types in the host
+// pass and the gfx942 device pass (FNUZ vs OCP), so a kernel templated on them
+// would be registered under a name the gfx942 code object does not contain. The
+// kernels are instantiated on these instead, and vecElementAdd resolves the
+// device's encoding.
+struct fp8e4m3 {
+  uint8_t bits;
+};
+struct fp8e5m2 {
+  uint8_t bits;
+};
+static_assert(sizeof(fp8e4m3) == 1 && sizeof(fp8e5m2) == 1, "fp8 tags must be one byte");
+
 template <typename T>
 inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
                                              std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-                                             || std::is_same<T, __hip_bfloat16>::value
+                                             || std::is_same<T, __hip_bfloat16>::value ||
+                                             std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value
 #endif
 );
 
@@ -75,6 +90,40 @@ static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_
     return (reinterpret_cast<uint32_t*>(&z))[0];
 #endif
   }
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
+  else if constexpr (std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value) {
+#if defined(__gfx942__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
+    // The math of hadd2 / hadd2_b on these arches (widen to f32, add, narrow),
+    // with the high pair packed into the low pair's result so nothing narrower
+    // than a dword reaches codegen: the 16-bit form crashes the gfx1250 backend.
+    if constexpr (std::is_same<T, fp8e4m3>::value) {
+      const auto lo = __builtin_amdgcn_cvt_pk_f32_fp8(a, false) + __builtin_amdgcn_cvt_pk_f32_fp8(b, false);
+      const auto hi = __builtin_amdgcn_cvt_pk_f32_fp8(a, true) + __builtin_amdgcn_cvt_pk_f32_fp8(b, true);
+      const int out = __builtin_amdgcn_cvt_pk_fp8_f32(lo[0], lo[1], 0, false);
+      return (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(hi[0], hi[1], out, true);
+    } else {
+      const auto lo = __builtin_amdgcn_cvt_pk_f32_bf8(a, false) + __builtin_amdgcn_cvt_pk_f32_bf8(b, false);
+      const auto hi = __builtin_amdgcn_cvt_pk_f32_bf8(a, true) + __builtin_amdgcn_cvt_pk_f32_bf8(b, true);
+      const int out = __builtin_amdgcn_cvt_pk_bf8_f32(lo[0], lo[1], 0, false);
+      return (uint32_t)__builtin_amdgcn_cvt_pk_bf8_f32(hi[0], hi[1], out, true);
+    }
+#else
+    // Same packed add the RCCL reduce kernels use, so DDA rounds identically.
+    union {
+      uint32_t u32;
+      fp8x2_storage_t x2[2];
+    } x{a}, y{b}, z;
+    if constexpr (std::is_same<T, fp8e4m3>::value) {
+      z.x2[0] = hadd2(x.x2[0], y.x2[0]);
+      z.x2[1] = hadd2(x.x2[1], y.x2[1]);
+    } else {
+      z.x2[0] = hadd2_b(x.x2[0], y.x2[0]);
+      z.x2[1] = hadd2_b(x.x2[1], y.x2[1]);
+    }
+    return z.u32;
+#endif
+  }
+#endif
   return 0;
 }
 

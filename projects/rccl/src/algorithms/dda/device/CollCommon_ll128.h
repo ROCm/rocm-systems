@@ -61,7 +61,7 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
-// word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
+// word holds 2 x fp32, 4 x fp16/bf16 or 8 x fp8; each 4B half is folded with the shared
 // vecElementAdd<T> (which handles the per-type packing), then recombined.
 template <typename T>
 __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
