@@ -81,7 +81,7 @@ On gfx1200 and above, the sampling interval can also use the reference clock. ``
 
 ``refclk_cycles`` is supported on gfx1200 and above.
 Requesting it on other architectures produces an error. Use
-``rocprofv3-avail list --spm-config``
+``rocprofv3-avail info --spm-config``
 to query the supported interval units and ranges for each agent.
 
 .. _spm-cli-options:
