@@ -41,8 +41,9 @@ static amd::rdc::RdcLibraryLoader rdc_embedded_loader;
 rdc_status_t rdc_init(uint64_t) { return RDC_ST_OK; }
 
 rdc_status_t rdc_shutdown() {
-  rdc_client_loader.unload();
-  return rdc_embedded_loader.unload();
+  rdc_status_t client_status = rdc_client_loader.unload();
+  rdc_status_t embedded_status = rdc_embedded_loader.unload();
+  return client_status != RDC_ST_OK ? client_status : embedded_status;
 }
 
 rdc_status_t rdc_connect(const char* ipAddress, rdc_handle_t* p_rdc_handle, const char* root_ca,
@@ -187,6 +188,7 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_i
     return RDC_ST_INVALID_HANDLER;
   }
 
+  *p_rdc_attr = {};  // fields the handler does not fill read as 0, as rdc.h documents
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }

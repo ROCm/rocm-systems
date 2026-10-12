@@ -127,7 +127,7 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   }
 
   rdc_component_t component = static_cast<rdc_component_t>(request->component_index());
-  rdc_component_version_t compv;
+  rdc_component_version_t compv = {};
   rdc_status_t result = rdc_device_get_component_version(rdc_handle_, component, &compv);
 
   reply->set_version(compv.version);
@@ -1141,7 +1141,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
                                             const ::rdc::GetConfigRequest* request,
                                             ::rdc::GetConfigResponse* reply) {
   (void)(context);
-  rdc_config_setting_list_t settings;
+  rdc_config_setting_list_t settings = {};
 
   rdc_status_t status = rdc_config_get(rdc_handle_, request->group_id(), &settings);
 

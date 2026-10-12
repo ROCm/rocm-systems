@@ -32,8 +32,10 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
-// Loads one library and keeps it until unload(). Loading it again returns the library already
-// loaded, because handlers and modules created from it may still be in use.
+// Loads one library and keeps it until unload(). Loading the same filename again returns the
+// library already loaded, with the first call's dlopen_flags, because handlers and modules
+// created from it may still be in use. Loading a different filename fails; filenames are
+// compared as strings.
 class RdcLibraryLoader {
  public:
   RdcLibraryLoader();

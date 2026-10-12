@@ -131,7 +131,8 @@ void RdciDiscoverySubSystem::show_attributes() {
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
     if (result != RDC_ST_OK) {
-      throw RdcException(result, "Fail to get the attributes of GPU " + std::to_string(i));
+      throw RdcException(result,
+                         "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
     }
   }
 
@@ -185,11 +186,13 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
     if (result != RDC_ST_OK) {
-      throw RdcException(result, "Fail to get the attributes of GPU " + std::to_string(i));
+      throw RdcException(result,
+                         "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
     }
-    result = rdc_get_num_partition(rdc_handle_, i, &num_partitions[i]);
+    result = rdc_get_num_partition(rdc_handle_, gpu_index_list[i], &num_partitions[i]);
     if (result != RDC_ST_OK) {
-      throw RdcException(result, "Fail to get the partition count of GPU " + std::to_string(i));
+      throw RdcException(
+          result, "Fail to get the partition count of GPU " + std::to_string(gpu_index_list[i]));
     }
   }
 

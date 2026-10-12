@@ -46,9 +46,10 @@ endif()
 
 include(GoogleTest)
 
-# rdc_codec_tests: pure-logic tests (entity codec + AFID field registration).
-# Links only librdc_bootstrap (which holds the codec and the field descriptor
-# table) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
+# rdc_codec_tests: pure-logic tests (entity codec, AFID field registration,
+# library loader; the loader tests dlopen only libm and libc). Links only
+# librdc_bootstrap (which holds the codec, the field descriptor table and the
+# loader) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
 # load-time static initializer that throws when no GPU/driver is present, which
 # would abort the process before main(); keeping these tests out of that library
 # lets them run on GPU-less CI and satisfy the unit-test gate anywhere. Uses

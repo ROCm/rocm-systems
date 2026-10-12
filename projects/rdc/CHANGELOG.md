@@ -14,9 +14,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
-- `rdc_connect()` no longer breaks other RDC handles in the same process. Stopping an embedded handle after `rdc_connect()` no longer crashes, and `rdc_connect()` calls from several threads at once no longer fail at random.
+- Processes that open more than one RDC handle no longer crash or fail to connect. Stopping an embedded handle after `rdc_connect()` crashed, and concurrent `rdc_connect()` calls could fail at random.
 
-- `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. `rdc_device_get_attributes()` no longer returns uninitialized memory as the GPU name when it fails.
+- `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

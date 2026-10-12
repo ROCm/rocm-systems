@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cstddef>
 #include <thread>
 #include <vector>
 
@@ -37,6 +38,7 @@ constexpr int kThreads = 16;
 constexpr int kLoadsPerThread = 2000;
 
 using CosFn = double (*)(double);
+using StrlenFn = size_t (*)(const char*);
 
 // rdc_connect() from several threads shares one loader. A load must never drop the library
 // that another thread is resolving symbols from.
@@ -70,7 +72,17 @@ TEST(RdcLibraryLoader, LoadingAnotherLibraryKeepsTheFirst) {
   CosFn cos_fn = nullptr;
   EXPECT_EQ(loader.load_symbol(&cos_fn, "cos"), RDC_ST_OK);
   ASSERT_NE(cos_fn, nullptr);
-  EXPECT_EQ(cos_fn(0.0), 1.0);
+  EXPECT_DOUBLE_EQ(cos_fn(0.0), 1.0);
+}
+
+// unload() forgets the library, so the loader can load another one afterwards.
+TEST(RdcLibraryLoader, UnloadAllowsAnotherLibrary) {
+  amd::rdc::RdcLibraryLoader loader;
+  ASSERT_EQ(loader.load(kLibrary), RDC_ST_OK);
+  ASSERT_EQ(loader.unload(), RDC_ST_OK);
+  EXPECT_EQ(loader.load("libc.so.6"), RDC_ST_OK);
+  StrlenFn strlen_fn = nullptr;
+  EXPECT_EQ(loader.load_symbol(&strlen_fn, "strlen"), RDC_ST_OK);
 }
 
 }  // namespace
