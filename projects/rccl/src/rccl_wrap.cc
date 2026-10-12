@@ -185,12 +185,8 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
       // gfx120x acquire ordering that Simple uses. Keep Simple until LL is fixed for gfx120x.
       info->protocol = NCCL_PROTO_SIMPLE;
     }
-    /**
-     * We prefer simple protocol when p2p_disabled = 1,
-     * This is due to a fix in LL protocol implementation
-     * for gfx120x with __MEMORY_SCOPE_SYSTEM in prims_ll.h
-     * causing poor performance but keeps the LL protocol functional
-     */
+    // With P2P disabled, multi-node collectives also use Simple: the system-scope LL stores for gfx120x
+    // in prims_ll.h are slow.
     bool p2p_disabled = ncclParamP2pDisable();
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;

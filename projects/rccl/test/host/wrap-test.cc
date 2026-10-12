@@ -1193,20 +1193,49 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSi
       "Wrap_UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        constexpr ncclFunc_t funcs[] = {ncclFuncAllGather, ncclFuncReduceScatter, ncclFuncAllReduce};
-        constexpr size_t nBytes[] = {60600 * 4, 60600 * 4, 16000};
+        // Totals, not per rank: rcclGetSizePerRank divides by nRanks for AllGather/ReduceScatter, not AllReduce.
+        constexpr struct {
+          ncclFunc_t func;
+          size_t nBytes;
+        } kCases[] = {
+            {ncclFuncAllGather, 60600 * 4},      // sizePerRank 60600 <= 98304
+            {ncclFuncReduceScatter, 60600 * 4},  // sizePerRank 60600 <= 98304
+            {ncclFuncAllReduce, 16000},          // sizePerRank 16000 <= 16384
+        };
         for (const char* arch : {"gfx1200", "gfx1201"}) {
           ncclComm* comm = MakeCommWithArch(arch);
           comm->nNodes = 1;
           comm->nRanks = 4;
-          for (size_t index = 0; index < sizeof(funcs) / sizeof(funcs[0]); ++index) {
-            SCOPED_TRACE(::testing::Message() << "arch=" << arch << " func=" << funcs[index]);
+          for (const auto& c : kCases) {
+            SCOPED_TRACE(::testing::Message() << "arch=" << arch << " func=" << c.func);
             ncclTaskColl info{};
-            info.func = funcs[index];
+            info.func = c.func;
             info.protocol = NCCL_PROTO_LL;
-            rcclUpdateCollectiveProtocol(comm, nBytes[index], &info);
+            rcclUpdateCollectiveProtocol(comm, c.nBytes, &info);
             EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
           }
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The gfx950 override test above can't catch the gfx120x arm ignoring
+// NCCL_PROTO, so pin that the user's LL survives on single-node gfx120x too.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xUserOverrideKeepsLL) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx120xUserOverrideKeepsLL",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL");
+        for (const char* arch : {"gfx1200", "gfx1201"}) {
+          SCOPED_TRACE(arch);
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nNodes = 1;
+          comm->nRanks = 4;
+          ncclTaskColl info{};
+          info.func = ncclFuncAllGather;
+          info.protocol = NCCL_PROTO_LL;
+          rcclUpdateCollectiveProtocol(comm, /*nBytes=*/60600 * 4, &info);
+          EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
           DeleteCommWithArch(comm);
         }
       });
