@@ -233,18 +233,22 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
 // WaitForHostRelease kernel blocks kernel_stream until a helper thread releases it. Thus the
 // result does not depend on the duration of the copy. If should_sync is true, the helper thread
 // releases the kernel after a short delay, because a blocking memcpy_func cannot return before
-// the release. If should_sync is false, the helper thread releases the kernel after the stream
+// the release. If should_sync is false, the helper thread releases the kernel after the
 // query or after a long timeout. Thus a memcpy_func that blocks causes a failure, not a hang.
+// The query examines an event that follows the kernel, not the stream. A memcpy_func can return
+// before its own copy completes, for example a copy from pageable host memory to the device.
 template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                             const hipStream_t kernel_stream) {
-  constexpr std::chrono::milliseconds kBlockingCopyReleaseDelay{100};
+  constexpr std::chrono::milliseconds kBlockingCopyReleaseDelay{200};
   constexpr std::chrono::milliseconds kAsyncCopyReleaseTimeout{10000};
 
+  EventsGuard kernel_done(1);
   LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
   *release.ptr() = 0;
   WaitForHostRelease<<<1, 1, 0, kernel_stream>>>(release.ptr());
-  HIP_CHECK(hipGetLastError());
+  const hipError_t launch_error = hipGetLastError();
+  const hipError_t record_error = hipEventRecord(kernel_done, kernel_stream);
 
   const auto release_delay = should_sync ? kBlockingCopyReleaseDelay : kAsyncCopyReleaseTimeout;
   std::promise<void> query_done;
@@ -254,9 +258,11 @@ void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
     __atomic_store_n(flag, 1, __ATOMIC_RELEASE);
   });
   const auto memcpy_error = memcpy_func();
-  const auto query_error = hipStreamQuery(kernel_stream);
+  const auto query_error = hipEventQuery(kernel_done);
   query_done.set_value();
   releaser.join();
+  HIP_CHECK(launch_error);
+  HIP_CHECK(record_error);
   HIP_CHECK(hipStreamSynchronize(kernel_stream));
 
   HIP_CHECK(memcpy_error);
