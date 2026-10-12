@@ -4,8 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 //
-// Host-only microtests for buildIonicdvSymbols (src/misc/ionicdvsymbols.cc) and
-// buildMlx5dvSymbols (src/misc/mlx5dvsymbols.cc).
+// Host-only microtests for buildIonicdvSymbols (src/misc/ionicdvsymbols.cc),
+// buildMlx5dvSymbols (src/misc/mlx5dvsymbols.cc) and gin_dv_dlopen
+// (src/include/gin/gin_dv_dlopen.h, used by the GIN GDA factory).
 //
 // Contract: libionic and libmlx5 are also libibverbs providers, so libibverbs may hold
 // pointers into them. When a required dv symbol is missing the builder returns
@@ -30,6 +31,7 @@
 
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "fakes/dv_provider_fake.h"
+#include "gin/gin_dv_dlopen.h"
 
 #include IONICDV_SYMBOLS_CC_PATH
 #undef LOAD_SYM
@@ -106,6 +108,21 @@ TEST(DvSymbolsTestIsolated, Mlx5ProviderStaysMappedWhenDvSymbolMissing) {
                               [&] { return buildMlx5dvSymbols(&symbols); });
     EXPECT_EQ(symbols.mlx5dv_internal_is_supported, nullptr);
     EXPECT_EQ(symbols.mlx5dv_internal_create_qp, nullptr);
+  });
+}
+
+TEST(DvSymbolsTestIsolated, GinDvLibraryStaysMappedAfterDlclose) {
+  if (!FakeProviderExists(DV_PROVIDER_FAKE_IONIC_PATH)) {
+    GTEST_SKIP() << "fake provider not found at " << DV_PROVIDER_FAKE_IONIC_PATH;
+  }
+  RUN_ISOLATED_TEST("DvSymbols_GinDvLibraryStaysMappedAfterDlclose", []() {
+    // The GIN factory's DLSYM_HELPER dlcloses the handle when a symbol is missing.
+    ExpectProviderStaysMapped(DV_PROVIDER_FAKE_IONIC_PATH, ncclSuccess, [] {
+      void* handle = gin_dv_dlopen("libionic.so");
+      if (handle == nullptr) return ncclSystemError;
+      dlclose(handle);
+      return ncclSuccess;
+    });
   });
 }
 

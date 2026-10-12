@@ -39,6 +39,7 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "gin/gin_dv_dlopen.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/gda_enums.hpp>
@@ -405,8 +406,8 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     {
-      set->dv_handle = dlopen("libionic.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
+      set->dv_handle = gin_dv_dlopen("libionic.so");
+      if (!set->dv_handle) set->dv_handle = gin_dv_dlopen("/usr/local/lib/libionic.so");
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libionic.so: %s", dlerror());
         return -1;
@@ -426,8 +427,8 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     {
-      set->dv_handle = dlopen("libbnxt_re.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
+      set->dv_handle = gin_dv_dlopen("libbnxt_re.so");
+      if (!set->dv_handle) set->dv_handle = gin_dv_dlopen("/usr/local/lib/libbnxt_re.so");
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libbnxt_re.so: %s", dlerror());
         return -1;
@@ -451,7 +452,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     {
-      set->dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+      set->dv_handle = gin_dv_dlopen("libmlx5.so");
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libmlx5.so: %s", dlerror());
         return -1;
