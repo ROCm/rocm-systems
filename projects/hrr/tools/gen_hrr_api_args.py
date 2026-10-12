@@ -2400,7 +2400,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     that the payload is partial and replay would treat it as faithful. Each
     truncation therefore also calls note_unreplayable(), which lists the API,
     with the clipped argument as the reason, under manifest.unreplayable_apis
-    where replay can see it.
+    where replay can see it. The warning is printed once per process, but the
+    note is made on every truncation: the writer lists notes per archive, and
+    a forked child or a fresh archive starts with none.
 
     note_unreplayable(), not mark_incomplete(): the event is written and the
     archive stays well-formed — only the clipped argument makes the call
@@ -2419,10 +2421,10 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"          LogPrintfWarning(")
             lines.append(f"              \"[HRR] {entry.name}: {d.param} is %zu characters; \"")
             lines.append(f"              \"recording the first {d.max_count - 1} only\", _n);")
-            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
-            lines.append(f"              \"{d.param} was truncated to {d.max_count - 1} characters at capture \"")
-            lines.append(f"              \"time; replay would pass a shortened string\");")
             lines.append(f"        }}")
+            lines.append(f"        hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"            \"{d.param} was truncated to {d.max_count - 1} characters at capture \"")
+            lines.append(f"            \"time; replay would pass a shortened string\");")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
@@ -2440,10 +2442,10 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"              \"[HRR] {entry.name}: recording only the first {d.max_count} \"")
             lines.append(f"              \"of %u {d.param} entries; replay of this call will be \"")
             lines.append(f"              \"incomplete\", _n);")
-            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
-            lines.append(f"              \"only the first {d.max_count} {d.param} entries were recorded at \"")
-            lines.append(f"              \"capture time; replay would pass a partial array\");")
             lines.append(f"        }}")
+            lines.append(f"        hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"            \"only the first {d.max_count} {d.param} entries were recorded at \"")
+            lines.append(f"            \"capture time; replay would pass a partial array\");")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param},"
@@ -2713,8 +2715,7 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
         if e.reserved:
             continue
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
-    lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
-    lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
+    lines.append("  hip_capture_install_compiler_table(cap);")
     lines.append("}")
     lines.append("")
 
