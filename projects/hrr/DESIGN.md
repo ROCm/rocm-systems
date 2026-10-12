@@ -322,7 +322,8 @@ HRR's writes to the live tables and the HIP entry points follow one contract:
 - Both sides use the `__atomic` builtins outside Windows and `std::atomic_ref<void*>` on
   Windows.
 
-A caller therefore gets either the old function or the new one. The acquire load pairs
+The contract covers HRR's writer only. For a slot that HRR writes, a caller therefore
+gets either the old function or the new one. The acquire load pairs
 with the release store, so a shim also sees what was written before its install, such
 as `g_real_table`. An acquire load of a pointer is a plain load on x86-64 and `LDAR` on
 AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSanitizer.
@@ -330,7 +331,8 @@ AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSani
 
 Other writers do not follow the contract yet. The CLR profiler
 (`projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp`) installs and removes
-its wrappers with a whole-table `memcpy`. rocprofiler-register tools write slots with
+its wrappers with a whole-table `memcpy`, and keeps doing so until AIRUNTIME-2845
+(PR #13260) lands. rocprofiler-register tools write slots with
 ordinary stores during `ToolsInit()` in `hip_api_trace.cpp`. Those writes can race
 with the entry points.
 
