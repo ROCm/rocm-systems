@@ -6,7 +6,9 @@ unsupported fields, and unauthorized operations.
 """
 
 import os
+import struct
 import subprocess
+import sys
 import time
 
 import pytest
@@ -140,3 +142,86 @@ class TestDaemonResilience:
             assert _port_open(port), "rdcd did not restart successfully"
         finally:
             terminate_process(proc)
+
+
+# ---------------------------------------------------------------------------
+# Client library lifetime (no GPU or daemon needed)
+# ---------------------------------------------------------------------------
+_DT_FLAGS_1 = 0x6FFFFFFB
+_DF_1_NODELETE = 0x8
+
+# Starts gRPC's threads with a failing RPC, shuts RDC down, and reports whether
+# librdc_client.so is still mapped.
+_SHUTDOWN_PROBE = """
+import ctypes, os, sys
+P = ctypes.c_void_p
+rdc = ctypes.CDLL(os.path.join(sys.argv[1], "librdc_bootstrap.so"))
+rdc.rdc_init.argtypes = [ctypes.c_uint64]
+rdc.rdc_connect.argtypes = [ctypes.c_char_p, ctypes.POINTER(P)] + [ctypes.c_char_p] * 3
+rdc.rdc_device_get_all.argtypes = [P, P, P]
+rdc.rdc_disconnect.argtypes = [P]
+handle = P()
+assert rdc.rdc_init(0) == 0
+assert rdc.rdc_connect(b"localhost:1", ctypes.byref(handle), None, None, None) == 0
+ids, count = (ctypes.c_uint32 * 128)(), ctypes.c_uint32()
+rdc.rdc_device_get_all(handle, ids, ctypes.byref(count))  # nothing listens on port 1
+assert rdc.rdc_disconnect(handle) == 0
+assert rdc.rdc_shutdown() == 0
+try:
+    ctypes.CDLL("librdc_client.so", mode=os.RTLD_NOLOAD)
+    print("resident")
+except OSError:
+    print("unloaded")
+"""
+
+
+def _dt_flags_1(path):
+    """Return DT_FLAGS_1 of a 64-bit little-endian ELF shared object, or 0 if absent."""
+    with open(path, "rb") as f:
+        hdr = f.read(64)
+        assert hdr[:6] == b"\x7fELF\x02\x01", f"{path} is not a 64-bit little-endian ELF file"
+        (phoff,) = struct.unpack_from("<Q", hdr, 0x20)
+        phentsize, phnum = struct.unpack_from("<HH", hdr, 0x36)
+        for i in range(phnum):
+            f.seek(phoff + i * phentsize)
+            p_type, _, p_offset, _, _, p_filesz = struct.unpack("<IIQQQQ", f.read(40))
+            if p_type != 2:  # PT_DYNAMIC
+                continue
+            f.seek(p_offset)
+            dyn = f.read(p_filesz)
+            for off in range(0, len(dyn) - 15, 16):
+                tag, val = struct.unpack_from("<qQ", dyn, off)
+                if tag == 0:  # DT_NULL
+                    break
+                if tag == _DT_FLAGS_1:
+                    return val
+    return 0
+
+
+class TestClientLibraryLifetime:
+    """rdc_shutdown() dlclose()s librdc_client.so while gRPC threads still run.
+
+    Unloading the library under those threads crashes every rdci command on exit,
+    so the library must stay resident.
+    """
+
+    @pytest.fixture
+    def client_lib_dir(self, rocm_dir):
+        lib_dir = os.path.join(rocm_dir, "lib")
+        if not os.path.isfile(os.path.join(lib_dir, "librdc_client.so")):
+            pytest.skip("librdc_client.so not installed")
+        return lib_dir
+
+    def test_client_library_is_nodelete(self, client_lib_dir):
+        path = os.path.realpath(os.path.join(client_lib_dir, "librdc_client.so"))
+        assert _dt_flags_1(path) & _DF_1_NODELETE, "librdc_client.so is not linked -z nodelete"
+
+    def test_client_library_stays_loaded_after_shutdown(self, client_lib_dir):
+        r = subprocess.run(
+            [sys.executable, "-c", _SHUTDOWN_PROBE, client_lib_dir],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert r.returncode == 0, f"probe failed (rc={r.returncode}): {r.stderr[-2000:]}"
+        assert "resident" in r.stdout.splitlines(), "rdc_shutdown() unloaded librdc_client.so"
