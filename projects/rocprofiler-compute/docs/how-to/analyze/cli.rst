@@ -803,13 +803,9 @@ These flags require ``--output-format stdout`` (the default). Combining
 table.
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
-and counter CSV pair. The on-disk join column is ``Correlation_Id``; analyze
-canonicalizes it to ``Correlation_ID`` and joins on ``Correlation_ID``
-and ``GUID``. Collapsed GPU time and kernel lists come from pass 0.
-Analyze parses Function, then nests marker intervals per ``Thread_Id``.
-Plain ``analyze -p`` without those flags does not join markers. Analyze
-does not write ``ml_api_trace/consolidated.csv``. Missing or null marker
-columns make analyze exit.
+and counter CSV pair and print an operator call tree. Plain ``analyze -p``
+without those flags does not join markers. Analyze does not write
+``ml_api_trace/consolidated.csv``.
 
 Operator analyze exits when:
 
@@ -821,8 +817,7 @@ Operator analyze exits when:
 
 Operator analyze warns during the join and continues when:
 
-* a kernel dispatch does not join to a marker on ``Correlation_ID`` and
-  ``GUID``
+* a kernel dispatch does not match any ROCTX range
 * attach cannot find the launcher thread
 * a worker interval is not contained in any launcher interval
 * a torch or triton call-tree root has no file/line and no launcher thread
@@ -831,11 +826,8 @@ A Function whose first token is the legacy stacked shape (``:#`` or
 ``#n@file:line``) makes analyze exit during parse, before the tree.
 Re-profile with current ``--torch-trace`` or ``--triton-trace``.
 
-The forest is keyed by CSV ``Thread_Id``. Attach uses Function ``ltid=``
-against that ``Thread_Id``. Stitch uses ``tid=`` and ``ftid=`` on the
-Function cell; analyze does not keep those as columns. ``/`` in the
-Operator column and in globs is the reconstructed call path, not a
-filesystem path.
+``/`` in the Operator column and in globs is the reconstructed call path,
+not a filesystem path.
 
 
 List all operators
@@ -950,8 +942,8 @@ Triton operator analysis
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels use the same join / consolidate / parse / nest path as PyTorch
-operators. ``--list-triton-operators`` and ``--triton-operator`` keep nodes
+Triton kernels use the same analyze path as PyTorch operators.
+``--list-triton-operators`` and ``--triton-operator`` keep nodes
 whose backend is ``triton`` (plus their ancestors), so Triton kernels are
 reported independently even if PyTorch operators appear in the same run.
 
