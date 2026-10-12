@@ -1707,17 +1707,6 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(amdsmi_processor_handle processor_hand
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
-                                                 int64_t* temperature) {
-  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
-  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
-  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-  *temperature = metrics.temperature_vrsoc;
-  return AMDSMI_STATUS_SUCCESS;
-}
-
 amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
                                        amdsmi_temperature_type_t sensor_type,
                                        amdsmi_temperature_metric_t metric, int64_t* temperature) {
