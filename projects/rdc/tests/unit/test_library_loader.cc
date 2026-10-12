@@ -83,6 +83,8 @@ TEST(RdcLibraryLoader, UnloadAllowsAnotherLibrary) {
   EXPECT_EQ(loader.load("libc.so.6"), RDC_ST_OK);
   StrlenFn strlen_fn = nullptr;
   EXPECT_EQ(loader.load_symbol(&strlen_fn, "strlen"), RDC_ST_OK);
+  ASSERT_NE(strlen_fn, nullptr);
+  EXPECT_EQ(strlen_fn("abc"), 3u);
 }
 
 }  // namespace

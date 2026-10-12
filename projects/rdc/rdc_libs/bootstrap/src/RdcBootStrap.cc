@@ -184,11 +184,14 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
 
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr) {
-  if (!p_rdc_handle || !p_rdc_attr) {
+  if (!p_rdc_attr) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  *p_rdc_attr = {};  // fields the handler does not fill read as 0, as rdc.h documents
+  if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
 
-  *p_rdc_attr = {};  // fields the handler does not fill read as 0, as rdc.h documents
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }

@@ -95,6 +95,9 @@ os._exit(0)  # skip unloading the client library at exit, which is not under tes
 )
 
 
+_RDCD_ADDRESS = "localhost:50051"  # where the rdcd_server fixture starts rdcd
+
+
 def _run_probe(probe, lib_dir, *args):
     """Run a probe in a child process; return its parsed JSON result line."""
     env = dict(os.environ)
@@ -142,7 +145,8 @@ class TestBootstrapLoader:
         )
         assert r.returncode == 0, r.stdout[-3000:] + r.stderr[-2000:]
         summary = json.loads(report.read_text())
-        assert summary["tests"] >= 3 and summary["failures"] == 0, summary
+        assert summary["tests"] >= 3, summary
+        assert summary["failures"] == 0 and summary["disabled"] == 0, summary
 
     def test_embedded_handle_survives_a_connect(self, lib_dir, has_gpu):
         if not has_gpu:
@@ -161,7 +165,7 @@ class TestDeviceAttributes:
         target = "embedded"
         if mode == "standalone":
             request.getfixturevalue("rdcd_server")
-            target = "localhost:50051"
+            target = _RDCD_ADDRESS
         results = _run_probe(_INVALID_GPU_ATTRIBUTES_PROBE, lib_dir, target)
         for result in results:
             assert result["status"] != 0, result
