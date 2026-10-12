@@ -450,8 +450,8 @@ make_core_table()
     table.hsa_queue_cas_write_index_scacq_screl_fn = hsa_queue_cas_write_index_scacq_screl;
     table.hsa_queue_cas_write_index_scacquire_fn   = hsa_queue_cas_write_index_scacquire;
     table.hsa_queue_cas_write_index_screlease_fn   = hsa_queue_cas_write_index_screlease;
-    table.hsa_queue_load_write_index_relaxed_fn   = hsa_queue_load_write_index_relaxed;
-    table.hsa_queue_load_write_index_scacquire_fn = hsa_queue_load_write_index_scacquire;
+    table.hsa_queue_load_write_index_relaxed_fn    = hsa_queue_load_write_index_relaxed;
+    table.hsa_queue_load_write_index_scacquire_fn  = hsa_queue_load_write_index_scacquire;
     table.hsa_signal_store_relaxed_fn              = hsa_signal_store_relaxed;
     table.hsa_signal_store_screlease_fn            = hsa_signal_store_screlease;
     table.hsa_signal_silent_store_relaxed_fn       = hsa_signal_silent_store_relaxed;
@@ -498,11 +498,11 @@ TEST_F(QueueInterpositionConsumerTransition, start_resyncs_stale_shadow)
     auto               dummy_queue = hsa_queue_t{};
     const hsa_queue_t* queue_ptr   = &dummy_queue;
 
-    auto     state    = std::make_shared<QueueState>();
+    auto     state     = std::make_shared<QueueState>();
     uint64_t real_wdid = 17;
     uint64_t real_rdid = 3;
-    state->real_wdid       = &real_wdid;
-    state->real_rdid       = &real_rdid;
+    state->real_wdid   = &real_wdid;
+    state->real_rdid   = &real_rdid;
     state->virtual_wptr.store(0);
     state->next_scan_pos   = 0;
     state->next_submit_pos = 0;
@@ -529,7 +529,7 @@ TEST_F(QueueInterpositionConsumerTransition, non_tracing_context_does_not_resync
 
     auto     state     = std::make_shared<QueueState>();
     uint64_t real_wdid = 9;
-    state->real_wdid       = &real_wdid;
+    state->real_wdid   = &real_wdid;
     state->virtual_wptr.store(1);
     state->next_scan_pos   = 1;
     state->next_submit_pos = 1;
@@ -554,7 +554,7 @@ TEST_F(QueueInterpositionConsumerTransition, stop_then_start_resyncs_again)
 
     auto     state     = std::make_shared<QueueState>();
     uint64_t real_wdid = 4;
-    state->real_wdid       = &real_wdid;
+    state->real_wdid   = &real_wdid;
     state->virtual_wptr.store(4);
     state->next_scan_pos   = 4;
     state->next_submit_pos = 4;
