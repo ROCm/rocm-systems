@@ -79,6 +79,12 @@ TEST(ParamParsersMicrotest, Cstr_ResolvePassesThePointerThrough) {
   const char* out = nullptr;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve(in, out));
   EXPECT_EQ(in, out);
+  // The one resolve() here that accepts a null input rather than rejecting
+  // it: bool, integer, OneOf, and ListOf all pin their null/empty rejection,
+  // but this assigns straight through and still returns ncclSuccess.
+  out = in;
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve(nullptr, out));
+  EXPECT_EQ(nullptr, out);
 }
 
 TEST(ParamParsersMicrotest, Cstr_ValidateAlwaysTrue) {
@@ -435,9 +441,15 @@ TEST(ParamParsersMicrotest, ListOf_ToStringJoinsWithTheDelimiter) {
   EXPECT_EQ("one,two,three", parser.toString({"one", "two", "three"}));
 }
 
-TEST(ParamParsersMicrotest, ListOf_DescribesItsDelimiter) {
+TEST(ParamParsersMicrotest, ListOf_HonorsANonDefaultDelimiter) {
   auto parser = ncclParamListOf<std::vector<std::string>>(';');
   EXPECT_EQ("Delimiter-separated list (delimiter=';')", parser.desc);
+  // Round-trips through ';' itself, not just its desc string: split() and the
+  // toString join could both hardcode ',' and still pass every other test here.
+  std::vector<std::string> out;
+  EXPECT_EQ(ncclSuccess, parser.resolve("a;b,c", out));
+  EXPECT_EQ((std::vector<std::string>{"a", "b,c"}), out);
+  EXPECT_EQ("a;b,c", parser.toString(out));
 }
 
 }  // namespace
