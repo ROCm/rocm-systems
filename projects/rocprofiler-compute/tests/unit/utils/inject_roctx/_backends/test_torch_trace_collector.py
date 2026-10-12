@@ -10,15 +10,9 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from packaging.version import Version
 
 from utils.inject_roctx._backends import torch_trace_collector as loader
-
-
-class FakeTorchVersion:
-    """Stand-in for the release components used from torch.torch_version."""
-
-    def __init__(self, version):
-        self.release = tuple(int(part) for part in version.split(".")[:2])
 
 
 class FakeNativeFunction:
@@ -52,7 +46,7 @@ def stub_torch(monkeypatch, version="2.13.0+cpu"):
         SimpleNamespace(__file__="/opt/fake/torch/__init__.py", __version__=version),
     )
     monkeypatch.setitem(
-        sys.modules, "torch.torch_version", SimpleNamespace(Version=FakeTorchVersion)
+        sys.modules, "torch.torch_version", SimpleNamespace(Version=Version)
     )
 
 

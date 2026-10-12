@@ -222,6 +222,9 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert any("nn.Module.Linear.forward" in fn for fn in functions)
             assert any(find_addmm_marker(fn) for fn in functions)
+            if torch_version in torch_trace_collector._SUPPORTED_TORCH_VERSIONS:
+                assert any("aten::addmm" in fn for fn in functions)
+                assert any("scope=FUNCTION" in fn for fn in functions)
             assert any("|seqNr=" in fn for fn in functions)
             assert any("|tid=" in fn for fn in functions)
             assert any("|ftid=" in fn for fn in functions)
@@ -552,6 +555,7 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
     binary_handler_profile_rocprof_compute,
 ):
     require_torch(gpu=True)
+    torch_version = torch_trace_collector._workload_torch_version()
     workload_dir = common.get_output_dir(param_id="torch_trace_user_range_backward")
     profile_config = dict(config)
     profile_config["simple_net_user_range_backward_thread"] = [
@@ -586,5 +590,7 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
         assert any("|ltid=" in fn for fn in functions)
+        if torch_version in torch_trace_collector._SUPPORTED_TORCH_VERSIONS:
+            assert any(re.search(r"ltid=\d+", fn) for fn in functions)
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
