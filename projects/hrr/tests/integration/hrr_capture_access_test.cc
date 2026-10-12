@@ -1113,10 +1113,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  * Test Description
  * ----------------
  *   - Captures Unit_HRR_GpuWorkload_Direct, then either changes one byte of
- *     its largest blob, deletes it, moves it, unchanged, under another
- *     blobs/<xx> or under blobs/zz, plants a stray file in blobs/, or plants
- *     a blobs/<xx> no blob uses as a link to a directory outside the archive,
- *     and copies the archive into the next run's pid-<pid>, which resumes it.
+ *     its largest blob, deletes it, before or after a clean resume, moves it,
+ *     unchanged, under another blobs/<xx> or under blobs/zz, plants a stray
+ *     file in blobs/, or plants a blobs/<xx> no blob uses as a link to a
+ *     directory outside the archive, and copies the archive into the next
+ *     run's pid-<pid>, which resumes it.
  *   - The file is gone, no longer hashes to its name, or is not where
  *     playback looks for it, so the resume does not trust it: the run writes
  *     that blob again where it belongs, and the archive is marked incomplete,
@@ -1157,6 +1158,20 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
     fs::rename(first_archive / changed, first_archive / "blobs" / other / changed.filename());
   }
   SECTION("deleted") {
+    fs::remove(first_archive / changed);
+  }
+  SECTION("deleted after a resume") {
+    // A clean resume first, whose manifest must still count every file.
+    fs::create_directories(work.path / "middle");
+    const PlantedRun middle = capture_after_planting(
+        work.path / "middle", work.path / "middle.sh",
+        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
+        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n");
+    REQUIRE(middle.ret == 0);
+    const fs::path resumed = hrr_single_process_archive(work.path / "middle");
+    REQUIRE(manifest_says_complete(resumed, true));
+    fs::remove_all(first_archive);
+    fs::copy(resumed, first_archive, fs::copy_options::recursive);
     fs::remove(first_archive / changed);
   }
   SECTION("after an incomplete run") {

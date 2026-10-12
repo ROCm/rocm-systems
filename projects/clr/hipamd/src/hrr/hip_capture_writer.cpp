@@ -786,7 +786,8 @@ static bool resumed_file_matches(const fs::path& p, const std::string& hex) {
 }
 
 // `expected` is how many blob and code object files the earlier run wrote.
-static void index_existing_blobs_locked(const std::string& output_dir, uint64_t expected) {
+// Returns how many this run trusts.
+static uint64_t index_existing_blobs_locked(const std::string& output_dir, uint64_t expected) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
   g_blob_claims.clear();  // as in the fresh-archive path of open()
@@ -876,6 +877,7 @@ static void index_existing_blobs_locked(const std::string& output_dir, uint64_t 
                      static_cast<unsigned long long>(expected));
     mark_incomplete_locked("blob or code object files of the earlier run are missing on resume");
   }
+  return g_written_blobs.size();
 }
 
 static void reopen_after_fork() {
@@ -1441,7 +1443,7 @@ bool open(const char* output_dir) {
   }
 
   const bool exists = existing_size > 0;
-  uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
+  uint64_t next_seq = 0, ev_count = 0, bl_count = 0, trusted = 0;
   bool fast = false;
   ScanResult scan{};
   if (exists) {
@@ -1516,7 +1518,8 @@ bool open(const char* output_dir) {
       std::lock_guard<std::mutex> lk(g_blob_mu);
       mark_incomplete_locked("the archive resumed here was already incomplete");
     }
-    index_existing_blobs_locked(out_dir, std::max<uint64_t>(fast ? bl_count : 0, prior.blob_count));
+    trusted = index_existing_blobs_locked(
+        out_dir, std::max<uint64_t>(fast ? bl_count : 0, prior.blob_count));
   } else {
     // Fresh per-process archive. Incomplete belongs to the archive, as in
     // atfork_child: a failure recorded against one closed earlier in this
@@ -1562,10 +1565,9 @@ bool open(const char* output_dir) {
     g_trailer_at        = -1;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
-    if (!exists)
-      g_blob_count.store(0, std::memory_order_relaxed);
-    else if (fast)
-      g_blob_count.store(bl_count, std::memory_order_relaxed);
+    // On resume, the files already there that this run trusts; a later write
+    // of any other hash adds to it.
+    g_blob_count.store(trusted, std::memory_order_relaxed);
     g_events_fd = fd;
     if (!exists) {
       // Pitched host copies record only their copied rows (hip_capture.cpp,
