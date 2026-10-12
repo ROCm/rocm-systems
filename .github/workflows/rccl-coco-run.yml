@@ -1,8 +1,8 @@
 name: RCCL coco run
 
-# Reusable launcher for one coco job from the ROCm/tRCCL harness.
+# Reusable launcher for one coco job from the ROCm/coco harness.
 #
-# `job` is bound to a cluster in tRCCL, so `runs_on` must name a runner on that cluster.
+# `job` is bound to a cluster in coco, so `runs_on` must name a runner on that cluster.
 on:
   workflow_call:
     inputs:
@@ -24,7 +24,7 @@ on:
         type: string
         required: true
       coco_ref:
-        description: 'ROCm/tRCCL git ref (commit, tag, or branch) to check out the harness at.'
+        description: 'ROCm/coco git ref (commit, tag, or branch) to check out the harness at.'
         type: string
         required: false
         default: 'main'
@@ -118,7 +118,7 @@ jobs:
         uses: ./.github/actions/rccl-checkout-coco-harness
         with:
           ref: ${{ inputs.coco_ref }}
-          path: ${{ env.COCO_DIR }}/tRCCL
+          path: ${{ env.COCO_DIR }}/coco
           client-id: ${{ secrets.APP_ID }}
           app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
@@ -130,10 +130,10 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-          cache-dependency-path: ${{ env.COCO_DIR }}/tRCCL/pyproject.toml
+          cache-dependency-path: ${{ env.COCO_DIR }}/coco/pyproject.toml
 
       - name: Install coco
-        working-directory: ${{ env.COCO_DIR }}/tRCCL
+        working-directory: ${{ env.COCO_DIR }}/coco
         env:
           COCO_VENV: ${{ env.COCO_DIR }}/venv
         run: |
@@ -145,11 +145,11 @@ jobs:
           "${COCO_VENV}/bin/coco" --help > /dev/null
           echo "==> coco installed from $(git rev-parse HEAD)"
 
-      # Scheduled runs (mode=run) use advanced.stage_dir from the tRCCL job
+      # Scheduled runs (mode=run) use advanced.stage_dir from the coco job
       # config; PR runs use a scratch tree this job creates and removes.
       - name: Resolve coco artifact directory
         id: artifact_dir
-        working-directory: ${{ env.COCO_DIR }}/tRCCL
+        working-directory: ${{ env.COCO_DIR }}/coco
         env:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}
@@ -176,7 +176,7 @@ jobs:
 
       - name: Launch coco
         id: launch
-        working-directory: ${{ env.COCO_DIR }}/tRCCL
+        working-directory: ${{ env.COCO_DIR }}/coco
         env:
           MODE: ${{ inputs.mode }}
           JOB: ${{ inputs.job }}

@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   coco_ref:
-    description: 'ROCm/tRCCL ref for the coco harness.'
+    description: 'ROCm/coco ref for the coco harness.'
     required: false
     default: 'main'
   dry_run:

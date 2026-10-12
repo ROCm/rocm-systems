@@ -6,20 +6,23 @@ name: RCCL coco PR
 # One job per cluster: `needs` on a matrix waits for every leg, so sharing a
 # job would let a slow cluster hold up the others.
 #
-# tRCCL config validation requires coco job keys of the form
+# coco config validation requires coco job keys of the form
 # <prefix>-rccl-pr-{build,smoke}. Adding a cluster is one entry in
 # .github/scripts/rccl_coco_matrix.py.
+#
+# A PR into release/* checks out that same branch of ROCm/coco. Minor fixes
+# on the release line do not pull harness changes that are still only on main.
 on:
   # No `paths:` filter: a path-skipped workflow reports no checks, so a required check would never pass.
   pull_request:
-    branches: [develop, main, rccl-develop, rccl_develop, rocprofiler-compute-develop]
+    branches: [develop, main, rccl-develop, rccl_develop, rocprofiler-compute-develop, 'release/**']
   workflow_dispatch:
     inputs:
       coco_ref:
-        description: 'ROCm/tRCCL ref for the coco harness.'
+        description: 'ROCm/coco ref. Empty follows a release/* branch of this repo, otherwise main.'
         type: string
         required: false
-        default: 'main'
+        default: ''
       dry_run:
         description: 'Resolve stacks and submissions without building or running anything.'
         type: boolean
@@ -98,11 +101,19 @@ jobs:
         id: clusters
         run: python3 .github/scripts/rccl_coco_matrix.py pr-clusters
 
+      - name: Select coco harness ref
+        id: harness_ref
+        env:
+          COCO_REF_EXPLICIT: ${{ inputs.coco_ref }}
+          COCO_BASE_REF: ${{ github.base_ref }}
+          COCO_REF_NAME: ${{ github.ref_name }}
+        run: python3 .github/scripts/rccl_resolve_coco_run.py select-ref
+
       - name: Resolve coco run parameters
         id: resolve
         uses: ./.github/actions/rccl-resolve-coco-run
         with:
-          coco_ref: ${{ inputs.coco_ref || 'main' }}
+          coco_ref: ${{ steps.harness_ref.outputs.coco_ref }}
           dry_run: ${{ inputs.dry_run || false }}
           pr_number: ${{ inputs.pr_number }}
           pr_sha: ${{ inputs.pr_sha }}

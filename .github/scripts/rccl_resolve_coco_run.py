@@ -25,6 +25,28 @@ SATURDAY_CRON = "47 3 * * 6"
 
 VALID_MODES = frozenset({"pr", "nightly", "weekly", "monthly"})
 
+# Integration line of ROCm/coco. A release/* branch of this repo checks out
+# the same branch there, so a minor fix does not pull harness changes that
+# are still only on main.
+COCO_INTEGRATION_REF = "main"
+RELEASE_BRANCH_PREFIX = "release/"
+
+
+def select_coco_ref(*, explicit: str, base_ref: str, ref_name: str) -> str:
+    """Branch or SHA of ROCm/coco to check out.
+
+    An explicit ref wins. Otherwise a release branch of this repo (the PR
+    base, or the branch a manual run was dispatched from) selects the same
+    branch of the harness. Anything else tracks main.
+    """
+    explicit = explicit.strip()
+    if explicit:
+        return explicit
+    for candidate in (base_ref.strip(), ref_name.strip()):
+        if candidate.startswith(RELEASE_BRANCH_PREFIX):
+            return candidate
+    return COCO_INTEGRATION_REF
+
 
 @dataclass(frozen=True)
 class ResolvedRun:
@@ -125,6 +147,18 @@ def resolve_run(
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "select-ref":
+        set_github_output(
+            {
+                "coco_ref": select_coco_ref(
+                    explicit=os.environ.get("COCO_REF_EXPLICIT", ""),
+                    base_ref=os.environ.get("COCO_BASE_REF", ""),
+                    ref_name=os.environ.get("COCO_REF_NAME", ""),
+                )
+            }
+        )
+        return
+
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
     try:
         resolved = resolve_run(

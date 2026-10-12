@@ -12,9 +12,28 @@ from pathlib import Path
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import rccl_resolve_coco_run as resolve
 
-SCHEDULED_WORKFLOW = (
-    Path(__file__).resolve().parents[2] / "workflows" / "rccl-coco-scheduled.yml"
-)
+GITHUB = Path(__file__).resolve().parents[2]
+SCHEDULED_WORKFLOW = GITHUB / "workflows" / "rccl-coco-scheduled.yml"
+PR_WORKFLOW = GITHUB / "workflows" / "rccl-coco-pr.yml"
+CHECKOUT_ACTION = GITHUB / "actions" / "rccl-checkout-coco-harness" / "action.yml"
+
+
+class HarnessCheckoutTest(unittest.TestCase):
+    def test_checkout_targets_coco_repo(self):
+        text = CHECKOUT_ACTION.read_text(encoding="utf-8")
+        self.assertIn("repository: ROCm/coco", text)
+        self.assertIn("repositories: coco", text)
+        self.assertNotIn("tRCCL", text)
+
+    def test_callers_select_the_ref_before_checkout(self):
+        for path in (PR_WORKFLOW, SCHEDULED_WORKFLOW):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("rccl_resolve_coco_run.py select-ref", text, path.name)
+            self.assertIn("steps.harness_ref.outputs.coco_ref", text, path.name)
+
+    def test_pr_workflow_runs_on_release_branches(self):
+        text = PR_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("'release/**'", text)
 
 
 class CronConsistencyTest(unittest.TestCase):
@@ -92,6 +111,68 @@ class BuildCocoArgsTest(unittest.TestCase):
         args = resolve.build_coco_args(mode="nightly", dry_run=False)
         self.assertIn("--prune-build", args)
         self.assertNotIn("--skip-baselines", args)
+
+
+class SelectCocoRefTest(unittest.TestCase):
+    def test_explicit_ref_wins(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="abc123",
+                base_ref="release/rocm-rel-7.2",
+                ref_name="develop",
+            ),
+            "abc123",
+        )
+
+    def test_release_base_uses_the_same_branch(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="",
+                base_ref="release/therock-10.1",
+                ref_name="42/merge",
+            ),
+            "release/therock-10.1",
+        )
+
+    def test_integration_base_tracks_main(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="",
+                base_ref="develop",
+                ref_name="42/merge",
+            ),
+            "main",
+        )
+
+    def test_dispatch_from_a_release_branch_follows_it(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="",
+                base_ref="",
+                ref_name="release/rocm-rel-7.2",
+            ),
+            "release/rocm-rel-7.2",
+        )
+
+    def test_schedule_on_develop_tracks_main(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="",
+                base_ref="",
+                ref_name="develop",
+            ),
+            "main",
+        )
+
+    def test_whitespace_explicit_ref_is_ignored(self):
+        self.assertEqual(
+            resolve.select_coco_ref(
+                explicit="  ",
+                base_ref="release/bkc/therock-10.2-20260922",
+                ref_name="",
+            ),
+            "release/bkc/therock-10.2-20260922",
+        )
 
 
 class ResolveRunTest(unittest.TestCase):
