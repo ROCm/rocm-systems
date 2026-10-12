@@ -73,10 +73,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 
 	/* in and out share a union. If the AIS handler ran, the KFD copied out
 	 * back with out.status set to the ioctl's error. If it rejected the
-	 * ioctl first (e.g. ENOTTY when AIS is unsupported), out still holds
-	 * the input args, so report errno and no progress instead.
+	 * ioctl first, out still holds the input args, so report errno and no
+	 * progress instead. ENOTTY (no AIS ioctl) only comes from the rejection
+	 * path; for other errors, a status that doesn't match errno means out
+	 * wasn't written.
 	 */
-	if (ret < 0 && (args.out.status != -errno || args.out.pad)) {
+	if (ret < 0 && (errno == ENOTTY || args.out.status != -errno)) {
 		args.out.status = -errno;
 		args.out.size_copied = 0;
 	}
