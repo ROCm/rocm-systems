@@ -56,13 +56,17 @@ cases:
   Unit_HRR_CaptureCrashSmallStack_Direct: {}
   Unit_HRR_CaptureDisabledInForkedChild: {}
   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo: {}
+  Unit_HRR_CaptureEventsFail_Direct: {}
+  Unit_HRR_CaptureEventsWriteFails: {}
   Unit_HRR_CaptureExitSummary: {}
+  Unit_HRR_CaptureForkAfterEventsFail: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
+  Unit_HRR_CaptureResumeChecksBlobBytes: {}
   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
