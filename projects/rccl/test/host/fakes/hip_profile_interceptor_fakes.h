@@ -54,11 +54,8 @@
 // the HIP headers is a compile error in the .cc, which is the intended alarm.
 
 // X(name, (parameter types)). The full list is the union of the two below.
-#define RCCL_HIP_PROFILE_INTERCEPTORS(X) \
-  RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(X) \
-  RCCL_HIP_PROFILE_INTERCEPTORS_FAIL_LOUD(X)
 
-// Defined in hip_fakes.cc over a std::function seam whose default still fails loud.
+// Defined in hip_fakes.cc over a g_<name> seam, asserted there to match HIP; the default still fails loud.
 #define RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(X)                               \
   X(hipExtLaunchKernel, (const void*, dim3, dim3, void**, size_t, hipStream_t, \
                          hipEvent_t, hipEvent_t, int))

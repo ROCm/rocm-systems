@@ -55,7 +55,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
-ASSERT_HOOK_MATCHES_PROD(g_hipExtLaunchKernel,            hipExtLaunchKernel);
+#define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
+RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
+#undef RCCL_ASSERT_INTERCEPTOR_HOOK
 
 #undef ASSERT_HOOK_MATCHES_PROD
 

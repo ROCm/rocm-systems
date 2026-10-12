@@ -11,12 +11,10 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <memory>
-#include <string>
+#include <cstdint>
 #include <vector>
 
 #include "../common/DdaIpcTestHelpers.hpp"
-#include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 
 #include DDA_ALL_REDUCE_IPC_CC_PATH
@@ -31,7 +29,7 @@ using RcclUnitTesting::DdaIpcMockComm;
 constexpr size_t kFlatTreeThresholdBytes = 256 * 1024;
 constexpr size_t kFp32CountAtThreshold = kFlatTreeThresholdBytes / sizeof(float);
 constexpr size_t kFp16CountAtThreshold = kFlatTreeThresholdBytes / sizeof(uint16_t);
-// Above any in-kernel staging cap, so the tree path must copy sendbuff into scratch before it launches.
+// 8 MiB fp32 tree payload, which the tree path copies into scratch before it launches.
 constexpr size_t kFp32CountCopiedBeforeTree = (8u << 20) / sizeof(float);
 
 void* const kSendbuff = reinterpret_cast<void*>(0x10);
@@ -165,10 +163,12 @@ TEST_F(DdaAllReduceIpcEligibleTest, TreePathAlignedPerRankSliceIsEligible) {
 
 struct Launch {
   const void* kernel;
+  void* ipcbuffs;
   size_t count;
   const void* sendbuff;
   void* recvbuff;
   int rank;
+  hipStream_t stream;
   hipEvent_t stopEvent;
   size_t memcpysBefore;
 };
@@ -177,13 +177,16 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipSuccess; };
+    g_hipMemcpyAsync = [this](void*, const void*, size_t, hipMemcpyKind, hipStream_t stream) {
+      memcpyStreams_.push_back(stream);
+      return hipSuccess;
+    };
     g_hipGetLastError = []() { return hipSuccess; };
-    g_hipExtLaunchKernel = [this](const void* kernel, dim3, dim3, void** args, size_t, hipStream_t, hipEvent_t,
-                                  hipEvent_t stopEvent, int) {
-      launches_.push_back({kernel, *static_cast<size_t*>(args[2]), *static_cast<const void**>(args[3]),
-                           *static_cast<void**>(args[1]), *static_cast<int*>(args[4]), stopEvent,
-                           g_hipMemcpyAsyncArgs.size()});
+    g_hipExtLaunchKernel = [this](const void* kernel, dim3, dim3, void** args, size_t, hipStream_t stream,
+                                  hipEvent_t, hipEvent_t stopEvent, int) {
+      launches_.push_back({kernel, *static_cast<void**>(args[0]), *static_cast<size_t*>(args[2]),
+                           *static_cast<const void**>(args[3]), *static_cast<void**>(args[1]),
+                           *static_cast<int*>(args[4]), stream, stopEvent, g_hipMemcpyAsyncArgs.size()});
       return hipSuccess;
     };
     mock_.comm.ddaIpcBarrierState = BarrierState();
@@ -193,7 +196,7 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   void TearDown() override { ResetHipFakes(); }
 
   ncclResult_t Run(size_t count, ncclDataType_t datatype) {
-    return ncclAllReduceDdaIpc(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), nullptr);
+    return ncclAllReduceDdaIpc(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream);
   }
 
   template <typename T>
@@ -202,8 +205,10 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   }
 
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
+  const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
   DdaIpcMockComm mock_;
   std::vector<Launch> launches_;
+  std::vector<hipStream_t> memcpyStreams_;
 };
 
 TEST_F(DdaAllReduceIpcDispatchTest, UnsupportedDatatypeReturnsInvalidArgumentWithoutLaunching) {
@@ -254,10 +259,12 @@ TEST_F(DdaAllReduceIpcDispatchTest, ScratchCheckUsesTheDispatchedElementSize) {
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchCarriesBuffersCountRankAndTakesStopEvent) {
   ASSERT_EQ(ncclSuccess, Run(64, ncclFloat32));
   ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ(mock_.comm.ddaPeerPtrsDev, launches_[0].ipcbuffs);
   EXPECT_EQ(64u, launches_[0].count);
   EXPECT_EQ(kSendbuff, launches_[0].sendbuff);
   EXPECT_EQ(kRecvbuff, launches_[0].recvbuff);
   EXPECT_EQ(3, launches_[0].rank);
+  EXPECT_EQ(kStream, launches_[0].stream);
   EXPECT_EQ(kStopEvent, launches_[0].stopEvent);
   EXPECT_EQ(nullptr, mock_.comm.addonStopEvent);
 }
@@ -287,6 +294,16 @@ TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunc
   EXPECT_EQ(mock_.comm.ddaScratch, g_hipMemcpyAsyncArgs[0].dst);
   EXPECT_EQ(kSendbuff, g_hipMemcpyAsyncArgs[0].src);
   EXPECT_EQ(count * sizeof(float), g_hipMemcpyAsyncArgs[0].bytes);
+  ASSERT_EQ(1u, memcpyStreams_.size());
+  EXPECT_EQ(kStream, memcpyStreams_[0]);
+  EXPECT_EQ(kStream, launches_[0].stream);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, ScratchCopyErrorIsReportedWithoutLaunching) {
+  g_hipMemcpyAsync = [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; };
+  EXPECT_EQ(ncclUnhandledCudaError, Run(kFp32CountCopiedBeforeTree, ncclFloat32));
+  EXPECT_EQ(1, g_hipMemcpyAsyncCalls);
+  EXPECT_TRUE(launches_.empty());
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, AboveThresholdCountNotDivisibleByRanksFallsBackToFlat) {
@@ -307,6 +324,18 @@ TEST_F(DdaAllReduceIpcDispatchTest, ThresholdIsInBytesNotElements) {
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchErrorIsReported) {
   g_hipGetLastError = []() { return hipErrorLaunchFailure; };
   EXPECT_EQ(ncclUnhandledCudaError, Run(16, ncclFloat32));
+}
+
+// ---------------------------------------------------------------------------
+// ncclAllReduceDdaIpcBlocks
+// ---------------------------------------------------------------------------
+
+// The 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS, so a changed cap fails here.
+TEST(DdaAllReduceIpcBlocksTest, GridFollowsElementSizeAndIsCappedAt24Blocks) {
+  EXPECT_EQ(1u, ncclAllReduceDdaIpcBlocks(nullptr, 16, ncclFloat32));
+  EXPECT_EQ(2u, ncclAllReduceDdaIpcBlocks(nullptr, 4096, ncclFloat32));
+  EXPECT_EQ(1u, ncclAllReduceDdaIpcBlocks(nullptr, 4096, ncclBfloat16));
+  EXPECT_EQ(24u, ncclAllReduceDdaIpcBlocks(nullptr, 1u << 20, ncclFloat32));
 }
 
 }  // namespace
