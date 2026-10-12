@@ -246,6 +246,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (!decode_caps.is_supported) {
+        std::cout << "info: the rocJPEG decoder on GPU device " << device_id
+                  << " reports no supported chroma subsampling." << std::endl;
+        return 0;
+    }
+
     const int label_width = 27;
     std::string coding_processes;
     for (const auto &process : kCodingProcesses) {

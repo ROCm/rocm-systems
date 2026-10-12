@@ -722,19 +722,35 @@ int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
     for (uint32_t value : decode_caps.reserved) {
         reserved_zero = reserved_zero && (value == 0);
     }
-    if (decode_caps.is_supported != 1 || decode_caps.roi_decode != 1 || decode_caps.hw_roi_decode > 1 ||
+    // These fields do not depend on which formats the VA-API driver advertises, so they are always reported.
+    if (decode_caps.is_supported > 1 || decode_caps.roi_decode > 1 || decode_caps.hw_roi_decode > 1 ||
         decode_caps.max_components != 3 || decode_caps.num_jpeg_cores < 1 ||
         decode_caps.min_width == 0 || decode_caps.min_width > decode_caps.max_width ||
         decode_caps.min_height == 0 || decode_caps.min_height > decode_caps.max_height ||
-        decode_caps.subsampling_mask == 0 || (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_411)) != 0 ||
-        decode_caps.output_format_mask != (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1 ||
-        decode_caps.coding_process_mask != (1u << ROCJPEG_CODING_PROCESS_BASELINE) ||
-        (decode_caps.hw_rgb_subsampling_mask & ~decode_caps.subsampling_mask) != 0 ||
-        (decode_caps.hw_rgb_output_format_mask & ~rgb_output_formats) != 0 ||
-        (decode_caps.hw_rgb_subsampling_mask == 0) != (decode_caps.hw_rgb_output_format_mask == 0) ||
         !reserved_zero) {
         std::cerr << "Inconsistent RocJpegDecodeCaps reported for a valid rocJPEG handle" << std::endl;
         return EXIT_FAILURE;
+    }
+    if (decode_caps.is_supported) {
+        if (decode_caps.subsampling_mask == 0 || (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_411)) != 0 ||
+            decode_caps.output_format_mask != (1u << ROCJPEG_OUTPUT_FORMAT_MAX) - 1 ||
+            decode_caps.coding_process_mask != (1u << ROCJPEG_CODING_PROCESS_BASELINE) ||
+            (decode_caps.hw_rgb_subsampling_mask & ~decode_caps.subsampling_mask) != 0 ||
+            (decode_caps.hw_rgb_output_format_mask & ~rgb_output_formats) != 0 ||
+            (decode_caps.hw_rgb_subsampling_mask == 0) != (decode_caps.hw_rgb_output_format_mask == 0)) {
+            std::cerr << "Inconsistent RocJpegDecodeCaps reported for a supported rocJPEG handle" << std::endl;
+            return EXIT_FAILURE;
+        }
+    } else {
+        // rocJpegGetDecoderCaps returns success with is_supported == 0 when the VA-API driver advertises none of
+        // the surface formats the VCN JPEG decoder writes. Every format-dependent field must then be zero.
+        std::cout << "info: the decoder reports no supported chroma subsampling; checking the zeroed fields" << std::endl;
+        if (decode_caps.subsampling_mask != 0 || decode_caps.output_format_mask != 0 ||
+            decode_caps.coding_process_mask != 0 || decode_caps.hw_rgb_subsampling_mask != 0 ||
+            decode_caps.hw_rgb_output_format_mask != 0) {
+            std::cerr << "Expected zeroed format fields for an unsupported rocJPEG handle" << std::endl;
+            return EXIT_FAILURE;
+        }
     }
     // A subsampling is supported exactly when it reports its native surface format.
     const uint32_t expected_native_formats[ROCJPEG_NUM_CHROMA_SUBSAMPLINGS] = {
