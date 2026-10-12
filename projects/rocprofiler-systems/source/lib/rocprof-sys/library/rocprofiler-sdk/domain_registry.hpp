@@ -19,7 +19,6 @@
 #include "library/rocprofiler-sdk/buffered/memory_copy.hpp"
 #include "library/rocprofiler-sdk/buffered/scratch_memory.hpp"
 
-#include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback/hip/compiler_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip/runtime_api.hpp"
 #include "library/rocprofiler-sdk/callback/hip_stream.hpp"
@@ -28,6 +27,7 @@
 #include "library/rocprofiler-sdk/callback/hsa/core_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/finalize_ext_api.hpp"
 #include "library/rocprofiler-sdk/callback/hsa/image_ext_api.hpp"
+#include "library/rocprofiler-sdk/callback/ompt/ompt.hpp"
 #include "library/rocprofiler-sdk/callback/rccl/rccl.hpp"
 #include "library/rocprofiler-sdk/callback/rocdecode_api.hpp"
 #include "library/rocprofiler-sdk/callback/rocjpeg_api.hpp"
@@ -169,12 +169,11 @@ private:
 
     consteval static auto collect_callback_domains()
     {
-        constexpr auto k_callback_domains_size = 13;
+        constexpr auto k_callback_domains_size = 14;
         simple_static_vector<callback_domain_definition<SdkBackend>,
                              k_callback_domains_size>
             result;
 
-        result.add(callback::k_code_object<SdkBackend, Externals>);
         result.add(callback::hip::k_compiler_api<SdkBackend, Externals>);
         result.add(callback::hip::k_runtime_api<SdkBackend, Externals>);
         result.add(callback::hsa::k_core_api<SdkBackend, Externals>);
@@ -191,12 +190,13 @@ private:
             result.add(callback::k_hip_stream<SdkBackend, Externals>);
         }
 
-        constexpr auto k_rocdecode_min_version =
+        constexpr auto k_rocdecode_and_ompt_min_version =
             version{ .major = 0, .minor = 6, .patch = 0 };
         if constexpr(version::from_formatted(SdkBackend::compile_time_version) >=
-                     k_rocdecode_min_version)
+                     k_rocdecode_and_ompt_min_version)
         {
             result.add(callback::k_rocdecode_api<SdkBackend, Externals>);
+            result.add(callback::ompt::k_ompt_api<SdkBackend, Externals>);
         }
 
         constexpr auto k_rocjpeg_min_version =

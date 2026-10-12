@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Direct native queues with cached mappings and explicit producer borrows.
@@ -5,9 +6,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use rocddi::gpu::queue::{
+use rocddi::device::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
-    QueueScratch,
+    QueueRingMemory, QueueScratch,
 };
 use rocddi::host_storage::{Allocator, Owned};
 
@@ -74,6 +75,7 @@ struct Queue {
     // These counters borrow the public device, which cannot be destroyed while
     // this queue is registered. No public device ownership is retained.
     device_queues: *const AtomicU64,
+    #[cfg(test)]
     device_reset_epoch: *const AtomicU64,
     _scratch_borrow: Option<memory::QueueScratchBorrow>,
     info: amdf_user_queue_info_t,
@@ -93,6 +95,21 @@ struct Mapping {
 }
 
 impl Queue {
+    fn observe_loss(&self) {
+        #[cfg(test)]
+        if matches!(self.native, NativeQueue::Fixture(_)) {
+            // The queue fixture has no activated native device.
+            // SAFETY: Its environment keeps this epoch live through the test.
+            instance::advance_reset_epoch(
+                unsafe { &*self.device_reset_epoch },
+                self.info.reset_epoch,
+            );
+            return;
+        }
+        // SAFETY: The registered queue borrows this live device.
+        unsafe { (*self.device).observe_loss(self.info.reset_epoch) };
+    }
+
     fn require_usable(&self) -> Result<(), u64> {
         if self.destroying.load(Ordering::Acquire) {
             Err(PRECONDITION)
@@ -117,11 +134,7 @@ impl Queue {
                 .terminal
                 .compare_exchange(0, encoded, Ordering::AcqRel, Ordering::Acquire);
             if lost {
-                // SAFETY: The registered queue borrows this still-live device.
-                instance::advance_reset_epoch(
-                    unsafe { &*self.device_reset_epoch },
-                    self.info.reset_epoch,
-                );
+                self.observe_loss();
             }
         }
         status
@@ -207,6 +220,8 @@ fn descriptor(
         AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 => QueueParameters::Pm4,
         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL => QueueParameters::Aql {
             producer_mode: producer,
+            ring_memory: QueueRingMemory::System,
+            global_work_sync: false,
             inactive_signal: None,
             error_event: None,
             scratch,
@@ -371,10 +386,12 @@ fn rollback_creation(
     status: u64,
 ) -> u64 {
     // SAFETY: No public queue was issued. The scratch child borrow retains
-    // any external address firmware could still reach after failed cleanup.
+    // any external address a GPU engine could still reach after failed cleanup.
     let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
     unregister(&device.queues);
-    result.err().map_or(status, |error| native(&error))
+    result
+        .err()
+        .map_or(status, |error| device.native_error_status(&error))
 }
 
 fn wait_consumed(
@@ -458,7 +475,7 @@ pub(crate) unsafe extern "C" fn create(
                 Ok(created) => created,
                 Err(error) => {
                     unregister(&device.queues);
-                    return Err(native(&error));
+                    return Err(device.native_error_status(&error));
                 }
             };
         let native_info = native_queue.info();
@@ -520,7 +537,8 @@ pub(crate) unsafe extern "C" fn create(
             allocator: instance.allocator,
             device: pointer.cast(),
             device_queues: &raw const device.queues,
-            device_reset_epoch: &raw const device.reset_epoch,
+            #[cfg(test)]
+            device_reset_epoch: &raw const *device.reset_epoch,
             _scratch_borrow: scratch_borrow,
             info: queue_info,
             host_mapping,
@@ -583,7 +601,7 @@ pub(crate) unsafe extern "C" fn map(
                 queue
                     .native
                     .map_device(producer)
-                    .map_err(|error| native(&error))?,
+                    .map_err(|error| producer.native_error_status(&error))?,
                 queue.info.command_type,
                 queue.info.format_version,
                 queue.info.format_features,
@@ -659,6 +677,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
             if queue.mappings.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
+            let mut observation_error = None;
             if !queue.destroying.load(Ordering::Acquire) {
                 // A work-only BUSY rejection also leaves all public queue uses
                 // available. No producer remains after mapping preflight, so the
@@ -669,21 +688,31 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
                     Err(error) if error.kind() == rocddi::ErrorKind::DeviceLost => {
                         queue.observe_error(&error);
                     }
-                    Err(error) => return Err(queue.observe_error(&error)),
+                    Err(error) => observation_error = Some(queue.observe_error(&error)),
                 }
             }
-            // Native destruction can release some backing before a later step
-            // fails. Keep the owner for cleanup retries, but never republish cached
-            // addresses or permit further queue use after that attempt begins.
+            // After the BUSY preflight, every outcome consumes the public
+            // handle. Failed or unproved cleanup retains native backing as a
+            // leak without replaying a partially completed release.
             queue.destroying.store(true, Ordering::Release);
-            // SAFETY: Mapping preflight established that no public producer
-            // borrow remains; the caller has exclusive queue access.
-            if let Err(error) = queue.native.destroy() {
-                return Err(queue.observe_error(&error));
-            }
+            let result = if let Some(status) = observation_error {
+                Err(status)
+            } else {
+                // SAFETY: Mapping preflight established that no public producer
+                // borrow remains; the caller has exclusive queue access.
+                queue
+                    .native
+                    .destroy()
+                    .map_err(|error| queue.observe_error(&error))
+            };
             unregister(&*queue.device_queues);
-            drop(Owned::from_raw(pointer.cast::<Queue>()));
-            Ok(())
+            let owner = Owned::from_raw(pointer.cast::<Queue>());
+            if result.is_err() {
+                std::mem::forget(owner);
+            } else {
+                drop(owner);
+            }
+            result
         }
     })
 }

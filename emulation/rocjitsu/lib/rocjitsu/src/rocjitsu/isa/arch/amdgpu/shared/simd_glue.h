@@ -534,12 +534,9 @@ inline void write_vop3_true16_dst(const Operand &dst, Wavefront &wf, uint32_t la
     uint32_t voff = wf.gpr_idx_en() ? apply_gpr_idx(wf, off, dst.vgpr_msb_role()) : off;
     uint32_t idx = wf.vgpr_alloc().base + voff;
     RegisterAccess regs(wf);
-    auto dst_region = regs.readwrite_vgpr_region(idx, 1, uint64_t{1} << lane);
-    uint32_t old_dst = dst_region.read().lane(0, lane);
-    uint32_t merged = dst_hi
-                          ? ((old_dst & 0x0000ffffu) | (src_half << 16))
-                          : (low_dst_zeroes_high ? src_half : ((old_dst & 0xffff0000u) | src_half));
-    dst_region.write().set_lane(0, lane, merged);
+    const uint8_t bytes = dst_hi ? 0xc : low_dst_zeroes_high ? 0xf : 0x3;
+    regs.write_vgpr_region(idx, 1, uint64_t{1} << lane, bytes)
+        .set_lane(0, lane, dst_hi ? src_half << 16 : src_half);
     return;
   }
   amdgpu::RegisterAccess(wf).write_lane(dst, lane, dst_hi ? (src_half << 16) : src_half);
@@ -1203,7 +1200,7 @@ template <bool ReadCarry, typename Inst, typename CarryOp, typename WriteResult>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   // Carry-in reads the incoming VCC; the result accumulates from zero so that
   // inactive lanes are zeroed (matching hardware and the scalar bodies).
-  const uint64_t vcc_in = ReadCarry ? wf.vcc_mask(exec) : 0;
+  const uint64_t vcc_in = ReadCarry ? wf.vcc_mask() : 0;
   uint64_t vcc_out = 0;
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -1703,7 +1700,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc_mask(exec);
+  const uint64_t vcc = wf.vcc_mask();
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.vsrc1, exec);
@@ -3317,7 +3314,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width_v<T>;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc_mask(exec);
+  const uint64_t vcc = wf.vcc_mask();
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
   auto src1 = regs.read_operand(inst.src1, exec);
@@ -3359,7 +3356,7 @@ template <typename Inst>
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint64_t vcc = wf.vcc_mask(exec);
+  const uint64_t vcc = wf.vcc_mask();
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand64(inst.src0, exec);
   auto src1 = regs.read_operand64(inst.src1, exec);
@@ -3706,9 +3703,9 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
   const U kSignBit(0x80000000u);
   const U kAbsMask(~0x80000000u);
   RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto src2 = regs.read_operand(inst.src2, exec);
+  auto src0 = regs.read_operand(inst.src0, exec, inst.src0.register_byte_mask());
+  auto src1 = regs.read_operand(inst.src1, exec, inst.src1.register_byte_mask());
+  auto src2 = regs.read_operand(inst.src2, exec, inst.src2.register_byte_mask());
   auto load_src = [&](const RegisterAccess::OperandReadView &op, uint32_t base,
                       uint32_t src_selector, uint32_t sel_hi_bit, uint32_t sel_bit,
                       uint32_t abs_bit, uint32_t neg_bit) -> F {
@@ -3752,7 +3749,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
       dst.template store_native<float>(base, compute_result(base), chunk);
     }
   } else {
-    auto dst = regs.readwrite_operand(inst.vdst, exec);
+    auto dst = regs.write_operand(inst.vdst, exec, DstMode == FmaMixDst::F16_LO ? 0x3 : 0xc);
     for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
       const uint64_t chunk = (exec >> base) & chunk_full;
       if (chunk == 0)
@@ -3771,13 +3768,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
         h = mixed_fma_f16_simd<false>(F(0), F(0), compute_result(base), wf.fp_round_mode_f16_f64(),
                                       false, wf.fp16_ovfl(), false);
       }
-      U prev = dst.template load_native<uint32_t>(base);
-      U packed;
-      if constexpr (DstMode == FmaMixDst::F16_LO) {
-        packed = (prev & 0xFFFF0000u) | h;
-      } else { // F16_HI
-        packed = (prev & 0x0000FFFFu) | (h << 16);
-      }
+      const U packed = DstMode == FmaMixDst::F16_LO ? h : h << 16;
       dst.template store_native<uint32_t>(base, packed, chunk);
     }
   }

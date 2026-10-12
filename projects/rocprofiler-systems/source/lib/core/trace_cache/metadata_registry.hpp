@@ -14,12 +14,10 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <functional>
-#include <initializer_list>
 #include <map>
 #include <memory>
 #include <optional>
 #include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <set>
 #include <string.h>
 #include <string>
@@ -197,7 +195,7 @@ struct gpu_perf_counter_name_entry
 
 struct metadata_registry
 {
-    metadata_registry();
+    metadata_registry()                                    = default;
     metadata_registry(const metadata_registry&)            = delete;
     metadata_registry& operator=(const metadata_registry&) = delete;
     metadata_registry(metadata_registry&&)                 = delete;
@@ -240,8 +238,6 @@ struct metadata_registry
         std::uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(std::uint64_t kernel_id) const;
-    rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
-    rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
 
     void set_gpu_perf_counter_counter_names(
         std::uint32_t device_id, std::vector<info::gpu_perf_counter_name_entry> entries);
@@ -269,28 +265,13 @@ private:
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>,
         state::thread>
-                                                      m_kernel_symbols;
-    rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
-        rocprofiler::sdk::get_buffer_tracing_names<const char*>()
-    };
-    rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
-        rocprofiler::sdk::get_callback_tracing_names<const char*>()
-    };
-
+        m_kernel_symbols{};
     // SDK PMC counter name ordering: device_id -> ordered name entries
     std::map<std::uint32_t, std::vector<info::gpu_perf_counter_name_entry>>
         m_gpu_perf_counter_counter_names;
     // O(1) lookup index: device_id -> counter_id -> index into the vector above
     std::map<std::uint32_t, std::unordered_map<std::uint64_t, std::size_t>>
-        m_gpu_perf_counter_index;
-
-    using callback_rename_map_t =
-        std::map<rocprofiler_tracing_operation_t, std::string_view>;
-
-    void overwrite_callback_names(
-        std::initializer_list<
-            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
-            rename_table);
+        m_gpu_perf_counter_index{};
 };
 
 }  // namespace rocprofsys::trace_cache

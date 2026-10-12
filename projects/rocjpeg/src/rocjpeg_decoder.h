@@ -203,9 +203,10 @@ private:
    RocJpegStatus InitHIP(int device_id);
 
    /**
-    * @brief Waits for a submitted surface and copies/converts the decoded output.
+    * @brief Waits for the submitted surfaces and copies/converts the decoded output.
+    *
+    * This is the only finalize path; the single-image decoders call it with a batch size of one.
     */
-   RocJpegStatus FinalizeDecode(VASurfaceID surface_id, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destination);
    RocJpegStatus FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size);
 
    /**
@@ -228,50 +229,10 @@ private:
     */
    RocJpegStatus CopyChannel(HipInteropDeviceMem& hip_interop, uint16_t channel_width, uint16_t channel_height, uint8_t channel_index, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
 
-   /**
-    * @brief Converts the image to RGB color space.
-    * @param hip_interop The HIP interop device memory.
-    * @param picture_width The width of the picture.
-    * @param picture_height The height of the picture.
-    * @param destination Pointer to the destination image.
-    * @return The status of the operation.
-    */
-   RocJpegStatus ColorConvertToRGB(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
-
-   /**
-    * @brief Converts the image to RGB planar color space.
-    * @param hip_interop The HIP interop device memory.
-    * @param picture_width The width of the picture.
-    * @param picture_height The height of the picture.
-    * @param destination Pointer to the destination image.
-    * @return The status of the operation.
-    */
-   RocJpegStatus ColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
-
-   /**
-    * @brief Retrieves the output format for planar YUV images.
-    * @param hip_interop The HIP interop device memory.
-    * @param picture_width The width of the picture.
-    * @param picture_height The height of the picture.
-    * @param chroma_height The height of the chroma channel.
-    * @param destination Pointer to the destination image.
-    * @return The status of the operation.
-    */
-   RocJpegStatus GetPlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
-
-   /**
-    * @brief Retrieves the output format for Y images.
-    * @param hip_interop The HIP interop device memory.
-    * @param picture_width The width of the picture.
-    * @param picture_height The height of the picture.
-    * @param destination Pointer to the destination image.
-    * @return The status of the operation.
-    */
-   RocJpegStatus GetYOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
-
-   // Batched-path accumulators: mirror the per-image color-convert/output helpers above,
-   // but instead of launching a kernel per image they append params to the per-kernel
-   // scratch buffers below. Memcpy-only work (CopyChannel) is still issued inline.
+   // Per-image output producers for the group loop in FinalizeDecodeBatched. Instead of
+   // launching a kernel per image, they append params to the per-kernel scratch buffers
+   // below, which LaunchBatchedParams then issues in one launch each. Memcpy-only work
+   // (CopyChannel) is still issued inline.
    RocJpegStatus AccumulateColorConvertToRGB(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
    RocJpegStatus AccumulateColorConvertToRGBPlanar(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);
    RocJpegStatus AccumulatePlanarYUVOutputFormat(HipInteropDeviceMem& hip_interop, uint32_t picture_width, uint32_t picture_height, uint16_t chroma_height, RocJpegImage *destination, const RocJpegDecodeParams *decode_params, bool is_roi_valid);

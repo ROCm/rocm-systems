@@ -397,6 +397,9 @@ enum class DrawDispatchType : uint32
     CmdDispatchOffset,                 ///< Direct compute dispatch (offsetted start).
     CmdGenExecuteIndirectDispatch,     ///< ExecuteIndirect dispatch.
     CmdDispatchAql,                    ///< AQL compute dispatch
+#if PAL_WORK_LISTS_SUPPORT
+    CmdDispatchList,                   ///< Work Lists Dispatch
+#endif
 
     Count,
     FirstDispatch = CmdDispatch        ///< All callbacks with an enum value greater or equal than this are dispatches

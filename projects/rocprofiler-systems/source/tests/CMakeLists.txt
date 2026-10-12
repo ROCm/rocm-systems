@@ -9,6 +9,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
     $<TARGET_OBJECTS:control-posix-clock-tests>
+    $<TARGET_OBJECTS:control-timeline-clock-tests>
     $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>

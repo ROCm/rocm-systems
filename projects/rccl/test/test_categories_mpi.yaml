@@ -81,6 +81,7 @@ test_categories:
       dispatches for messages under the DDA AlltoAll threshold."
     test_patterns:
       - "CeMPI_AlltoAll.*"
+      - "CeMPI_AlltoAllv.*"
     exclude_windows: *mpi_exclude_windows
     labels:
       - "rccl"

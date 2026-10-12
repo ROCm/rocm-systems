@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # GFX1201 HSA hardware checks
@@ -15,10 +16,9 @@ advertise sampling and that direct entry points reject configuration and
 creation without changing the output handle. Each probe has a 30-second
 subprocess watchdog.
 
-The logging probe verifies that a non-null caller-owned C `FILE*` is
-reported as unsupported without being retained. It then enables null-stream
-logging, creates and destroys a GPU queue, and checks that stderr contains the
-queue creation record.
+The logging probe writes a queue creation record to a caller-owned C `FILE*`,
+disables logging before closing that stream, and checks its contents. It then
+enables stderr logging and checks a second queue creation record there.
 
 Run `./run_kernel_comparison.sh /tmp/rocddi-cmake/lib/libhsa_runtime64.so`
 with `hipcc`, `clang-offload-bundler`, and installed ROCr to compare a real
