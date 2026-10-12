@@ -165,10 +165,6 @@ enum struct AsyncDir {
 
 using __rccl_global_char = __attribute__((address_space(1))) char;
 using __rccl_lds_char = __attribute__((address_space(3))) char;
-using __rccl_global_int32 = __attribute__((address_space(1))) int32_t;
-using __rccl_lds_int32 = __attribute__((address_space(3))) int32_t;
-using __rccl_global_int32x2 = __attribute__((address_space(1))) __rccl_int32x2;
-using __rccl_lds_int32x2 = __attribute__((address_space(3))) __rccl_int32x2;
 using __rccl_global_int32x4 = __attribute__((address_space(1))) __rccl_int32x4;
 using __rccl_lds_int32x4 = __attribute__((address_space(3))) __rccl_int32x4;
 
@@ -183,144 +179,170 @@ __device__ inline void asyncCopyB8(const uint8_t* global, uint8_t* lds) {
   }
 }
 
-// One b32 access (4 bytes) for a single lane.
-template <AsyncDir DIR, CachePolicy cp>
-__device__ inline void asyncCopyB32(const uint8_t* global, uint8_t* lds) {
-  if constexpr (DIR == AsyncDir::Load) {
-    __builtin_amdgcn_global_load_async_to_lds_b32((__rccl_global_int32*)global, (__rccl_lds_int32*)lds, ZERO_OFFSET,
-                                                  cp);
-  } else {
-    __builtin_amdgcn_global_store_async_from_lds_b32((__rccl_global_int32*)global, (__rccl_lds_int32*)lds, ZERO_OFFSET,
-                                                     cp);
-  }
-}
-
-// One b64 access (8 bytes) for a single lane.
-template <AsyncDir DIR, CachePolicy cp>
-__device__ inline void asyncCopyB64(const uint8_t* global, uint8_t* lds) {
-  if constexpr (DIR == AsyncDir::Load) {
-    __builtin_amdgcn_global_load_async_to_lds_b64((__rccl_global_int32x2*)global, (__rccl_lds_int32x2*)lds, ZERO_OFFSET,
-                                                  cp);
-  } else {
-    __builtin_amdgcn_global_store_async_from_lds_b64((__rccl_global_int32x2*)global, (__rccl_lds_int32x2*)lds,
-                                                     ZERO_OFFSET, cp);
-  }
-}
-
-// One b128 access (16 bytes) for a single lane.
-template <AsyncDir DIR, CachePolicy cp>
+// One b128 access (16 bytes) for a single lane.  OFF is the instruction's immediate offset, which the hardware adds
+// to BOTH the global and the LDS address, so an unrolled run can share a single pair of per-lane base pointers.
+template <AsyncDir DIR, CachePolicy cp, int32_t OFF = ZERO_OFFSET>
 __device__ inline void asyncCopyB128(const uint8_t* global, uint8_t* lds) {
   if constexpr (DIR == AsyncDir::Load) {
-    __builtin_amdgcn_global_load_async_to_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds,
-                                                   ZERO_OFFSET, cp);
+    __builtin_amdgcn_global_load_async_to_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds, OFF, cp);
   } else {
-    __builtin_amdgcn_global_store_async_from_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds,
-                                                      ZERO_OFFSET, cp);
+    __builtin_amdgcn_global_store_async_from_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds, OFF,
+                                                      cp);
   }
+}
+
+// Every argument of the warp-level entry points is warp-uniform by contract, but the compiler cannot prove it when
+// the caller derives it from threadIdx (e.g. a per-warp offset). Without that proof every loop bound, switch and
+// wait count downstream becomes a per-lane value with EXEC-masked control flow. readfirstlane restores it.
+__device__ inline uint32_t uniform(uint32_t v) {
+  return __builtin_amdgcn_readfirstlane(v);
+}
+__device__ inline uint64_t uniform(uint64_t v) {
+  const uint32_t lo = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v));
+  const uint32_t hi = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v >> 32));
+  return (static_cast<uint64_t>(hi) << 32) | lo;
+}
+template <typename T>
+__device__ inline T* uniform(T* p) {
+  return reinterpret_cast<T*>(uniform(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p))));
 }
 
 // Bytes moved by a single lane in the widest (b128) access.
-constexpr size_t BYTES_PER_LANE_B128 = 16;
-// The hot loop must start on a 128-byte boundary, so the peel aligns the global pointer to this.
+constexpr uint32_t BYTES_PER_LANE_B128 = 16;
+// Bytes moved by one full-warp b128 instruction. gfx1250 is wave32-only; the unrolled runs below bake multiples of
+// this into immediate offsets.
+constexpr uint32_t WARP_BYTES_B128 = 32 * BYTES_PER_LANE_B128;
+// The hot loop starts on a 128-byte boundary of its alignment anchor.
 constexpr size_t NATURAL_ALIGNMENT_BYTES = 128;
-// How many b128 iterations the hot loop unrolls at a time.
-constexpr int HOT_LOOP_UNROLL = 4;
+// Longest straight-line run of b128 instructions: the hot loop's unroll factor and the largest pipeline chunk.
+constexpr uint32_t MAX_RUN = 8;
+
+// N back-to-back full-warp b128 transfers from the per-lane pointers `g`/`l`, as straight-line code: every access
+// carries a compile-time immediate offset, so a run needs no per-access loop, branch or address math.
+template <AsyncDir DIR, CachePolicy cp, uint32_t N, uint32_t I = 0>
+__device__ inline void issueRunStatic(const uint8_t* g, uint8_t* l) {
+  if constexpr (I < N) {
+    asyncCopyB128<DIR, cp, static_cast<int32_t>(I * WARP_BYTES_B128)>(g, l);
+    issueRunStatic<DIR, cp, N, I + 1>(g, l);
+  }
+}
+
+// `count` (0..2*MAX_RUN-1) full-warp b128 transfers with a runtime count, advancing `g`/`l` past them. This is
+// Duff's device recast for the GPU: AMDGPU has no jump tables, and the structurizer turns a fall-through switch
+// into a chain of predicated blocks around every access, so the count is instead decomposed into power-of-two
+// straight-line runs -- one uniform scalar branch per bit.
+template <AsyncDir DIR, CachePolicy cp>
+__device__ inline void issueRunB128(const uint8_t*& g, uint8_t*& l, uint32_t count) {
+  if (count & 8) {
+    issueRunStatic<DIR, cp, 8>(g, l);
+    g += 8 * WARP_BYTES_B128;
+    l += 8 * WARP_BYTES_B128;
+  }
+  if (count & 4) {
+    issueRunStatic<DIR, cp, 4>(g, l);
+    g += 4 * WARP_BYTES_B128;
+    l += 4 * WARP_BYTES_B128;
+  }
+  if (count & 2) {
+    issueRunStatic<DIR, cp, 2>(g, l);
+    g += 2 * WARP_BYTES_B128;
+    l += 2 * WARP_BYTES_B128;
+  }
+  if (count & 1) {
+    issueRunStatic<DIR, cp, 1>(g, l);
+    g += WARP_BYTES_B128;
+    l += WARP_BYTES_B128;
+  }
+}
+static_assert(MAX_RUN == 8, "issueRunB128 decomposes counts below 2 * MAX_RUN");
 
 // Warp-cooperative byte copy between global memory and LDS.  The whole warp must call this with identical
 // `global`, `lds`, and `sizeInBytes` arguments -- the per-lane work distribution is derived internally.
 //
 // The copy is split into three phases:
-//   1. Peel the leading bytes so the global pointer reaches 128-byte (cache-line) alignment: first with b8
-//      accesses up to a 16-byte boundary, then with b128 accesses up to the 128-byte boundary.
-//   2. Run a hot, unrolled loop of full-warp b128 transfers (warpSize * 16 bytes per iteration), starting on
-//      the 128-byte aligned boundary produced by phase 1.
-//   3. Drain the tail (< warpSize * 16 bytes) with a descending b128 -> b64 -> b32 -> b8 cascade.
+//   1. Peel the leading bytes so the alignment ANCHOR (see below) reaches a 128-byte boundary: one b8 instruction
+//      up to the 16-byte boundary, then one partial b128 instruction up to the 128-byte boundary.
+//   2. Stream full-warp b128 instructions (warpSize * 16 bytes each), MAX_RUN per iteration with immediate
+//      offsets; the sub-MAX_RUN remainder is dispatched up front through issueRunB128 (Duff's device).
+//   3. Drain the tail (< warpSize * 16 bytes) with one partial b128 instruction and one b8 instruction.
 //
-// Alignment is peeled against the global-memory pointer; the LDS staging buffer is assumed to share the same
-// alignment (RCCL allocates it 128-byte aligned), so applying the same offset keeps the LDS side aligned too.
+// Choice of anchor.  Both legs work at any alignment (every async width accepts unaligned global and LDS
+// addresses), but throughput depends on which side is misaligned when the two pointers do not share their
+// sub-16-byte offset.  Measured on gfx1250: a b128 STORE wants its global side aligned regardless; a b128 LOAD
+// is nearly free with a 4/8/12-byte LDS misalignment but ~6x slower with an odd one, where a misaligned global
+// address costs half as much instead. So loads anchor on LDS when the skew is not a multiple of 4 and on global
+// otherwise; stores always anchor on global.
 //
 // `Aligned` fast path: when the caller has already proven that both `global` and `lds` start on a 128-byte
-// boundary, the phase-1 peel is provably a no-op.  Compiling it out removes the peel branches and lets the
-// hot loop start at offset 0 with folded, compile-time-known strides.  Callers must only pass Aligned=true
-// after checking the runtime pointers (see async::detail::issue).
+// boundary, the phase-1 peel is provably a no-op.  Compiling it out removes the peel branches and lets the hot
+// loop start at offset 0.  Callers must only pass Aligned=true after checking the runtime pointers.
 template <AsyncDir DIR, CachePolicy cp, bool Aligned = false>
 __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t sizeInBytes) {
-  const unsigned lane = __lane_id();
-  const size_t laneCount = (size_t)__builtin_amdgcn_wavefrontsize();
-  const size_t laneByte = (size_t)lane * BYTES_PER_LANE_B128;
-
+  global = uniform(global);
+  lds = uniform(lds);
+  sizeInBytes = uniform(static_cast<uint64_t>(sizeInBytes));
+  const uint32_t lane = __lane_id();
   size_t offset = 0;
 
   if constexpr (!Aligned) {
-    // Phase 1a: peel leading bytes until `global` is 16-byte aligned, one byte per lane.
-    const size_t misalign = (uintptr_t)global & (BYTES_PER_LANE_B128 - 1);
-    if (misalign != 0) {
-      const size_t head =
-        (BYTES_PER_LANE_B128 - misalign) < sizeInBytes ? (BYTES_PER_LANE_B128 - misalign) : sizeInBytes;
-      if (lane < head) {
-        asyncCopyB8<DIR, cp>(global + lane, lds + lane);
-      }
-      offset += head;
-    }
+    const uintptr_t skew = ((uintptr_t)global - (uintptr_t)lds) & (BYTES_PER_LANE_B128 - 1);
+    const uintptr_t anchor = (DIR == AsyncDir::Load && (skew & 3)) ? (uintptr_t)lds : (uintptr_t)global;
 
-    // Phase 1b: peel whole 16-byte chunks until `global + offset` reaches 128-byte alignment, one b128 per
-    // leading lane.  `global + offset` is already 16-byte aligned, so the number of bytes left to the next
-    // 128-byte boundary is a multiple of 16 (at most 112 -> 7 chunks, well within a warp).
-    const size_t align128 = ((uintptr_t)global + offset) & (NATURAL_ALIGNMENT_BYTES - 1);
-    const size_t bytesToLine = (NATURAL_ALIGNMENT_BYTES - align128) & (NATURAL_ALIGNMENT_BYTES - 1);
-    size_t peelChunks = bytesToLine / BYTES_PER_LANE_B128;
+    // Phase 1a: bytes up to the anchor's next 16-byte boundary, one byte per lane.
+    size_t head = (BYTES_PER_LANE_B128 - (anchor & (BYTES_PER_LANE_B128 - 1))) & (BYTES_PER_LANE_B128 - 1);
+    if (head > sizeInBytes) head = sizeInBytes;
+    if (lane < head) asyncCopyB8<DIR, cp>(global + lane, lds + lane);
+    offset = head;
+
+    // Phase 1b: whole 16-byte chunks up to the anchor's next 128-byte boundary (at most 7), one per lane.
+    size_t peelChunks = ((NATURAL_ALIGNMENT_BYTES - ((anchor + offset) & (NATURAL_ALIGNMENT_BYTES - 1))) &
+                         (NATURAL_ALIGNMENT_BYTES - 1)) /
+                        BYTES_PER_LANE_B128;
     const size_t availChunks = (sizeInBytes - offset) / BYTES_PER_LANE_B128;
     if (peelChunks > availChunks) peelChunks = availChunks;
     if (lane < peelChunks) {
-      const size_t laneOff = offset + laneByte;
+      const size_t laneOff = offset + lane * BYTES_PER_LANE_B128;
       asyncCopyB128<DIR, cp>(global + laneOff, lds + laneOff);
     }
     offset += peelChunks * BYTES_PER_LANE_B128;
   }
 
-  // Phase 2: hot unrolled loop of full-warp b128 transfers, now starting on a 128-byte boundary.
-  const size_t bytesPerIter = laneCount * BYTES_PER_LANE_B128;
-  size_t remaining = sizeInBytes - offset;
-#pragma unroll HOT_LOOP_UNROLL
-  while (remaining >= bytesPerIter) {
-    const size_t laneOff = offset + laneByte;
-    asyncCopyB128<DIR, cp>(global + laneOff, lds + laneOff);
-    offset += bytesPerIter;
-    remaining -= bytesPerIter;
+  // Phase 2: full-warp b128 instructions.  Remainder run first (Duff's device), then whole MAX_RUN runs.
+  const size_t laneByte = (size_t)lane * BYTES_PER_LANE_B128;
+  const uint8_t* g = global + offset + laneByte;
+  uint8_t* l = lds + offset + laneByte;
+  const size_t fullInstrs = (sizeInBytes - offset) / WARP_BYTES_B128;
+  issueRunB128<DIR, cp>(g, l, static_cast<uint32_t>(fullInstrs % MAX_RUN));
+  for (size_t runs = fullInstrs / MAX_RUN; runs != 0; --runs) {
+    issueRunStatic<DIR, cp, MAX_RUN>(g, l);
+    g += MAX_RUN * WARP_BYTES_B128;
+    l += MAX_RUN * WARP_BYTES_B128;
   }
+  offset += fullInstrs * WARP_BYTES_B128;
 
-  // Phase 3a: the remaining full 16-byte chunks, one b128 per leading lane.  `remaining < warpSize * 16`, so
-  // `full128 < warpSize` and every chunk maps to a distinct lane.
-  const size_t full128 = remaining / BYTES_PER_LANE_B128;
-  if (lane < full128) {
-    const size_t laneOff = offset + laneByte;
-    asyncCopyB128<DIR, cp>(global + laneOff, lds + laneOff);
-  }
-  offset += full128 * BYTES_PER_LANE_B128;
-  remaining -= full128 * BYTES_PER_LANE_B128;  // now < 16 bytes
+  // Phase 3a: the remaining whole 16-byte chunks (< warpSize of them), one per leading lane.
+  const size_t tailChunks = (sizeInBytes - offset) / BYTES_PER_LANE_B128;
+  if (lane < tailChunks) asyncCopyB128<DIR, cp>(g, l);
+  offset += tailChunks * BYTES_PER_LANE_B128;
 
-  if (remaining == 0) return;   // common case after a 16B-multiple chunk: nothing left to drain
+  // Phase 3b: the final 0..15 bytes, one byte per lane.
+  if (lane < sizeInBytes - offset) asyncCopyB8<DIR, cp>(global + offset + lane, lds + offset + lane);
+}
 
-  // Phase 3b: 0..15 trailing bytes.  `offset` and `remaining` are uniform across the warp here, so the
-  // descending cascade below is taken identically by every lane.  Because `offset` is 16-byte aligned, the
-  // b64 (8-byte) and b32 (4-byte) accesses are naturally aligned.
-  if (remaining >= 8) {
-    if (lane == 0) {
-      asyncCopyB64<DIR, cp>(global + offset, lds + offset);
-    }
-    offset += 8;
-    remaining -= 8;
-  }
-  if (remaining >= 4) {
-    if (lane == 0) {
-      asyncCopyB32<DIR, cp>(global + offset, lds + offset);
-    }
-    offset += 4;
-    remaining -= 4;
-  }
-  // Final 1..3 bytes, one b8 per lane.
-  if (lane < remaining) {
-    asyncCopyB8<DIR, cp>(global + offset + lane, lds + offset + lane);
+// Wait until at most N async ops are outstanding.  ASYNCcnt retires in issue order across loads and stores, so
+// this means every op older than the youngest N has completed.  The same ordering makes clamping to the 6-bit
+// field safe: if 63 or more ops were issued after the one being waited on and it were still in flight, all of them
+// would be too.
+template <uint32_t N>
+__device__ inline void asyncWaitAtMost() {
+  __builtin_amdgcn_s_wait_asynccnt(N > 63 ? 63 : N);
+}
+
+template <uint32_t I, uint32_t N, typename F>
+__device__ inline void staticFor(F&& f) {
+  if constexpr (I < N) {
+    f(std::integral_constant<uint32_t, I>{});
+    staticFor<I + 1, N>(f);
   }
 }
 
@@ -486,6 +508,14 @@ namespace detail {
 // LDS is subdivided into per-warp staging windows; each window is a multiple of
 // this many bytes (matching the widest async b128 access / 128B cache line).
 constexpr uint32_t WINDOW_GRAIN = 128;
+// The copy's bulk starts on, and is split across warps in, multiples of this many destination bytes: one
+// full-warp b128 instruction. Async accesses run markedly slower when a wave's 512B footprint is not 512B aligned
+// in global memory.
+constexpr uint32_t ANCHOR_GRAIN = async_detail::WARP_BYTES_B128;
+// Smallest per-warp window worth splitting LDS into when the load leg runs in the source's frame.
+constexpr uint32_t RING_MIN_WINDOW = 8192;
+// Fewest warps worth narrowing the team to for those windows; with less LDS, more warps on plain slots win.
+constexpr uint32_t RING_MIN_ISSUERS = 3;
 
 // Direct global->global byte copy by one warp, used only when the LDS staging
 // area is too small to hold even a single window (the vector fallback, mirroring
@@ -497,49 +527,496 @@ __device__ inline void warpGlobalCopy(const uint8_t* s, uint8_t* d, size_t n, ui
   for (size_t i = warpThread; i < n; i += warpThreads) d[i] = s[i];
 }
 
-// Stage [myStart, myStart+myBytes) HBM->LDS->HBM through this warp's single `window`-byte LDS buffer.
-// LoadAligned/StoreAligned pick the peel-free warpAsyncCopy fast path for the src/dst side respectively;
-// they are loop-invariant (myStart and window are both 128B multiples), so the choice is made once by the
-// caller and templated in here rather than branched per iteration. The Sync policy waits after the load
-// (RAW: the store must see the filled LDS) and after the store (WAR: the next load must not overwrite LDS
-// that is still draining).
-template <CachePolicy cp, bool LoadAligned, bool StoreAligned>
-__device__ inline void stageLoop(const uint8_t* s, uint8_t* d, uint8_t* myLds, size_t myStart, size_t myBytes,
-                                 uint32_t window) {
-  for (size_t o = 0; o < myBytes; o += window) {
-    const size_t chunk = (myBytes - o < window) ? (myBytes - o) : window;
-    asyncLoadToLDS<SyncPolicy::Sync, cp, LoadAligned>(s + myStart + o, myLds, chunk);
-    asyncStoreFromLDS<SyncPolicy::Sync, cp, StoreAligned>(myLds, d + myStart + o, chunk);
+// One chunk of `len` bytes (a multiple of 16, below 2 * MAX_RUN full-warp instructions) between the per-lane
+// pointers `g` (global) and `l` (LDS), for chunks whose length is only known at run time.
+template <async_detail::AsyncDir DIR, CachePolicy cp>
+__device__ inline void issueChunk(const uint8_t* g, uint8_t* l, uint32_t len, uint32_t lane) {
+  using namespace async_detail;
+  issueRunB128<DIR, cp>(g, l, len / WARP_BYTES_B128);
+  if (lane < (len % WARP_BYTES_B128) / BYTES_PER_LANE_B128) asyncCopyB128<DIR, cp>(g, l);
+}
+
+// issueChunk for any `len` (a multiple of 16).
+template <async_detail::AsyncDir DIR, CachePolicy cp>
+__device__ inline void issueSpan(const uint8_t* g, uint8_t* l, uint32_t len, uint32_t lane) {
+  using namespace async_detail;
+  constexpr uint32_t RUN = MAX_RUN * WARP_BYTES_B128;
+  for (; len >= RUN; len -= RUN, g += RUN, l += RUN) issueRunStatic<DIR, cp, MAX_RUN>(g, l);
+  issueChunk<DIR, cp>(g, l, len, lane);
+}
+
+// Load-leg layouts of the pipeline (see pipelineStage).
+enum class LoadFrame {
+  Slot, // each chunk loads exactly its own slot
+  Ring, // source-aligned, t0 a nonzero multiple of 16: lanes stay 16B aligned in LDS
+  Ring4, // source-aligned, t0 % 16 in {4, 8, 12}: lanes are offset in LDS, one of them straddles each seam
+  Shift, // source-aligned, t0 % 16 != 0: lanes stay 16B aligned in LDS, each slot is realigned before its store
+};
+
+// How far before its slot a chunk's LDS image starts in a ring frame: t0, or for Shift t0 rounded down to 16, which
+// leaves the image t0 % 16 bytes PAST the destination frame.
+template <LoadFrame F>
+__device__ inline uint32_t ldsLead(uint32_t t0) {
+  return F == LoadFrame::Shift ? (t0 & ~(async_detail::BYTES_PER_LANE_B128 - 1)) : t0;
+}
+
+using LdsWord = __attribute__((address_space(3))) uint32_t;
+using Word4 = uint32_t __attribute__((ext_vector_type(4)));
+using LdsWord4 = __attribute__((address_space(3))) Word4;
+
+// Shift frame: move slot `slot` of the ring back by r = t0 % 16 bytes, in place, into the destination frame. Each
+// lane rebuilds its 16 bytes from the five words starting at its r & ~3 (the next lane's leading ones included),
+// and an instruction's reads come before its writes and after the previous instruction's, so every read precedes
+// the write that clobbers it. The chunk's last r bytes are in the next slot's first lane group, which the next
+// chunk's first load writes; for the window's last slot that is slot 0's, which the load leg mirrors into a 16-byte
+// pad past the window so the reads never wrap. The word offset is folded into the LDS address and the byte offset
+// into v_alignbyte, so the code has no data-dependent selects for the compiler to multiply.
+template <uint32_t U>
+__device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
+  using namespace async_detail;
+  constexpr uint32_t B = U * WARP_BYTES_B128;
+  constexpr uint32_t G = U < 2 ? U : 2; // instructions per batch
+  const uint32_t r = t0 & (BYTES_PER_LANE_B128 - 1);
+  uint8_t* p = win + slot * B;
+  const uint8_t* q = p + (r & ~3u);
+#pragma unroll 1
+  for (uint32_t i = 0; i < U; i += G) {
+    uint32_t w[G][5];
+#pragma unroll
+    for (uint32_t k = 0; k < G; ++k) {
+#pragma unroll
+      for (uint32_t j = 0; j < 5; ++j) w[k][j] = *(const LdsWord*)(q + (i + k) * WARP_BYTES_B128 + 4 * j);
+    }
+#pragma unroll
+    for (uint32_t k = 0; k < G; ++k) {
+      Word4 o;
+      o.x = __builtin_amdgcn_alignbyte(w[k][1], w[k][0], r);
+      o.y = __builtin_amdgcn_alignbyte(w[k][2], w[k][1], r);
+      o.z = __builtin_amdgcn_alignbyte(w[k][3], w[k][2], r);
+      o.w = __builtin_amdgcn_alignbyte(w[k][4], w[k][3], r);
+      *(LdsWord4*)(p + (i + k) * WARP_BYTES_B128) = o;
+    }
+  }
+  // The async store reads LDS behind the DS counter's back.
+  __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
+}
+
+// Load leg of pipeline chunk c into `slot` of the window, from per-lane pointers `g` (the chunk's source) and `win`
+// (the window base). In the Slot frame a chunk is U full-warp instructions into its own slot.
+//
+// In the Ring frames the source sits `t0` bytes past a 512B boundary and the load leg runs in the SOURCE's aligned
+// frame instead: chunk c's U instructions cover the 512B-aligned source blocks starting t0 bytes before the chunk
+// (`g` is that aligned address), so their LDS image starts t0 bytes before the slot -- the tail of the previous
+// slot, or for slot 0 of the window's last slot, the one lane group that wraps around. Every global access of both
+// legs is then a whole aligned block; only the LDS side of the loads is offset, which the hardware barely notices.
+// Chunk 0 masks off the lanes wholly ahead of the copy.
+//
+// Ring4 also has a lane that straddles each slot seam. The window is padded by 16 bytes at both ends to absorb
+// the parts of a straddling lane that fall outside it, and since the wrapped straddler's second half lands in the
+// end pad rather than at the window start, chunks into slot 0 re-issue that one lane unwrapped first.
+//
+// Shift starts the image only t0 rounded down to 16 bytes before the slot, so its lanes stay 16B aligned and the
+// image sits t0 % 16 bytes past the destination frame until realignSlot moves it back. Its window has a 16-byte
+// pad at the end, into which chunks into slot 0 re-issue the lane that writes the window's first 16 bytes.
+template <CachePolicy cp, LoadFrame F, uint32_t U, uint32_t S, bool FIRST = false>
+__device__ inline void loadFull(const uint8_t* g, uint8_t* win, uint32_t slot, uint32_t pos, uint32_t t0) {
+  using namespace async_detail;
+  constexpr uint32_t B = U * WARP_BYTES_B128;
+  if constexpr (F == LoadFrame::Slot) {
+    issueRunStatic<AsyncDir::Load, cp, U>(g, win + slot * B);
+  } else {
+    const uint32_t lt = ldsLead<F>(t0);
+    uint8_t* l = win + slot * B - lt;
+    if constexpr (FIRST) {
+      if (pos + BYTES_PER_LANE_B128 > t0) asyncCopyB128<AsyncDir::Load, cp>(g, l);
+    } else {
+      if (F == LoadFrame::Ring4 && slot == 0 && pos < t0 && pos + BYTES_PER_LANE_B128 > t0)
+        asyncCopyB128<AsyncDir::Load, cp>(g, l);
+      if (F == LoadFrame::Shift && slot == 0 && pos == lt) asyncCopyB128<AsyncDir::Load, cp>(g, l + S * B);
+      asyncCopyB128<AsyncDir::Load, cp>(g, (slot == 0 && pos < lt) ? l + S * B : l);
+    }
+    issueRunStatic<AsyncDir::Load, cp, U - 1>(g + WARP_BYTES_B128, l + WARP_BYTES_B128);
+  }
+}
+
+// Load leg of the short last chunk, `len` bytes of the copy (at least one instruction is issued either way).
+template <CachePolicy cp, LoadFrame F, uint32_t U, uint32_t S>
+__device__ inline void loadPartial(const uint8_t* g, uint8_t* win, uint32_t slot, uint32_t len, uint32_t lane,
+                                   uint32_t t0, bool first) {
+  using namespace async_detail;
+  constexpr uint32_t B = U * WARP_BYTES_B128;
+  if constexpr (F == LoadFrame::Slot) {
+    issueChunk<AsyncDir::Load, cp>(g, win + slot * B, len, lane);
+  } else {
+    const uint32_t pos = lane * BYTES_PER_LANE_B128;
+    const uint32_t lt = ldsLead<F>(t0);
+    uint8_t* l = win + slot * B - lt;
+    const uint32_t hi = t0 + len;
+    const uint32_t n = (hi + WARP_BYTES_B128 - 1) / WARP_BYTES_B128;
+    if (first) {
+      if (pos + BYTES_PER_LANE_B128 > t0 && pos < hi) asyncCopyB128<AsyncDir::Load, cp>(g, l);
+    } else {
+      const bool wrap = slot == 0 && pos < lt;
+      if (F == LoadFrame::Ring4 && wrap && pos + BYTES_PER_LANE_B128 > t0) asyncCopyB128<AsyncDir::Load, cp>(g, l);
+      if (F == LoadFrame::Shift && slot == 0 && pos == lt) asyncCopyB128<AsyncDir::Load, cp>(g, l + S * B);
+      if (pos < hi) asyncCopyB128<AsyncDir::Load, cp>(g, wrap ? l + S * B : l);
+    }
+    for (uint32_t j = 1; j < n; ++j) {
+      if (j * WARP_BYTES_B128 + pos < hi)
+        asyncCopyB128<AsyncDir::Load, cp>(g + j * WARP_BYTES_B128, l + j * WARP_BYTES_B128);
+    }
+  }
+}
+
+// Stage [0, bytes) to `d` through this warp's LDS window `win` as a software pipeline. `d` and `win` are PER-LANE
+// pointers (lane * 16 already added) and 16-byte aligned; `bytes` is a nonzero multiple of 16. `s` is the
+// per-lane source, moved back by `t0` to its aligned frame when SHIFT (see loadFull).
+//
+// The LDS image follows the DESTINATION's alignment, so every store-from-LDS is aligned on both its global and its
+// LDS side -- the combination the hardware is most sensitive to. The load leg reads the source at whatever
+// alignment it has; when src and dst agree mod 16 it is shifted so every load is 512B aligned too.
+//
+// The window is cut into S slots of B = U * 512 bytes, and chunk c of the range cycles through slot c % S. Loads
+// run A = S/2 chunks ahead of the stores, so up to A loads and D = S - A stores are in flight at once and the LDS
+// is never idle waiting for a whole window to fill or drain. ASYNCcnt retires in issue order across loads and
+// stores, so each dependency is a single s_wait_asynccnt on "the ops issued after it":
+//   * RAW: before storing chunk c, wait for load(c) -- SHIFTED, for the first instruction of load(c+1), which
+//     carries the slot's last t0 bytes;
+//   * WAR: before loading chunk c+A into its slot, wait for store(c-D), the slot's previous occupant.
+// Only the last chunk can be short, so with U and S fixed at compile time every one of those counts is a
+// constant once the first A-1 iterations and the last A are peeled. Ops left out of a count can only make the
+// wait stricter, never weaker.
+//
+// Returns with the final stores still in flight; the caller drains with asyncWait<0>().
+template <CachePolicy cp, uint32_t U, uint32_t S, LoadFrame F>
+__device__ __forceinline__ void pipelineCore(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes, uint32_t lane,
+                                             uint32_t t0) {
+  using namespace async_detail;
+  constexpr bool SHIFT = F != LoadFrame::Slot;
+  constexpr uint32_t B = U * WARP_BYTES_B128;
+  constexpr uint32_t A = S / 2;
+  constexpr uint32_t D = S - A;
+  constexpr uint32_t R = SHIFT ? 1 : 0;
+  static_assert(A >= 1 && U <= MAX_RUN, "pipeline needs >= 2 slots of at most MAX_RUN instructions");
+  static_assert(!SHIFT || A >= 2, "a shifted store needs the next load in flight before it");
+
+  const uint32_t pos = lane * BYTES_PER_LANE_B128;
+  const size_t K = (bytes + B - 1) / B;
+  const uint32_t lastLen = static_cast<uint32_t>(bytes - (K - 1) * B);
+  auto loadF = [&](size_t c, uint32_t slot) { loadFull<cp, F, U, S>(s + c * B, win, slot, pos, t0); };
+  auto load = [&](size_t c, uint32_t slot) {
+    if (c == K - 1) loadPartial<cp, F, U, S>(s + c * B, win, slot, lastLen, lane, t0, c == 0);
+    else if (c == 0) loadFull<cp, F, U, S, true>(s, win, 0, pos, t0);
+    else loadF(c, slot);
+  };
+  auto realign = [&](uint32_t slot) {
+    if constexpr (F == LoadFrame::Shift) realignSlot<U>(win, slot, t0);
+  };
+  auto storeF = [&](size_t c, uint32_t slot) {
+    realign(slot);
+    issueRunStatic<AsyncDir::Store, cp, U>(d + c * B, win + slot * B);
+  };
+  auto store = [&](size_t c, uint32_t slot) {
+    if (c != K - 1) return storeF(c, slot);
+    realign(slot);
+    issueChunk<AsyncDir::Store, cp>(d + c * B, win + slot * B, lastLen, lane);
+  };
+
+  if (K <= S) { // fits in the window: no slot is reused, so fill everything, then drain everything
+    for (size_t c = 0; c < K; ++c) load(c, static_cast<uint32_t>(c));
+    asyncWaitAtMost<0>();
+    for (size_t c = 0; c < K; ++c) store(c, static_cast<uint32_t>(c));
+    return;
+  }
+  // K > S >= 2A, so chunks 0 .. 2A-2 are all full and none of the peeled iterations touches the last one.
+  staticFor<0, A>([&](auto c) { loadFull<cp, F, U, S, c == 0>(s + c * B, win, c, pos, t0); });
+
+  // Iterations 0 .. A-2: load(c) is followed by loads c+1 .. c+A-1 and stores 0 .. c-1 (SHIFTED: everything
+  // after the first instruction of load(c+1)). Slot c+A is fresh.
+  staticFor<0, A - 1>([&](auto c) {
+    asyncWaitAtMost<U*(A - 1 + c) - R>();
+    storeF(c, c);
+    loadF(c + A, c + A);
+  });
+
+  // Steady state, c in [A-1, K-A): A-1 loads and A-1 stores follow load(c) (SHIFTED: U-1, A-2 and A-2 after the
+  // head of load(c+1)); D loads and D stores follow store(c-D). Only load(c+A) can be the short last chunk.
+  uint32_t storeSlot = A - 1;
+  uint32_t loadSlot = (2 * A - 1) % S;
+  for (size_t c = A - 1; c < K - A; ++c) {
+    asyncWaitAtMost<SHIFT ? U * (2 * A - 3) - 1 : U * 2 * (A - 1)>();
+    storeF(c, storeSlot);
+    storeSlot = (storeSlot + 1 == S) ? 0 : storeSlot + 1;
+    if (c >= D) asyncWaitAtMost<U * 2 * D>();
+    load(c + A, loadSlot);
+    loadSlot = (loadSlot + 1 == S) ? 0 : loadSlot + 1;
+  }
+
+  // Last A iterations, c = K-A+e. Unshifted, load(c) is followed by the A-1-e remaining loads (the last of them
+  // short, so at least one instruction) and A-1 full stores. SHIFTED, the head of load(c+1) is followed by the
+  // rest of that chunk, the A-2-e later loads (counted as U-1, A-3-e full and one) and A-2 full stores; the last
+  // store waits for all of the short chunk, which A-1 stores follow.
+  staticFor<0, A>([&](auto e) {
+    constexpr uint32_t after = !SHIFT       ? ((e < A - 1) ? U * (2 * A - 3 - e) + 1 : U * (A - 1)) :
+                               (e + 2 < A)  ? U * (2 * A - 4 - e) :
+                               (e + 2 == A) ? U * (A - 2) :
+                                              U * (A - 1);
+    asyncWaitAtMost<after>();
+    store(K - A + e, storeSlot);
+    storeSlot = (storeSlot + 1 == S) ? 0 : storeSlot + 1;
+  });
+}
+
+// pipelineCore, plus a constraint of the Ring4 and Shift frames: the last lane of their load leg writes up to 15
+// bytes past the copy's LDS image, which must stay inside the last chunk's slot. When the range ends exactly on a
+// slot boundary, its final 16 bytes are moved through registers instead.
+template <CachePolicy cp, uint32_t U, uint32_t S, LoadFrame F>
+__device__ __forceinline__ void pipelineStage(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes, uint32_t lane,
+                                              uint32_t t0) {
+  using namespace async_detail;
+  constexpr uint32_t B = U * WARP_BYTES_B128;
+  if constexpr (F == LoadFrame::Ring4 || F == LoadFrame::Shift) {
+    if (bytes % B == 0) {
+      const size_t staged = bytes - BYTES_PER_LANE_B128;
+      const uint32_t pos = lane * BYTES_PER_LANE_B128;
+      const uint8_t* tailSrc = s - pos + t0 + staged;
+      uint8_t* tailDst = d - pos + staged;
+      const uint32_t tailByte = tailSrc[lane % BYTES_PER_LANE_B128];
+      pipelineCore<cp, U, S, F>(s, d, win, staged, lane, t0);
+      if (lane < BYTES_PER_LANE_B128) tailDst[lane] = static_cast<uint8_t>(tailByte);
+      return;
+    }
+  }
+  pipelineCore<cp, U, S, F>(s, d, win, bytes, lane, t0);
+}
+
+// A window too small for two full-warp slots: the whole window is one (partial-warp) chunk, staged serially.
+template <CachePolicy cp>
+__device__ __forceinline__ void serialStage(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes, uint32_t window,
+                                            uint32_t lane) {
+  using namespace async_detail;
+  for (size_t o = 0; o < bytes; o += window) {
+    const uint32_t len = static_cast<uint32_t>(bytes - o < window ? bytes - o : window);
+    issueChunk<AsyncDir::Load, cp>(s + o, win, len, lane);
+    asyncWaitAtMost<0>();
+    issueChunk<AsyncDir::Store, cp>(d + o, win, len, lane);
+    asyncWaitAtMost<0>();
+  }
+}
+
+// A copy that fits in the window, in one round: load everything, then store everything. `s`, `d`, `win` are NOT
+// offset per lane. When the source sits t0 (a nonzero multiple of 16) bytes past a 512B boundary, the loads run in
+// its aligned frame as in the Ring pipeline, with the lanes ahead of the copy masked off.
+template <CachePolicy cp>
+__device__ __forceinline__ void wholeStage(const uint8_t* s, uint8_t* d, uint8_t* win, uint32_t bytes, uint32_t lane,
+                                           uint32_t t0) {
+  using namespace async_detail;
+  const uint32_t pos = lane * BYTES_PER_LANE_B128;
+  if (t0 != 0 && (t0 & (BYTES_PER_LANE_B128 - 1)) == 0) {
+    const uint8_t* g = s - t0 + pos;
+    uint8_t* l = win - t0 + pos;
+    const uint32_t hi = t0 + bytes;
+    if (pos + BYTES_PER_LANE_B128 > t0 && pos < hi) asyncCopyB128<AsyncDir::Load, cp>(g, l);
+    if (hi > WARP_BYTES_B128)
+      issueSpan<AsyncDir::Load, cp>(g + WARP_BYTES_B128, l + WARP_BYTES_B128, hi - WARP_BYTES_B128, lane);
+  } else {
+    issueSpan<AsyncDir::Load, cp>(s + pos, win + pos, bytes, lane);
+  }
+  asyncWaitAtMost<0>();
+  issueSpan<AsyncDir::Store, cp>(d + pos, win + pos, bytes, lane);
+}
+
+// Slot geometry by window size, at least 2KB (Ring: 4KB, Ring4 and Shift: 7.5KB after their padding). The ring frames
+// make each store wait for one more load, so they favor more, smaller slots.
+//
+// Out of line: the tiers are up to ~85KB of code per frame, and inlined they scatter the setup and wholeStage paths
+// across it, which costs ~1.5us of instruction fetch on a cold launch. Everything above this (down to the public entry
+// points) is force-inlined into the kernel instead, so the call saves no registers and the kernel needs no scratch,
+// whose setup costs about as much again per launch.
+//
+// Keep each instantiation well under 128KB: past that, the AMDGPU backend's long-branch relaxation borrows the
+// return address s[30:31] without restoring it, and the function returns into itself.
+template <CachePolicy cp, LoadFrame F>
+__device__ __attribute__((noinline)) void pipelineByWindow(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes,
+                                                           uint32_t window, uint32_t lane, uint32_t t0) {
+  // Arguments arrive in VGPRs; restore their uniformity so the tier choice and the counts stay scalar.
+  bytes = async_detail::uniform(static_cast<uint64_t>(bytes));
+  window = async_detail::uniform(window);
+  t0 = async_detail::uniform(t0);
+  if constexpr (F == LoadFrame::Slot) {
+    // Tiers at 1.5x each power of two, so that a window of LDS / 8 warps from an uneven budget isn't a third idle.
+    if (window >= 65536) pipelineStage<cp, 8, 16, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 49152) pipelineStage<cp, 8, 12, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 32768) pipelineStage<cp, 4, 16, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 24576) pipelineStage<cp, 4, 12, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 16384) pipelineStage<cp, 4, 8, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 12288) pipelineStage<cp, 4, 6, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 8192) pipelineStage<cp, 4, 4, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 6144) pipelineStage<cp, 2, 6, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 4096) pipelineStage<cp, 2, 4, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 3072) pipelineStage<cp, 1, 6, F>(s, d, win, bytes, lane, t0);
+    else pipelineStage<cp, 1, 4, F>(s, d, win, bytes, lane, t0);
+  } else if constexpr (F == LoadFrame::Ring) {
+    if (window >= 65536) pipelineStage<cp, 8, 16, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 32768) pipelineStage<cp, 4, 16, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 16384) pipelineStage<cp, 2, 16, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 8192) pipelineStage<cp, 1, 16, F>(s, d, win, bytes, lane, t0);
+    else pipelineStage<cp, 1, 8, F>(s, d, win, bytes, lane, t0);
+  } else { // padded windows: 15 slots, so a power-of-two window less its padding loses only one
+    if (window >= 15 * 4096) pipelineStage<cp, 8, 15, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 15 * 2048) pipelineStage<cp, 4, 15, F>(s, d, win, bytes, lane, t0);
+    else if (window >= 15 * 1024) pipelineStage<cp, 2, 15, F>(s, d, win, bytes, lane, t0);
+    else pipelineStage<cp, 1, 15, F>(s, d, win, bytes, lane, t0);
+  }
+}
+
+// Pick the load-leg mode and slot geometry for a `window`-byte LDS buffer and run the pipeline. `d` and `win`
+// must be 16B aligned; `s`, `d`, `win` are NOT yet offset per lane.
+template <CachePolicy cp>
+__device__ __forceinline__ void pipelinedStage(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes,
+                                               uint32_t window) {
+  using namespace async_detail;
+  if (bytes == 0) return;
+  const uint32_t lane = __lane_id();
+  const size_t laneByte = (size_t)lane * BYTES_PER_LANE_B128;
+  const uint32_t t0 = static_cast<uint32_t>((uintptr_t)s & (WARP_BYTES_B128 - 1));
+  // A copy that fits the window is one load-all / store-all round; Ring4's straddling lanes need the pipeline.
+  if (bytes <= window && ((t0 & 3) != 0 || (t0 & (BYTES_PER_LANE_B128 - 1)) == 0)) {
+    wholeStage<cp>(s, d, win, static_cast<uint32_t>(bytes), lane, t0);
+    return;
+  }
+  if (window < 1024) {
+    serialStage<cp>(s + laneByte, d + laneByte, win + laneByte, bytes, window, lane);
+  } else if (window < 2048) {
+    pipelineStage<cp, 1, 2, LoadFrame::Slot>(s + laneByte, d + laneByte, win + laneByte, bytes, lane, 0);
+  } else {
+    constexpr uint32_t PAD = BYTES_PER_LANE_B128;
+    // Below these windows the source-aligned frames lose to plain slots: with only 512B slots, waiting for the next
+    // load (and Shift's realign) leaves too little in flight.
+    constexpr uint32_t RING_MIN = 8 * 512, SHIFT_MIN = 15 * 512 + PAD, RING4_MIN = 15 * 512 + 2 * PAD;
+    if (t0 != 0 && (t0 & (BYTES_PER_LANE_B128 - 1)) == 0 && window >= RING_MIN) {
+      pipelineByWindow<cp, LoadFrame::Ring>(s - t0 + laneByte, d + laneByte, win + laneByte, bytes, window, lane, t0);
+    } else if ((t0 & 3) != 0 && window >= SHIFT_MIN) {
+      pipelineByWindow<cp, LoadFrame::Shift>(s - t0 + laneByte, d + laneByte, win + laneByte, bytes, window - PAD, lane,
+                                             t0);
+    } else if ((t0 & 3) == 0 && (t0 & (BYTES_PER_LANE_B128 - 1)) != 0 && window >= RING4_MIN) {
+      pipelineByWindow<cp, LoadFrame::Ring4>(s - t0 + laneByte, d + laneByte, win + PAD + laneByte, bytes,
+                                             window - 2 * PAD, lane, t0);
+    } else {
+      pipelineByWindow<cp, LoadFrame::Slot>(s + laneByte, d + laneByte, win + laneByte, bytes, window, lane, 0);
+    }
+  }
+}
+
+using GlobalByte = __attribute__((address_space(1))) uint8_t;
+
+template <uint32_t W>
+struct HeadElem;
+template <>
+struct HeadElem<1> {
+  using T = uint8_t;
+};
+template <>
+struct HeadElem<2> {
+  using T = uint16_t;
+};
+template <>
+struct HeadElem<4> {
+  using T = uint32_t;
+};
+template <>
+struct HeadElem<8> {
+  using T = uint32_t __attribute__((ext_vector_type(2)));
+};
+template <>
+struct HeadElem<16> {
+  using T = uint32_t __attribute__((ext_vector_type(4)));
+};
+
+// A copy's head (< ANCHOR_GRAIN bytes, a multiple of W) moved through registers in W-byte accesses, W a common
+// alignment of src and dst: at most 16 accesses per lane, 64 bytes in `v`. Global address space, or as possible
+// LDS reads the loads would have to complete before the pipeline's first write to LDS. The loads are clamped
+// rather than guarded: a guarded load merged into a packed register makes the compiler wait on each in turn.
+constexpr uint32_t HEAD_WORDS = ANCHOR_GRAIN / 32;
+template <uint32_t W>
+__device__ inline void headLoad(const GlobalByte* s, uint32_t head, uint32_t lane, uint32_t (&v)[HEAD_WORDS]) {
+  using E = typename HeadElem<W>::T;
+  constexpr uint32_t PER = ANCHOR_GRAIN / (32 * W);
+  constexpr uint32_t WORDS = W < 4 ? 1 : W / 4;
+#pragma unroll
+  for (uint32_t k = 0; k < PER; ++k) {
+    if (k * 32 * W < head) {
+      const uint32_t i = (lane + 32 * k) * W;
+      const E x = *reinterpret_cast<const __attribute__((address_space(1))) E*>(s + (i < head ? i : 0));
+      if constexpr (W <= 4) {
+        v[k] = x;
+      } else {
+#pragma unroll
+        for (uint32_t j = 0; j < WORDS; ++j) v[k * WORDS + j] = x[j];
+      }
+    }
+  }
+}
+template <uint32_t W>
+__device__ inline void headStore(GlobalByte* d, uint32_t head, uint32_t lane, const uint32_t (&v)[HEAD_WORDS]) {
+  using E = typename HeadElem<W>::T;
+  constexpr uint32_t PER = ANCHOR_GRAIN / (32 * W);
+  constexpr uint32_t WORDS = W < 4 ? 1 : W / 4;
+#pragma unroll
+  for (uint32_t k = 0; k < PER; ++k) {
+    const uint32_t i = (lane + 32 * k) * W;
+    if (k * 32 * W < head && i < head) {
+      E x;
+      if constexpr (W <= 4) {
+        x = static_cast<E>(v[k]);
+      } else {
+#pragma unroll
+        for (uint32_t j = 0; j < WORDS; ++j) x[j] = v[k * WORDS + j];
+      }
+      *reinterpret_cast<__attribute__((address_space(1))) E*>(d + i) = x;
+    }
   }
 }
 
 // core: partition + issue the whole copy for the team [start, stop). Work + LDS
 // partition by rank within the team (warpId - start), so each team indexes its
 // own ldsBuffer from zero. Safe to call collectively (warps outside the range
-// return immediately) or only from the team's warps. NO final wait -- each async
-// tile already drains its own load/store (RAW/WAR) inside the loop, so nothing
-// is left in flight on return; async::tdmWait() below is therefore a no-op guard
-// kept for API parity with tdm::tdmWait().
+// return immediately) or only from the team's warps. NO final wait: the last
+// pipeline chunks (and the register-staged edge stores) are left in flight for
+// async::tdmWait() to drain, so the asynchronous forms genuinely overlap.
+//
+// LAYOUT OF A COPY
+//   [ head (registers) ][ ---- dst-aligned bulk (async pipeline per warp) ---- ][ residual < 16B (registers) ]
+//   * The LDS image follows the destination: misaligned async stores cost far more than misaligned loads, and
+//     when src and dst agree mod 4 the pipeline's ring-framed load leg keeps the loads 512B aligned as well.
+//   * `head` brings the DESTINATION up to an ANCHOR_GRAIN boundary. It is < 512 bytes, so the team's first warp
+//     copies it through registers: its loads are issued before that warp's pipeline starts and its stores after
+//     the pipeline is primed, so it adds no latency and stays off ASYNCcnt.
+//   * The bulk is split across issuers in ANCHOR_GRAIN grains, so every warp's destination start stays aligned.
+//   * The last issuer's final < 16 bytes are copied the same way as the head.
 template <CachePolicy cp>
-__device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes,
-                             uint32_t startWarpId, uint32_t stopWarpId) {
-  const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
-  uint8_t* d = reinterpret_cast<uint8_t*>(dst);
-  uint8_t* lds = reinterpret_cast<uint8_t*>(ldsBuffer);
-  const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes); // LDS is small
+__device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
+                                      size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
+  using async_detail::uniform;
+  const uint8_t* s = uniform(reinterpret_cast<const uint8_t*>(src));
+  uint8_t* d = uniform(reinterpret_cast<uint8_t*>(dst));
+  uint8_t* lds = uniform(reinterpret_cast<uint8_t*>(ldsBuffer));
+  sizeBytes = uniform(static_cast<uint64_t>(sizeBytes));
+  const uint32_t ldsBytes = uniform(static_cast<uint32_t>(ldsBufferBytes)); // LDS is small
+  startWarpId = uniform(startWarpId);
+  stopWarpId = uniform(stopWarpId);
 
   const uint32_t W = warpSize;
   const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
   const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
   const uint32_t warpThread = tid % W; // thread index within its warp
-  const uint32_t warpId = tid / W;
+  const uint32_t warpId = async_detail::uniform(tid / W);
   const uint32_t nWarps = (nThreads + W - 1) / W;
 
   // --- team membership: this warp participates iff in [start, stop) --------
   const uint32_t teamStop = (stopWarpId > nWarps) ? nWarps : stopWarpId;
   if (startWarpId >= teamStop || warpId < startWarpId || warpId >= teamStop) return; // not on this team
   const uint32_t rank = warpId - startWarpId; // rank within the team
-  const uint32_t teamWarps = teamStop - startWarpId; // >= 1
 
   // active threads in THIS warp (handles partial final warp); stride for the
   // byte fallback below.
@@ -547,50 +1024,104 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
   if (sizeBytes == 0) return;
 
-  // --- tiny-LDS fallback: not enough LDS for a single window ---------------
-  if (ldsBytes < WINDOW_GRAIN) {
+  // --- byte fallback: not enough LDS for a single window, or no full warp ---
+  // The async path spreads each instruction across all lanes of the wave, so only full warps issue it; a partial
+  // final warp sits out unless the team has nothing else.
+  const uint32_t fullWarps = nThreads / W;
+  const uint32_t issueStop = teamStop < fullWarps ? teamStop : fullWarps;
+  if (ldsBytes < WINDOW_GRAIN || startWarpId >= issueStop) {
     if (rank == 0) warpGlobalCopy<cp>(s, d, sizeBytes, warpThread, warpThreads);
     return;
   }
+  if (warpId >= issueStop) return;
+  const uint32_t teamWarps = issueStop - startWarpId; // >= 1
+
+  // --- [head][bulk]: head brings dst to an ANCHOR_GRAIN boundary --------------
+  size_t head = (ANCHOR_GRAIN - ((uintptr_t)d & (ANCHOR_GRAIN - 1))) & (ANCHOR_GRAIN - 1);
+  if (head > sizeBytes) head = sizeBytes;
+  const size_t bulk = sizeBytes - head;
 
   // --- give each issuing warp a 128B-multiple LDS window -------------------
+  // Every warp's source start has the same offset t0 within a 512B block. When the pipeline's load leg has to run
+  // in the source's frame (t0 a nonzero multiple of 4), deeper windows matter more than more warps.
+  const uint32_t t0 = static_cast<uint32_t>((uintptr_t)(s + head) & (ANCHOR_GRAIN - 1));
+  const bool ring = t0 != 0 && (t0 & 3) == 0;
   uint32_t maxIssuers = ldsBytes / WINDOW_GRAIN; // #warps we can give a window
+  if (ring && ldsBytes >= RING_MIN_ISSUERS * RING_MIN_WINDOW) maxIssuers = ldsBytes / RING_MIN_WINDOW;
   uint32_t issuers = teamWarps < maxIssuers ? teamWarps : maxIssuers;
   uint32_t window = (ldsBytes / issuers) & ~(WINDOW_GRAIN - 1); // per-warp 128B-multiple
   if (rank >= issuers) return; // this warp doesn't issue
 
-  // Distribute the byte range across issuers in contiguous, 128B-aligned blocks. Splitting on whole
-  // WINDOW_GRAIN (128B) grains -- rather than raw sizeBytes/issuers -- keeps every issuing warp's start a
-  // multiple of 128B, so `s + myStart` and `d + myStart` inherit the base pointers' alignment and stay
-  // aligned across chunks (the stride `window` is a 128B multiple). The sub-128B remainder is appended to
-  // the last issuing warp so coverage remains contiguous and gap-free.
-  const size_t grain = WINDOW_GRAIN;
-  const size_t nGrains = sizeBytes / grain;
-  const size_t tail = sizeBytes - nGrains * grain; // 0..127 trailing bytes
+  // Distribute the bulk across issuers in contiguous, dst-aligned blocks of whole grains. The sub-grain
+  // remainder is appended to the last issuing warp so coverage remains contiguous and gap-free.
+  const size_t grain = ANCHOR_GRAIN;
+  const size_t nGrains = bulk / grain;
+  const size_t tail = bulk - nGrains * grain;
 
   const size_t baseG = nGrains / issuers;
   const size_t extraG = nGrains % issuers;
   const size_t myG = baseG + (rank < extraG ? 1u : 0u);
   const size_t startG = rank * baseG + (rank < extraG ? rank : extraG);
 
-  size_t myStart = startG * grain; // 128B-aligned
+  const size_t myStart = head + startG * grain;
   size_t myBytes = myG * grain;
-  if (rank == issuers - 1) myBytes += tail; // last warp mops up the < 128B tail
-  if (myBytes == 0) return;
+  if (rank == issuers - 1) myBytes += tail;
+  const size_t staged = myBytes & ~static_cast<size_t>(async_detail::BYTES_PER_LANE_B128 - 1);
+  const uint32_t resid = static_cast<uint32_t>(myBytes - staged); // nonzero only on the last issuer
 
-  uint8_t* myLds = lds + static_cast<size_t>(rank) * window;
+  // Register-staged edges: load now, store once the pipeline is primed.
+  const GlobalByte* gs = (const GlobalByte*)s;
+  GlobalByte* gd = (GlobalByte*)d;
+  uint32_t headRegs[HEAD_WORDS];
+  const bool hasHead = rank == 0 && head != 0;
+  // log2 of the widest access (up to 16B) both sides of the head are aligned to and its length (clamped to a short
+  // copy) is a multiple of.
+  const uint32_t headLen = static_cast<uint32_t>(head);
+  const uint32_t headLog = __builtin_ctz(static_cast<uint32_t>((uintptr_t)s | (uintptr_t)d) | headLen | 16u);
+  if (hasHead) {
+    switch (headLog) {
+    case 4:
+      headLoad<16>(gs, headLen, warpThread, headRegs);
+      break;
+    case 3:
+      headLoad<8>(gs, headLen, warpThread, headRegs);
+      break;
+    case 2:
+      headLoad<4>(gs, headLen, warpThread, headRegs);
+      break;
+    case 1:
+      headLoad<2>(gs, headLen, warpThread, headRegs);
+      break;
+    default:
+      headLoad<1>(gs, headLen, warpThread, headRegs);
+      break;
+    }
+  }
+  uint32_t residByte = 0;
+  if (resid != 0) residByte = gs[myStart + staged + (warpThread < resid ? warpThread : 0)];
 
-  // Pick the peel-free fast path per direction (load reads src, store writes dst). myStart and window are
-  // both 128B multiples, so each side's alignment is loop-invariant and computed once here.
-  const uintptr_t mask = WINDOW_GRAIN - 1;
-  const bool ldsAligned = ((uintptr_t)myLds & mask) == 0;
-  const bool loadAligned = ldsAligned && (((uintptr_t)(s + myStart) & mask) == 0);
-  const bool storeAligned = ldsAligned && (((uintptr_t)(d + myStart) & mask) == 0);
+  pipelinedStage<cp>(s + myStart, d + myStart, lds + static_cast<size_t>(rank) * window, staged, window);
 
-  if (loadAligned && storeAligned) stageLoop<cp, true, true>(s, d, myLds, myStart, myBytes, window);
-  else if (loadAligned) stageLoop<cp, true, false>(s, d, myLds, myStart, myBytes, window);
-  else if (storeAligned) stageLoop<cp, false, true>(s, d, myLds, myStart, myBytes, window);
-  else stageLoop<cp, false, false>(s, d, myLds, myStart, myBytes, window);
+  if (hasHead) {
+    switch (headLog) {
+    case 4:
+      headStore<16>(gd, headLen, warpThread, headRegs);
+      break;
+    case 3:
+      headStore<8>(gd, headLen, warpThread, headRegs);
+      break;
+    case 2:
+      headStore<4>(gd, headLen, warpThread, headRegs);
+      break;
+    case 1:
+      headStore<2>(gd, headLen, warpThread, headRegs);
+      break;
+    default:
+      headStore<1>(gd, headLen, warpThread, headRegs);
+      break;
+    }
+  }
+  if (warpThread < resid) gd[myStart + staged + warpThread] = static_cast<uint8_t>(residByte);
 }
 
 } // namespace detail
@@ -630,29 +1161,33 @@ __device__ ASYNC_API void tdmCopyByTeam(void* dst, const void* src, size_t sizeB
 
 __device__ inline void tdmWait() {
   asyncWait<0>();
+  // The copy's register-staged head/residual are ordinary global stores; drain those too. There is no builtin
+  // for STOREcnt.
+  __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
 }
 
 template <CachePolicy cp>
-__device__ inline void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
-                                    size_t ldsBufferBytes) {
+__device__ __forceinline__ void tdmCopyAsync(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
+                                             size_t ldsBufferBytes) {
   detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
 }
 
 template <CachePolicy cp>
-__device__ inline void tdmCopy(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes) {
+__device__ __forceinline__ void tdmCopy(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
+                                        size_t ldsBufferBytes) {
   detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, /*start=*/0, /*stop=*/~0u);
   tdmWait();
 }
 
 template <CachePolicy cp>
-__device__ inline void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
-                                          size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
+__device__ __forceinline__ void tdmCopyAsyncByTeam(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
+                                                   size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
   detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
 }
 
 template <CachePolicy cp>
-__device__ inline void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
-                                     size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
+__device__ __forceinline__ void tdmCopyByTeam(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer,
+                                              size_t ldsBufferBytes, uint32_t startWarpId, uint32_t stopWarpId) {
   detail::issue<cp>(dst, src, sizeBytes, ldsBuffer, ldsBufferBytes, startWarpId, stopWarpId);
   tdmWait(); // no-op on any warp that issued nothing / is off-team
 }
