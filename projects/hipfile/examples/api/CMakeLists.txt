@@ -2,14 +2,14 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISAddExecutable)
+include(HipFileAddExecutable)
 
 set(API_EXAMPLES
     get-version
 )
 
 foreach(example ${API_EXAMPLES})
-    ais_add_executable(
+    hipfile_add_executable(
         NAME ${example}
         DEPS hipfile
         SRCS "${example}.cpp"

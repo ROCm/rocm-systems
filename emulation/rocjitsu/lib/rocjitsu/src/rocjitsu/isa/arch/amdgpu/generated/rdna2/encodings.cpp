@@ -1391,8 +1391,9 @@ bool Vop3p::has_lit_0_has_lit_1_has_lit_2() {
 }
 
 bool Ds::uses_split_ds_offsets() const {
-  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 55 && inst_.op <= 56) ||
-         (inst_.op >= 78 && inst_.op <= 79) || (inst_.op >= 119 && inst_.op <= 120);
+  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 46 && inst_.op <= 47) ||
+         (inst_.op >= 55 && inst_.op <= 56) || (inst_.op >= 78 && inst_.op <= 79) ||
+         (inst_.op >= 110 && inst_.op <= 111) || (inst_.op >= 119 && inst_.op <= 120);
 }
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)

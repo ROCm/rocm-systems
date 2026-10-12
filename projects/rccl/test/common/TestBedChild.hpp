@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <vector>
 #include <unistd.h>
 #include "CollectiveArgs.hpp"
@@ -33,7 +34,9 @@ namespace RcclUnitTesting
       CHILD_DESTROY_COMMS    = 9,  // DestroyComms()
       CHILD_DESTROY_GRAPHS   = 10, // DestroyGraphs()
       CHILD_STOP             = 11, // Stop()
-      NUM_CHILD_COMMANDS     = 12
+      CHILD_REGISTER_MEM     = 12, // RegisterMem()
+      CHILD_QUERY_SYMMETRIC  = 13, // QuerySymmetricSupport()
+      NUM_CHILD_COMMANDS     = 14
     };
 
     char const ChildCommandNames[NUM_CHILD_COMMANDS][20] =
@@ -49,8 +52,25 @@ namespace RcclUnitTesting
       "DEALLOCATE_MEM",
       "DESTROY_COMMS",
       "DESTROY_GRAPHS",
-      "STOP"
+      "STOP",
+      "REGISTER_MEM",
+      "QUERY_SYMMETRIC"
     };
+
+    // argv layout of an exec'd child worker (TestBed::InitChild builds it, main() parses it)
+    enum
+    {
+      CHILD_ARG_FLAG            = 1, // "--child"
+      CHILD_ARG_ID              = 2,
+      CHILD_ARG_READ_FD         = 3,
+      CHILD_ARG_WRITE_FD        = 4,
+      CHILD_ARG_VERBOSE         = 5,
+      CHILD_ARG_PRINT_VALUES    = 6,
+      CHILD_ARG_RANK_THREADING  = 7,
+      CHILD_ARG_MEM_ALLOC_TYPE  = 8,
+      NUM_CHILD_ARGS            = 9  // argc, including argv[0]
+    };
+    static constexpr char const* kChildFlag = "--child";
 
     // These variables remain constant for life of TestBedChild
     int   childId;
@@ -66,10 +86,10 @@ namespace RcclUnitTesting
     int childReadFd;
 
     // These varibles may change based on commands issued by parent
-    int totalRanks;                                                   // Total ranks
-    int rankOffset;                                                   // Global rank offset for this child
-    int numGroupCalls;                                                // Toatal # of group calls to be executed
-    bool useBlocking;                                                 // RCCL communication with blocking or non-blocking option
+    int totalRanks = 0;                                               // Total ranks
+    int rankOffset = 0;                                               // Global rank offset for this child
+    int numGroupCalls = 0;                                            // Toatal # of group calls to be executed
+    bool useBlocking = true;                                          // RCCL communication with blocking or non-blocking option
     std::vector<int> numCollectivesInGroup;                           // # of collectives to run per group call
     std::vector<int> numStreamsPerGroup;                              // # of different streams allowed per group call
     std::vector<ncclComm_t> comms;                                    // RCCL communicators for each rank
@@ -78,7 +98,8 @@ namespace RcclUnitTesting
     std::vector<std::vector<std::vector<CollectiveArgs>>> collArgs;   // Info for each collective for each rank per group call
     std::vector<std::vector<std::vector<hipGraph_t>>> graphs;         // Graphs for executing collectives per group call
     std::vector<std::vector<std::vector<hipGraphExec_t>>> graphExecs; // GraphExecs for executing collectives per group call
-    std::vector<std::vector<std::vector<bool>>> graphEnabled; 
+    std::vector<std::vector<std::vector<bool>>> graphEnabled;
+    MemAllocType memAllocType = MEM_ALLOC_HIP;                        // Current memory allocation mode
 
     // Constructor
     TestBedChild(int const childId, bool const verbose, int const printValues, bool const useRankThreading);
@@ -86,10 +107,19 @@ namespace RcclUnitTesting
     // Prepare parent/child communication pipes - to be executed by parent process
     int InitPipes();
 
+    // Closes every open pipe descriptor and marks it -1 - to be executed by parent process
+    void ClosePipes();
+
     // Execution
     void StartExecutionLoop();
 
   protected:
+    // Number of elements UT_PRINT_VALUES prints from a buffer of numElements (-1 prints all)
+    size_t NumElementsToPrint(size_t numElements) const
+    {
+      return printValues < 0 ? numElements : std::min(numElements, static_cast<size_t>(printValues));
+    }
+
     // Calls ncclGetUniqueId and returns it to parent
     ErrCode GetUniqueId(std::vector<char>& retValBuf);
 
@@ -122,5 +152,36 @@ namespace RcclUnitTesting
 
     // Destroys graphs
     ErrCode DestroyGraphs();
+
+    ErrCode RegisterMem();
+
+    // Returns (as int) whether every local comm reports symmetric kernel support
+    ErrCode QuerySymmetricSupport(std::vector<char>& retValBuf);
+
+  private:
+    // Per-collective registration bodies for RegisterMem(): symmetric windows
+    // (ncclCommWindowRegister) and user buffer registration (ncclCommRegister).
+    ErrCode RegisterMemSymmetric(int localRank, CollectiveArgs& collArg);
+    ErrCode RegisterMemLegacy(int localRank, CollectiveArgs& collArg);
+
+    ErrCode DeregisterMemInternal(int groupId, int collId, int localRank);
+
+    ErrCode DeallocateMemInternal(int groupId, int collId, int localRank);
+
+    // Closes an NCCL group opened by the caller and returns bodyStatus unless
+    // ncclGroupEnd itself fails. The group must be closed on every exit path,
+    // otherwise a pooled worker carries the open group into the next config.
+    // With non-blocking comms, ncclInProgress is waited out on every comm.
+    ErrCode EndGroup(ErrCode bodyStatus, char const* msg);
+
+    // Aborts and nulls every live comm of this child. Later teardown skips them.
+    void AbortComms();
+
+    // Rejects a pipe-supplied groupId that does not index the current config.
+    bool IsValidGroupId(int groupId, char const* handler) const;
+
+    // Destroys any live graph / graph-exec handles for groupId after syncing
+    // the owning devices.
+    ErrCode ReleaseGraphHandles(int groupId);
   };
 }

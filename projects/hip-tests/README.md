@@ -238,4 +238,4 @@ Note that level-based *selection* additionally needs `-DENABLE_YAML_TAGS`, since
 
 ### Building with address sanitizer
 
-To build catch tests with Address Sanitizer options, use the cmake option `-DENABLE_ADDRESS_SANITIZER=ON`.
+To build catch tests with Address Sanitizer options, use the cmake option `-DENABLE_SANITIZER=ASAN` for host and device instrumentation, or `-DENABLE_SANITIZER=HOST_ASAN` to instrument only host code. Device instrumentation needs an `xnack+` capable GPU at runtime.

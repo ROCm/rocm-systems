@@ -5,7 +5,7 @@
 
 #include "core/agent_manager.hpp"
 #include "core/output_file_registry.hpp"
-#include "core/trace_cache/sample_processor.hpp"
+#include "core/trace_cache/sample_processor_interface.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 
@@ -159,7 +159,7 @@ static_assert(kTriggerTable.back().kfd_name == nullptr,
 
 // NOT thread-safe. handle() and finalize_processing() must be called from a
 // single thread; finalize_processing() is not idempotent.
-class unified_memory_processor_t : public processor_t<unified_memory_processor_t>
+class unified_memory_processor_t : public sample_processor_interface
 {
 public:
     unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, int pid,
@@ -171,24 +171,24 @@ public:
     unified_memory_processor_t& operator=(unified_memory_processor_t&&)      = delete;
     ~unified_memory_processor_t()                                            = default;
 
-    void prepare_for_processing();
-    void finalize_processing();
+    void prepare_for_processing() override;
+    void finalize_processing() override;
 
-    void handle(const kfd_sample& sample);
+    void handle(const kfd_sample& sample) override;
 
-    void handle(const in_time_sample&) {}
-    void handle(const pmc_event_with_sample&) {}
-    void handle(const region_sample&) {}
-    void handle(const kernel_dispatch_sample&) {}
-    void handle(const memory_copy_sample&) {}
-    void handle(const memory_allocate_sample&) {}
-    void handle(const scratch_memory_sample&) {}
-    void handle(const gpu_pmc_sample&) {}
-    void handle(const ainic_pmc_sample&) {}
-    void handle(const cpu_pmc_sample&) {}
-    void handle(const gpu_perf_counter_sample&) {}
-    void handle(const hipfile_pmc_sample&) {}
-    void handle(const backtrace_region_sample&) {}
+    void handle(const in_time_sample&) override {}
+    void handle(const pmc_event_with_sample&) override {}
+    void handle(const region_sample&) override {}
+    void handle(const kernel_dispatch_sample&) override {}
+    void handle(const memory_copy_sample&) override {}
+    void handle(const memory_allocate_sample&) override {}
+    void handle(const scratch_memory_sample&) override {}
+    void handle(const gpu_pmc_sample&) override {}
+    void handle(const ainic_pmc_sample&) override {}
+    void handle(const cpu_pmc_sample&) override {}
+    void handle(const gpu_perf_counter_sample&) override {}
+    void handle(const hipfile_pmc_sample&) override {}
+    void handle(const backtrace_region_sample&) override {}
 
 private:
     void handle_page_migrate(const kfd_sample& sample);

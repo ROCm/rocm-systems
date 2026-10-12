@@ -18,6 +18,7 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -25,6 +26,24 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 
 namespace rocjitsu::test {
+
+/// @brief Construct ROCr's amd_aql_pm4_ib vendor envelope for queue tests.
+/// @details The embedded type-3 INDIRECT_BUFFER selects the supplied command
+/// buffer. The remaining ten dwords pad the envelope to one AQL ring slot.
+inline hsa_kernel_dispatch_packet_t make_pm4_ib_packet(uint64_t address, uint32_t dwords,
+                                                       uint64_t completion_signal = 0) {
+  std::array<uint32_t, 16> words{};
+  words[0] = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (uint32_t{amdgpu::kAmdAqlFormatPm4Ib} << 16);
+  words[1] = 0xc0023f00;
+  words[2] = uint32_t(address);
+  words[3] = uint32_t(address >> 32);
+  words[4] = (1u << 23) | dwords;
+  words[5] = 10;
+  hsa_kernel_dispatch_packet_t packet{};
+  std::memcpy(&packet, words.data(), sizeof(packet));
+  packet.completion_signal.handle = completion_signal;
+  return packet;
+}
 
 /// Simulates what ROCR's user-mode AqlQueue does: manages a ring buffer,
 /// writes AQL packets, and rings the doorbell. Does NOT load kernels --
@@ -162,11 +181,9 @@ public:
   /// to place on every XCD rather than split.
   /// @param completion_signal_va Signal to decrement when it retires, or 0.
   void pm4_ib(uint64_t completion_signal_va = 0) {
-    hsa_kernel_dispatch_packet_t pkt{};
-    pkt.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
-    pkt.setup = amdgpu::kAmdAqlFormatPm4Ib;
-    pkt.completion_signal.handle = completion_signal_va;
-    submit(pkt);
+    constexpr uint64_t address = 0xf0020000;
+    memory_->write32(address, 0x80000000); // One type-2 NOP.
+    submit(make_pm4_ib_packet(address, 1, completion_signal_va));
   }
 
   /// Build and submit an AMD extended kernel dispatch packet with cluster shape.

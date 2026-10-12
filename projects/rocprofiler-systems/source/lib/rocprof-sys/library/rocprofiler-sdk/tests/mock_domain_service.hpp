@@ -81,7 +81,19 @@ struct callback_tracing_record_t
     std::uint32_t    operation = 0;
     std::uint64_t    thread_id = 0;
     correlation_id_t correlation_id{};
-    void*            payload = nullptr;
+    // Only k_rccl reads this (extract_event_info() casts it to
+    // mock_sdk::rccl_api_data*); every other domain's on_record leaves it nullptr.
+    void* payload = nullptr;
+};
+
+struct code_object_load_data_t
+{
+    std::uint64_t code_object_id = 0;
+};
+
+struct code_object_kernel_symbol_register_data_t
+{
+    std::uint64_t kernel_id = 0;
 };
 
 using tracing_operation_t     = std::size_t;
@@ -418,36 +430,40 @@ struct mock_sdk
                                                          std::int32_t, void*);
 
     // NOLINTBEGIN(readability-identifier-naming)
-    static constexpr std::size_t      compile_time_version                    = 90909;
-    static constexpr buffer_policy_t  BUFFER_POLICY_LOSSLESS                  = 1;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS = 20;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_FAULT     = 21;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE   = 22;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_QUEUE          = 23;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU = 24;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_FAULT           = 25;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_MIGRATE         = 26;
-    static constexpr std::size_t      BUFFER_TRACING_KFD_QUEUE                = 27;
-    static constexpr std::size_t      CALLBACK_TRACING_CODE_OBJECT            = 1;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_CORE_API           = 2;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_AMD_EXT_API        = 3;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_IMAGE_EXT_API      = 4;
-    static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API   = 5;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API        = 6;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API       = 7;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCJPEG_API            = 8;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API          = 9;
-    static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API           = 10;
-    static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API            = 11;
-    static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM             = 12;
-    static constexpr std::size_t      HIP_STREAM_SET                          = 0;
-    static constexpr callback_phase_t CALLBACK_PHASE_ENTER                    = 0;
-    static constexpr callback_phase_t CALLBACK_PHASE_EXIT                     = 1;
-    static constexpr callback_phase_t CALLBACK_PHASE_NONE                     = 2;
-    static constexpr std::size_t      BUFFER_TRACING_KERNEL_DISPATCH          = 28;
-    static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY              = 29;
-    static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION        = 30;
-    static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY           = 31;
+    static constexpr std::size_t      compile_time_version                      = 90909;
+    static constexpr buffer_policy_t  BUFFER_POLICY_LOSSLESS                    = 1;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS   = 20;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_FAULT       = 21;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE     = 22;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_QUEUE            = 23;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU   = 24;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_FAULT             = 25;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_PAGE_MIGRATE           = 26;
+    static constexpr std::size_t      BUFFER_TRACING_KFD_QUEUE                  = 27;
+    static constexpr std::size_t      CALLBACK_TRACING_CODE_OBJECT              = 1;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_CORE_API             = 2;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_AMD_EXT_API          = 3;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_IMAGE_EXT_API        = 4;
+    static constexpr std::size_t      CALLBACK_TRACING_HSA_FINALIZE_EXT_API     = 5;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_RUNTIME_API          = 6;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_COMPILER_API         = 7;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCJPEG_API              = 8;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCDECODE_API            = 9;
+    static constexpr std::size_t      CALLBACK_TRACING_ROCSHMEM_API             = 10;
+    static constexpr std::size_t      CALLBACK_TRACING_HIPFILE_API              = 11;
+    static constexpr std::size_t      CALLBACK_TRACING_HIP_STREAM               = 12;
+    static constexpr std::size_t      HIP_STREAM_SET                            = 0;
+    static constexpr std::size_t      CALLBACK_TRACING_RCCL_API                 = 13;
+    static constexpr std::size_t      CALLBACK_TRACING_OMPT                     = 14;
+    static constexpr callback_phase_t CALLBACK_PHASE_ENTER                      = 0;
+    static constexpr callback_phase_t CALLBACK_PHASE_EXIT                       = 1;
+    static constexpr callback_phase_t CALLBACK_PHASE_NONE                       = 2;
+    static constexpr std::size_t      BUFFER_TRACING_KERNEL_DISPATCH            = 28;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_COPY                = 29;
+    static constexpr std::size_t      BUFFER_TRACING_MEMORY_ALLOCATION          = 30;
+    static constexpr std::size_t      BUFFER_TRACING_SCRATCH_MEMORY             = 31;
+    static constexpr std::size_t      CODE_OBJECT_LOAD                          = 1;
+    static constexpr std::size_t      CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER = 2;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH   = 32;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY       = 33;
     static constexpr std::size_t      EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION = 34;
@@ -465,6 +481,185 @@ struct mock_sdk
     using memory_copy_record_t          = test_support::memory_copy_record_t;
     using memory_allocation_record_t    = test_support::memory_allocation_record_t;
     using scratch_memory_record_t       = test_support::scratch_memory_record_t;
+    using code_object_load_data_t       = test_support::code_object_load_data_t;
+    using code_object_kernel_symbol_register_data_t =
+        test_support::code_object_kernel_symbol_register_data_t;
+
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    using nccl_data_type_t = int;
+    using nccl_comm_t      = void*;
+    using nccl_result_t    = int;
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr nccl_result_t    NCCL_SUCCESS                   = 0;
+    static constexpr nccl_data_type_t NCCL_INT8                      = 0;
+    static constexpr nccl_data_type_t NCCL_UINT8                     = 1;
+    static constexpr nccl_data_type_t NCCL_FLOAT16                   = 2;
+    static constexpr nccl_data_type_t NCCL_BFLOAT16                  = 3;
+    static constexpr nccl_data_type_t NCCL_INT32                     = 4;
+    static constexpr nccl_data_type_t NCCL_UINT32                    = 5;
+    static constexpr nccl_data_type_t NCCL_FLOAT32                   = 6;
+    static constexpr nccl_data_type_t NCCL_INT64                     = 7;
+    static constexpr nccl_data_type_t NCCL_UINT64                    = 8;
+    static constexpr nccl_data_type_t NCCL_FLOAT64                   = 9;
+    static constexpr bool             k_are_nccl_fp8_types_available = false;
+
+    using rccl_api_id_t                                          = std::size_t;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllGather     = 0;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllToAll      = 1;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclAllReduce     = 2;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclGather        = 3;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclRecv          = 4;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduce        = 5;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclBroadcast     = 6;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclReduceScatter = 7;
+    static constexpr rccl_api_id_t RCCL_API_ID_ncclSend          = 8;
+    // NOLINTEND(readability-identifier-naming)
+
+    struct rccl_arg_with_count
+    {
+        nccl_comm_t      comm     = nullptr;
+        nccl_data_type_t datatype = NCCL_INT8;
+        std::size_t      count    = 0;
+    };
+    struct rccl_arg_with_sendcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      sendcount = 0;
+    };
+    struct rccl_arg_with_recvcount
+    {
+        nccl_comm_t      comm      = nullptr;
+        nccl_data_type_t datatype  = NCCL_INT8;
+        std::size_t      recvcount = 0;
+    };
+
+    // Mirrors the shape of rocprofiler_rccl_api_args_t: each collective exposes only the
+    // count member the real RCCL API uses for it, so extract_event_info's
+    // if-constexpr(requires{event.count/.sendcount/.recvcount}) branching is exercised
+    // exactly like production.
+    struct rccl_api_args_t
+    {
+        rccl_arg_with_sendcount ncclAllGather;
+        rccl_arg_with_count     ncclAllToAll;
+        rccl_arg_with_count     ncclAllReduce;
+        rccl_arg_with_sendcount ncclGather;
+        rccl_arg_with_count     ncclRecv;
+        rccl_arg_with_count     ncclReduce;
+        rccl_arg_with_count     ncclBroadcast;
+        rccl_arg_with_recvcount ncclReduceScatter;
+        rccl_arg_with_count     ncclSend;
+    };
+
+    struct rccl_api_data
+    {
+        rccl_api_args_t args;
+    };
+
+    [[nodiscard]] static constexpr std::size_t rccl_type_size(
+        nccl_data_type_t datatype) noexcept
+    {
+        switch(datatype)
+        {
+            case NCCL_INT8:
+            case NCCL_UINT8: return 1;
+            case NCCL_FLOAT16:
+            case NCCL_BFLOAT16: return 2;
+            case NCCL_INT32:
+            case NCCL_UINT32:
+            case NCCL_FLOAT32: return 4;
+            case NCCL_INT64:
+            case NCCL_UINT64:
+            case NCCL_FLOAT64: return 8;
+            default: return 0;
+        }
+    }
+
+    // ─── Members required by domains::callback::ompt::k_ompt_api
+    // ──────────────────────────
+    using ompt_operation_t = std::size_t;
+
+    // NOLINTBEGIN(readability-identifier-naming)
+    static constexpr ompt_operation_t OMPT_ID_thread_begin       = 0;
+    static constexpr ompt_operation_t OMPT_ID_thread_end         = 1;
+    static constexpr ompt_operation_t OMPT_ID_parallel_begin     = 2;
+    static constexpr ompt_operation_t OMPT_ID_parallel_end       = 3;
+    static constexpr ompt_operation_t OMPT_ID_task_create        = 4;
+    static constexpr ompt_operation_t OMPT_ID_task_schedule      = 5;
+    static constexpr ompt_operation_t OMPT_ID_implicit_task      = 6;
+    static constexpr ompt_operation_t OMPT_ID_device_initialize  = 7;
+    static constexpr ompt_operation_t OMPT_ID_device_finalize    = 8;
+    static constexpr ompt_operation_t OMPT_ID_device_load        = 9;
+    static constexpr ompt_operation_t OMPT_ID_mutex_released     = 10;
+    static constexpr ompt_operation_t OMPT_ID_dependences        = 11;
+    static constexpr ompt_operation_t OMPT_ID_task_dependence    = 12;
+    static constexpr ompt_operation_t OMPT_ID_lock_init          = 13;
+    static constexpr ompt_operation_t OMPT_ID_lock_destroy       = 14;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquire      = 15;
+    static constexpr ompt_operation_t OMPT_ID_mutex_acquired     = 16;
+    static constexpr ompt_operation_t OMPT_ID_nest_lock          = 17;
+    static constexpr ompt_operation_t OMPT_ID_flush              = 18;
+    static constexpr ompt_operation_t OMPT_ID_cancel             = 19;
+    static constexpr ompt_operation_t OMPT_ID_dispatch           = 20;
+    static constexpr ompt_operation_t OMPT_ID_error              = 21;
+    static constexpr ompt_operation_t OMPT_ID_callback_functions = 22;
+    // NOLINTEND(readability-identifier-naming)
+
+    enum class ompt_thread_type_t
+    {
+        ompt_thread_initial = 1,
+        ompt_thread_worker  = 2,
+        ompt_thread_other   = 3,
+        ompt_thread_unknown = 4
+    };
+
+    static constexpr ompt_thread_type_t OMPT_THREAD_INITIAL =
+        ompt_thread_type_t::ompt_thread_initial;
+
+    // Mirrors rocprofiler_ompt_args_t's shape (one struct member per OMPT operation
+    // whose fields ompt.hpp reads); a plain struct suffices since tests only ever
+    // populate the single branch matching the record's operation.
+    struct ompt_args_t
+    {
+        struct
+        {
+            ompt_thread_type_t thread_type = ompt_thread_type_t::ompt_thread_worker;
+        } thread_begin;
+
+        struct
+        {
+            void* parallel_data = nullptr;
+            int   flags         = 0;
+        } parallel_begin;
+
+        struct
+        {
+            void* parallel_data = nullptr;
+            int   flags         = 0;
+        } parallel_end;
+
+        struct
+        {
+            int flags = 0;
+        } task_create;
+
+        struct
+        {
+            int flags = 0;
+        } implicit_task;
+
+        struct
+        {
+            int flags = 0;
+        } cancel;
+    };
+
+    struct callback_tracing_ompt_data_t
+    {
+        std::uint64_t size = 0;
+        ompt_args_t   args;
+    };
 
     static void create_context(context_id_t* context) { g_mock->create_context(context); }
     static void start_context(context_id_t context) { g_mock->start_context(context); }
@@ -712,9 +907,9 @@ struct thread_info_data_t
 
 struct track_data_t
 {
-    std::string   track_name;
-    std::uint64_t thread_id = 0;
-    std::string   extdata;
+    std::string                  track_name;
+    std::optional<std::uint64_t> thread_id;
+    std::string                  extdata;
 
     bool operator==(const track_data_t&) const = default;
 };
@@ -763,19 +958,18 @@ struct kernel_dispatch_sample_data_t
 // verify calls via gmock_buffer_storage, not by reading fields back.
 struct memory_copy_sample_data_t
 {
-    std::uint64_t start_timestamp         = 0;
-    std::uint64_t end_timestamp           = 0;
-    std::uint64_t thread_id               = 0;
-    std::uint64_t dst_agent_id_handle     = 0;
-    std::uint64_t src_agent_id_handle     = 0;
-    std::int32_t  kind                    = 0;
-    std::int32_t  operation               = 0;
-    std::uint64_t bytes                   = 0;
-    std::uint64_t correlation_id_internal = 0;
-    std::uint64_t correlation_id_ancestor = 0;
-    std::uint64_t dst_address_value       = 0;
-    std::uint64_t src_address_value       = 0;
-    std::uint64_t stream_handle           = 0;
+    std::uint64_t    start_timestamp     = 0;
+    std::uint64_t    end_timestamp       = 0;
+    std::uint64_t    thread_id           = 0;
+    std::uint64_t    dst_agent_id_handle = 0;
+    std::uint64_t    src_agent_id_handle = 0;
+    std::string_view name;
+    std::uint64_t    bytes                   = 0;
+    std::uint64_t    correlation_id_internal = 0;
+    std::uint64_t    correlation_id_ancestor = 0;
+    std::uint64_t    dst_address_value       = 0;
+    std::uint64_t    src_address_value       = 0;
+    std::uint64_t    stream_handle           = 0;
 
     bool operator==(const memory_copy_sample_data_t&) const = default;
 };
@@ -784,17 +978,17 @@ struct memory_copy_sample_data_t
 // tests verify calls via gmock_buffer_storage, not by reading fields back.
 struct memory_allocation_sample_data_t
 {
-    std::uint64_t start_timestamp         = 0;
-    std::uint64_t end_timestamp           = 0;
-    std::uint64_t thread_id               = 0;
-    std::uint64_t agent_id_handle         = 0;
-    std::int32_t  kind                    = 0;
-    std::int32_t  operation               = 0;
-    std::uint64_t allocation_size         = 0;
-    std::uint64_t correlation_id_internal = 0;
-    std::uint64_t correlation_id_ancestor = 0;
-    std::uint64_t address_value           = 0;
-    std::uint64_t stream_handle           = 0;
+    std::uint64_t    start_timestamp = 0;
+    std::uint64_t    end_timestamp   = 0;
+    std::uint64_t    thread_id       = 0;
+    std::uint64_t    agent_id_handle = 0;
+    std::string_view name;
+    std::int32_t     operation               = 0;
+    std::uint64_t    allocation_size         = 0;
+    std::uint64_t    correlation_id_internal = 0;
+    std::uint64_t    correlation_id_ancestor = 0;
+    std::uint64_t    address_value           = 0;
+    std::uint64_t    stream_handle           = 0;
 
     bool operator==(const memory_allocation_sample_data_t&) const = default;
 };
@@ -803,18 +997,18 @@ struct memory_allocation_sample_data_t
 // tests verify calls via gmock_buffer_storage, not by reading fields back.
 struct scratch_memory_sample_data_t
 {
-    std::uint64_t start_timestamp         = 0;
-    std::uint64_t end_timestamp           = 0;
-    std::uint64_t thread_id               = 0;
-    std::uint64_t agent_id_handle         = 0;
-    std::uint64_t queue_id_handle         = 0;
-    std::int32_t  kind                    = 0;
-    std::int32_t  operation               = 0;
-    std::int32_t  flags                   = 0;
-    std::uint64_t allocation_size         = 0;
-    std::uint64_t correlation_id_internal = 0;
-    std::uint64_t correlation_id_ancestor = 0;
-    std::uint64_t stream_handle           = 0;
+    std::uint64_t    start_timestamp = 0;
+    std::uint64_t    end_timestamp   = 0;
+    std::uint64_t    thread_id       = 0;
+    std::uint64_t    agent_id_handle = 0;
+    std::uint64_t    queue_id_handle = 0;
+    std::string_view name;
+    std::int32_t     operation               = 0;
+    std::int32_t     flags                   = 0;
+    std::uint64_t    allocation_size         = 0;
+    std::uint64_t    correlation_id_internal = 0;
+    std::uint64_t    correlation_id_ancestor = 0;
+    std::uint64_t    stream_handle           = 0;
 
     bool operator==(const scratch_memory_sample_data_t&) const = default;
 };
@@ -830,6 +1024,9 @@ struct gmock_metadata_registry
     MOCK_METHOD(void, add_pmc_info, (const pmc_info_data_t& info));
     MOCK_METHOD(void, add_queue, (std::uint64_t queue_handle));
     MOCK_METHOD(void, add_stream, (std::uint64_t stream_handle));
+    MOCK_METHOD(void, add_code_object, (const code_object_load_data_t& code_object));
+    MOCK_METHOD(void, add_kernel_symbol,
+                (const code_object_kernel_symbol_register_data_t& kernel_symbol));
 };
 
 inline std::unique_ptr<::testing::StrictMock<gmock_metadata_registry>>
@@ -842,6 +1039,13 @@ struct gmock_buffer_storage
     MOCK_METHOD(void, store_memory_allocation,
                 (const memory_allocation_sample_data_t& sample));
     MOCK_METHOD(void, store_scratch_memory, (const scratch_memory_sample_data_t& sample));
+    // Flattened view of externals::pmc_event_with_sample (declared after this struct).
+    // NOLINTNEXTLINE(readability-function-size)
+    MOCK_METHOD(void, store_pmc_event,
+                (std::size_t category_enum_id, std::string track_name,
+                 std::size_t timestamp_ns, std::string event_metadata,
+                 std::uint32_t device_id, std::uint8_t device_type,
+                 std::string pmc_info_name, double value));
     MOCK_METHOD(bool, get_use_timemory, ());
     MOCK_METHOD(void, write_timemory_bundle,
                 (std::string_view name, std::uint64_t tid, std::uint64_t elapsed_ns));
@@ -1009,6 +1213,80 @@ struct externals
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_hipfile_api_category_name = "rocm_hipfile_api";
+
+    // ─── Members required by domains::callback::k_rccl ──────────────────────────────
+    // Stand-in for rocprofsys::state::thread: only Internal and scoped() are touched by
+    // k_rccl (register_gpu()/add_bytes() push/pop the Internal thread state around
+    // their locked sections).
+    struct state_thread
+    {
+        enum class state
+        {
+            enabled,
+            internal
+        };
+
+        static constexpr state Internal = state::internal;
+
+        struct [[nodiscard]] scoped_guard
+        {};
+
+        static scoped_guard scoped(state /*state_to_set*/) { return {}; }
+    };
+
+    struct rocm_rccl_api_category
+    {};
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_rccl_api_category_name = "rocm_rccl_api";
+
+    // ─── Members required by domains::callback::ompt::k_ompt_api
+    // ─────────────────────────
+    struct rocm_ompt_api_category
+    {};
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr std::string_view rocm_ompt_api_category_name = "rocm_ompt_api";
+
+    static constexpr std::string_view comm_data_name        = "comm_data";
+    static constexpr std::string_view comm_data_description = "comm data test category";
+    static constexpr std::size_t      comm_data_enum_value  = 0;
+
+    static constexpr std::string_view rccl_send_label      = "RCCL Comm Send";
+    static constexpr std::string_view rccl_recv_label      = "RCCL Comm Recv";
+    static constexpr std::string_view rccl_send_track_name = rccl_send_label;
+    static constexpr std::string_view rccl_recv_track_name = rccl_recv_label;
+
+    // Stand-in for trace_cache::pmc_event_with_sample: category_enum_id, track_name,
+    // timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
+    // call_stack, line_info, device_id, device_type, pmc_info_name, value, system_tid.
+    // Distinct from kfd_sample_t (one fewer size_t field) -- k_rccl constructs this
+    // exact 14-argument shape.
+    struct pmc_event_with_sample
+    {
+        std::size_t                 category_enum_id = 0;
+        std::string_view            track_name;
+        std::size_t                 timestamp_ns = 0;
+        std::string_view            event_metadata;
+        std::size_t                 stack_id        = 0;
+        std::size_t                 parent_stack_id = 0;
+        std::size_t                 correlation_id  = 0;
+        std::string_view            call_stack;
+        std::string_view            line_info;
+        std::uint32_t               device_id   = 0;
+        std::uint8_t                device_type = 0;
+        std::string_view            pmc_info_name;
+        double                      value = 0.0;
+        std::optional<std::int64_t> system_tid;
+    };
+
+    // Tests set these to drive device_resolver::configure_comm_cu_device_function();
+    // the defaults model "symbol not found, no error text".
+    static inline void*       dlsym_result   = nullptr;
+    static inline const char* dlerror_result = nullptr;
+
+    static void*       dlsym(const char* /*symbol_name*/) { return dlsym_result; }
+    static const char* dlerror() { return dlerror_result; }
 
     struct region_sample
     {
@@ -1207,6 +1485,20 @@ struct externals
                 g_metadata_registry_mock->add_stream(stream_handle);
             }
         }
+        void add_code_object(const code_object_load_data_t& code_object)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_code_object(code_object);
+            }
+        }
+        void add_kernel_symbol(const code_object_kernel_symbol_register_data_t& symbol)
+        {
+            if(g_metadata_registry_mock)
+            {
+                g_metadata_registry_mock->add_kernel_symbol(symbol);
+            }
+        }
     };
 
     struct buffer_storage_t
@@ -1252,6 +1544,17 @@ struct externals
         // matching this domain family's behavior before the unification onto
         // get_buffer_storage().
         void store(const kfd_sample_t& /*sample*/) {}
+        void store(pmc_event_with_sample&& sample)
+        {
+            if(g_buffer_storage_mock)
+            {
+                g_buffer_storage_mock->store_pmc_event(
+                    sample.category_enum_id, std::string{ sample.track_name },
+                    sample.timestamp_ns, std::string{ sample.event_metadata },
+                    sample.device_id, sample.device_type,
+                    std::string{ sample.pmc_info_name }, sample.value);
+            }
+        }
         void store(const region_sample& sample)
         {
             if(g_buffer_storage_mock)
