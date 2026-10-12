@@ -386,7 +386,7 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
  */
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
     max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
-    vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
+    vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{1, false, false}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
 #ifdef ROCJPEG_USE_DLOPEN_VA
     va_loader_ = RocJpegVaapiLoader::GetShared();
@@ -556,7 +556,10 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
  * it sets the capabilities to support ROI decode and conversion to RGB.
  *
  * @note If the initialization of the AMD GPU device fails or querying the number of JPEG cores fails,
- *       appropriate error messages are logged.
+ *       appropriate error messages are logged and the core count is left at the safe fallback of 1.
+ *       Discovery failure is not fatal -- decoding still works through VA-API -- but the count is used
+ *       as the sub-batch stride when grouping work, so it must never be zero or those loops would not
+ *       advance. For the same reason a successful query reporting zero cores is also clamped to 1.
  */
 void RocJpegVappiDecoder::GetNumJpegCores() {
     amdgpu_device_handle dev_handle;
@@ -566,17 +569,21 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
     const char *enable_vcn_hw_csc_str = std::getenv("ROCJPEG_ENABLE_VCN_HW_CSC");
     bool enable_vcn_hw_csc = (enable_vcn_hw_csc_str != nullptr && strcmp(enable_vcn_hw_csc_str, "1") == 0);
     if (amdgpu_device_initialize(drm_fd_, &major_version, &minor_version, &dev_handle)) {
-        ErrorLog(g_rocjpeg_logger, "amdgpu_device_initialize failed!");
+        ErrorLog(g_rocjpeg_logger, "amdgpu_device_initialize failed! Falling back to a single JPEG core.");
         return;
     }
     error_code = amdgpu_query_hw_ip_count(dev_handle, AMDGPU_HW_IP_VCN_JPEG, &num_jpeg_cores);
     if (!error_code) {
-        current_vcn_jpeg_spec_.num_jpeg_cores = num_jpeg_cores;
+        if (num_jpeg_cores == 0) {
+            ErrorLog(g_rocjpeg_logger, "Queried zero JPEG cores! Falling back to a single JPEG core.");
+        } else {
+            current_vcn_jpeg_spec_.num_jpeg_cores = num_jpeg_cores;
+        }
         // Set the capabilities based on the number of JPEG cores
         current_vcn_jpeg_spec_.can_roi_decode = (num_jpeg_cores >= 8);
         current_vcn_jpeg_spec_.can_convert_to_rgb = (num_jpeg_cores >= 8) && enable_vcn_hw_csc;
     } else {
-        ErrorLog(g_rocjpeg_logger, "Failed to get the number of jpeg cores.");
+        ErrorLog(g_rocjpeg_logger, "Failed to get the number of jpeg cores! Falling back to a single JPEG core.");
     }
     amdgpu_device_deinitialize(dev_handle);
 }
