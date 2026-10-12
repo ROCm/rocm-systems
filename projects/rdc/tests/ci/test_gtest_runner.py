@@ -35,7 +35,8 @@ class TestGoogleTestSuite:
         )
 
     def test_rdc_client_shutdown(self, rocm_dir, rdctst_path):
-        # rdctst_path skips this test unless the RDC test package is installed.
+        # rdctst_path skips this test unless the RDC test package is installed. rdctst
+        # is built only with the standalone client, so rdc_client_tests must be too.
         binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_client_tests")
         assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
 

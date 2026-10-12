@@ -26,9 +26,9 @@ THE SOFTWARE.
 // crashed rdci with SIGSEGV on exit, after it had printed its results.
 //
 // glibc never unloads a library that has an STB_GNU_UNIQUE symbol. GCC emits
-// those for some inline and template statistics, so a client library with
-// GCC-compiled code in it usually passes this test with or without the fix.
-// A clang-only build, as TheRock ships, needs the fix.
+// those for static variables in inline functions and templates, so a client
+// library with GCC-compiled code in it usually passes this test with or
+// without the fix. A clang-only build, as TheRock ships, needs the fix.
 
 #include <dlfcn.h>
 #include <gtest/gtest.h>
