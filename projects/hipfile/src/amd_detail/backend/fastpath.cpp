@@ -304,6 +304,11 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
     catch (const std::system_error &sys_err) {
         return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
+    catch (const BackendDisabled &) {
+        // score() accepted the I/O, then another thread hit ENOTTY and
+        // disabled the fastpath before _io_impl() ran.
+        return true;
+    }
     catch (...) {
         // Thrown exception not eligible for fallback.
         return false;
@@ -322,6 +327,16 @@ async_fastpath_copy(void *userArgs)
 
     if (!paramsValid(op->buffer, size, file_offset, buffer_offset)) {
         op->bytes_transferred_internal = -hipFileInvalidValue;
+        return;
+    }
+
+    // The fastpath was chosen when this op was queued. An earlier op may have
+    // since hit ENOTTY and disabled it, so skip the AIS call and fall back.
+    if (!Context<Configuration>::get()->fastpath()) {
+        op->bytes_transferred_internal = -hipFileInternalError;
+        if (op->failover) {
+            op->failover->fallback_needed = true;
+        }
         return;
     }
 
