@@ -50,6 +50,14 @@ cases:
   Unit_HRR_CaptureActiveMarker: {}
   Unit_HRR_CaptureActiveMarker_Direct: {}
   Unit_HRR_CaptureArchiveIsPrivate: {}
+  Unit_HRR_CaptureCapabilities: {}
+  Unit_HRR_CaptureCapabilitiesAcrossProcesses: {}
+  Unit_HRR_CaptureCapabilitiesExport_Direct: {}
+  Unit_HRR_CaptureCapabilitiesFork_Direct: {}
+  Unit_HRR_CaptureCapabilitiesForkedChild: {}
+  Unit_HRR_CaptureCapabilitiesImport_Direct: {}
+  Unit_HRR_CaptureCapabilitiesWithoutRandom: {}
+  Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
