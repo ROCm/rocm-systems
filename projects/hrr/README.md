@@ -118,7 +118,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
 | `--max-events N` | Refuse an archive with more than `N` events; the reader stops loading at the first one past the cap. It counts events; each record's payload is separately limited in size (default `50000000`) |
 | `--max-host-bytes N` | End the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, graph operand buffers, D2H read-back buffers) would pass `N` bytes; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
-| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit) |
+| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit; at most `31536000`, 365 days) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |

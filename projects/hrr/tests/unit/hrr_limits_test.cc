@@ -358,6 +358,22 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyThreads) {
 /**
  * Test Description
  * ----------------
+ *   - --max-wall-seconds above the documented maximum is refused with the
+ *     maximum named, not silently shortened to it; the maximum itself and 0
+ *     are not refused for their value (the run goes on to need a device, so
+ *     only the refusal is checked here).
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesWallSecondsAboveMaximum) {
+  TmpArchive arc("wallmax", {0, 1});
+  auto [ret, out] = hrr_playback_merged(arc.root, "--max-wall-seconds 31536001");
+  CHECK(ret != 0);
+  CHECK(out.find("31536000") != std::string::npos);
+  CHECK(out.find("--max-wall-seconds") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - load_archive stops at the event cap: an archive with three events fails
  *     to load under a cap of two and loads under a cap of three.
  */

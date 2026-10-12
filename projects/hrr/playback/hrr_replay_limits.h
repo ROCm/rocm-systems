@@ -61,6 +61,7 @@ constexpr uint64_t kDefaultMaxThreads   = 256;
 constexpr uint64_t kDefaultMaxEvents    = 50000000;
 constexpr uint64_t kDefaultMaxHostBytes = 16ull << 30;  // 16 GiB
 constexpr uint64_t kDefaultMaxWallSecs  = 3600;         // 1 hour
+constexpr uint64_t kMaxWallSecs         = 31536000;     // 365 days, the largest accepted value
 
 // Number of yields before a wait starts sleeping.
 constexpr int kSpinYields = 1000;

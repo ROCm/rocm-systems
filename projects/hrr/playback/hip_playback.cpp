@@ -2906,6 +2906,11 @@ hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
     else
         ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 
@@ -2919,6 +2924,11 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
     else
         ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 

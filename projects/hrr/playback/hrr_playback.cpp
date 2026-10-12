@@ -1265,7 +1265,8 @@ static void print_usage(const char* argv0) {
     "  --max-host-bytes N    End the replay when host memory held for the archive\n"
     "                        (blob caches, pinned buffers, read-backs) would pass N\n"
     "                        bytes. Default 17179869184 (16 GiB).\n"
-    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit).\n"
+    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit; at most\n"
+    "                        31536000, 365 days).\n"
     "                        Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
@@ -1373,7 +1374,14 @@ int main(int argc, char** argv) {
       if      (!strcmp(flag, "--max-threads"))      max_threads   = n;
       else if (!strcmp(flag, "--max-events"))       hrr::set_max_events(n);
       else if (!strcmp(flag, "--max-host-bytes"))   ctx.host_budget.set_cap(n);
-      else                                          max_wall_secs = n;
+      else {
+        if (n > hrr::kMaxWallSecs) {
+          fprintf(stderr, "[HRR] --max-wall-seconds accepts at most %llu (use 0 for no limit)\n",
+                  (unsigned long long)hrr::kMaxWallSecs);
+          return 1;
+        }
+        max_wall_secs = n;
+      }
     }
     else if ((!strcmp(argv[i], "--max-seq-waits") ||
               !strcmp(argv[i], "--max-query-attempts") ||
@@ -1526,7 +1534,7 @@ int main(int argc, char** argv) {
   // Wall-clock limit for the whole replay. The replay can be blocked inside a
   // HIP call that no flag interrupts, so the watchdog ends the process.
   hrr::WallClockWatchdog wall_watchdog(
-      std::chrono::milliseconds(std::min<uint64_t>(max_wall_secs, 31536000ull) * 1000), [max_wall_secs] {
+      std::chrono::milliseconds(max_wall_secs * 1000), [max_wall_secs] {
         fprintf(stderr,
                 "[HRR] Fatal: replay still running after %llu s "
                 "(--max-wall-seconds); ending it\n",
