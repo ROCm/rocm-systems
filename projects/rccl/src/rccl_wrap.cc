@@ -1702,13 +1702,13 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
-      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  if (ceAvailable && !hasSysmemSegment &&
+      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force || (!symEligible && ceRegInWindow))) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
-  if (!query && !symEligible) INFO(NCCL_TUNING,
+  if (!query) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
        " ceRegInWindow=%d hasSysmem=%d CTAPolicy=%d force=%d",
        (int)ceAvailable, (int)ceArGraphAllowed, (int)ceBufferOk, (int)ceAllReduceOpSupported,
