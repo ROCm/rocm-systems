@@ -12,6 +12,7 @@ set(common_sources
     mpl.cpp
     parse.cpp
     regex.cpp
+    ring_buffer.cpp
     sha256.cpp
     static_object.cpp
     string_entry.cpp
