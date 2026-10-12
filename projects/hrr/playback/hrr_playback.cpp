@@ -68,6 +68,12 @@
 #include <functional>
 #include <map>
 #include <string>
+#ifdef _WIN32
+#  include <fcntl.h>
+#  include <io.h>
+#  include <random>
+#  include <windows.h>
+#endif
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -969,7 +975,8 @@ static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
 // O_NOFOLLOW, is fsynced, and then renamed over `name`, all through a
 // descriptor for `dir` that was opened without following a link and checked.
 // A link planted at `name`, at the old predictable ".repair.tmp" name or in
-// place of `dir` is never written through. `fill` writes the content.
+// place of `dir` is never written through (on Windows the temporary file is
+// created with CREATE_NEW under a random name). `fill` writes the content.
 // On failure the original file is untouched and *err says why.
 static bool write_file_in_dir(const fs::path& dir, const std::string& name,
                               const std::function<bool(FILE*)>& fill, std::string* err) {
@@ -1032,10 +1039,38 @@ static bool write_file_in_dir(const fs::path& dir, const std::string& name,
     *err = "refusing " + target.string() + ": it is a symbolic link";
     return false;
   }
-  const fs::path tmp = target.string() + ".repair.tmp";
-  FILE* f = fopen(tmp.string().c_str(), "wb");
+  // The temporary file has an unpredictable name and is made with CREATE_NEW,
+  // which fails when anything exists at that name, a link included, and
+  // FILE_FLAG_OPEN_REPARSE_POINT keeps a reparse point from being followed.
+  // A link planted at a guessed name is therefore never written through.
+  FILE* f = nullptr;
+  fs::path tmp;
+  std::random_device rd;
+  for (int attempt = 0; attempt < 16 && !f; ++attempt) {
+    char suffix[32];
+    snprintf(suffix, sizeof(suffix), ".repair.%08x%08x.tmp", rd(), rd());
+    tmp = target.string() + suffix;
+    HANDLE h = CreateFileW(tmp.wstring().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+      if (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS) continue;
+      break;
+    }
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h), _O_BINARY);
+    if (fd < 0) {
+      CloseHandle(h);
+      fs::remove(tmp, ec);
+      break;
+    }
+    f = _fdopen(fd, "wb");
+    if (!f) {
+      _close(fd);
+      fs::remove(tmp, ec);
+      break;
+    }
+  }
   if (!f) {
-    *err = "cannot open " + tmp.string() + " for writing";
+    *err = "cannot create a temporary file beside " + target.string();
     return false;
   }
   bool ok = fill(f);
