@@ -53,8 +53,15 @@ python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 | `RCCL_LIB` | `$RCCL_BUILD/librccl.so` | library to inspect |
 | `RCCL_BUILD` | `<rccl>/build/release`, else `build/debug` | RCCL build dir |
 | `ROCM_PATH` | `/opt/rocm` | ROCm install root |
+| `RCCL_LL_GUARD_REQUIRED` | unset | `1`: fail instead of skip if the library, tools or a checked arch are missing |
 
 The whole suite skips if the library or tools are missing.
+
+## CI
+
+- The TheRock RCCL build job (`.github/workflows/therock-rccl-ci-linux.yml`)
+  runs the full suite on the built `librccl.so` with `RCCL_LL_GUARD_REQUIRED=1`.
+- `test/host/run_host_tests.sh guards` runs the detector tests (`-m detector`).
 
 ## When it fails
 

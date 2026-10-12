@@ -20,10 +20,13 @@ its arch. It needs a built RCCL and the ROCm LLVM tools, but no GPU.
   RCCL_LIB    path to librccl.so  (default: $RCCL_BUILD/librccl.so)
   RCCL_BUILD  RCCL build dir      (default: <rccl>/build/{release,debug})
   ROCM_PATH   ROCm install root   (default: /opt/rocm)
+  RCCL_LL_GUARD_REQUIRED=1  fail instead of skip when the library, tools or a
+                            checked arch are missing (for CI)
 """
 
 import functools
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,6 +47,7 @@ _DEFAULT_BUILD = next((d for d in (RCCL_ROOT / "build" / "release",
 RCCL_BUILD = Path(os.environ.get("RCCL_BUILD", _DEFAULT_BUILD))
 RCCL_LIB = Path(os.environ.get("RCCL_LIB", RCCL_BUILD / "librccl.so"))
 ROCM_PATH = os.environ.get("ROCM_PATH", "/opt/rocm")
+REQUIRED = os.environ.get("RCCL_LL_GUARD_REQUIRED") == "1"
 
 # ---------------------------------------------------------------------------
 # Modifiers every LL poll load must carry, per arch, as printed by
@@ -61,23 +65,34 @@ EXPECTED_POLL_MODIFIERS = {
 MAX_REPORTED = 10
 
 
+def _skip(reason):
+    # In CI a skip reads as a pass, so the guard must not quietly not run.
+    if REQUIRED:
+        pytest.fail(reason + " [RCCL_LL_GUARD_REQUIRED=1]")
+    pytest.skip(reason)
+
+
 @functools.lru_cache(maxsize=None)
 def _toolchain():
     tc = ll_isa.Toolchain(ROCM_PATH)
     missing = tc.missing()
     if missing:
-        pytest.skip(f"ROCm LLVM tools not found in {tc.bindir}: {missing} "
-                    "(set ROCM_PATH)")
+        _skip(f"ROCm LLVM tools not found in {tc.bindir}: {missing} "
+              "(set ROCM_PATH)")
     return tc
 
 
 @pytest.fixture(scope="session")
 def fatbin(tmp_path_factory):
     if not RCCL_LIB.is_file():
-        pytest.skip(f"librccl.so not found at {RCCL_LIB} "
-                    "(build RCCL, or set RCCL_BUILD / RCCL_LIB)")
+        _skip(f"librccl.so not found at {RCCL_LIB} "
+              "(build RCCL, or set RCCL_BUILD / RCCL_LIB)")
     out = str(tmp_path_factory.mktemp("fatbin") / "librccl.hip_fatbin")
-    _toolchain().extract_fatbin(str(RCCL_LIB.resolve()), out)
+    try:
+        _toolchain().extract_fatbin(str(RCCL_LIB.resolve()), out)
+    except subprocess.CalledProcessError as e:
+        # e.g. a packaged lib whose device code was split out (kpack).
+        _skip(f"no device code in {RCCL_LIB}: {e.stderr.strip()}")
     return out
 
 
@@ -85,6 +100,9 @@ def fatbin(tmp_path_factory):
 def targets(fatbin):
     found = _toolchain().targets(fatbin)
     assert found, f"no amdgcn device code found in {RCCL_LIB}"
+    if not set(found) & set(EXPECTED_POLL_MODIFIERS):
+        _skip(f"{RCCL_LIB} has none of the checked arches "
+              f"{sorted(EXPECTED_POLL_MODIFIERS)}, only {sorted(found)}")
     return found
 
 
