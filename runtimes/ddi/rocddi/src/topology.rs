@@ -166,7 +166,7 @@ pub(crate) struct TopologyKey {
     pub(crate) member: u32,
 }
 
-/// Provider-local directed link. Host classification is explicit rather than
+/// Driver-local directed link. Host classification is explicit rather than
 /// inferred from an operating-system node or GPU identifier.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MemoryLink {
@@ -196,14 +196,14 @@ pub struct GpuQueueCapabilities {
     pub aql_system_cache_control: bool,
     /// Direct native PM4 transport is implemented for this endpoint.
     pub pm4: bool,
-    /// Bounded DRM-mediated PM4 submission is qualified for this endpoint.
+    /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
     pub kernel_pm4: bool,
     /// System-memory release/acquire through PM4 cache controls is qualified
     /// for this endpoint and host architecture.
     pub pm4_system_cache_control: bool,
     /// Direct monotonic-64-bit SDMA transport is implemented.
     pub sdma: bool,
-    /// Bounded DRM-mediated SDMA submission is qualified for this endpoint.
+    /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
     pub kernel_sdma: bool,
     /// System-memory release/acquire through the selected SDMA protocol is
     /// qualified for this endpoint and host architecture.
@@ -247,7 +247,7 @@ pub struct GpuInfo {
     pub maximum_wave_count_per_compute_unit: u32,
     /// Maximum number of address watchpoints reported by the backend.
     pub maximum_address_watch_point_count: u32,
-    /// Native context-save scratch-wave bound per compute unit.
+    /// Hardware context-save scratch-wave bound per compute unit.
     pub maximum_scratch_wave_count_per_compute_unit: u32,
     /// LDS bytes per compute unit.
     pub local_data_share_byte_length: u64,
@@ -270,7 +270,7 @@ pub struct GpuInfo {
     /// SDMA firmware revision reported by the backend.
     pub sdma_firmware_version: u32,
     /// Maximum persisting L2 cache reservation in bytes reported by topology.
-    /// Zero means the native provider did not report support.
+    /// Zero means the native driver did not report support.
     pub persisting_l2_cache_size_max: u32,
     /// GPU queue transports qualified by the current backend.
     pub queues: GpuQueueCapabilities,
@@ -293,13 +293,13 @@ impl GpuInfo {
     }
 }
 
-/// Presentation metadata obtained by the active native provider. This is
+/// Presentation metadata obtained by the active native driver. This is
 /// separate from the stable compute target and endpoint identity.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GpuPresentation {
     /// Optional marketing name for display to applications.
     pub product_name: Option<String>,
-    /// ASIC family from a qualified provider source, falling back to topology.
+    /// ASIC family from a qualified driver source, falling back to topology.
     pub asic_family_id: u32,
     /// GPU timestamp frequency in hertz from the DRM render node, if reported.
     pub gpu_counter_frequency_hz: Option<u64>,
@@ -333,7 +333,7 @@ pub enum EndpointKind {
 /// to backing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Endpoint {
-    /// Provider-scoped opaque native identity.
+    /// Opaque platform identity, unique among endpoints in one session.
     pub id: [u8; 16],
     /// UTF-8 diagnostic name with NUL termination.
     pub name: [u8; 128],
@@ -363,8 +363,8 @@ pub struct Endpoint {
     pub(crate) caches: Option<Shared<Buffer<CacheInfo>>>,
     pub(crate) memory_links: Option<Shared<Buffer<MemoryLink>>>,
     pub(crate) topology_key: TopologyKey,
-    pub(crate) provider_instance: u64,
-    pub(crate) native: driver::EndpointSelector,
+    pub(crate) driver_instance: u64,
+    pub(crate) selector: driver::EndpointSelector,
 }
 
 impl Endpoint {
@@ -393,7 +393,7 @@ impl Endpoint {
     #[doc(hidden)]
     #[must_use]
     pub fn memory_link_to(&self, owner: &Self) -> Option<MemoryLinkInfo> {
-        if self.provider_instance != owner.provider_instance {
+        if self.driver_instance != owner.driver_instance {
             return None;
         }
         self.memory_links.as_ref().and_then(|links| {
@@ -437,7 +437,7 @@ impl Endpoint {
     /// construct this endpoint record.
     #[must_use]
     pub fn can_access_local_memory(&self, owner: &Self) -> bool {
-        self.provider_instance == owner.provider_instance
+        self.driver_instance == owner.driver_instance
             && ((self.topology_key == owner.topology_key)
                 || self
                     .memory_link_to(owner)
