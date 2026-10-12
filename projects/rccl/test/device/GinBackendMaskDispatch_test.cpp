@@ -249,10 +249,10 @@ protected:
     return d_records_.copyTo();
   }
 
-  // Exactly one backend stub ran, once.
-  static void expectOnlyCalled(const std::vector<PutRecord>& records, int slot) {
+  // Exactly one backend stub ran, calls times.
+  static void expectOnlyCalled(const std::vector<PutRecord>& records, int slot, int calls = 1) {
     for (int i = 0; i < kNumSlots; ++i) {
-      EXPECT_EQ(records[i].calls, i == slot ? 1 : 0) << "slot " << i;
+      EXPECT_EQ(records[i].calls, i == slot ? calls : 0) << "slot " << i;
     }
   }
 
@@ -307,6 +307,7 @@ protected:
   static void uploadMultiSegmentWindow(DeviceBuffer<ncclWindow_vidmem>& d_win, DeviceBuffer<ncclSegmentWindow>& d_segs,
                                        uintptr_t defaultToken, uint32_t offset4K,
                                        const std::vector<SegmentSpec>& specs) {
+    ASSERT_LE(specs.size(), d_segs.count);
     std::vector<ncclSegmentWindow> segs(d_segs.count);
     for (size_t i = 0; i < specs.size(); ++i) {
       for (int c = 0; c < NCCL_GIN_MAX_CONNECTIONS; ++c) {
@@ -322,18 +323,12 @@ protected:
     d_win.upload(win);
   }
 
-  static void expectOnlyCalledTimes(const std::vector<PutRecord>& records, int slot, int calls) {
-    for (int i = 0; i < kNumSlots; ++i) {
-      EXPECT_EQ(records[i].calls, i == slot ? calls : 0) << "slot " << i;
-    }
-  }
-
   // The slot's per-call log holds exactly the expected chunks; only the last one carries the signal and counter.
   static void expectChunks(const std::vector<PutRecord>& records, int slot, const PutArgs& args,
                            const std::vector<ExpectedChunk>& chunks, ncclGinSignalType lastSignalType,
                            ncclGinSignalOp_t signalOp, uint64_t signalOpArg, bool strongSignals, bool lastHasCounter) {
     ASSERT_LE(chunks.size(), static_cast<size_t>(kMaxLoggedCalls));
-    expectOnlyCalledTimes(records, slot, static_cast<int>(chunks.size()));
+    expectOnlyCalled(records, slot, static_cast<int>(chunks.size()));
     for (size_t i = 0; i < chunks.size(); ++i) {
       SCOPED_TRACE(::testing::Message() << "chunk " << i);
       const PutRecord& rec = records[logIndex(slot, static_cast<int>(i))];
@@ -448,10 +443,10 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutChunksAcrossSegmentsAndEscalat
   constexpr uintptr_t kD0 = 0xD50100, kD1 = 0xD50200, kD2 = 0xD50300, kD3 = 0xD50400;
   // Segment 0 of each window is skipped, so the start offsets resolve to (1, 60) and (1, 150).
   ASSERT_NO_FATAL_FAILURE(
-      uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, kSrcOffset4K,
+      uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/0,
                                {{kS0, 40, kNuma}, {kS1, 100, kDev}, {kS2, 300, kNuma}, {kS3, 50, kNuma}}));
   ASSERT_NO_FATAL_FAILURE(
-      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, kDstOffset4K,
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0,
                                {{kD0, 80, kDev}, {kD1, 200, kDev}, {kD2, 290, kDev}, {kD3, 100, kDev}}));
   PutArgs args = defaultArgs();
   args.srcOff = 40 + 60;
@@ -476,10 +471,10 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutChunksAcrossSegmentsAndEscalat
 TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutWithoutHostNumaKeepsRequiredOnFirstChunkOnly) {
   constexpr uintptr_t kS0 = 0x5C1100, kS1 = 0x5C1200, kS2 = 0x5C1300;
   constexpr uintptr_t kD0 = 0xD51100;
-  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, kSrcOffset4K,
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/0,
                                                    {{kS0, 64, kDev}, {kS1, 64, kDev}, {kS2, 64, kDev}}));
   ASSERT_NO_FATAL_FAILURE(
-      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, kDstOffset4K, {{kD0, 1000, kDev}}));
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0, {{kD0, 1000, kDev}}));
   PutArgs args = defaultArgs();
   args.srcOff = 32;
   args.dstOff = 500;
@@ -503,6 +498,49 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutWithoutHostNumaKeepsRequiredOn
     expectChunks(records, kEfaSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_NONE, static_cast<ncclGinSignalOp_t>(0),
                  /*signalOpArg=*/0, /*strongSignals=*/true, /*lastHasCounter=*/true);
   }
+}
+
+// Offsets exactly on segment boundaries start in the next segment; a >= in findSegmentFromWindow adds a 0-byte chunk.
+TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutStartingOnSegmentBoundaries) {
+  constexpr uintptr_t kS0 = 0x5C2100, kS1 = 0x5C2200, kS2 = 0x5C2300;
+  constexpr uintptr_t kD0 = 0xD52100, kD1 = 0xD52200;
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/0,
+                                                   {{kS0, 64, kDev}, {kS1, 64, kDev}, {kS2, 64, kDev}}));
+  ASSERT_NO_FATAL_FAILURE(
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0, {{kD0, 100, kDev}, {kD1, 100, kDev}}));
+  PutArgs args = defaultArgs();
+  args.srcOff = 64;
+  args.dstOff = 100;
+  args.bytes = 100;
+  const std::vector<ExpectedChunk> chunks = {
+      {kD1, 0, kS1, 0, 64, args.required},
+      {kD1, 64, kS2, 0, 36, cuda::thread_scope_thread},
+  };
+  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
+      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
+  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+               /*strongSignals=*/true, /*lastHasCounter=*/false);
+}
+
+// Segments are registered from the allocation base, but the multi-segment branch looks up the window offset alone.
+TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyIgnoresWindowOffset4K) {
+  constexpr uintptr_t kS0 = 0x5C3100, kS1 = 0x5C3200;
+  constexpr uintptr_t kD0 = 0xD53100;
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/1,
+                                                   {{kS0, 4096, kDev}, {kS1, 4096, kNuma}}));
+  ASSERT_NO_FATAL_FAILURE(
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0, {{kD0, 1000, kDev}}));
+  PutArgs args = defaultArgs();
+  args.srcOff = 100;
+  args.dstOff = 0;
+  args.bytes = 200;
+  // BUG: findSegmentFromWindow gets srcOffset, not 4096 * ginOffset4K + srcOffset, so it reads seg 0; correct is below.
+  const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS0, 100, 200, args.required}};
+  // const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS1, 100, 200, cuda::thread_scope_system}};
+  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
+      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
+  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+               /*strongSignals=*/true, /*lastHasCounter=*/false);
 }
 
 }  // namespace
