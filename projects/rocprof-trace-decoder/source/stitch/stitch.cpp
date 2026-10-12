@@ -413,6 +413,8 @@ void Stitcher::stitch(WaveDataInternal& wave)
     wave.instructions_array = wave.instructions.data();
     wave.timeline_size = wave.timeline.size();
     wave.timeline_array = wave.timeline.data();
+    wave.execmask = wave.popcnt.size() ? wave.popcnt.data() : nullptr;
+    wave.execmask_size = wave.popcnt.size();
 
     if (!wave.bIsComplete)
         for (auto& inst : wave.instructions) wave.end_time = std::max(wave.end_time, inst.time + inst.duration + 4);
