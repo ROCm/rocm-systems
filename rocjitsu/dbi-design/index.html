@@ -1425,6 +1425,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kernel-entry-prologue-and-framework-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel-entry prologue and framework storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kernel-entry prologue and framework storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reserved-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserved storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prologue-words" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prologue words
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-kernarg-wrapper-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The kernarg wrapper contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fail-closed-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail-closed list
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#testing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2350,6 +2422,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#kernel-entry-prologue-and-framework-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel-entry prologue and framework storage
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Kernel-entry prologue and framework storage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reserved-storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reserved storage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prologue-words" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prologue words
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Placement
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-kernarg-wrapper-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The kernarg wrapper contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fail-closed-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail-closed list
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#testing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2555,7 +2699,7 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 <hr />
 <h2 id="supporting-modules">Supporting Modules<a class="headerlink" href="#supporting-modules" title="Permanent link">&para;</a></h2>
 <h3 id="code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher (<code>code/patch/code_object_patcher.h</code>) [shared with DBT]<a class="headerlink" href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt" title="Permanent link">&para;</a></h3>
-<p>Owns ELF-level mutations. The DBI orchestrator reads the original payload via <code>text_bytes()</code>, assembles the new <code>.text</code> locally (each anchor spliced in place, then the probe bodies, the entry prologue if there is one, and every trampoline appended after the original bytes with <code>append_words()</code>), and applies it with a single <code>replace_text()</code> before <code>emit()</code> returns the patched ELF buffer. When a site spills, the orchestrator also calls <code>set_private_segment_fixed_size(descriptor_file_offset, SpillManager::total_private_bytes())</code> to grow the kernel's scratch reservation to cover the DBI spill zone before <code>replace_text</code>. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside <code>.text</code> as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain <code>.text</code>-relative bytes in <code>[text_size, text_size + cave_bytes)</code>.</p>
+<p>Owns ELF-level mutations. The DBI orchestrator reads the original payload via <code>text_bytes()</code>, assembles the new <code>.text</code> locally (each anchor spliced in place, then the probe bodies, the entry prologue if there is one, and every trampoline appended after the original bytes with <code>append_words()</code>), and applies it with a single <code>replace_text()</code>. A patch carrying an entry prologue then adds its <code>.rocjitsu.kernarg</code> record through <code>append_nonalloc_section()</code>, and <code>emit()</code> returns the patched ELF buffer. When a site spills, the orchestrator also calls <code>set_private_segment_fixed_size(descriptor_file_offset, SpillManager::total_private_bytes())</code> to grow the kernel's scratch reservation to cover the DBI spill zone before <code>replace_text</code>. The patcher accepts any well-formed mutation request; layout decisions stay in the orchestrator. Trampolines live inside <code>.text</code> as a local code cave (the same layout DBT uses) rather than a separate section, so cave offsets are plain <code>.text</code>-relative bytes in <code>[text_size, text_size + cave_bytes)</code>.</p>
 <h3 id="instruction-builder-codebuildersinstruction_builderh-shared-with-dbt">Instruction Builder (<code>code/builders/instruction_builder.h</code>) [shared with DBT]<a class="headerlink" href="#instruction-builder-codebuildersinstruction_builderh-shared-with-dbt" title="Permanent link">&para;</a></h3>
 <p>ISA-parameterized helpers for encoding common instructions (<code>s_branch</code>, <code>s_nop</code>, <code>s_mov_b32</code>/<code>s_mov_b64</code>, <code>s_cselect_b32</code>, <code>s_getpc_b64</code>, <code>s_swappc_b64</code>, etc.) and the SOPP branch math (<code>compute_sopp_branch_simm16</code>). Used by both the trampoline builder and the DBT code-cave path. SOPP format is identical across AMDGPU generations but opcodes differ; always go through these helpers, never hardcode opcodes. (Moved from <code>code/patch/</code> to <code>code/builders/</code> alongside <code>spill_builders.h</code>.)</p>
 <h3 id="spill-builders-codebuildersspill_buildersh-dbi-only">Spill Builders (<code>code/builders/spill_builders.h</code>) [DBI-only]<a class="headerlink" href="#spill-builders-codebuildersspill_buildersh-dbi-only" title="Permanent link">&para;</a></h3>
@@ -2612,7 +2756,7 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 <p>Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5, whose vector operands resolve only from a block where <code>MODE.VGPR_MSB</code> is known zero, which an anchor does not guarantee; relative (<code>v_movrel*</code>) or GPR-indexed (<code>MODE.GPR_IDX_EN</code>) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the <code>s_movrel*</code> family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one <code>.text</code>, or a body outside it, since <code>BasicBlock::build()</code> decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable <code>.text</code>; and an entry offset that starts no decoded block.</p>
 <h3 id="spillmanager">SpillManager<a class="headerlink" href="#spillmanager" title="Permanent link">&para;</a></h3>
 <p><strong>Files:</strong> <code>code/patch/spill_manager.h</code>, <code>code/patch/spill_manager.cpp</code></p>
-<p>Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after; the orchestrator writes the bumped <code>total_private_bytes()</code> back into the descriptor (see <a href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher</a>). Not consumed by the inline-nop pipeline. Slots are laid out above the kernel's existing scratch via the shared <code>PrivateSegmentCursor</code> (an aligned, overflow-safe byte-range allocator, defined inline in <code>spill_manager.h</code>), so DBI slots can start above DBT's high-water mark when both passes run.</p>
+<p>Per-kernel scratch-layout planner for DBI spill/fill slots. Probe-call trampolines use it to reserve byte offsets within per-lane scratch where saved SGPRs / VGPRs / AccVGPRs go before a probe runs and from which they are restored after; the orchestrator writes the bumped <code>total_private_bytes()</code> back into the descriptor (see <a href="#code-object-patcher-codepatchcode_object_patcherh-shared-with-dbt">Code Object Patcher</a>). Not consumed by the inline-nop pipeline. Slots are laid out above the kernel's existing scratch via the shared <code>PrivateSegmentCursor</code> (an aligned, overflow-safe byte-range allocator, defined inline in <code>spill_manager.h</code>), so DBI slots can start above DBT's high-water mark when both passes run. Note that a DBT output already carrying a <code>.rocjitsu.kernarg</code> extension cannot take a prologue-bearing patch, for the reason given under <a href="#the-kernarg-wrapper-contract">the wrapper contract</a>.</p>
 <h4 id="responsibilities_1">Responsibilities<a class="headerlink" href="#responsibilities_1" title="Permanent link">&para;</a></h4>
 <ul>
 <li>Reserve a "DBI spill zone" appended above the kernel's existing <code>private_segment_fixed_size</code>, aligned to 16 bytes.</li>
@@ -2734,12 +2878,56 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 <p>The planner also reserves, from the same dead-SGPR pool bounded by <code>ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count)</code> (below a CDNA kernel's special-register tail), a temp per preserved special register (an even pair for EXEC/VCC, a single for M0) and — for SGPR spills — a bridge VGPR from the kernel's ordinary-VGPR range (<code>min(kernel_vgpr_count, accum_base)</code>, so it can never alias an AccVGPR). EXEC is reserved whenever the site spills, not just when the probe clobbers it, because the store/load run under a forced full mask.</p>
 <p>The instrumentor does <strong>not yet grow the kernel's SGPR count</strong>, so the kernel must already allocate through <code>s31</code> (and through any special-state/bridge temps). Until auto-growth lands, the hardware smoke test instruments a register-padded fixture kernel (<code>vector_add_probe.hip</code>, <code>.sgpr_count</code> ≥ 32). Resource policy fails closed when the probe body reads a register its convention does not supply, when the link pair is live at the anchor, when a site passes more argument dwords than <code>kMaxProbeArgVgprs</code>, when the argument VGPRs fall outside the kernel's ordinary-VGPR bound, when a site passes arguments but no single kernel descriptor was discovered to derive that bound from, when a non-empty <code>probe_args</code> accompanies an inline-nop point, when no dead target pair or required temp is available within the kernel's ordinary SGPRs, when the probe clobbers FLAT_SCRATCH (the spill store/load depend on it), when the kernel has zero scratch or is one of several kernels, when a spill offset exceeds the arch's scratch-offset field, (for SGPR spills) when no dead bridge VGPR exists in the ordinary-VGPR range, or (for AccVGPR spills) when the target has no AccVGPR file (<code>arch_has_accvgpr</code> is false) or an AccVGPR index falls outside the descriptor-derived accumulator window (<code>kernel_vgpr_count − accum_base</code>). The spill set itself is <code>instrument_clobbers ∩ live_at_anchor</code> and is spilled, not rejected.</p>
 <hr />
+<h2 id="kernel-entry-prologue-and-framework-storage">Kernel-entry prologue and framework storage<a class="headerlink" href="#kernel-entry-prologue-and-framework-storage" title="Permanent link">&para;</a></h2>
+<p>A probe at an arbitrary site cannot be handed a runtime value, because no register holding a launch value survives that far: the kernarg segment pointer is dead within a handful of instructions in every compiled kernel measured. A value a probe needs must therefore be captured at kernel entry and parked where per-site register selection cannot take it. That is what <code>code/patch/entry_prologue.h</code> provides, and <code>ProbeArgSource::LogBufferPtrLo</code> / <code>LogBufferPtrHi</code> are what read it back.</p>
+<h3 id="reserved-storage">Reserved storage<a class="headerlink" href="#reserved-storage" title="Permanent link">&para;</a></h3>
+<p><code>plan_dbi_entry_storage</code> picks one aligned run of <code>kDbiEntryStorageRegisters</code> (4) SGPRs: a <strong>persistent pair</strong> written at entry and read at every later site, plus an <strong>entry-only temp pair</strong> live just inside the prologue. Four rather than two because the prologue restores the guest's kernarg pointer, which needs somewhere to stage the reload; dropping the restore would free the temp pair without re-opening storage selection.</p>
+<p>The floor is <code>dbi_entry_storage_floor</code>: <code>explicit_ordinary_sgpr_bound</code> over every block reachable from the entry, folded with the descriptor's user-SGPR block and its enabled system SGPRs. It is <strong>deliberately not <code>COMPUTE_PGM_RSRC1</code>'s SGPR count</strong>, which is an allocation total whose tail can hold VCC, flat scratch, XNACK and granularity padding, so starting there can land in special-SGPR territory. The run must fit the kernel's existing allocation, below <code>ordinary_sgpr_bound</code> (which excludes the CDNA special-register tail); the allocation is not grown, and a kernel with no room fails closed.</p>
+<p><code>explicit_ordinary_sgpr_bound</code> walks explicit operands, so it cannot see an M0-displaced scalar write. <code>plan_dbi_entry_storage</code> therefore fails closed on any <code>s_movrel*</code> in the kernel (<code>accesses_sgprs_indirectly_via_movrel</code>). DBT's <code>reserve_cdna3_virtual_lds_base_sgpr_pair</code> derives its floor from the same scan and does not apply that gate.</p>
+<p><strong>Storage avoids what the probes clobber.</strong> <code>compute_probe_reserved_registers</code> unions every probe body's ordinary clobbers with the link pair each returns through, and that set constrains selection. Unioned over <em>every</em> probe on the object, not only the ones reading the pointer, because the pair has to survive from entry to each later site either way. Without it, a probe whose body happened to use the chosen pair would fail at its every site with nothing the caller could do, since a body's clobber set is a property of the body rather than of the anchor.</p>
+<h3 id="prologue-words">Prologue words<a class="headerlink" href="#prologue-words" title="Permanent link">&para;</a></h3>
+<p><code>build_dbi_entry_prologue</code> emits, for storage <code>s[res:res+3]</code> and kernarg pair <code>s[karg:karg+1]</code>:</p>
+<div class="highlight"><pre><span></span><code>s_load_dwordx2 s[res  :res+1], s[karg:karg+1], payload_offset
+s_load_dwordx2 s[res+2:res+3], s[karg:karg+1], original_ptr_offset
+s_waitcnt lgkmcnt(0)                  ; s_wait_kmcnt 0 on RDNA4
+s_mov_b32 s[karg  ], s[res+2]
+s_mov_b32 s[karg+1], s[res+3]
+</code></pre></div>
+<p>Both loads precede the restore because the CP delivers a pointer to the rocjitsu wrapper and the restore overwrites it, after which nothing in the wrapper is reachable. The temp pair exists because the second load cannot name the kernarg pair as both destination and address. The wait sits ahead of the <strong>restore</strong>, not merely ahead of the reads below it, because the restore writes the SBASE both loads are still in flight against.</p>
+<p>The kernarg pair is the loads' address operand while the storage pairs are their destinations, so the two ride different SMEM fields of different widths (<code>kMaxSmemSbase</code> 126, <code>kMaxSmemSdata</code> 127) and are range-checked against the field each actually occupies.</p>
+<h3 id="placement">Placement<a class="headerlink" href="#placement" title="Permanent link">&para;</a></h3>
+<p><code>Instrumentor::plan_entry_prologue</code> synthesizes a site at the kernel's entry offset and runs it through the ordinary <code>make_base_plan</code> + <code>TrampolineBuilder::build</code> path, so the entry becomes an anchor like any other and its original instruction runs from the cave after the prologue words. There is no second entry-patch mechanism. DBT's <code>append_relocated_kernel_text</code> is not reusable here: it reserves a NOP-padded stub in a freshly built <code>.text</code> ahead of a relocated body, and DBI splices in place, so there is no delta to rebase and no room ahead of the entry. The cave becomes <code>[probe bodies][entry prologue][trampolines]</code>.</p>
+<p>The prologue is <strong>not idempotent</strong>: it is reached by any transfer to the entry offset and destroys the wrapper pointer on the way out. Nothing currently rejects a kernel whose control flow can return to the entry.</p>
+<h3 id="the-kernarg-wrapper-contract">The kernarg wrapper contract<a class="headerlink" href="#the-kernarg-wrapper-contract" title="Permanent link">&para;</a></h3>
+<p>The offsets the prologue bakes in come from <code>make_kernarg_extension_layout(desc.kernarg_size, {kDbiEntryPayloadLayout})</code>: a byte-for-byte copy of the guest's kernarg image, then the guest's own kernarg pointer, then the 8-byte DBI payload. Copying the prefix is what keeps CP kernarg preloads and source kernarg offsets valid.</p>
+<p>On the success path the instrumentor writes a <code>.rocjitsu.kernarg</code> record under variant <code>kDbiKernargVariantName</code> (<code>"dbi"</code>) with one payload named <code>kDbiEntryPayloadName</code> (<code>"dbi-log-buffer"</code>), so a runtime can build a conforming wrapper without reproducing the prologue's arithmetic. Records are keyed by <code>(kernel_name, variant_name)</code>, which discriminates within one serialized payload rather than across sections: the loader-side reader stops at the first section of this name, so the instrumentor refuses an object that already carries one.</p>
+<p><strong>The patched descriptor's <code>kernarg_size</code> is deliberately left at the guest's own size</strong>, unlike DBT, which grows it to the wrapper size when it declares an extension. Nothing here allocates a wrapper either: the record states the contract, and the runtime that honours it is not in this change. Until it lands, both prologue loads address past the end of a real kernarg allocation, so <code>Instrumentor::patch()</code> refuses every <code>LogBufferPtr*</code> argument. <code>patch_with_debug_summaries()</code> still plans the prologue for callers that supply the wrapper themselves, which is how the simulator tests work: the harness hands the CP a wrapper directly.</p>
+<p><code>kernarg_segment_ptr_slot</code> and <code>CommandProcessor::init_wavefront_regs</code> walk the user-SGPR enable-bit order independently, and the CP interleaves register writes with its walk so it cannot call the helper. <code>tests/dbi/kernarg_sgpr_slot_test.cpp</code> dispatches every combination to pin the agreement; a drift would have the prologue load from an unrelated pair with no fault and every unit test still green.</p>
+<h3 id="fail-closed-list">Fail-closed list<a class="headerlink" href="#fail-closed-list" title="Permanent link">&para;</a></h3>
+<p>Each aborts the whole patch with its own diagnostic. The four the planner raises also name the probe that required a prologue, since nothing in the kernel asked for one and the message would otherwise read as unprompted:</p>
+<ul>
+<li>the kernel preloads kernargs (<code>kernarg_preload != 0</code>). A CDNA3/CDNA4 kernel compiled with preloading has two hardware entries 256 bytes apart, and splicing only the descriptor entry would leave the reserved pair uninitialized on the firmware path. Preloading is opt-in, so no realistic workload pays today</li>
+<li>a multi-kernel code object, or no discovered SGPR allocation</li>
+<li>a descriptor with no <code>ENABLE_SGPR_KERNARG_SEGMENT_PTR</code></li>
+<li>a kernel entry that does not decode, is not a relocatable anchor, or sits inside an <code>s_clause</code> run</li>
+<li>a code object that already declares a kernarg extension</li>
+<li>a queued point whose bytes overlap the kernel entry</li>
+<li>any <code>s_movrel*</code> in the kernel</li>
+<li>from <code>patch()</code>, any <code>LogBufferPtr*</code> argument at all</li>
+<li>no aligned run left after excluding the probes' clobbers</li>
+<li>storage that is misaligned, out of SMEM field range, not one contiguous run, or overlapping the kernarg pair</li>
+<li>a wrapper offset past the target's SMEM immediate range</li>
+</ul>
+<hr />
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Unit (<code>tests/patch/instrumentor_test.cpp</code>):</strong> Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for <code>is_relocatable_anchor</code>), inline-nop plan guardrail, <code>make_trampoline_plan</code>, end-to-end <code>patch()</code> on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), the spill formula, per-class spill planning (<code>plan_vgpr/sgpr/acc_spills</code> — ascending slots, class/arch/offset-cap rejections, the kernel-VGPR-count bridge bound), the drain ordering (<code>expect_drain_before_store</code> / <code>expect_drain_after_return</code>), EXEC/VCC/M0 preservation (incl. unconditional EXEC/VCC), the probe declaration contract (two points disagreeing on argument count, argument sources, or mask policy are each rejected; two points agreeing on all three share one copied body; two points differing only in their immediate <em>values</em> also share one body while each trampoline materializes its own constant), the Wave32/Wave64 <code>AnchorExecHi</code> pair (rejected on a Wave32 kernel, accepted on a Wave64 one), and the fail-closed cases (FLAT_SCRATCH clobber, zero-scratch, SGPR temp past the kernel allocation, arguments past the kernel's ordinary-VGPR bound).</li>
+<li><strong>Unit (<code>tests/patch/instrumentor_test.cpp</code>):</strong> Validator coverage (each rejection path on synthetic anchors, including the bounds-overflow regression for <code>is_relocatable_anchor</code>), inline-nop plan guardrail, <code>make_trampoline_plan</code>, end-to-end <code>patch()</code> on a synthetic ELF (expected anchor splice + trampoline layout + reparse), a decoded round-trip of every word in the emitted trampoline, the probe-call path (probe body copied once and the trampoline call targets it), the spill formula, per-class spill planning (<code>plan_vgpr/sgpr/acc_spills</code> — ascending slots, class/arch/offset-cap rejections, the kernel-VGPR-count bridge bound), the drain ordering (<code>expect_drain_before_store</code> / <code>expect_drain_after_return</code>), EXEC/VCC/M0 preservation (incl. unconditional EXEC/VCC), the probe declaration contract (two points disagreeing on argument count, argument sources, or mask policy are each rejected; two points agreeing on all three share one copied body; two points differing only in their immediate <em>values</em> also share one body while each trampoline materializes its own constant), the Wave32/Wave64 <code>AnchorExecHi</code> pair (rejected on a Wave32 kernel, accepted on a Wave64 one), and the fail-closed cases (FLAT_SCRATCH clobber, zero-scratch, SGPR temp past the kernel allocation, arguments past the kernel's ordinary-VGPR bound). For the entry prologue: the orchestrator-level gates, the cave layout (the region between the probe bodies and the site trampoline holds both loads at the declared offsets, the restores, and the wait ordered ahead of them, with the storage pair recovered from the argument <code>v_mov</code> so the assertion is that the prologue wrote the pair the site reads), the <code>.rocjitsu.kernarg</code> round trip, and three storage-selection cases: the run moves off a probe's clobbers, exhausting every aligned run fails closed, and the exclusion covers a probe that never reads the pair.</li>
 <li><strong>Spill sim e2e (<code>tests/dbi/dbi_spill_sim_test.cpp</code>):</strong> Runs the full <code>s_swappc</code> envelope + spill bracket through <code>DbiSim</code> and reads back registers after execution, each with a negative control that nops the restore. Fixtures cover VGPR, SGPR (VGPR-bridged), two-SGPR, reused-spilled-bridge, AccVGPR (CDNA), combined VGPR+SGPR+ACC, EXEC preserve (wave32 partial mask), full-mask EXEC-widen spill, and probe-runs-under-anchor-mask — parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong> (AGPR is CDNA-only).</li>
 <li><strong>Mask sim e2e (<code>tests/dbi/dbi_mask_sim_test.cpp</code>):</strong> The only suite whose kernel narrows <code>EXEC</code> before the anchor (<code>s_mov_b64 exec, 3</code>), which is what makes the policy observable at all. A probe writing a sentinel into a dead observation VGPR reaches lanes 0..1 under the default policy and every lane under <code>force_full_exec</code>, so the two cases are each other's control. That pair runs in two envelope shapes: with no arguments the full-mask window never opens, so the masked probe inherits an untouched <code>EXEC</code>; with an argument in a live <code>v0</code> the window opens, <code>v0</code> spills, and the masked case additionally exercises the anchor-mask restore that <code>force_full_exec</code> is defined by skipping. Mask-as-value cases pass <code>AnchorExecLo</code> (all targets) and both dwords (Wave64 only, asserting <code>{3, 0}</code> against a preset register so the zero high dword is not vacuous), and the Wave32 target asserts the <code>AnchorExecHi</code> rejection instead — which is what makes its Wave32 descriptor load-bearing rather than decorative. A further pair covers a probe that narrows <code>EXEC</code> and returns without putting it back, at a site with a live argument VGPR: the post-call re-widen is the only thing that lets the spill reload reach the lanes the probe switched off, and no other probe here exercises it (they all return with <code>EXEC</code> already <code>-1</code>, where the re-widen is a no-op). Two negative controls, each nopping one <code>exec, -1</code> write: without the opening widen the full-exec probe falls back to the anchor's lanes, and without the re-widen the reload strands every lane the probe switched off. Parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong>.</li>
 <li><strong>Argument sim e2e (<code>tests/dbi/dbi_arg_sim_test.cpp</code>):</strong> Runs a probe call that passes an argument at an anchor where the argument register <code>v0</code> is <em>live</em>, so one execution covers the whole chain — argument VGPRs into <code>builder_clobbers</code>, into the spill set, argument write, probe read, restore. Asserts both halves out of one dispatch: the probe received the value the site passed, and the guest's <code>v0</code> survived carrying it. Negative control nops the two <code>v_mov_b32 v0, &lt;literal&gt;</code> words and requires the probe to read the guest's value instead. Parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong>. Shares <code>test::DbiSim</code> (<code>tests/dbi/dbi_sim.h</code>) with the spill suite; note that harness dispatches its own descriptor with the full register file, so the register-ownership gates are exercised at patch time only.</li>
+<li><strong>Entry-prologue sim e2e (<code>tests/dbi/dbi_entry_prologue_sim_test.cpp</code>):</strong> The only suite that <em>runs</em> the prologue. Two kernels, because its two halves are observed differently. The delivery kernel destroys the kernarg SGPR pair before the anchor, which is what makes the reason for the prologue observable rather than assumed: a probe that still receives the payload pointer received it from the framework's storage and not from a register that happened to survive. Emitting the argument from the kernarg pair instead of the reserved pair fails it on all three targets. The restore kernel reads the pair back into VGPRs after the anchor, which both observes the restore and keeps the pair live there, since dead registers are what the call envelope takes for its own temps. Two negative controls: nopping the payload <code>s_load_dwordx2</code> must stop the pointer arriving, and nopping the two restore moves must leave the guest seeing the CP's wrapper pointer. Call-and-return variants of both kernels put an <code>s_call_b64</code> to a helper returning through <code>s_setpc_b64</code> ahead of the anchor, so the storage and the restored kernarg pointer are shown to survive a call and an indirect return. The wrapper image is built through <code>write_kernarg_extension_wrapper</code>, so the offsets loaded from are the ones a runtime would write. Parameterized across <strong>CDNA3, CDNA4, and RDNA4</strong>, though <code>DbiSim</code> dispatches Wave64 on all three; the prologue is pure scalar, so nothing here turns on the executing wave size. <strong>No nop-the-wait control:</strong> the simulator retires scalar loads synchronously, so it would fail to fail. Separately, <code>build_s_load_dwordx2</code> always sets RDNA4's SMEM <code>soffset</code> to NULL, so although the model reads that field nothing exercises a non-NULL value. Both need hardware.</li>
+<li><strong>CP kernarg placement (<code>tests/dbi/kernarg_sgpr_slot_test.cpp</code>):</strong> Pins <code>CommandProcessor::init_wavefront_regs</code>'s user-SGPR walk against <code>kernarg_segment_ptr_slot</code> by dispatching all eight combinations of the properties preceding the kernarg pointer. Each case writes the expected slot as a literal and asserts both sides independently, so neither computes the other; a ninth case checks the adjacent pairs are clear. A consistency check between two in-tree copies of the AMDHSA contract, not a conformance check against hardware.</li>
+<li><strong>Unit (<code>tests/patch/entry_prologue_test.cpp</code>):</strong> The storage planner and the prologue words on their own: the floor rule (operand scan vs ABI block, disabled workgroup dimensions), run placement above the floor and below the reserved link pair, the emitted word vector, and the rejections the orchestrator never reaches -- kernarg preload, a non-contiguous run, a run overlapping the kernarg pair, an odd or out-of-field pair base, and a wrapper offset past the target's SMEM immediate. Also the one case where the kernarg pair is not at s[0:1], which is what keeps the SBASE plumbing honest.</li>
 <li><strong>Unit (<code>tests/code/kernel_descriptor_scan_test.cpp</code>):</strong> Single-kernel scan, and the malformed-ELF rejections (unterminated <code>.kd</code> name, section-header-table / symtab-range overflow, descriptor crossing its owning section).</li>
 <li><strong>Unit (<code>tests/patch/trampoline_builder_test.cpp</code>):</strong> Builder byte-layout contract, branch math, arch-honoring opcode selection, INT16 limit boundary cases.</li>
 <li><strong>Unit (<code>tests/patch/instruction_builder_test.cpp</code>):</strong> <code>compute_sopp_branch_simm16</code> boundary / alignment / overflow / negative-unaligned-delta.</li>
