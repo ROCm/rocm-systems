@@ -52,10 +52,10 @@ void ReportActivity(const amd::Command& command) {
   if (operation_id >= OP_ID_NUMBER) {
     // hipEventRecord enqueues an EventMarker with command type 0 (internal marker) rather than
     // CL_COMMAND_MARKER, so OperationId() can't classify it. It still dispatches a real barrier
-    // packet carrying a GPU timestamp (marker_ts_), so report it as a barrier to surface
+    // packet with a signal of its own (signal_required_), so report it as a barrier to surface
     // event-record sync points on the GPU timeline. Generic internal markers (batch-flush) have
-    // marker_ts_ == false and stay unreported.
-    if (command.type() == 0 && command.profilingInfo().marker_ts_) {
+    // signal_required_ == false and stay unreported.
+    if (command.type() == 0 && command.profilingInfo().signal_required_) {
       operation_id = OP_ID_BARRIER;
     } else {
       // This command does not translate into a profiler activity (dispatch, memcopy, etc...),
