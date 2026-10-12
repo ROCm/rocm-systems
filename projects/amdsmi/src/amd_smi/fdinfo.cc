@@ -43,6 +43,56 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
   return false;
 }
 
+auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
+                               amdsmi_proc_info_t* info) -> amdsmi_status_t {
+  DIR* d = opendir(fdinfo_dir.c_str());
+  if (d == nullptr) return AMDSMI_STATUS_NO_PERM;
+
+  // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
+  // client's usage, so count each drm-client-id once.
+  std::unordered_set<uint64_t> clients;
+  while (const dirent* dir = readdir(d)) {
+    if (dir->d_name[0] == '.') continue;
+    // Opened through the directory already open, not by its path again, so a
+    // PID reused during the scan cannot switch these reads to another process.
+    const int fd = openat(dirfd(d), dir->d_name, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) continue;
+    FILE* fdinfo = fdopen(fd, "r");
+    if (fdinfo == nullptr) {
+      close(fd);
+      continue;
+    }
+    char fd_bdf_str[13] = "";
+    bool has_client = false;
+    uint64_t client = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
+    char* l = nullptr;
+    size_t l_size = 0;
+    while (::getline(&l, &l_size, fdinfo) > 0) {
+      if (sscanf(l, "drm-pdev: %12s", fd_bdf_str) == 1) continue;
+      if (sscanf(l, "drm-client-id: %" SCNu64, &client) == 1) {
+        has_client = true;
+        continue;
+      }
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-vram:", &vram)) continue;
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-gtt:", &gtt)) continue;
+      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-cpu:", &cpu)) continue;
+      if (sscanf(l, "drm-engine-gfx: %" SCNu64, &gfx) == 1) continue;
+      if (sscanf(l, "drm-engine-enc: %" SCNu64, &enc) == 1) continue;
+    }
+    free(l);
+    fclose(fdinfo);
+    if (bdf != fd_bdf_str) continue;
+    if (has_client && !clients.insert(client).second) continue;
+    info->memory_usage.vram_mem += vram;
+    info->memory_usage.gtt_mem += gtt;
+    info->memory_usage.cpu_mem += cpu;
+    info->engine_usage.gfx += gfx;
+    info->engine_usage.enc += enc;
+  }
+  closedir(d);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 extern "C" {
 
 amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
@@ -126,8 +176,6 @@ amdsmi_status_t gpu_is_in_kfd_pid(const amdsmi_bdf_t& bdf, long pid, uint64_t kn
 amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
                                      amdsmi_proc_info_t& info, uint64_t kfd_gpu_id) {
   char bdf_str[13];
-  DIR* d;
-  struct dirent* dir;
 
   /* 0000:00:00.0 */
   snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
@@ -150,54 +198,10 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
     }
   }
 
-  d = opendir(path.c_str());
-  if (!d) return AMDSMI_STATUS_NO_PERM;
-
   memset(&info, 0, sizeof(info));
-  // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
-  // client's usage, so count each drm-client-id once.
-  std::unordered_set<uint64_t> clients;
-  while ((dir = readdir(d)) != NULL) {
-    if (dir->d_name[0] == '.') continue;
-    // Opened through the directory already open, not by its path again, so a
-    // PID reused during the scan cannot switch these reads to another process.
-    const int fd = openat(dirfd(d), dir->d_name, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) continue;
-    FILE* fdinfo = fdopen(fd, "r");
-    if (fdinfo == nullptr) {
-      close(fd);
-      continue;
-    }
-    char fd_bdf_str[13] = "";
-    bool has_client = false;
-    uint64_t client = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
-    char* l = nullptr;
-    size_t l_size = 0;
-    while (::getline(&l, &l_size, fdinfo) > 0) {
-      if (sscanf(l, "drm-pdev: %12s", fd_bdf_str) == 1) continue;
-      if (sscanf(l, "drm-client-id: %" SCNu64, &client) == 1) {
-        has_client = true;
-        continue;
-      }
-      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-vram:", &vram)) continue;
-      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-gtt:", &gtt)) continue;
-      if (smi_amdgpu_parse_drm_memory(l, "drm-memory-cpu:", &cpu)) continue;
-      if (sscanf(l, "drm-engine-gfx: %" SCNu64, &gfx) == 1) continue;
-      if (sscanf(l, "drm-engine-enc: %" SCNu64, &enc) == 1) continue;
-    }
-    free(l);
-    fclose(fdinfo);
-    if (strncmp(bdf_str, fd_bdf_str, sizeof(fd_bdf_str)) != 0) continue;
-    if (has_client && !clients.insert(client).second) continue;
-    info.memory_usage.vram_mem += vram;
-    info.memory_usage.gtt_mem += gtt;
-    info.memory_usage.cpu_mem += cpu;
-    info.engine_usage.gfx += gfx;
-    info.engine_usage.enc += enc;
-  }
+  ret = smi_amdgpu_sum_drm_fdinfo(path, bdf_str, &info);
+  if (ret != AMDSMI_STATUS_SUCCESS) return ret;
   info.mem = info.memory_usage.vram_mem + info.memory_usage.gtt_mem + info.memory_usage.cpu_mem;
-
-  closedir(d);
 
   //  Note: If possible at all, try to get the name of the process/container.
   //        In case the other info fail, get at least something.
