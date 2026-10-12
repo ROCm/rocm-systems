@@ -70,7 +70,7 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         const char* _name = nullptr;
         if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::no_timemory>{},
+            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
                                       std::string_view{ _name }, _args...);
         }
     }
@@ -115,7 +115,7 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
         const char* _name = nullptr;
         if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::no_timemory>{},
+            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
                                       std::string_view{ _name }, _args...);
         }
     }

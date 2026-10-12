@@ -37,6 +37,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
   now an unknown-argument error); the `tracing.legacy` key was removed from JSON
   configuration export.
+- Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
+  values) are no longer attached to Perfetto slices. They will be available through the
+  timemory output formats.
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
 

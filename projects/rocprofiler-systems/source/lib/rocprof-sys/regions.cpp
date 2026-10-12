@@ -4,9 +4,9 @@
 #include "api.hpp"
 #include "core/categories.hpp"
 #include "core/config.hpp"
+#include "library/annotation.hpp"
 #include "library/components/category_region.hpp"
 #include "library/tracing.hpp"
-#include "library/tracing/annotation.hpp"
 #include "rocprofiler-systems/categories.h"
 
 #include <cstdint>

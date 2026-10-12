@@ -16,7 +16,6 @@
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/tracing/annotation.hpp"
 #include <cstdint>
 
 #include <charconv>
@@ -464,7 +463,7 @@ namespace tim::quirk
 struct causal : concepts::quirk_type
 {};
 
-struct no_timemory : concepts::quirk_type
+struct cache_only : concepts::quirk_type
 {};
 
 struct timemory : concepts::quirk_type
