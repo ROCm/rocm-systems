@@ -749,7 +749,7 @@
       }
       fields.set(name, line.slice(colon + 1).trim());
     }
-    var heading = lines[0].match(/^(\[[^\]]+\])\s*(.*)$/);
+    var heading = lines[0].match(/^\[([^\]]+)\]\s*(.*)$/);
     var measured = fields.get("Measured").replace(/\s*\(threshold:\s*[^)]*\)\s*$/, "");
     return [heading ? heading[1] : "", heading ? heading[2] : lines[0],
       fields.get("Impact"), fields.get("Condition"), measured];
