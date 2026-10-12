@@ -16,9 +16,11 @@
 #   2. lib/build-ompi.sh      build OpenMPI (--with-rocm) -> ompi.env
 #   3. lib/build-rocshmem.sh  build rocSHMEM (IPC+SDMA)   -> rocshmem.env
 #   4. projects/rccl  install.sh  build RCCL (GIN/rocSHMEM), then build
-#      rccl-UnitTestsFixtures, the ConnCheck host/device tests, and
-#      rccl-UnitTestsGinSdmaBroadcastPolicy
-#      (GIN_ANVIL_UNIT_TESTS=ON) -> rccl.env
+#      rccl-UnitTestsFixtures, the ConnCheck host/device tests,
+#      rccl-UnitTestsGinSdma{Broadcast,ReduceScatter}Policy,
+#      rccl-UnitTestsGinSdmaReduceScatterGpu, and
+#      rccl-UnitTestsGinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)
+#      -> rccl.env
 #   5. projects/rccl-tests        build rccl-tests (DEVICE_API + ROCSHMEM)
 #   6. rccl-UnitTestsGinAnvilSdmaFactory  SDMA factory gtest (single-node)
 #   7. run-gin-ci.sh              run the GIN/rocSHMEM tests (non-gating)
@@ -122,6 +124,8 @@ rccl_fixtures_bin="${rccl_build}/test/rccl-UnitTestsFixtures"
 rccl_conn_plugin_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilPlugin"
 rccl_conn_device_bin="${rccl_build}/test/rccl-UnitTestsGinAnvilConnCheckDevice"
 rccl_bcast_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaBroadcastPolicy"
+rccl_rs_policy_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaReduceScatterPolicy"
+rccl_rs_gpu_ut_bin="${rccl_build}/test/rccl-UnitTestsGinSdmaReduceScatterGpu"
 rm -rf "${rccl_prefix}"
 (
   cd "${rccl_src}"
@@ -200,7 +204,7 @@ assert_conn_check_kernels_in_fatbin() {
 assert_conn_check_kernels_in_fatbin "${librccl}"
 echo "    conn-check kernels present in ${librccl} .hip_fatbin"
 
-echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, and GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
+echo "==> [4/7] build fixtures, ConnCheck, GinSdma{Broadcast,ReduceScatter}Policy, ReduceScatterGpu, and GinAnvilSdmaFactory (GIN_ANVIL_UNIT_TESTS=ON)"
 (
   cd "${rccl_build}"
   cmake . \
@@ -212,6 +216,8 @@ echo "==> [4/7] build fixtures, ConnCheck, GinSdmaBroadcastPolicy, and GinAnvilS
     rccl-UnitTestsGinAnvilPlugin \
     rccl-UnitTestsGinAnvilConnCheckDevice \
     rccl-UnitTestsGinSdmaBroadcastPolicy \
+    rccl-UnitTestsGinSdmaReduceScatterPolicy \
+    rccl-UnitTestsGinSdmaReduceScatterGpu \
     rccl-UnitTestsGinAnvilSdmaFactory
 )
 if [[ ! -x "${rccl_fixtures_bin}" ]]; then
@@ -229,10 +235,22 @@ if [[ ! -x "${rccl_conn_plugin_bin}" || ! -x "${rccl_conn_device_bin}" ]]; then
   ls -la "${rccl_build}/test" 2>/dev/null >&2 || true
   exit 1
 fi
+if [[ ! -x "${rccl_rs_policy_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinSdmaReduceScatterPolicy not built at ${rccl_rs_policy_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_rs_policy_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_rs_gpu_ut_bin}" ]]; then
+  echo "ERROR: rccl-UnitTestsGinSdmaReduceScatterGpu not built at ${rccl_rs_gpu_ut_bin}" >&2
+  ls -la "$(dirname "${rccl_rs_gpu_ut_bin}")" 2>/dev/null >&2 || true
+  exit 1
+fi
 echo "    rccl-UnitTestsFixtures: ${rccl_fixtures_bin}"
 echo "    rccl-UnitTestsGinSdmaBroadcastPolicy: ${rccl_bcast_policy_ut_bin}"
 echo "    rccl-UnitTestsGinAnvilPlugin: ${rccl_conn_plugin_bin}"
 echo "    rccl-UnitTestsGinAnvilConnCheckDevice: ${rccl_conn_device_bin}"
+echo "    rccl-UnitTestsGinSdmaReduceScatterPolicy: ${rccl_rs_policy_ut_bin}"
+echo "    rccl-UnitTestsGinSdmaReduceScatterGpu: ${rccl_rs_gpu_ut_bin}"
 
 # Locate the in-tree RCCL CMake package config. rccl-tests' find_package(RCCL)
 # otherwise resolves roc::rccl to the nightly ROCm (its toolchain prepends
@@ -274,6 +292,11 @@ if [[ ! -x "${rccl_tests_build}/alltoall_perf" ]]; then
 fi
 if [[ ! -x "${rccl_tests_build}/broadcast_perf" ]]; then
   echo "ERROR: broadcast_perf not built under ${rccl_tests_build}" >&2
+  ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
+  exit 1
+fi
+if [[ ! -x "${rccl_tests_build}/reduce_scatter_perf" ]]; then
+  echo "ERROR: reduce_scatter_perf not built under ${rccl_tests_build}" >&2
   ls -la "${rccl_tests_build}" 2>/dev/null >&2 || true
   exit 1
 fi
