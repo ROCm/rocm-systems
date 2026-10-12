@@ -85,6 +85,7 @@ function(rccl_define_micro_source_lists)
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
     rasnet-test.cc                       # src/ras/rasnet.cc
+    ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
     ras-param-test.cc                    # src/ras/ras_param.cc
@@ -824,6 +825,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
     RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
     RASNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/rasnet.cc"
+    RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
     RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
     RAS_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras_param.cc"
