@@ -1,0 +1,42 @@
+# HRR test configuration. Every case the binary registers has an entry here.
+# An empty entry runs on every OS and GPU architecture.
+#
+# A skip rule matches when every key under "when" matches (a list is OR, a
+# missing key matches anything, and a value may be a glob such as gfx11*).
+# kind: disabled is a temporary regression and requires a public issue URL.
+# kind: unsupported is permanent and needs only a reason.
+#
+# Regenerate the case names from a built binary with:
+#   hrr_test_config.py check --binary <exe> --config <this file> --update
+# Listing needs no GPU. Say so in the commit message when the set changes.
+version: 1
+suite: unit
+binary: hrr-unit-tests
+select: "*"
+targets:
+  os: [linux, windows]
+  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
+cases:
+  Unit_HRR_AllocKind_FreeDispatch: {}
+  Unit_HRR_Format_BadMagic: {}
+  Unit_HRR_Format_EventTypeName: {}
+  Unit_HRR_Format_HashHex: {}
+  Unit_HRR_Format_Roundtrip: {}
+  Unit_HRR_Format_SmallPayloadForType: {}
+  Unit_HRR_Format_TruncatedEvent: {}
+  Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
+  Unit_HRR_Playback_VersionOption: {}
+  Unit_HRR_Playback_ZeroInitDrainGuard: {}
+  Unit_HRR_Recovery_CompleteArchive: {}
+  Unit_HRR_Recovery_ImplausiblePayloadLength: {}
+  Unit_HRR_Recovery_MultiProcessRootInfo: {}
+  Unit_HRR_Recovery_NoTrailer: {}
+  Unit_HRR_Recovery_RepairWritesProcessManifest: {}
+  Unit_HRR_Recovery_TornHeader: {}
+  Unit_HRR_Recovery_TornPayload: {}
+  Unit_HRR_TranslatePtr_ExactMatch: {}
+  Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
+  Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}
+  Unit_HRR_TranslatePtr_TightestEnclosing: {}
+  Unit_HRR_TranslatePtr_Zero_ReturnsNull: {}
