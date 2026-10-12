@@ -22,6 +22,15 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
   case ncclSymkKernelId_AllGather_STMC:
   case ncclSymkKernelId_ReduceScatter_LDMC:
     return divUp((comm->minCompCap < 100 ? 16 : 32), comm->nRanks);
+  case ncclSymkKernelId_AllReduce_AGxNaN_R:
+  case ncclSymkKernelId_AllReduce_AGxTmaNaN_R:
+    // Measured on gfx1250 (96 CUs): every size slows past 192 blocks.
+    return 192;
+  case ncclSymkKernelId_AllGather_NaN:
+  case ncclSymkKernelId_AllGather_TmaNaN:
+  case ncclSymkKernelId_ReduceScatter_NaN:
+  case ncclSymkKernelId_ReduceScatter_TmaNaN:
+    return ncclSymkNanMaxBlocks;
   default:
     return ncclSymkMaxBlocks;
   }
@@ -64,7 +73,10 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   // minCTAs/maxCTAs are resolved (env > per-call > comm) at task-append time.
   // NCCL_SYM_CTAS is an explicit override of the resolved bounds.
   int nUserCTAs = ncclSymkModelCtasEnvOverride();
-  if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = nUserCTAs;
+  if (nUserCTAs > 0) {
+    int cap = (ncclSymkNanKernelMask() >> kernelId & 1) ? ncclSymkNanMaxBlocks : maxBlocksLsa(comm, kernelId);
+    nMinBlocks = nMaxBlocks = std::min(nUserCTAs, cap);
+  }
 
   // Even CTA counts are preferred for optimal performance, except for when CTAs==1.
   if (nMinBlocks != nMaxBlocks) {
@@ -103,6 +115,18 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   struct ncclSymkLsaEstimate selectedEstimate;
   if (!evaluateLsaEstimate(input, kernelId, nBytes, nMaxBlocks, &selectedEstimate)) return ncclSuccess;
   *nBlocks = nMaxBlocks;
+  // The NaN kernels' estimate is not monotonic in the block count (a block's epochs are
+  // quantized), so their reference is the best count rather than the widest.
+  if (ncclSymkNanKernelMask() >> kernelId & 1) {
+    for (int candidate = nMinBlocks; candidate < nMaxBlocks; candidate += candidate == 1 ? 1 : 2) {
+      struct ncclSymkLsaEstimate candidateEstimate;
+      if (evaluateLsaEstimate(input, kernelId, nBytes, candidate, &candidateEstimate) &&
+          candidateEstimate.ctaSelectionTimeUs < selectedEstimate.ctaSelectionTimeUs) {
+        selectedEstimate = candidateEstimate;
+        *nBlocks = candidate;
+      }
+    }
+  }
   float maxCtaSelectionTimeUs = static_cast<float>(selectedEstimate.ctaSelectionTimeUs);
   for (int candidate = nMinBlocks; candidate < nMaxBlocks; candidate += candidate == 1 ? 1 : 2) {
     struct ncclSymkLsaEstimate candidateEstimate;

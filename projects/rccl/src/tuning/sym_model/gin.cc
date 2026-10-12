@@ -110,7 +110,7 @@ ncclResult_t ncclSymkGinModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   nMinBlocks = std::min(nMinBlocks, nMaxBlocks);
   // NCCL_SYM_CTAS is an explicit override of the resolved bounds.
   int nUserCTAs = ncclSymkModelCtasEnvOverride();
-  if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = nUserCTAs;
+  if (nUserCTAs > 0) nMinBlocks = nMaxBlocks = std::min(nUserCTAs, ncclSymkMaxBlocks);
 
   *timeUs = FLT_MAX;
   *nBlocks = 0;

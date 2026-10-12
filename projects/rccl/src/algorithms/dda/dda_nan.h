@@ -23,13 +23,14 @@
 
 // RCCL_DDA_NAN_MAX_BLOCKS caps the grid; it cannot exceed the epoch cells. The
 // default is per path: on gfx1250 fabric the large calls scale with the grid up
-// to about 256 blocks; the IPC path was tuned at 64.
+// to 288 blocks, 3 per WGP (256 leaves 32 of the 96 WGPs a block short); the IPC
+// path was tuned at 64.
 static inline int rcclDdaNanMaxBlocks(const ncclComm* comm) {
   static const int env = [] {
     const char* s = ncclGetEnv("RCCL_DDA_NAN_MAX_BLOCKS");
     return s ? atoi(s) : 0;
   }();
-  const int v = env > 0 ? env : (comm->ddaNanFabricMemHandler != nullptr ? 256 : 64);
+  const int v = env > 0 ? env : (comm->ddaNanFabricMemHandler != nullptr ? 288 : 64);
   return v > dda::nan::kEpochCells ? dda::nan::kEpochCells : v;
 }
 

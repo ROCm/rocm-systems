@@ -23,7 +23,8 @@ static constexpr float disableTime = 1.e30f;
 int ncclSymkModelCtasEnvOverride() {
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
-  if (nUserCTAs > ncclSymkMaxBlocks) return ncclSymkMaxBlocks;
+  // Callers clamp to the kernel's own cap; the NaN kernels take more blocks than the rest.
+  if (nUserCTAs > ncclSymkNanMaxBlocks) return ncclSymkNanMaxBlocks;
   return static_cast<int>(nUserCTAs);
 }
 
@@ -59,7 +60,10 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
   // for Tma, so both keep it.
   bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> kernelId & 1;
   int nThreads = ncclSymkMaxThreads;
-  if (fullWidth) {
+  if (ncclSymkNanKernelMask() >> kernelId & 1) {
+    // Fixes the units per epoch, which every rank must agree on, and the TDM kernels' warp per peer.
+    nThreads = ncclSymkNanThreads;
+  } else if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
   } else if (ncclSymkIsGfx950(comm) && isLsa) {
     // The width tuning is fitted to the gfx950 LSA kernels.
@@ -94,14 +98,16 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
     return ncclSuccess;
   }
 
+  // [RCCL] The NaN-flag kernels, like LL, take a single work and move data through their own scratch.
+  uint32_t scratchKernelMask = ncclSymkLLKernelMask() | ncclSymkNanKernelMask();
   if ((inputs->nWorks > 1 &&
-       ((tuning_kmask & ncclSymkLLKernelMask()) != 0)) // We currently don't support grouping for LL kernels.
+       ((tuning_kmask & scratchKernelMask) != 0)) // We currently don't support grouping for LL kernels.
       || (inputs->func == ncclFuncAllReduce && inputs->winRegType != ncclSymSendRegRecvReg &&
-          (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+          (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg &&
-       inputs->winRegType != ncclSymSendNonregRecvReg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+       inputs->winRegType != ncclSymSendNonregRecvReg && (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncReduceScatter && inputs->winRegType != ncclSymSendRegRecvReg &&
-       inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+       inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg && inputs->comm->nNodes > 1 &&
        (tuning_kmask & ncclSymkGinKernelMask()) != 0)) {
     tuning->valid = 0;

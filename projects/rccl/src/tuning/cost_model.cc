@@ -286,6 +286,12 @@ Enable order: Broadcast, Reduce, AllGather, ReduceScatter, AllReduce
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}}, // ReduceScatter_LDMC
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}}, // ReduceScatter_RailA2A_LsaLD
   {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}}, // ReduceScatter_RailA2A_LsaLDMC
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}}, // AllGather_NaN
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 1, 0, 0}}, // AllGather_TmaNaN
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 1}}, // AllReduce_AGxNaN_R
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 0, 1}}, // AllReduce_AGxTmaNaN_R
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}}, // ReduceScatter_NaN
+  {nullptr, ncclTuningSymkModelSim, nullptr, {0, 0, 0, 1, 0}}, // ReduceScatter_TmaNaN
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}}, // CE AllGather Unicast
   {nullptr, ncclTuningCeModelSim, nullptr, {0, 0, 1, 0, 0}}, // CE AllGather Multicast
 };

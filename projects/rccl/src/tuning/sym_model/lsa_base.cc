@@ -47,6 +47,23 @@ struct rcclSymkTuningModel {
   double peakBw[rcclSymkCollCount];
   double llBusFactor[rcclSymkCollCount];
   double withinPeakFactor[rcclSymkCollCount][rcclSymkProtoCount];
+  // The NaN-flag kernels: latency (us), then bandwidth (GB/s of pushes per rank, the local one
+  // included) that each block adds up to a peak the blocks share, blended harmonically: a block's
+  // pushes are limited by the stores it keeps in flight, and every block's by the links. The
+  // two-shot AllReduce has its own. Pushing through the Tensor Data Mover speeds up blocks that
+  // take more than an epoch, and costs a little on the rest. Only a block per CU runs at once, so
+  // a grid past the CU count adds a wave.
+  double nanLat;
+  double nanBlockBw;
+  double nanPeakBw;
+  double nanTwoShotLat;
+  double nanTwoShotBlockBw;
+  double nanTwoShotPeakBw;
+  double nanTdmBwGain;
+  double nanTdmLat;
+  double nanEpochLat;
+  double nanExtraWaveLat;
+  double nanWithinPeakFactor;
 };
 
 // Default tuning model.
@@ -62,7 +79,18 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
   // The higher, the more conservative the model (less LL usage, more ST usage)
   .llBusFactor = {12.0, 4.0, 3.0},
   // The higher, the more conservative the model (less CTAs)
-  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.005}}
+  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.005}},
+  .nanLat = 7.0,
+  .nanBlockBw = 8.0,
+  .nanPeakBw = 350.0,
+  .nanTwoShotLat = 10.3,
+  .nanTwoShotBlockBw = 8.0,
+  .nanTwoShotPeakBw = 260.0,
+  .nanTdmBwGain = 1.15,
+  .nanTdmLat = 0.4,
+  .nanEpochLat = 8.0,
+  .nanExtraWaveLat = 3.5,
+  .nanWithinPeakFactor = 1.01,
 };
 
 // Alternate ReduceScatter tuning, selected with SYM_MODEL=1.
@@ -78,7 +106,18 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
   // The higher, the more conservative the model (less LL usage, more ST usage)
   .llBusFactor = {12.0, 4.0, 9.0},
   // The higher, the more conservative the model (less CTAs)
-  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.025}}
+  .withinPeakFactor = {{1.100, 1.005}, {1.015, 1.015}, {1.025, 1.025}},
+  .nanLat = 7.0,
+  .nanBlockBw = 8.0,
+  .nanPeakBw = 350.0,
+  .nanTwoShotLat = 10.3,
+  .nanTwoShotBlockBw = 8.0,
+  .nanTwoShotPeakBw = 260.0,
+  .nanTdmBwGain = 1.15,
+  .nanTdmLat = 0.4,
+  .nanEpochLat = 8.0,
+  .nanExtraWaveLat = 3.5,
+  .nanWithinPeakFactor = 1.01,
 };
 
 static constexpr struct rcclSymkTuningModel rcclSymkTuningModels[] = {rcclSymkTuningModel_0, rcclSymkTuningModel_1};
@@ -102,7 +141,7 @@ static int rcclSymkTuningModelIndex() {
 static const struct rcclSymkTuningModel& rcclSymkModelFor(enum ncclSymkKernelId kernelId, int* coll, int* proto) {
   bool isAR = ncclSymkARKernelMask() >> kernelId & 1;
   bool isAG = ncclSymkAGKernelMask() >> kernelId & 1;
-  bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
+  bool isLL = (ncclSymkLLKernelMask() | ncclSymkNanKernelMask()) >> kernelId & 1;
   *coll = static_cast<int>(isAR ? rcclSymkColl::AllReduce : isAG ? rcclSymkColl::AllGather : rcclSymkColl::ReduceScatter);
   *proto = static_cast<int>(isLL ? rcclSymkProto::LL : rcclSymkProto::Simple);
   return rcclSymkTuningModels[rcclSymkTuningModelIndex()];
@@ -110,7 +149,52 @@ static const struct rcclSymkTuningModel& rcclSymkModelFor(enum ncclSymkKernelId 
 
 double rcclSymkLsaWithinPeakFactor(enum ncclSymkKernelId kernelId) {
   int c, p;
-  return rcclSymkModelFor(kernelId, &c, &p).withinPeakFactor[c][p];
+  const struct rcclSymkTuningModel& m = rcclSymkModelFor(kernelId, &c, &p);
+  if (ncclSymkNanKernelMask() >> kernelId & 1) return m.nanWithinPeakFactor;
+  return m.withinPeakFactor[c][p];
+}
+
+static bool rcclSymkNanModel(struct ncclComm* comm, enum ncclSymkKernelId kernelId, size_t nBytes, int nBlocks,
+                             struct ncclSymkLsaEstimate* estimate) {
+  int c, p;
+  const struct rcclSymkTuningModel& m = rcclSymkModelFor(kernelId, &c, &p);
+  constexpr double GBps = 1.e9 / 1.e6;
+  // nBytes is the whole buffer for AllReduce, a rank's part for AllGather and ReduceScatter.
+  double pushBytes = double(comm->nRanks) * nBytes;
+  double lat = m.nanLat, blockBw = m.nanBlockBw, peakBw = m.nanPeakBw;
+  if (rcclSymkNanTwoShot(kernelId, nBytes)) {
+    // Pushed with stores in either kernel.
+    pushBytes = 2.0 * nBytes;
+    lat = m.nanTwoShotLat;
+    blockBw = m.nanTwoShotBlockBw;
+    peakBw = m.nanTwoShotPeakBw;
+    if (rcclSymkNanTdm(kernelId)) lat += m.nanTdmLat;
+  } else {
+    // A block takes its part per source an epoch at a time, each waiting out the last, and past
+    // one epoch the partial last one costs about a full one.
+    constexpr double epochBytes = ncclSymkNanEpochUnits * 16.0;
+    size_t cells = divUp(nBytes, size_t(NCCL_SYM_KERNEL_CELL_SIZE));
+    double part = double(divUp(cells, size_t(nBlocks)) * NCCL_SYM_KERNEL_CELL_SIZE);
+    double epochs = std::ceil(part / epochBytes);
+    if (epochs > 1) {
+      pushBytes *= epochs * epochBytes * nBlocks / nBytes;
+      lat += (epochs - 1) * m.nanEpochLat;
+    }
+    if (rcclSymkNanTdm(kernelId)) {
+      if (epochs > 1) {
+        blockBw *= m.nanTdmBwGain;
+        peakBw *= m.nanTdmBwGain;
+      } else {
+        lat += m.nanTdmLat;
+      }
+    }
+  }
+  if (comm->cuCount > 0 && nBlocks > comm->cuCount) lat += m.nanExtraWaveLat;
+  double bw = GBps / (1.0 / (nBlocks * blockBw) + 1.0 / peakBw);
+  estimate->ctaSelectionTimeUs = lat + pushBytes / bw;
+  estimate->timeUs = static_cast<float>(estimate->ctaSelectionTimeUs);
+  estimate->selectionTimeUs = estimate->timeUs;
+  return std::isfinite(estimate->timeUs) && estimate->timeUs > 0.0f;
 }
 #endif
 
@@ -122,6 +206,9 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
   int nRanks = comm->nRanks;
   size_t busBytes; // max(bytes sent, bytes received)
   double busMultiplier = 1;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  if (ncclSymkNanKernelMask() >> kernelId & 1) return rcclSymkNanModel(comm, kernelId, nBytes, nBlocks, estimate);
+#endif
 
   switch (kernelId) {
   default:

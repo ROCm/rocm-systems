@@ -65,6 +65,14 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC,
 
+  // [RCCL] NaN-flag kernels (NCCL_PROTO=NaN), appended so the upstream ids keep their values.
+  ncclSymkKernelId_AllGather_NaN,
+  ncclSymkKernelId_AllGather_TmaNaN,
+  ncclSymkKernelId_AllReduce_AGxNaN_R,
+  ncclSymkKernelId_AllReduce_AGxTmaNaN_R,
+  ncclSymkKernelId_ReduceScatter_NaN,
+  ncclSymkKernelId_ReduceScatter_TmaNaN,
+
   ncclSymkKernelId_Count
 };
 
@@ -87,8 +95,35 @@ constexpr char const* ncclSymKernelStr[] = {
   "ReduceScatter_LD",
   "ReduceScatter_LDMC",
   "ReduceScatter_RailA2A_LsaLD",
-  "ReduceScatter_RailA2A_LsaLDMC"
+  "ReduceScatter_RailA2A_LsaLDMC",
+  "AllGather_NaN",
+  "AllGather_TmaNaN",
+  "AllReduce_AGxNaN_R",
+  "AllReduce_AGxTmaNaN_R",
+  "ReduceScatter_NaN",
+  "ReduceScatter_TmaNaN"
 };
+static_assert(sizeof(ncclSymKernelStr) / sizeof(ncclSymKernelStr[0]) == ncclSymkKernelId_Count,
+              "ncclSymKernelStr needs one name per ncclSymkKernelId");
+
+// [RCCL] Scratch of the NaN-flag kernels (src/device/symmetric/nan.cuh). A header line per block
+// carries the block's bank across launches, then each block owns a region of banks that rotate by
+// epoch. A bank holds a slot per source rank of ncclSymkNanEpochUnits 16 B units.
+constexpr int ncclSymkNanMaxRanks = 8;
+constexpr int ncclSymkNanBanks = 3;
+constexpr int ncclSymkNanThreads = 256;
+// Units each thread of the register path moves per source per epoch.
+constexpr int ncclSymkNanUnroll = 2;
+constexpr int ncclSymkNanEpochUnits = ncclSymkNanThreads * ncclSymkNanUnroll;
+// Above ncclSymkMaxBlocks: the large calls keep scaling with the grid, as the NaN DDA kernels do.
+constexpr int ncclSymkNanMaxBlocks = 256;
+constexpr size_t ncclSymkNanHeaderBytes = ncclSymkNanMaxBlocks * 16;
+constexpr size_t ncclSymkNanBlockBytes = size_t(ncclSymkNanBanks) * ncclSymkNanMaxRanks * ncclSymkNanEpochUnits * 16;
+constexpr size_t ncclSymkNanScratchBytes = ncclSymkNanHeaderBytes + ncclSymkNanMaxBlocks * ncclSymkNanBlockBytes;
+static_assert(ncclSymkNanHeaderBytes % 128 == 0, "the regions start on a line");
+// AllReduce calls of more bytes take the two-shot (a reduce-scatter epoch, then an all-gather
+// epoch) instead of pushing the whole buffer to every rank.
+constexpr size_t ncclSymkNanTwoShotMinBytes = size_t(128) << 10;
 
 struct ncclSymkDevComm {
   struct ncclDevComm devComm;
@@ -98,6 +133,8 @@ struct ncclSymkDevComm {
   struct ncclGinSyncHandle ginSyncHandle;
   ncclDevResourceHandle rsGinAccumBuf;
   uint32_t rsGinAccumBytesPerBlock;
+  // Allocated only under NCCL_PROTO=NaN; no NaN kernel is selected otherwise.
+  ncclDevResourceHandle nanBuf;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -108,6 +145,7 @@ struct ncclSymkDevComm {
 struct ncclSymkState {
   bool initialized;
   bool hasLsaMultimem;
+  bool hasNanScratch;
   int maxGinInboxBlocks;
   struct ncclSymkDevComm kcomm;
 };
@@ -228,6 +266,7 @@ int ncclSymkLsaKernelMask();
 int ncclSymkAGKernelMask();
 int ncclSymkARKernelMask();
 int ncclSymkRSKernelMask();
+int ncclSymkNanKernelMask();
 size_t ncclSymkRsGinChunkBytes();
 
 constexpr int ncclSymkAllGather_RailRing_ChunkSize = 1 << 20;

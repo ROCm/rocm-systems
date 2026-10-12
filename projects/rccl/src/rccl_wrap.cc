@@ -667,7 +667,10 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   if (kernelId == ncclSymkKernelId_Count) return false;
   *maxChannels = bestTuning.maxChannels;
   *algo = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
-  *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  if (ncclSymkNanKernelMask() & (1ull << kernelId))
+    *protocol = NCCL_PROTO_NAN;
+  else
+    *protocol = rcclSymkKernelIdIsLL((int)kernelId) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
   return true;
 }
 
@@ -1045,6 +1048,17 @@ static size_t rcclDdaNanCap(ncclComm* comm, ncclFunc_t func, size_t cap, bool na
   return std::max(cap, nanMax);
 }
 
+// Under NCCL_PROTO=NaN, symmetric-registered buffers take the symmetric NaN-flag kernels in
+// [RCCL_SYM_NAN_MIN, RCCL_SYM_NAN_MAX] bytes (the size each selector compares its arch thresholds
+// against; a negative max is unbounded), and the NaN DDA or ring kernels outside it. The arch
+// symMinR2/symMaxR2 thresholds were fitted to the other symmetric kernels and do not apply.
+RCCL_PARAM(SymNanMin, "SYM_NAN_MIN", 0);
+RCCL_PARAM(SymNanMax, "SYM_NAN_MAX", -1);
+static bool rcclSymNanInWindow(size_t bytes) {
+  const int64_t lo = rcclParamSymNanMin(), hi = rcclParamSymNanMax();
+  return bytes >= (size_t)std::max<int64_t>(lo, 0) && (hi < 0 || bytes <= (size_t)hi);
+}
+
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query, const char* prefix) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
@@ -1370,8 +1384,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     INFO(NCCL_TUNING, "AR CE-2shot/CE-registered disqualified: graph capture active (graphModeSeen=%d ceArGraphAllowed=%d)",
          (int)comm->ceColl.graphModeSeen, (int)rcclCeArGraphSafe(comm));
   const size_t msgBytes = count * ncclTypeSize(datatype);
-  // Under NCCL_PROTO=NaN, DDA, ring and tree each run their NaN-flag variant. GIN,
-  // CE and symk have none, so they are skipped.
+  // Under NCCL_PROTO=NaN, symk, DDA, ring and tree each run their NaN-flag variant.
+  // GIN and CE have none, so they are skipped.
   const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
   if (!rcclNcclAlgoEnvIsSet()) {
   #if defined(ENABLE_ROCSHMEM_GIN)
@@ -1413,10 +1427,10 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // implies recv is registered; when symkRequested=false suppression is moot.
     const size_t symMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncAllReduce, ceCapturing);
     const size_t symMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncAllReduce);
-    const bool symSuppressedByMax = msgBytes > symMaxR2;
-    const bool symSuppressedByMin = symMinR2 > 0 && msgBytes < symMinR2;
+    const bool symSuppressedByMax = !nanForced && msgBytes > symMaxR2;
+    const bool symSuppressedByMin = !nanForced && symMinR2 > 0 && msgBytes < symMinR2;
     const bool symkRequested =
-      !nanForced && (op == ncclSum) &&
+      (!nanForced || rcclSymNanInWindow(msgBytes)) && (op == ncclSum) &&
       isSymmetricKernelRequestedWin(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, count, sendWin, recvWin);
     // symSuppressedByMin: DDA wins below symMinR2[AR]; do not block it with symkRequested.
     const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
@@ -1621,7 +1635,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
     // (1) DDA fast paths. Symmetric-registered buffers defer to the symmetric
     // kernel (extracted downstream), so DDA is gated on !symEligible, as before.
-    const bool agSymkRequested = !nanForced &&
+    const bool agSymkRequested = (!nanForced || rcclSymNanInWindow(totalBytes)) &&
       isSymmetricKernelRequestedWin(comm, ncclFuncAllGather, (int)ncclDevSum, datatype, sendcount, sendWin, recvWin);
     // symMaxR2[AG] withdraws symk above a size threshold so CE-registered can win
     // (mirrors the AllReduce symSuppressedByMax pattern).
@@ -1631,8 +1645,8 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
     const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
     const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
-    const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
-    const bool agSymSuppressedBySize = agSymkRequested && totalBytes > agSymMaxR2;
+    const bool agSymSuppressedByMin  = agSymkRequested && !nanForced && agSymMinR2 > 0 && totalBytes < agSymMinR2;
+    const bool agSymSuppressedBySize = agSymkRequested && !nanForced && totalBytes > agSymMaxR2;
     const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
     if (!query && agSymkRequested && agSymSuppressedByMin)
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu < agSymMinR2=%zu", totalBytes, agSymMinR2);
@@ -1841,7 +1855,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   decision->protocol = NCCL_PROTO_SIMPLE;
   decision->nMaxChannels = 0;
 
-  // Under NCCL_PROTO=NaN, DDA and ring each run their NaN-flag variant; symk has none.
+  // Under NCCL_PROTO=NaN, symk, DDA and ring each run their NaN-flag variant.
   // Hierarchical and Direct ReduceScatter are multi-node only, where this is false,
   // and their intra-node legs pick NaN on their own.
   const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
@@ -1862,15 +1876,15 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     NCCLCHECK(ncclGetSymRegType(rsSendWin, rsRecvWin, &rsWinRegType));
     const rcclArchThresholds* const archTable = extAlgoArchTable(comm);
     const bool symkRequested =
-      !nanForced && (op == ncclSum || op == ncclAvg) &&
+      (!nanForced || rcclSymNanInWindow(totalBytes)) && (op == ncclSum || op == ncclAvg) &&
       isSymmetricKernelRequestedWin(comm, ncclFuncReduceScatter, (op == ncclAvg) ? (int)ncclDevSumPostDiv : (int)ncclDevSum,
                                     datatype, recvcount, rsSendWin, rsRecvWin);
     const size_t rsSymMinR2 = rcclSymMinR2CapTab(archTable, ncclFuncReduceScatter);
-    const bool symSuppressedByMin = symkRequested && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
+    const bool symSuppressedByMin = symkRequested && !nanForced && rsSymMinR2 > 0 && totalBytes < rsSymMinR2;
     // rsRecvRegistered dropped: isSymmetricKernelRequestedWin requires both windows
     // to carry NCCL_WIN_COLL_SYMMETRIC, so symkRequested=true implies recv registered.
     const size_t rsSymMaxR2 = rcclSymMaxR2CapTab(archTable, ncclFuncReduceScatter, /*graphMode=*/false);
-    const bool symSuppressedByMax = symkRequested && totalBytes > rsSymMaxR2;
+    const bool symSuppressedByMax = symkRequested && !nanForced && totalBytes > rsSymMaxR2;
     const bool symEligible = symkRequested && !symSuppressedByMin && !symSuppressedByMax;
     if (!query && symkRequested && symSuppressedByMin)
       INFO(NCCL_TUNING, "RS symk disqualified: totalBytes=%zu < rsSymMinR2=%zu", totalBytes, rsSymMinR2);

@@ -7,7 +7,9 @@
 
 #include "sym_kernels.h"
 #include "archinfo.h"
+#include "bootstrap.h"
 #include "comm.h"
+#include "rccl_common.h"
 #include "device.h"
 #include "nccl_device/core_tmp.h"
 #include "transport.h"
@@ -32,20 +34,36 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
                                    1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_ReduceScatter_LL;
 
+// [RCCL] NaN-flag kernels (NCCL_PROTO=NaN), and the ones among them that push through the Tensor
+// Data Mover. Kept out of kernelMask_Tma: they need no dynamic LDS and no 16-warp launch.
+constexpr uint32_t kernelMask_NaN = 1 << ncclSymkKernelId_AllGather_NaN | 1 << ncclSymkKernelId_AllGather_TmaNaN |
+                                    1 << ncclSymkKernelId_AllReduce_AGxNaN_R |
+                                    1 << ncclSymkKernelId_AllReduce_AGxTmaNaN_R |
+                                    1 << ncclSymkKernelId_ReduceScatter_NaN |
+                                    1 << ncclSymkKernelId_ReduceScatter_TmaNaN;
+constexpr uint32_t kernelMask_NaNTdm = 1 << ncclSymkKernelId_AllGather_TmaNaN |
+                                       1 << ncclSymkKernelId_AllReduce_AGxTmaNaN_R |
+                                       1 << ncclSymkKernelId_ReduceScatter_TmaNaN;
+
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_NaN | 1 << ncclSymkKernelId_AllGather_TmaNaN;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
                                    1 << ncclSymkKernelId_AllReduce_RSxLD_AGxST |
-                                   1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST;
+                                   1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
+                                   1 << ncclSymkKernelId_AllReduce_AGxNaN_R |
+                                   1 << ncclSymkKernelId_AllReduce_AGxTmaNaN_R;
 
 constexpr uint32_t kernelMask_RS = 1 << ncclSymkKernelId_ReduceScatter_LD | 1 << ncclSymkKernelId_ReduceScatter_LDMC |
                                    1 << ncclSymkKernelId_ReduceScatter_TmaLD | 1 << ncclSymkKernelId_ReduceScatter_LL |
                                    1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
-                                   1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC;
+                                   1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                   1 << ncclSymkKernelId_ReduceScatter_NaN |
+                                   1 << ncclSymkKernelId_ReduceScatter_TmaNaN;
 
 constexpr uint32_t kernelMask_LSA =
   1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -94,6 +112,10 @@ int ncclSymkARKernelMask() {
 
 int ncclSymkRSKernelMask() {
   return kernelMask_RS;
+}
+
+int ncclSymkNanKernelMask() {
+  return kernelMask_NaN;
 }
 
 // Host picker: true when nBytes is large enough for this kernel's TMA deep loop at nBlocks.
@@ -163,6 +185,28 @@ bool ncclSymkTmaForced(struct ncclComm* comm) {
   return ncclParamSymTmaEnable() >= 2 && ncclSymkTmaAvailable(comm);
 }
 
+// [RCCL] NCCL_PROTO=NaN takes the NaN-flag symmetric kernels where they apply. RCCL_SYM_NAN_ENABLE=0
+// leaves forced NaN to the NaN DDA and ring kernels instead. RCCL_SYM_NAN_TDM picks between the
+// kernels that push by vector stores and those that push through the Tensor Data Mover: 0 never TDM,
+// 1 always TDM where available, -1 (default) whichever the tuner predicts faster.
+RCCL_PARAM(SymNanEnable, "SYM_NAN_ENABLE", 1);
+RCCL_PARAM(SymNanTdm, "SYM_NAN_TDM", -1);
+
+// Readiness is "no dword is all-ones", which only these types guarantee. Keep in sync with nan_tys
+// in src/device/symmetric/generate.py.
+static bool rcclSymkNanDtype(ncclDataType_t ty) {
+  return ty == ncclFloat32 || ty == ncclFloat16 || ty == ncclBfloat16;
+}
+
+static bool rcclSymkNanTdmAvailable(struct ncclComm* comm) {
+#if defined(__HIP_PLATFORM_AMD__)
+  return TDM_TOOLCHAIN_AVAILABLE && comm->archName && IsArchMatch(comm->archName, "gfx1250");
+#else
+  (void)comm;
+  return false;
+#endif
+}
+
 static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
 static constexpr size_t ncclSymkRsGinMinChunkBytes = 128;
 static constexpr size_t ncclSymkRsGinMaxChunkBytes = size_t(1) << 30;
@@ -204,6 +248,27 @@ static void getRequirements_gin(struct ncclComm* comm, int* out_nBlocks, size_t*
 
 extern int64_t ncclParamSymCTAs();
 
+// The device runtime zeroes the resource window, and the NaN scratch has to read all-ones before any
+// peer pushes into it, hence the barrier.
+static ncclResult_t rcclSymkNanScratchInit(struct ncclComm* comm) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclDevComm const& dc = comm->symkState.kcomm.devComm;
+  char* local = (char*)nccl::utility::add4G(dc.resourceWindow_inlined.lsaFlatBase,
+                                            dc.lsaRank * dc.resourceWindow_inlined.stride4G);
+  local += (size_t)comm->symkState.kcomm.nanBuf * 128;
+  cudaStream_t stream = nullptr;
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+  CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), ret, exit);
+  CUDACHECKGOTO(cudaMemsetAsync(local, 0xFF, ncclSymkNanScratchBytes, stream), ret, exit);
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), ret, exit);
+  NCCLCHECKGOTO(bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, 0x4e614e), ret, exit);
+exit:
+  if (stream != nullptr) CUDACHECKIGNORE(cudaStreamDestroy(stream));
+  CUDACHECKIGNORE(cudaThreadExchangeStreamCaptureMode(&mode));
+  return ret;
+}
+
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // The block width tuning is fitted to gfx950 and must not reach other architectures. It sizes the
 // shared LL slots and blockDim, which peers must agree on, so every rank has to share this arch.
@@ -242,6 +307,17 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
                                &symk->kcomm.lsaLLA2A, &lla2aReq);
     lla2aReq.next = reqs.resourceRequirementsList;
     reqs.resourceRequirementsList = &lla2aReq;
+
+    struct ncclDevResourceRequirements nanReq = {};
+    symk->hasNanScratch = rcclParamSymNanEnable() && rcclNanProtoForced() && comm->nNodes == 1 &&
+                          ncclTeamLsa(comm).nRanks == comm->nRanks && comm->nRanks <= ncclSymkNanMaxRanks;
+    if (symk->hasNanScratch) {
+      nanReq.bufferSize = ncclSymkNanScratchBytes;
+      nanReq.bufferAlign = 128;
+      nanReq.outBufferHandle = &symk->kcomm.nanBuf;
+      nanReq.next = reqs.resourceRequirementsList;
+      reqs.resourceRequirementsList = &nanReq;
+    }
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
     struct ncclDevResourceRequirements ginOutboxReq = {};
@@ -291,6 +367,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
 
     NCCLCHECK(ncclDevrCommCreateInternal(comm, &reqs, &symk->kcomm.devComm, /*isInternal=*/true,
                                          /*deviceCodeVersion=*/NCCL_VERSION_CODE));
+    if (symk->hasNanScratch) NCCLCHECK(rcclSymkNanScratchInit(comm));
 
     // Dedicated sym profiler buffers, kept separate from the regular kernels' so the
     // sym workCounter never interleaves with device channels[].workCounter.
@@ -376,6 +453,22 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   }
   if (!hasSTMC) kmask &= ~kernelMask_STMC;
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
+
+  // [RCCL] Forced NaN takes only the NaN-flag kernels, and nothing else takes them. A NaN dtype they
+  // do not serve (f64) is left to the NaN DDA and ring kernels.
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, ty) && rcclNanProtoFunc(coll)) {
+    kmask &= kernelMask_NaN;
+    if (!comm->symkState.hasNanScratch || !rcclSymkNanDtype(ty)) kmask = 0;
+    // Their element counts and indices are 32-bit.
+    if (nElts * ncclTypeSize(ty) >= (size_t(2) << 30)) kmask = 0;
+    if (rcclParamSymNanTdm() == 0 || !rcclSymkNanTdmAvailable(comm)) {
+      kmask &= ~kernelMask_NaNTdm;
+    } else if (rcclParamSymNanTdm() == 1) {
+      kmask &= kernelMask_NaNTdm;
+    }
+  } else {
+    kmask &= ~kernelMask_NaN;
+  }
 
   size_t nBytes = alignUp(nElts * ncclTypeSize(ty), NCCL_SYM_KERNEL_CELL_SIZE);
   size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks) * nBytes;
