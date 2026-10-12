@@ -50,6 +50,7 @@
 
 // Fat binary format structs (ClangOffloadBundleUncompressedHeader, etc.)
 #include "../hip_code_object.hpp"
+#include "../hip_dispatch_slot.hpp"
 #include "../hip_platform.hpp"   // PlatformState::Instance()
 
 #include <algorithm>
@@ -2509,100 +2510,24 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
-namespace {
-
-// Other threads keep calling through the live dispatch tables while the shims go
-// in and out, so the tables are written one slot at a time with atomic operations
-// and never copied over as a whole. Outside Windows, function-pointer slots are
-// accessed through a may_alias view so the store is well-defined against the typed
-// table fields; MSVC does no type-based alias analysis and clang-cl disables it by
-// default.
-template <typename Table> constexpr size_t kDispatchSlots =
-    (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
-
-#if IS_WINDOWS
-struct DispatchSlot {
-  void* value;
-};
-
-void store_slot(DispatchSlot* slot, void* value) {
-  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
-}
-
-void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
-  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
-      expected, desired, std::memory_order_release, std::memory_order_relaxed);
-}
-#elif defined(__GNUC__) || defined(__clang__)
-struct DispatchSlot {
-  void* value;
-} __attribute__((__may_alias__));
-
-void store_slot(DispatchSlot* slot, void* value) {
-  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
-}
-
-void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
-  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
-                              __ATOMIC_RELAXED);
-}
-#else
-#error "Outside Windows, HRR dispatch slots need GCC or Clang"
-#endif
-
-template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
-  static_assert(sizeof(void (*)()) == sizeof(void*),
-                "dispatch slot atomics need function pointers the size of void*");
-  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
-                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
-                "layout must match HIP dispatch tables: size_t size then void* slots");
-  static_assert(sizeof(DispatchSlot) == sizeof(void*), "DispatchSlot must be a single pointer");
-  return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
-}
-
-// Unlike uninstall this does not compare first: a slot that changed since the
-// snapshot still gets its shim, or the archive would silently miss that API.
-template <typename Table>
-void install_shims(const Table* live, const Table& shims, const Table& real) {
-  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
-  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
-  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
-  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
-    if (shim[i].value != orig[i].value) store_slot(&slot[i], shim[i].value);
-  }
-}
-
-// A slot that another component changed after install keeps its new value.
-template <typename Table>
-void uninstall_shims(const Table* live, const Table& shims, const Table& real) {
-  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
-  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
-  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
-  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
-    if (shim[i].value != orig[i].value) replace_slot(&slot[i], shim[i].value, orig[i].value);
-  }
-}
-
-}  // namespace
-
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  install_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  hip::InstallDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
 }
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  hip::RemoveDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   // The compiler shims go as well, or a capture refused at init or in a forked
   // child keeps running them with capture off. Shutdown leaves them.
   if (g_compiler_installed.exchange(false))
-    uninstall_shims(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
-                    g_real_compiler_table);
+    hip::RemoveDispatchSlots(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
+                             g_real_compiler_table);
 }
 
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
   g_cap_compiler_table = shims;
-  install_shims(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
+  hip::InstallDispatchSlots(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
 }
 
 // ---------------------------------------------------------------------------
@@ -2778,7 +2703,7 @@ void hip_capture_shutdown() {
   // Only the runtime shims: the compiler table keeps its shims, so a fat binary
   // unregistered after this still goes through them, and the writer drops it.
   if (g_installed.exchange(false))
-    uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+    hip::RemoveDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

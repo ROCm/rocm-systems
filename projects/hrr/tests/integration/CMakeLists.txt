@@ -45,8 +45,9 @@
 # wrapped keeps its wrapper, nothing is recorded after the trailer, and a failed
 # blob write leaves the archive incomplete, in the parent only across fork().
 # A write that fails only when its file is closed does too, and a call made
-# after the trailer leaves no unreplayable API in the manifest.
-# It reaches the live dispatch table through rocprofiler-register, with
+# after the trailer leaves no unreplayable API in the manifest. It also covers
+# hipProfilerDisableExt(), which must leave a slot another tool changed alone.
+# It reaches the live dispatch tables through rocprofiler-register, with
 # hrr_dispatch_tool.cc as the tool library. Linux only.
 #
 # hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:

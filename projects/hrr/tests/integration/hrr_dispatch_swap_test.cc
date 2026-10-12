@@ -35,6 +35,12 @@
  *     afterwards writes its own archive and must still get its trailer, and
  *     the parent must keep capturing after fork().
  *
+ *   Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable:
+ *     A tool wraps one runtime slot and one compiler slot after
+ *     hipProfilerEnableExt(). hipProfilerDisableExt() must leave both wrappers
+ *     in place, restore every other slot, and not touch the size fields. Enabled
+ *     again, the profiler must not call back into the tool's wrappers.
+ *
  * The live dispatch table is reached through rocprofiler-register, the way a
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
  * Preloading the same library lets a workload act as the capture opens its
@@ -82,6 +88,7 @@ namespace {
 #define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
 #define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
 #define HRR_NO_TABLE_MARKER "HRR_NO_HIP_TABLE"
+#define HRR_PROFILER_MARKER "HRR_PROFILER_SWAP"
 
 // Big enough that the failing write is cut off by the file size limit, which
 // is set well below it and well above anything else the capture writes then.
@@ -418,6 +425,114 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// CLR profiler enable and disable
+// ---------------------------------------------------------------------------
+
+HipCompilerDispatchTable* tool_hip_compiler_table() {
+  using Fn = void* (*)();
+  auto fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_hip_compiler_table"));
+  return fn ? static_cast<HipCompilerDispatchTable*>(fn()) : nullptr;
+}
+
+using PushFn = decltype(HipCompilerDispatchTable::__hipPushCallConfiguration_fn);
+std::atomic<MemcpyFn> g_prof_next_memcpy{nullptr};
+std::atomic<PushFn> g_prof_next_push{nullptr};
+
+hipError_t tool_hipMemcpy(void* dst, const void* src, size_t bytes, hipMemcpyKind kind) {
+  return g_prof_next_memcpy.load(std::memory_order_acquire)(dst, src, bytes, kind);
+}
+
+hipError_t tool_hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared,
+                                         hipStream_t stream) {
+  return g_prof_next_push.load(std::memory_order_acquire)(grid, block, shared, stream);
+}
+
+template <typename Table> std::vector<unsigned char> table_bytes(const Table& t) {
+  const auto* bytes = reinterpret_cast<const unsigned char*>(&t);
+  return std::vector<unsigned char>(bytes, bytes + sizeof(Table));
+}
+
+// Pointer-sized words of `t` that differ from `before`, the size field included,
+// leaving out the slot at `skip`.
+template <typename Table>
+size_t changed_words(const Table& t, const std::vector<unsigned char>& before, size_t skip) {
+  const auto* now = reinterpret_cast<const unsigned char*>(&t);
+  size_t changed = 0;
+  for (size_t off = 0; off + sizeof(void*) <= before.size(); off += sizeof(void*))
+    if (off != skip && std::memcmp(now + off, before.data() + off, sizeof(void*)) != 0) ++changed;
+  return changed;
+}
+
+// One pushed and popped launch configuration, and one copy, through the tables.
+bool call_through(HipDispatchTable* t, HipCompilerDispatchTable* c, void* dev) {
+  dim3 grid(1), block(1);
+  size_t shared = 0;
+  hipStream_t stream = nullptr;
+  if (c->__hipPushCallConfiguration_fn(grid, block, 0, nullptr) != hipSuccess) return false;
+  if (c->__hipPopCallConfiguration_fn(&grid, &block, &shared, &stream) != hipSuccess) return false;
+  unsigned char buf[64] = {0x7a};
+  return t->hipMemcpy_fn(dev, buf, sizeof(buf), hipMemcpyHostToDevice) == hipSuccess;
+}
+
+TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));  // hip::init() installs the capture shims
+  if (runtime_has_no_table()) return;
+  HipDispatchTable* t = tool_hip_table();
+  HipCompilerDispatchTable* c = tool_hip_compiler_table();
+  INFO("rocprofiler-register did not pass the HIP tables to " HRR_DISPATCH_TOOL);
+  REQUIRE(t != nullptr);
+  REQUIRE(c != nullptr);
+
+  using EnableFn = hipError_t (*)(uint64_t*, uint64_t);
+  using DisableFn = hipError_t (*)(uint64_t*);
+  auto enable = reinterpret_cast<EnableFn>(dlsym(RTLD_DEFAULT, "hipProfilerEnableExt"));
+  auto disable = reinterpret_cast<DisableFn>(dlsym(RTLD_DEFAULT, "hipProfilerDisableExt"));
+  REQUIRE(enable != nullptr);
+  REQUIRE(disable != nullptr);
+
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, 64));
+  const std::vector<unsigned char> runtime_before = table_bytes(*t);
+  const std::vector<unsigned char> compiler_before = table_bytes(*c);
+  const MemcpyFn memcpy_before = t->hipMemcpy_fn;
+  const PushFn push_before = c->__hipPushCallConfiguration_fn;
+
+  HRR_HIP_CHECK(enable(nullptr, 0));
+  {
+    INFO("hipProfilerEnableExt() did not wrap the slots this test changes");
+    REQUIRE(t->hipMemcpy_fn != memcpy_before);
+    REQUIRE(c->__hipPushCallConfiguration_fn != push_before);
+  }
+  // A tool that attaches while the profiler is on chains to its wrappers.
+  g_prof_next_memcpy.store(t->hipMemcpy_fn, std::memory_order_release);
+  t->hipMemcpy_fn = &tool_hipMemcpy;
+  g_prof_next_push.store(c->__hipPushCallConfiguration_fn, std::memory_order_release);
+  c->__hipPushCallConfiguration_fn = &tool_hipPushCallConfiguration;
+  HRR_HIP_CHECK(disable(nullptr));
+
+  const int kept_runtime = t->hipMemcpy_fn == &tool_hipMemcpy ? 1 : 0;
+  const int kept_compiler =
+      c->__hipPushCallConfiguration_fn == &tool_hipPushCallConfiguration ? 1 : 0;
+  const size_t others_runtime =
+      changed_words(*t, runtime_before, offsetof(HipDispatchTable, hipMemcpy_fn));
+  const size_t others_compiler = changed_words(
+      *c, compiler_before, offsetof(HipCompilerDispatchTable, __hipPushCallConfiguration_fn));
+  printf(HRR_PROFILER_MARKER " kept=%d/%d others=%zu/%zu\n", kept_runtime, kept_compiler,
+         others_runtime, others_compiler);
+  fflush(stdout);
+  REQUIRE(call_through(t, c, dev));
+
+  // Enabled again, the wrappers must call on to what they wrapped first, not to
+  // the tool's slots that chain back to them.
+  HRR_HIP_CHECK(enable(nullptr, 0));
+  REQUIRE(call_through(t, c, dev));
+  HRR_HIP_CHECK(disable(nullptr));
+  printf(HRR_PROFILER_MARKER " reenabled\n");
+  fflush(stdout);
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
+// ---------------------------------------------------------------------------
 // Drivers
 // ---------------------------------------------------------------------------
 
@@ -701,6 +816,32 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis) {
   INFO("child manifest.json:\n" << manifest);
   CHECK(manifest.find("\"hipLaunchHostFunc\"") == std::string::npos);
   CHECK(manifest.find("\"hipGraphAddEmptyNode\"") != std::string::npos);
+}
+
+// Before, hipProfilerDisableExt() copied the profiler's snapshot over both
+// tables and the tool's slots went back to what they held before the enable.
+HRR_TEST_CASE(Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_profiler_swap.hrr");
+  const std::string out = capture_workload(cap.path, "Unit_HRR_ProfilerSwap_Direct", true);
+  INFO("Workload output:\n" << out);
+  if (skipped_without_table(out)) return;
+
+  const size_t at = out.find(HRR_PROFILER_MARKER " kept=");
+  REQUIRE(at != std::string::npos);
+  int kept_runtime = -1, kept_compiler = -1;
+  size_t others_runtime = 0, others_compiler = 0;
+  REQUIRE(sscanf(out.c_str() + at, HRR_PROFILER_MARKER " kept=%d/%d others=%zu/%zu",
+                 &kept_runtime, &kept_compiler, &others_runtime, &others_compiler) == 4);
+  // Disable left the tool's slots alone and restored every other one.
+  CHECK(kept_runtime == 1);
+  CHECK(kept_compiler == 1);
+  CHECK(others_runtime == 0);
+  CHECK(others_compiler == 0);
+  CHECK(out.find(HRR_PROFILER_MARKER " reenabled") != std::string::npos);
+
+  hrr::Archive ar;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), ar));
+  CHECK(ar.complete);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE && HRR_DISPATCH_TOOL
