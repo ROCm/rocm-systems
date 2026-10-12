@@ -1551,7 +1551,7 @@ def _collapse_matching_markers_across_passes(
 
 
 def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
-    """Dispatches unmatched on Correlation_ID, plus GUID when both frames have it."""
+    """Dispatches unmatched on Correlation_ID and GUID."""
     return joined_df[
         joined_df["Kernel_Name"].notna() & joined_df["Function"].isna()
     ].copy()

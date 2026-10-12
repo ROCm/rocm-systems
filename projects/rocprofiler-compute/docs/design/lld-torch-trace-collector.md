@@ -152,8 +152,7 @@ key and function_ordinal.
 1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
    `_counter_collection.csv`.
 2. Rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
-   unique dispatches to markers on `Correlation_ID` (plus `GUID` when both
-   files have that column).
+   unique dispatches to markers on `Correlation_ID` and `GUID`.
 3. Record `UnaccountedKernelError` when a dispatch does not join to a
    marker on those keys (warns during join). Plain analyze without
    those flags does not join and does not report that error.
