@@ -240,6 +240,12 @@ jobs:
             fi
           }
 
+          # A command outside run() (cd, source, cmake, make) still ends the step
+          # under set -e. Record where, so the summary does not read the logs that
+          # were never written as a pass.
+          finished=0
+          trap '[ "$finished" = 1 ] || echo "FAILED: stopped at: $BASH_COMMAND" > "$RESULTS_DIR/test_step_result.txt"' EXIT
+
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           source detect_asic_filter.sh
@@ -259,6 +265,7 @@ jobs:
           cd build
           run "$RESULTS_DIR/amd_smi_drm_ex.log" ./amd_smi_drm_ex
           run "$RESULTS_DIR/amd_smi_nodrm_ex.log" ./amd_smi_nodrm_ex
+          finished=1
 
           if [ "${#failed[@]}" -gt 0 ]; then
             echo "::error::Failed: ${failed[*]}"
