@@ -5386,9 +5386,9 @@ rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group
 }
 
 // Whether a GetProcessInfoForPID() error means that the process exited during
-// the read: KFD removes its files (ENODEV, or an empty read), then its
-// directory (ESRCH, or any error once the directory is gone). That function
-// fails only outside a PID namespace, where pid names the KFD directory.
+// the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
+// error once the directory is gone). That function fails only outside a PID
+// namespace, where pid names the KFD directory.
 static bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
   return err == ESRCH || err == ENODEV || (err != 0 && !amd::smi::KfdProcessExists(pid));
 }
@@ -5433,7 +5433,11 @@ rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t* procs, uint32_t
       if (KfdProcessExitedDuringRead(pid, proc_err_code)) {
         procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
-        return amd::smi::ErrnoToRsmiStatus(proc_err_code);
+        // Still running but unreadable: keep it with every stat not available,
+        // as the amdsmi process list does.
+        procs[i] = rsmi_process_info_t{pid, std::numeric_limits<uint64_t>::max(),
+                                       std::numeric_limits<uint64_t>::max(), KFD_STATS_INVALID,
+                                       KFD_STATS_INVALID};
       }
     }
   }
