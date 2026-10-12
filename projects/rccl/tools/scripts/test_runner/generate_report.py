@@ -109,7 +109,7 @@ header p  { font-size: .85rem; color: #aaa; margin-top: 4px; }
               box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 28px; font-size: .88rem; overflow: hidden; }
 .meta-table td { padding: 8px 18px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
 .meta-table tr:last-child td { border-bottom: none; }
-.meta-table .meta-key { width: 160px; color: #666; font-weight: 600; text-transform: uppercase;
+.meta-table .meta-key { width: 160px; color: #333; font-weight: 700; text-transform: uppercase;
                         font-size: .72rem; letter-spacing: .4px; white-space: nowrap; }
 .meta-table .meta-val { word-break: break-all; }
 .summary-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 36px; }
@@ -142,6 +142,12 @@ tr:hover td { background: #fafafa; }
 .reason-group ul { list-style: none; padding-left: 12px; }
 .reason-group ul li { padding: 3px 0; font-size: .83rem; color: #333; border-bottom: 1px solid #f5f5f5; }
 footer { text-align: center; font-size: .78rem; color: #aaa; padding: 20px; }
+details summary { list-style: none; padding: 16px 24px; border-bottom: 1px solid #eee;
+                  cursor: pointer; user-select: none; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before { content: "▶ "; font-size: .7rem; margin-right: 4px; color: #999; }
+details[open] summary::before { content: "▼ "; }
+details[open] summary { border-bottom: 1px solid #eee; }
 .legend-table { width: 100%; border-collapse: collapse; font-size: .78rem; color: #555;
                 margin-top: -20px; margin-bottom: 36px; }
 .legend-table td { padding: 3px 8px; }
@@ -166,7 +172,11 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     bkc = bkc_override or "unknown"
     gpu_arch = run.get("gpu_arch", "unknown")
     num_gpus = run.get("gpus_per_node", "?")
-    config_name = run.get("config_name", "") or "mi455_ainic_roce_func"
+    config_file = run.get("config_file", "")
+    if config_file:
+        config_name = os.path.basename(config_file)
+    else:
+        config_name = run.get("config_name", "") or ""
     os_name = meta.get("os", "unknown")
 
     ts = run.get("started_at", run.get("created_at", ""))
@@ -187,17 +197,26 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     executed = passed + failed + timeout + skipped
 
     suite_total  = real_total or summary.get("cases_total", summary.get("total", executed))
-    not_executed = suite_total - executed if suite_total > executed else None
+    not_executed_raw = suite_total - executed if suite_total > executed else None
+    # Suppress "Not Executed" stat when it equals the disabled count — that means
+    # every unexecuted case is simply a DISABLED_ test (they never run by design).
+    not_executed = not_executed_raw if (not_executed_raw is not None and not_executed_raw != disabled) else None
     pass_rate         = (passed / suite_total * 100) if suite_total else 0
     pass_rate_exec    = (passed / executed * 100) if executed else 0
 
     # ---- META TABLE ----
+    sbios = versions.get("sbios", "")
+    amdgpu_ver = versions.get("amdgpu", "")
+    hip_ver = versions.get("hip", "")
+
     meta_rows = [
         ("Date", date_str),
         ("Host", hostname),
-        ("Mode", mode),
         ("BKC", bkc),
-        ("ROCm", rocm_ver),
+        ("ROCm version", rocm_ver),
+        ("amdgpu driver", amdgpu_ver),
+        ("HIP version", hip_ver),
+        ("SBIOS version", sbios),
         ("GPU Arch", gpu_arch),
         ("GPUs / Node", num_gpus),
         ("OS", os_name),
@@ -206,6 +225,8 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
         ("Duration", f"{duration:.0f}s ({duration/60:.1f}m)"),
         ("Pass Rate", f"{pass_rate:.1f}% of total  |  {pass_rate_exec:.1f}% of executed"),
     ]
+    # Strip rows with no value so the table stays clean
+    meta_rows = [(k, v) for k, v in meta_rows if v not in (None, "", "unknown")]
 
     meta_rows_html = "".join(
         f"<tr><td class='meta-key'>{_h(label)}</td><td class='meta-val'>{_h(str(value))}</td></tr>"
@@ -283,8 +304,10 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
         b = _badge(badge_text, badge_color) if badge_text else ""
         return f"""
         <section>
-          <h2>{_h(title)} {b}</h2>
-          <div class="sec-body">{body}</div>
+          <details>
+            <summary><h2 style="display:inline;cursor:pointer">{_h(title)} {b}</h2></summary>
+            <div class="sec-body">{body}</div>
+          </details>
         </section>"""
 
     body = f"""<!DOCTYPE html>
@@ -298,7 +321,7 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
 <body>
 <header>
   <h1>RCCL Functional Test Report</h1>
-  <p>{_h(date_str)} &nbsp;|&nbsp; {_h(hostname)} &nbsp;|&nbsp; Mode: {_h(mode)} &nbsp;|&nbsp; BKC {_h(bkc)} &nbsp;|&nbsp; {_h(rocm_ver)}</p>
+  <p>{_h(date_str)} &nbsp;|&nbsp; Mode: {_h(mode)} &nbsp;|&nbsp; BKC {_h(bkc)}</p>
 </header>
 <div class="content">
   {cards_html}
@@ -308,6 +331,7 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
   {section("Timed-Out Tests", f"{timeout} cases", "#fd7e14", timeout_html)}
   {section("Skipped Tests", f"{skipped} gtest cases", "#6c757d", skipped_html)}
   {section("Disabled Tests", f"{disabled} cases", "#0d6efd", disabled_html)}
+<!-- augment:coverage -->
 </div>
 {f'<div class="content"><div style="background:#fff3cd;border-left:4px solid #ffc107;padding:12px 18px;border-radius:6px;font-size:.88rem;color:#856404;margin-bottom:24px"><strong>Note:</strong> {_h(summary["note"])}</div></div>' if summary.get("note") else ""}
 <footer>Generated by test_runner generate_report.py &nbsp;|&nbsp; {_h(date_str)}</footer>
@@ -332,8 +356,12 @@ def main(argv=None):
     p.add_argument("--rocm-label", default="", help="ROCm label override (e.g. /opt/rocm symlink target name)")
     p.add_argument("--real-total", type=int, default=0,
                    help="True gtest case count from --gtest_list_tests across all binaries")
+    p.add_argument("--config", default="",
+                   help="Override config filename shown in the report (e.g. mi455_ainic_roce_func.json)")
     args = p.parse_args(argv)
     run, cases = load_run(args.run_dir)
+    if args.config:
+        run["config_file"] = args.config
     generate(run, cases, args.mode, args.bkc, args.output,
              rocm_label=args.rocm_label or None,
              real_total=args.real_total or None)
