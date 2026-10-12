@@ -682,10 +682,15 @@ void set_max_file_bytes(uint64_t bytes) {
 }
 
 bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
-                      std::string* error) {
+                      std::string* error, bool* refused) {
+  if (refused) *refused = false;
   auto fail = [&](const std::string& why) {
     if (error) *error = why;
     return false;
+  };
+  auto refuse = [&](const std::string& why) {
+    if (refused) *refused = true;
+    return fail(why);
   };
   std::error_code ec;
   const uintmax_t size = std::filesystem::file_size(file_path, ec);
@@ -693,7 +698,7 @@ bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
     return fail("cannot stat " + file_path + ": " + ec.message());
   const uint64_t cap = max_file_bytes();
   if (size > cap)
-    return fail("refusing to read " + file_path + ": " + std::to_string(size) +
+    return refuse("refusing to read " + file_path + ": " + std::to_string(size) +
                 " bytes exceeds the " + std::to_string(cap) +
                 "-byte file cap (--max-file-bytes)");
   FILE* f = fopen(file_path.c_str(), "rb");
@@ -702,7 +707,7 @@ bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
     data.resize(static_cast<size_t>(size));
   } catch (const std::bad_alloc&) {
     fclose(f);
-    return fail("out of memory reading " + file_path + " (" + std::to_string(size) + " bytes)");
+    return refuse("out of memory reading " + file_path + " (" + std::to_string(size) + " bytes)");
   }
   // Read at most `size` bytes: a file that grew since the stat is not followed.
   bool ok = fread(data.data(), 1, data.size(), f) == data.size();

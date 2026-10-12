@@ -34,6 +34,7 @@
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
+hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace fs = std::filesystem;
 
@@ -222,6 +223,31 @@ TEST_CASE("Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget", "[hrr]")
     CHECK(ctx.host_budget.used() == 0);
     CHECK_FALSE(ctx.has_alloc(0x3000));
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - The replay's dispatch table (what dispatch_event calls) reaches the
+ *     charging handlers for hipHostMalloc, hipMallocHost and hipFreeHost, not a
+ *     generated one that skips the budget (or, for hipMallocHost/hipFreeHost, a
+ *     NOOP). Calling a dispatch entry over budget refuses the allocation.
+ */
+TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
+  CHECK(hrr_playback_dispatch[HRR_API_HIPHOSTMALLOC] == &playback_hipHostMalloc);
+  CHECK(hrr_playback_dispatch[HRR_API_HIPMALLOCHOST] == &playback_hipMallocHost);
+  CHECK(hrr_playback_dispatch[HRR_API_HIPFREEHOST] == &playback_hipFreeHost);
+
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(100);
+  hrr_test::ExactRecord<hrr_args_hipMallocHost> rec;
+  rec.get()->ptr = 0x4000;
+  rec.get()->size = 101;
+  hipError_t r = hipSuccess;
+  (void)hrr_test::capture_stderr(
+      [&] { r = hrr_playback_dispatch[HRR_API_HIPMALLOCHOST](ctx, rec.bytes()); });
+  CHECK(r == hipErrorMemoryAllocation);
+  CHECK(ctx.fatal_error.load());
 }
 
 /**

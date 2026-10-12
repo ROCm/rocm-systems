@@ -113,12 +113,12 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
 | `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress, i.e. a gap or duplicate in the recorded sequence (default `5000000`, a few minutes) |
-| `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default `5000000`) |
+| `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default: no limit; the query waits for replayed work as a synchronize does) |
 | `--max-file-bytes N` | Refuse a blob or code object larger than `N` bytes (default `4294967296`, 4 GiB) |
 | `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
 | `--max-events N` | Refuse an archive with more than `N` events; the reader stops loading at the first one past the cap. It counts events; each record's payload is separately limited in size (default `50000000`) |
 | `--max-host-bytes N` | End the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, graph operand buffers, D2H read-back buffers) would pass `N` bytes; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
-| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit) |
+| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit; at most `31536000`, 365 days) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
