@@ -1285,12 +1285,13 @@ def summarize_results(results_dir: Path, os_label: str, summary_file: Optional[P
         details.append(f"#### Command Tests\n\nFailed: `{joined}`")
 
     # The workflow appends "Exit code: <rc>" to a suite log when the suite exits
-    # non-zero, which also catches a crash that prints no test result.
+    # non-zero, which also catches a crash that prints no test result. The marker
+    # is the last line, so a suite that prints such a line itself cannot hide it.
     exit_code_re = _re.compile(r"^Exit code: (\d+)$", _re.MULTILINE)
 
     def _exit_code(text: str) -> int:
-        match = exit_code_re.search(text)
-        return int(match.group(1)) if match else 0
+        codes = exit_code_re.findall(text)
+        return int(codes[-1]) if codes else 0
 
     # 3. AMDSMI gtest output
     gtest_log = results_dir / "amdsmi_tests.log"

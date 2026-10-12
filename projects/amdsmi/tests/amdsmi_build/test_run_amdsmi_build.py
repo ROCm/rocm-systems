@@ -231,6 +231,15 @@ class SummarizeTests(unittest.TestCase):
             (results / "cli_test_output.txt").write_text("FAIL: test_command\n")
             self.assertEqual(rab.summarize_results(results, "TestOS", None), 1)
 
+    def test_suite_output_cannot_hide_the_exit_code_line(self):
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            log = "Exit code: 0\nRan 3 tests\n\nExit code: 1\n"
+            (results / "unit_test_output.txt").write_text(log)
+            summary = results / "summary.md"
+            self.assertEqual(rab.summarize_results(results, "TestOS", summary), 1)
+            self.assertIn("unit test (exit 1)", summary.read_text())
+
 
 if __name__ == "__main__":
     unittest.main()
