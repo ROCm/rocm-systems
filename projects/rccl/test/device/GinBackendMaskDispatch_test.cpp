@@ -286,6 +286,7 @@ protected:
 #else
   static constexpr int kNuma = hipMemLocationTypeHostNuma;
 #endif
+  static constexpr int kHost = 2; // CU_MEM_LOCATION_TYPE_HOST; ROCm < 7.12 headers have no HIP enumerator for it.
 
   struct SegmentSpec {
     uintptr_t token;
@@ -537,6 +538,30 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyIgnoresWindowOffset4K
   // BUG: findSegmentFromWindow gets srcOffset, not 4096 * ginOffset4K + srcOffset, so it reads seg 0; correct is below.
   const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS0, 100, 200, args.required}};
   // const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS1, 100, 200, cuda::thread_scope_system}};
+  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
+      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
+  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+               /*strongSignals=*/true, /*lastHasCounter=*/false);
+}
+
+// AMD ROCm >= 7.12 records host segments as CU_MEM_LOCATION_TYPE_HOST, but the escalation only checks HOST_NUMA.
+TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyDoesNotEscalateOnHostSegment) {
+  constexpr uintptr_t kS0 = 0x5C4100, kS1 = 0x5C4200;
+  constexpr uintptr_t kD0 = 0xD54100;
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/0,
+                                                   {{kS0, 64, kHost}, {kS1, 64, kHost}}));
+  ASSERT_NO_FATAL_FAILURE(
+      uploadMultiSegmentWindow(d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0, {{kD0, 1000, kDev}}));
+  PutArgs args = defaultArgs();
+  args.srcOff = 32;
+  args.dstOff = 0;
+  args.bytes = 64;
+  // BUG: gin__funcs.h escalates only on HOST_NUMA, so an AMD host src segment keeps the user's scope; correct is below.
+  const std::vector<ExpectedChunk> chunks = {
+      {kD0, 0, kS0, 32, 32, args.required},
+      // {kD0, 0, kS0, 32, 32, cuda::thread_scope_system},
+      {kD0, 32, kS1, 0, 32, cuda::thread_scope_thread},
+  };
   const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
       makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
   expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
