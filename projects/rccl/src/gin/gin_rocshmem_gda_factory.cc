@@ -40,6 +40,7 @@
 
 #include "gin/gin_rocshmem_gda_factory.h"
 #include "dv_dlopen.h"
+#include "gin_rocshmem_gda_inspect.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/gda_enums.hpp>
@@ -310,7 +311,7 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     }
 
     // Check for active port
-    struct ibv_port_attr port_attr;
+    struct ibv_port_attr port_attr {};
     int port = 1;
     if (ibv.query_port(ctx, port, &port_attr) != 0 || port_attr.state != IBV_PORT_ACTIVE) {
       LOG_WARN("GIN QP factory: device %s port %d not active (state=%d), skipping", ibv.get_device_name(dev_list[d]),
@@ -872,6 +873,32 @@ static int ginIbvMtuToInt(enum ibv_mtu mtu) {
   }
 }
 
+// Negotiates path MTU as min(local, remote), mirroring transport/net_ib/connect.cc's
+// std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller is responsible for having
+// already validated local_mtu (done once, outside the per-peer loop); only remote_mtu is
+// validated here. Returns -1 and leaves *out untouched if remote_mtu is invalid, else 0.
+static int ginNegotiatePathMtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
+  if (ginIbvMtuToInt(remote_mtu) == 0) return -1;
+  *out = (local_mtu < remote_mtu) ? local_mtu : remote_mtu;
+  return 0;
+}
+
+// Test-only wrappers over the file-static helpers above (host-only, no HW), following the
+// pattern in src/transport/net_ib_cast/connect.cc's ncclIbCastTest* forwarders. Declared in
+// gin_rocshmem_gda_inspect.h. This TU only builds under ENABLE_ROCSHMEM_GIN (see
+// src/CMakeLists.txt), so no additional guard is needed here.
+extern "C" int ginTestIbvMtuToInt(int mtu) {
+  return ginIbvMtuToInt(static_cast<enum ibv_mtu>(mtu));
+}
+
+extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu) {
+  enum ibv_mtu out;
+  int rc = ginNegotiatePathMtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
+  if (rc != 0) return rc;
+  *out_mtu = ginIbvMtuToInt(out);
+  return 0;
+}
+
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
@@ -889,12 +916,14 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
              IBV_QP_MIN_RNR_TIMER;
 
   enum ibv_mtu local_mtu = set->nic.portinfo.active_mtu;
+  if (ginIbvMtuToInt(local_mtu) == 0) {
+    return -1;
+  }
 
   for (int i = 0; i < set->nRanks; i++) {
-    if (ginIbvMtuToInt(local_mtu) == 0 || ginIbvMtuToInt(remote_info[i].active_mtu) == 0) {
+    if (ginNegotiatePathMtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
       return -1;
     }
-    attr.path_mtu = (local_mtu < remote_info[i].active_mtu) ? local_mtu : remote_info[i].active_mtu;
 
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
@@ -905,7 +934,12 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
       // Path-local if same subnet and GRH not required; else global addressing. FLID only when
-      // subnets differ. Mirrors transport/net_ib/connect.cc::ncclIbQpRtr().
+      // subnets differ. The subnet/GRH-necessity decision and remote-FLID lookup mirror
+      // transport/net_ib/connect.cc::ncclIbQpRtr(); unlike that path, the local sgid_index chosen
+      // above ("Select GID") does not prefer a routable-FLID GID index the way
+      // ncclIbGetGidIndex()/NCCL_IB_ROUTABLE_FLID_GID_INDEX does for native IB — it takes the
+      // first IBV_GID_TYPE_IB entry. Native IB remains inspection-only on every AMD cluster
+      // checked so far, so this has not been a reachable gap in practice.
       bool sameSubnet = (ginExtractLocalSubnetPrefix(set->nic.gid.global.subnet_prefix) ==
                          ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
       bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
