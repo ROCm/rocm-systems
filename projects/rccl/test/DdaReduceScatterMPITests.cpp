@@ -9,10 +9,11 @@
  * @brief MPI end-to-end tests for the DDA fabric ReduceScatter LL and LL128 tiers
  *
  * Each input element depends on the sending rank, the destination shard, the element index and the
- * call, so a wrong peer, shard, packet or line index, or a stale scratch bank, changes the sum. All
- * calls of a test are enqueued back to back on one communicator with no host sync, so consecutive
- * calls alternate the two scratch banks and the third reuses the first. The COLL log line of every
- * launch confirms the tier, since the fallback paths also sum correctly.
+ * call, so a wrong peer, shard, packet or line index, or a stale scratch bank, changes the sum. The
+ * two single-tier tests enqueue every call back to back with no host sync, so consecutive calls
+ * alternate the two scratch banks and the third reuses the first; the two interleaved tests drain
+ * the stream and barrier at each LL/LL128 switch. The COLL log line of every launch confirms the
+ * tier, since the fallback paths also sum correctly.
  *
  * nRanks 4 and 8 reach the launchers' unrolled NRANKS_CT kernels; any other count reaches the
  * runtime one. Run (example):
