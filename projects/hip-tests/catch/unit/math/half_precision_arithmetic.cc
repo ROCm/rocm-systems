@@ -12,6 +12,10 @@
  * @ingroup MathTest
  */
 
+// Reference for the saturating `__h*_sat` intrinsics.  They clamp to [0, 1] and, flush a NaN
+// result to +0.0 rather than propagating it.
+static float sat_ref(float x) { return std::isnan(x) ? 0.0f : std::clamp(x, 0.0f, 1.0f); }
+
 
 MATH_UNARY_HP_KERNEL_DEF(__habs);
 
@@ -127,7 +131,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hadd2);
 MATH_BINARY_HP_TEST_DEF_IMPL(__hadd2, __hadd_ref, EqValidatorBuilderFactory<float>());
 
 
-static float __hadd_sat_ref(float x1, float x2) { return std::clamp(x1 + x2, 0.0f, 1.0f); }
+static float __hadd_sat_ref(float x1, float x2) { return sat_ref(x1 + x2); }
 
 MATH_BINARY_HP_KERNEL_DEF(__hadd_sat);
 
@@ -201,7 +205,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hsub2);
 MATH_BINARY_HP_TEST_DEF_IMPL(__hsub2, __hsub_ref, EqValidatorBuilderFactory<float>());
 
 
-static float __hsub_sat_ref(float x1, float x2) { return std::clamp(x1 - x2, 0.0f, 1.0f); }
+static float __hsub_sat_ref(float x1, float x2) { return sat_ref(x1 - x2); }
 
 MATH_BINARY_HP_KERNEL_DEF(__hsub_sat);
 
@@ -275,7 +279,7 @@ MATH_BINARY_HP_KERNEL_DEF(__hmul2);
 MATH_BINARY_HP_TEST_DEF_IMPL(__hmul2, __hmul_ref, EqValidatorBuilderFactory<float>());
 
 
-static float __hmul_sat_ref(float x1, float x2) { return std::clamp(x1 * x2, 0.0f, 1.0f); }
+static float __hmul_sat_ref(float x1, float x2) { return sat_ref(x1 * x2); }
 
 MATH_BINARY_HP_KERNEL_DEF(__hmul_sat);
 
@@ -387,7 +391,7 @@ MATH_TERNARY_HP_TEST_DEF_IMPL(__hfma2, static_cast<float (*)(float, float, float
 
 
 static float __hfma_sat_ref(float x1, float x2, float x3) {
-  return std::clamp(std::fma(x1, x2, x3), 0.0f, 1.0f);
+  return sat_ref(std::fma(x1, x2, x3));
 }
 
 MATH_TERNARY_HP_KERNEL_DEF(__hfma_sat);
