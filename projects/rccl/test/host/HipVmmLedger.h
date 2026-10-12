@@ -7,7 +7,7 @@
 // Tracks device memory a unit allocates through the HIP VMM / malloc seams,
 // on top of InstallHipVmmEmulator(). Clean() is true when everything it created
 // was freed and no call was refused (bad free, over-release, out-of-range
-// synchronous copy/memset). Imported handles and async copies are not checked.
+// synchronous device copy/memset). Imported handles and async copies are not checked.
 
 #ifndef RCCL_TEST_HOST_HIPVMMLEDGER_H_
 #define RCCL_TEST_HOST_HIPVMMLEDGER_H_
@@ -109,8 +109,9 @@ class HipVmmLedger {
       return hipSuccess;
     };
 
-    g_hipMemcpy = [this](void* dst, const void* src, size_t n, hipMemcpyKind) {
-      if (!Covers(dst, n)) return Reject("hipMemcpy outside any live allocation");
+    g_hipMemcpy = [this](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
+      const bool toHost = kind == hipMemcpyHostToHost || kind == hipMemcpyDeviceToHost;
+      if (!toHost && !Covers(dst, n)) return Reject("hipMemcpy outside any live allocation");
       std::memcpy(dst, src, n);
       return hipSuccess;
     };

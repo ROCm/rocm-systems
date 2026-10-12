@@ -14,12 +14,13 @@
 #include <set>
 #include <vector>
 
-#include "HipVmmLedger.h"
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+
+#include "algorithms/dda/fabric/FabricTestFixture.h"
 
 #include "alloc.h"
 #include "bootstrap.h"
@@ -32,11 +33,12 @@ struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 namespace {
 
-constexpr int kNRanks = 4;
-constexpr int kRank = 1;
-constexpr size_t kPage = 4096;  // emulator allocation granularity
+using dda_fabric_test::FabricLedgerTest;
+using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kNRanks;
+using dda_fabric_test::kRank;
 
-void* const kBootstrap = reinterpret_cast<void*>(0xB007);
+constexpr size_t kPage = 4096;  // emulator allocation granularity
 void* const kSelfPtr = reinterpret_cast<void*>(0x5E1F000);
 const hipMemGenericAllocationHandle_t kSelfHandle = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x5E1F);
 constexpr size_t kSelfSize = 2 * kPage;
@@ -49,13 +51,12 @@ hipMemGenericAllocationHandle_t HandleForDesc(uint64_t desc) {
   return reinterpret_cast<hipMemGenericAllocationHandle_t>(0x10000 + desc);
 }
 
-class FabricMemHandlerMicrotest : public ::testing::Test {
+class FabricMemHandlerMicrotest : public FabricLedgerTest {
  protected:
   void SetUp() override {
     savedHandleType_ = ncclCuMemHandleType;
-    SetMicroEnvAbsent("NCCL_CUMEM_SKIP_FREE");
-    ledger_.Install();
-    ASSERT_FALSE(rcclSkipCuMemFree());  // alloc.h caches this once per process
+    FabricLedgerTest::SetUp();
+    if (HasFatalFailure()) return;
 
     g_hipMemExportToShareableHandle = [](void* shareable, hipMemGenericAllocationHandle_t,
                                          hipMemAllocationHandleType, unsigned long long) {
@@ -82,12 +83,8 @@ class FabricMemHandlerMicrotest : public ::testing::Test {
 
   void TearDown() override {
     handler_.reset();
-    EXPECT_TRUE(ledger_.Clean()) << ledger_.Summary();
     ncclCuMemHandleType = savedHandleType_;
-    ResetBootstrapStubs();
-    ResetHipFakes();
-    ResetNcclFakes();
-    ResetEnvFakes();
+    FabricLedgerTest::TearDown();
   }
 
   ncclFabricMemHandler* MakeHandler(int nRanks = kNRanks, int rank = kRank) {
@@ -128,7 +125,6 @@ class FabricMemHandlerMicrotest : public ::testing::Test {
   int nRanks_ = kNRanks;
   int rank_ = kRank;
   hipMemAllocationHandleType savedHandleType_ = hipMemHandleTypeNone;
-  HipVmmLedger ledger_;
   std::unique_ptr<ncclFabricMemHandler> handler_;
   std::vector<uint64_t> importedDescs_;
 };
