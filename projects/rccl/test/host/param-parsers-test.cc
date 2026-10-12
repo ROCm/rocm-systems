@@ -371,6 +371,20 @@ TEST(ParamParsersMicrotest, Bitset_ToStringDecomposesAnUnlistedCombination) {
   EXPECT_EQ("A,C", parser.toString(5u));
 }
 
+TEST(ParamParsersMicrotest, Bitset_ToStringDecompositionSkipsOverlappingCompositeAlias) {
+  // MakeFlagParser declares AB after A and B, so by the time decomposition
+  // would reach AB, A and B have already consumed its bits out of `remaining`
+  // regardless of the isSingleBit guard -- that ordering makes the guard
+  // unobservable through MakeFlagParser alone. Declaring AB first instead
+  // means decomposition reaches it while both its bits are still available:
+  // without the guard at parser_bitset.h:83, AB matches "A|B|C" (7) as a
+  // subset and leaks into the output alongside C.
+  auto opts = makeOptions(makeOption<Flag>("AB", Flag::AB), makeOption<Flag>("A", Flag::A),
+                          makeOption<Flag>("B", Flag::B), makeOption<Flag>("C", Flag::C));
+  auto parser = ncclParamBitsetOf<Flag, uint32_t>(opts);
+  EXPECT_EQ("A,B,C", parser.toString(7u));
+}
+
 TEST(ParamParsersMicrotest, Bitset_ToStringOfZeroOrNoMatchIsNone) {
   auto parser = MakeFlagParser();
   EXPECT_EQ("NONE", parser.toString(0u));
