@@ -2527,8 +2527,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:
+            dual = op == 'swap' and (
+                'WRXCHG2' in upper
+                or 'STOREXCHG2ADDR' in upper
+                or 'STOREXCHG_2ADDR' in upper
+            )
             return InstructionSemantics(
-                name, 'ds_atomic', operation=op, elem_size=esz, num_elems=dw
+                name,
+                'ds_atomic2' if dual else 'ds_atomic',
+                operation=op,
+                elem_size=esz,
+                num_elems=dw,
             )
     # ── Lane permutation / swizzle ──────────────────────────────────────
     if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32', 'DS_BPERMUTE_FI_B32'):

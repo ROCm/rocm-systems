@@ -31,6 +31,40 @@ import sys
 import time
 import types
 import unittest
+from unittest import mock
+
+
+def cli_search_order(start_dir):
+    """Return source-tree and installed CLI directories to search."""
+    candidates = [parent / "amdsmi_cli" for parent in pathlib.Path(start_dir).resolve().parents]
+    candidates.append(pathlib.Path(amdsmi_path).resolve().parent.parent / "libexec" / "amdsmi_cli")
+    return [str(candidate) for candidate in candidates]
+
+
+def find_cli_dir(*candidates):
+    """Return the first candidate containing the CLI logger and subcommands."""
+    for candidate in candidates:
+        candidate = os.fspath(candidate)
+        if os.path.isfile(os.path.join(candidate, "amdsmi_logger.py")) and os.path.isdir(
+            os.path.join(candidate, "subcommands")
+        ):
+            return candidate
+    return ""
+
+
+def fake_module(name, **attributes):
+    """Create a module stub with the supplied attributes."""
+    module = types.ModuleType(name)
+    for attribute, value in attributes.items():
+        setattr(module, attribute, value)
+    return module
+
+
+def stub_modules(test_case, modules):
+    """Temporarily install module stubs for a test class."""
+    patcher = mock.patch.dict(sys.modules, modules)
+    patcher.start()
+    test_case.addClassCleanup(patcher.stop)
 
 
 def _print_path_remediation(script, file):
