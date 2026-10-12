@@ -20,9 +20,13 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
@@ -108,9 +112,13 @@ TEST_F(ParamRegistryMicrotest, Add_RegistersSoFindReturnsTheSameEntry) {
 TEST_F(ParamRegistryMicrotest, Find_UnknownKeyReturnsNullptr) {
   // A live entry must be registered first: otherwise a find() that ignored
   // its key argument and returned the map's first entry would pass this test
-  // vacuously against an empty map.
+  // vacuously against an empty map. Bound to a named local, like every other
+  // Register() call site here: MakeInfo stores key.c_str() into the
+  // process-wide map, so passing Key() directly would leave that pointer
+  // dangling the moment this statement ends.
+  std::string key = Key();
   FakeParam live(3);
-  ASSERT_EQ(ncclSuccess, Register(Key(), &live));
+  ASSERT_EQ(ncclSuccess, Register(key, &live));
   EXPECT_EQ(nullptr, ncclParamRegistry::find(Key("_NEVER_REGISTERED")));
 }
 
@@ -190,6 +198,32 @@ TEST_F(ParamRegistryMicrotest, State_IsASingletonSharedAcrossAllAccessors) {
   EXPECT_EQ(ncclParamRegistryInstance(), static_cast<void*>(&ncclParamRegistry::state()));
   EXPECT_EQ(&ncclParamRegistry::state().map, &ncclParamRegistry::instance());
   EXPECT_EQ(&ncclParamRegistry::state().mtx, &ncclParamRegistry::mutex());
+}
+
+TEST_F(ParamRegistryMicrotest, AddLocksTheSharedMutexForTheDurationOfTheCall) {
+  // State_IsASingletonSharedAcrossAllAccessors only proves mutex() resolves to
+  // the right address; it doesn't prove add/find/remove actually lock it.
+  // Deleting the three std::lock_guard lines in param_registry.cc leaves every
+  // other test here green, since none of them run concurrently. Holding the
+  // mutex on this thread and asserting a concurrent add() hasn't returned yet
+  // exercises the lock_guard itself, not just its target.
+  std::string key = Key();
+  FakeParam fake(7);
+  std::atomic<bool> done{false};
+  ncclResult_t result = ncclInternalError;
+
+  std::unique_lock<std::mutex> lock(ncclParamRegistry::mutex());
+  std::thread worker([&] {
+    result = Register(key, &fake);
+    done.store(true, std::memory_order_release);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_FALSE(done.load(std::memory_order_acquire));
+
+  lock.unlock();
+  worker.join();
+  EXPECT_TRUE(done.load(std::memory_order_acquire));
+  EXPECT_EQ(ncclSuccess, result);
 }
 
 }  // namespace
