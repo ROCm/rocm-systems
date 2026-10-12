@@ -188,11 +188,14 @@ void TestGpuMetricsRead::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_metrics_info(processor_handles_[i], &smu);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-    if (err != AMDSMI_STATUS_SUCCESS) {
-      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        continue;
-      }
-    } else {
+    if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**GPU METRICS: Not supported on device " << i << ", skipping\n";
+      continue;
+    }
+    // Any other failure is a real one: letting it fall through left the metrics
+    // claim unasserted on every ASIC.
+    CHK_ERR_ASRT(err);
+    {
       auto temp_xcd_counter_value = uint16_t(0);
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=" + std::to_string(i), VERB(STANDARD));
       auto ret_xcd = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
@@ -220,10 +223,11 @@ void TestGpuMetricsRead::Run(void) {
       amdsmi_asic_info_t asic_info = {};
       err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
       ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0 && smu.apu_metrics == nullptr) {
-        std::cout << "Fusion/APU device detected but APU metrics not available, skipping device "
-                  << i << std::endl;
-        continue;
+      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {
+        // An APU reports its metrics through the shared APU table; a null one
+        // here means the device answered SUCCESS without any of that data.
+        ASSERT_NE(smu.apu_metrics, nullptr)
+            << "device " << i << " is an APU but reported no APU metrics";
       }
       IF_VERB(STANDARD) {
         std::cout << "METRIC TABLE HEADER:\n";
