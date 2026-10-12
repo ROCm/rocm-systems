@@ -91,7 +91,7 @@ RCCL_PARAM(DdaLLThreshold, "DDA_LL_THRESHOLD", kDdaThresholdUnset);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024); // 1 MiB
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024 * 1024); // 2 MiB
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
-RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
+RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(256) * 1024 * 1024); // 256 MiB
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
@@ -152,6 +152,9 @@ int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   }
   return returnVal;
 }
+
+// gfx1250 Ring AllReduce keeps LL128 up to this many bytes per rank (AICOMRCCL-2875).
+static constexpr uint64_t kGfx1250RingLL128MaxBytesPerRank = 8ULL * 1024 * 1024;
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
@@ -223,6 +226,14 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
             ll128Max *= 3.8; // Scale max message size for n > 2 since Tree has special behavior at 2 nodes
           }
           // ll128Max += (log2i(comm->nNodes) - 1) * comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL128][RCCL_PROTOCOL_FACTOR_IDX];
+          // gfx1250 fabric (AICOMRCCL-2874/2875): Tree LL128 beats Tree Simple at every
+          // size (1.3-2.9x at 32M-16G), and Ring LL128 beats Ring Simple while each
+          // rank's share of the message stays within 8 MiB.
+          if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
+            ll128Max = info->algorithm == NCCL_ALGO_TREE
+                         ? UINT64_MAX
+                         : std::max<uint64_t>(ll128Max, (uint64_t)comm->nRanks * kGfx1250RingLL128MaxBytesPerRank);
+          }
         }
         if (sizePerRank <= ll128Max && sizePerRank > ll128Min) {
           info->protocol = NCCL_PROTO_LL128;

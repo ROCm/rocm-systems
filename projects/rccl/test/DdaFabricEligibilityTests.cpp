@@ -1224,10 +1224,11 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
 // ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
 // These call the shape-eligibility function directly (which uses rcclParamDdaLL128OneShotThreshold /
 // TwoShotThreshold, not the arch table), so they are independent of archName.
-// The 32 MiB cap matches gfx1250 ddaLL128Max[AllReduce] from the arch table.
+// 32 MiB was gfx1250's ddaLL128Max[AllReduce] when these were written; the probe
+// size is kept as an in-range point.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
 {
-    // gfx1250 ddaLL128Max[AllReduce] = 32 MiB; 32 MiB / 4 bytes = 8388608 float32
+    // 32 MiB / 4 bytes = 8388608 float32
     EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
 }

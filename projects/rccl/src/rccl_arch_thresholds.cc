@@ -42,7 +42,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather
     2ULL*1024*1024,      // [3] ReduceScatter
-    32ULL*1024*1024,     // [4] AllReduce
+    256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M on 16-64 ranks (AICOMRCCL-2875)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used

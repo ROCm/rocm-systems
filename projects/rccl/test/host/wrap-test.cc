@@ -1276,6 +1276,119 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) 
       });
 }
 
+// The gfx1250 AllReduce LL128 overrides sit inside rcclUpdateCollectiveProtocol's
+// ENABLE_LL128 arm, so they only compile where that arm does (see the
+// IsArchSupportedForFunc_LL128_* pair above for the same split).
+#if defined(ENABLE_LL128)
+namespace {
+// gfx1250 AllReduce comm carrying tuning_model_11's AllReduce LL/LL128 ranges.
+constexpr uint64_t kGfx1250ArLL128Max = 16777216;
+ncclComm* MakeGfx1250ProtocolComm(int nRanks) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nNodes = 1;
+  comm->nRanks = nRanks;
+  comm->topo->ll128Enabled = true;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+  comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = kGfx1250ArLL128Max;
+  return comm;
+}
+
+int ArProtocol(ncclComm* comm, int algorithm, size_t nBytes) {
+  ncclTaskColl info{};
+  info.func = ncclFuncAllReduce;
+  info.algorithm = algorithm;
+  info.protocol = NCCL_PROTO_SIMPLE;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+}  // namespace
+
+// AICOMRCCL-2874: on gfx1250 Tree LL128 beats Tree Simple at every size, so a Tree
+// AllReduce far past the table's LL128 ceiling stays on LL128. Ring at the same
+// size is the control: it still drops to Simple.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL128) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250TreeAllReduceKeepsLL128",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeGfx1250ProtocolComm(16);
+        const size_t big = size_t(16) << 30;
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_TREE, big));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, big));
+        EXPECT_EQ(NCCL_PROTO_LL, ArProtocol(comm, NCCL_ALGO_TREE, 1024)) << "LL range still wins small sizes";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// AICOMRCCL-2875: Ring AllReduce keeps LL128 up to nRanks x 8 MiB (inclusive), past the
+// table's 16 MiB ceiling, and returns to Simple one byte later.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128ScalesWithRanks",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        for (int nRanks : {8, 16, 64}) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(nRanks);
+          const size_t cap = size_t(nRanks) * (size_t(8) << 20);
+          EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, cap)) << nRanks;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, cap + 1)) << nRanks;
+          DeleteCommWithArch(comm);
+        }
+        // Two ranks: nRanks x 8 MiB sits below the table ceiling, which still applies.
+        ncclComm* comm = MakeGfx1250ProtocolComm(2);
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max + 1));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Other arches keep the table ceiling for both algorithms.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        // gfx1250's ranges and rank count on another arch, which reaches the same arm via nNodes >= 2.
+        ncclComm* comm = MakeCommWithArch("gfx90a");
+        comm->nNodes = 2;
+        comm->nRanks = 16;
+        comm->topo->ll128Enabled = true;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 131072;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = kGfx1250ArLL128Max;
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_TREE, kGfx1250ArLL128Max + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max + 1));
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max));
+        DeleteCommWithArch(comm);
+      });
+}
+#else
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nNodes = 1;
+        comm->nRanks = 16;
+        comm->topo->ll128Enabled = true;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 131072;
+        comm->minMaxLLRange[RCCL_AR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16777216;
+        for (int algorithm : {NCCL_ALGO_TREE, NCCL_ALGO_RING}) {
+          ncclTaskColl info{};
+          info.func = ncclFuncAllReduce;
+          info.algorithm = algorithm;
+          info.protocol = NCCL_PROTO_LL;  // sentinel
+          rcclUpdateCollectiveProtocol(comm, size_t(64) << 20, &info);
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol) << "algorithm=" << algorithm;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+#endif  // ENABLE_LL128
+
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch",
