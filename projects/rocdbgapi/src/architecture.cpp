@@ -2473,11 +2473,6 @@ protected:
       return utils::bit_extract (relaunch_wave, 11, 12);
     }
     static constexpr uint32_t
-    compute_relaunch_wave_payload_scratch_en (uint32_t relaunch_wave)
-    {
-      return utils::bit_extract (relaunch_wave, 15, 15);
-    }
-    static constexpr uint32_t
     compute_relaunch_wave_payload_last_wave (uint32_t relaunch_wave)
     {
       return utils::bit_extract (relaunch_wave, 16, 16);
@@ -2508,9 +2503,6 @@ protected:
     size_t vgpr_count () const override;
     /* Number of scalar registers.  */
     size_t sgpr_count () const override;
-
-    /* Return true is a scratch slot is allocated for this record.  */
-    bool is_scratch_enabled () const override;
 
     /* The shader engine ID this wave was created on.  */
     uint32_t shader_engine_id () const override;
@@ -2849,12 +2841,6 @@ size_t
 gfx9_architecture_t::cwsr_record_t::hwreg_count () const
 {
   return 32;
-}
-
-bool
-gfx9_architecture_t::cwsr_record_t::is_scratch_enabled () const
-{
-  return compute_relaunch_wave_payload_scratch_en (m_compute_relaunch_wave);
 }
 
 uint32_t
@@ -4404,11 +4390,6 @@ protected:
       return utils::bit_extract (relaunch_wave, 0, 9);
     }
     static constexpr uint32_t
-    compute_relaunch_wave_payload_scratch_en (uint32_t relaunch_wave)
-    {
-      return utils::bit_extract (relaunch_wave, 11, 11);
-    }
-    static constexpr uint32_t
     compute_relaunch_wave_payload_first_wave (uint32_t relaunch_wave)
     {
       return utils::bit_extract (relaunch_wave, 12, 12);
@@ -4440,8 +4421,6 @@ protected:
     size_t sgpr_count () const override;
     size_t vgpr_count () const override;
     virtual size_t shared_vgpr_count () const;
-
-    bool is_scratch_enabled () const override;
 
     uint32_t shader_engine_id () const override;
     uint32_t scratch_scoreboard_id () const override;
@@ -4954,12 +4933,6 @@ gfx10_architecture_t::branch_target (wave_t &wave, agent_address_t pc,
     }
 
   return gfx9_architecture_t::branch_target (wave, pc, instruction);
-}
-
-bool
-gfx10_architecture_t::cwsr_record_t::is_scratch_enabled () const
-{
-  return compute_relaunch_wave_payload_scratch_en (m_compute_relaunch_wave);
 }
 
 uint32_t
@@ -6314,7 +6287,6 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_poison_err_mask = 1 << 15;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_user_mask = 1 << 16;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_sys_mask = 1 << 17;
-  static constexpr uint32_t sq_wave_state_priv_scratch_en_mask = 1 << 18;
   static constexpr uint32_t sq_wave_state_priv_perf_en_mask = 1 << 19;
   static constexpr uint32_t sq_wave_state_priv_ttrace_en_mask = 1 << 20;
 
