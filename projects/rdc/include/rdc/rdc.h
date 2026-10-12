@@ -1184,8 +1184,8 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  *  should be fetched
  *
  *  @param[out] p_rdc_attr GPU attribute corresponding to the gpu_index. Unless
- *  it is NULL, the struct is zeroed first: fields the call does not fill read
- *  as 0, and the name is empty when the call fails.
+ *  it is NULL, the struct is zeroed first, so fields the call does not fill
+ *  read as 0.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
