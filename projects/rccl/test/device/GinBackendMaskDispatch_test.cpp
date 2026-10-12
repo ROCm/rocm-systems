@@ -305,10 +305,12 @@ protected:
   };
 
   // Connections 1..3 get a poisoned token, so reading the wrong connection or the default-backend window shows up.
+  // specs is numBackends blocks of numSegments, backend-major like ncclDevrAllocAndPopulateSegmentWindows.
   static void uploadMultiSegmentWindow(DeviceBuffer<ncclWindow_vidmem>& d_win, DeviceBuffer<ncclSegmentWindow>& d_segs,
-                                       uintptr_t defaultToken, uint32_t offset4K,
-                                       const std::vector<SegmentSpec>& specs) {
+                                       uintptr_t defaultToken, uint32_t offset4K, const std::vector<SegmentSpec>& specs,
+                                       int numBackends = 1) {
     ASSERT_LE(specs.size(), d_segs.count);
+    ASSERT_EQ(specs.size() % numBackends, 0u);
     std::vector<ncclSegmentWindow> segs(d_segs.count);
     for (size_t i = 0; i < specs.size(); ++i) {
       for (int c = 0; c < NCCL_GIN_MAX_CONNECTIONS; ++c) {
@@ -320,7 +322,7 @@ protected:
     d_segs.copyFrom(segs);
     ncclWindow_vidmem win = makeWindow(defaultToken, offset4K);
     win.ginMultiSegmentWins = d_segs.ptr;
-    win.numSegments = static_cast<int>(specs.size());
+    win.numSegments = static_cast<int>(specs.size()) / numBackends;
     d_win.upload(win);
   }
 
@@ -566,6 +568,33 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyDoesNotEscalateOnHost
       makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
   expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
                /*strongSignals=*/true, /*lastHasCounter=*/false);
+}
+
+// backendIndex 1 reads windows from ginMultiSegmentWins[numSegments + seg]; sizes still come from backend 0.
+TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutUsesWindowsOfItsBackendIndex) {
+  constexpr uintptr_t kS0 = 0x5C5100, kS1 = 0x5C5200, kB1S0 = 0x5C5300, kB1S1 = 0x5C5400;
+  constexpr uintptr_t kD0 = 0xD55100, kD1 = 0xD55200, kB1D0 = 0xD55300, kB1D1 = 0xD55400;
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(
+      d_srcWin_, d_srcSegs_, kSrcToken, /*offset4K=*/0,
+      {{kS0, 64, kDev}, {kS1, 64, kNuma}, {kB1S0, 64, kDev}, {kB1S1, 64, kNuma}}, /*numBackends=*/2));
+  ASSERT_NO_FATAL_FAILURE(uploadMultiSegmentWindow(
+      d_dstWin_, d_dstSegs_, kDstToken, /*offset4K=*/0,
+      {{kD0, 100, kDev}, {kD1, 100, kDev}, {kB1D0, 100, kDev}, {kB1D1, 100, kDev}}, /*numBackends=*/2));
+  ncclDevComm comm = makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA);
+  comm.backendIndex = 1;
+  PutArgs args = defaultArgs();
+  args.srcOff = 32;
+  args.dstOff = 50;
+  args.bytes = 80;
+  const std::vector<ExpectedChunk> chunks = {
+      {kB1D0, 50, kB1S0, 32, 32, args.required},
+      {kB1D0, 82, kB1S1, 0, 18, cuda::thread_scope_system},
+      {kB1D1, 0, kB1S1, 18, 30, cuda::thread_scope_thread},
+  };
+  const std::vector<PutRecord> records =
+      runPut<ncclGin_SegmentMixed>(comm, args, ncclGin_SignalInc{args.signalId}, ncclGin_CounterInc{args.counterId});
+  expectChunks(records, kEfaSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+               /*strongSignals=*/true, /*lastHasCounter=*/true);
 }
 
 }  // namespace
