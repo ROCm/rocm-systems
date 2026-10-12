@@ -378,10 +378,10 @@ void runAtomicRoundTrip() {
 }
 
 TEST_F(NcclUtilityDeviceTest, AtomicLoadStoreRoundTripAllScopesAndOrders) {
-  runAtomicRoundTrip<uint32_t>();
-  runAtomicRoundTrip<uint64_t>();
-  runAtomicRoundTrip<int32_t>();
-  runAtomicRoundTrip<uint16_t>();  // sizeof 2 takes atomic_ref's unscoped __atomic fallback.
+  ASSERT_NO_FATAL_FAILURE(runAtomicRoundTrip<uint32_t>());
+  ASSERT_NO_FATAL_FAILURE(runAtomicRoundTrip<uint64_t>());
+  ASSERT_NO_FATAL_FAILURE(runAtomicRoundTrip<int32_t>());
+  ASSERT_NO_FATAL_FAILURE(runAtomicRoundTrip<uint16_t>());  // sizeof 2 takes atomic_ref's unscoped __atomic fallback.
 }
 
 // ---------------------------------------------------------------------------
@@ -515,21 +515,21 @@ void runLoadConst(uint8_t salt) {
 }
 
 TEST_F(NcclUtilityDeviceTest, LoadConstLdgEveryAlignmentBranch) {
-  runLoadConst<Align1>(0x11);
-  runLoadConst<Align2>(0x22);
-  runLoadConst<Align4>(0x33);
-  runLoadConst<Align8>(0x44);
-  runLoadConst<Align16>(0x55);
-  runLoadConst<Align32>(0x66);
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align1>(0x11));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align2>(0x22));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align4>(0x33));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align8>(0x44));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align16>(0x55));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<Align32>(0x66));
 }
 
 TEST_F(NcclUtilityDeviceTest, LoadConstLdgScalars) {
-  runLoadConst<uint8_t>(0x71);
-  runLoadConst<int16_t>(0x72);
-  runLoadConst<uint32_t>(0x73);
-  runLoadConst<float>(0x74);
-  runLoadConst<double>(0x75);
-  runLoadConst<uint64_t>(0x76);
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<uint8_t>(0x71));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<int16_t>(0x72));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<uint32_t>(0x73));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<float>(0x74));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<double>(0x75));
+  ASSERT_NO_FATAL_FAILURE(runLoadConst<uint64_t>(0x76));
 }
 
 }  // namespace
