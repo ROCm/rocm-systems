@@ -39,7 +39,7 @@ ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
     *cast = tmp; \
   } while (0)
 
-// Attempt to load a specific symbol version - fail silently
+// Optional symbol: on failure only funcptr is left NULL; no teardown
 #define LOAD_SYM_VERSION(handle, symbol, funcptr, version) \
   do { \
     cast = (void**)&funcptr; \

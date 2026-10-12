@@ -12,6 +12,7 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "multiplane.h"
+#include <mutex>
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -518,7 +519,13 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
-  if (wrap_ionicdv_has_qp_set_gda()) NCCLCHECK(wrap_ionicdv_qp_set_gda(qp->qp, false, true));
+  if (wrap_ionicdv_qp_set_gda(qp->qp, false, true) != ncclSuccess) {
+    static std::once_flag gdaWarnOnce;
+    std::call_once(gdaWarnOnce, []() {
+      WARN("NET/IB-CAST : ionic_dv_qp_set_gda is unavailable or failed; IB-CAST QPs are created without GDA receive "
+           "mode. Upgrade libionic for full IB-CAST support.");
+    });
+  }
   qp->ctsQpSlot = createQpAttrs->ctsQpSlot;
   return ncclSuccess;
 }

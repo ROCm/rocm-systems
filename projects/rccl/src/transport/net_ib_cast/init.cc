@@ -390,10 +390,6 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
          "remaining network plugins, if any. Upgrade libionic, or set NCCL_NET=IB.");
     return ncclInternalError;
   }
-  if (rcclUseAinic() && !wrap_ionicdv_has_qp_set_gda()) {
-    WARN("NET/IB-CAST : libionic lacks ionic_dv_qp_set_gda; IB-CAST QPs are created without GDA receive mode. "
-         "Upgrade libionic for full IB-CAST support.");
-  }
 
   // Detect IB cards
   int nIbDevs = 0;

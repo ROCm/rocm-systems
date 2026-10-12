@@ -41,8 +41,6 @@ ncclResult_t wrap_ionicdv_symbols(void) {
   } \
   return ncclSuccess;
 
-bool wrap_ionicdv_has_qp_set_gda(void) { return ionicdvSymbols.ionicdv_internal_qp_set_gda != NULL; }
-
 ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* qp, bool enable_send, bool enable_recv) {
   if (ionicdvSymbols.ionicdv_internal_qp_set_gda == NULL) {
     errno = EOPNOTSUPP;
