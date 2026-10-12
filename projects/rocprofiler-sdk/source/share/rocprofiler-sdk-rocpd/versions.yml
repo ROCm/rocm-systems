@@ -70,5 +70,5 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.5
 # - SPM counter location (xcc, shader_engine, shader_array, wgp, instance) moved
 #   from rocpd_pmc_event onto rocpd_info_pmc
-# - One rocpd_info_pmc row per counter location. rocpd_pmc_event.pmc_id points at it
+# - One rocpd_info_pmc row per agent and counter location. rocpd_pmc_event.pmc_id points at it
 # - spm_counters view reads those fields from rocpd_info_pmc

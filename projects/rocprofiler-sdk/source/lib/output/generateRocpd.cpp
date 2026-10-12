@@ -1706,11 +1706,13 @@ write_rocpd(
 
         auto spm_name_id = string_entries.at("SPM");
 
-        // One rocpd_info_pmc row per counter location. Ids sit above the KFD
-        // pmc id range (0x7000000000000000) so they do not collide with
-        // counter ids or KFD rows.
+        // One rocpd_info_pmc row per agent and counter location. The same
+        // counter and XCC/SE/SA/WGP/instance on two GPUs are different rows.
+        // Ids sit above the KFD pmc id range (0x7000000000000000) so they do
+        // not collide with counter ids or KFD rows.
         struct spm_location_key
         {
+            uint64_t agent_id      = 0;
             uint64_t counter_id    = 0;
             int64_t  xcc           = 0;
             int64_t  shader_engine = 0;
@@ -1720,7 +1722,7 @@ write_rocpd(
 
             bool operator==(const spm_location_key& rhs) const
             {
-                return counter_id == rhs.counter_id && xcc == rhs.xcc &&
+                return agent_id == rhs.agent_id && counter_id == rhs.counter_id && xcc == rhs.xcc &&
                        shader_engine == rhs.shader_engine && shader_array == rhs.shader_array &&
                        wgp == rhs.wgp && instance == rhs.instance;
             }
@@ -1734,6 +1736,7 @@ write_rocpd(
                                    (seed << 6) + (seed >> 2));
                 };
                 size_t seed = 0;
+                seed        = mix(seed, key.agent_id);
                 seed        = mix(seed, key.counter_id);
                 seed        = mix(seed, static_cast<uint64_t>(key.xcc));
                 seed        = mix(seed, static_cast<uint64_t>(key.shader_engine));
@@ -1746,8 +1749,10 @@ write_rocpd(
         auto location_ids = std::unordered_map<spm_location_key, uint64_t, spm_location_key_hash>{};
         auto next_location_pmc_id = uint64_t{0x7100000000000000ULL};
 
-        auto spm_location_pmc_id = [&](const auto& count) -> uint64_t {
+        auto spm_location_pmc_id = [&](const auto&            count,
+                                       rocprofiler_agent_id_t sample_agent) -> uint64_t {
             auto key = spm_location_key{
+                sample_agent.handle,
                 count.id.handle,
                 static_cast<int64_t>(counters::rec_to_dim_pos(count.instance_id,
                                                               counters::ROCPROFILER_DIMENSION_XCC)),
@@ -1763,24 +1768,22 @@ write_rocpd(
             if(auto found = location_ids.find(key); found != location_ids.end())
                 return found->second;
 
-            const tool_counter_info* base_info  = nullptr;
-            rocprofiler_agent_id_t   base_agent = {};
-            for(const auto& [agent_key, counters] : tool_metadata.agent_counter_info)
+            const tool_counter_info* base_info = nullptr;
+            if(auto agent_counters = tool_metadata.agent_counter_info.find(sample_agent);
+               agent_counters != tool_metadata.agent_counter_info.end())
             {
-                for(const auto& info : counters)
+                for(const auto& counter_info : agent_counters->second)
                 {
-                    if(info.id.handle != count.id.handle) continue;
-                    base_info  = &info;
-                    base_agent = agent_key;
+                    if(counter_info.id.handle != count.id.handle) continue;
+                    base_info = &counter_info;
                     break;
                 }
-                if(base_info) break;
             }
 
             auto pmc_id = next_location_pmc_id++;
             location_ids.emplace(key, pmc_id);
 
-            const auto* agent       = base_info ? tool_metadata.get_agent(base_agent) : nullptr;
+            const auto* agent       = tool_metadata.get_agent(sample_agent);
             auto        json_data   = get_json_string([agent](auto& ar) {
                 if(agent) cereal::save(ar, *agent);
             });
@@ -1850,15 +1853,16 @@ write_rocpd(
                     for(const auto* count_ptr : values)
                     {
                         const auto& count = *count_ptr;
-                        get_insert_statement(db,
-                                             "rocpd_pmc_event{{uuid}}",
-                                             {
-                                                 insert_value("id", idx++),
-                                                 insert_value("event_id", evt_id),
-                                                 insert_value("sample_id", sample_id),
-                                                 insert_value("pmc_id", spm_location_pmc_id(count)),
-                                                 insert_value("value", count.value),
-                                             });
+                        get_insert_statement(
+                            db,
+                            "rocpd_pmc_event{{uuid}}",
+                            {
+                                insert_value("id", idx++),
+                                insert_value("event_id", evt_id),
+                                insert_value("sample_id", sample_id),
+                                insert_value("pmc_id", spm_location_pmc_id(count, info.agent_id)),
+                                insert_value("value", count.value),
+                            });
                     }
                 }
             }

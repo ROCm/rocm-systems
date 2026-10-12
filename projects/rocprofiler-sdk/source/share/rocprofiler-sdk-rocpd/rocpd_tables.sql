@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS
         "is_derived" INTEGER,
         "spm_support" INTEGER,
         -- SPM location. NULL on the base counter row. Set on one row per
-        -- (counter, XCC, shader engine, shader array, WGP, instance).
+        -- (agent, counter, XCC, shader engine, shader array, WGP, instance).
         "xcc" INTEGER,
         "shader_engine" INTEGER,
         "shader_array" INTEGER,
