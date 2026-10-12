@@ -1067,8 +1067,8 @@ void TileRMATester::verifyResults(uint64_t size) {
         break;
     }
 
-    // For StartCoord tests: verify only the subregion [off..t0+off) x [off..t1+off)
-    // using the source's tile_linear_idx at (row-off, col-off).
+    // For StartCoord tests: verify only the transferred subregion [off..t0+off) x [off..t1+off).
+    // tile_linear_idx uses absolute (row, col) within the padded tensor to match the source init.
     int verify_row_start = is_start_coord_test ? start_coord_offset : 0;
     int verify_col_start = is_start_coord_test ? start_coord_offset : 0;
     int verify_rows      = t0;
