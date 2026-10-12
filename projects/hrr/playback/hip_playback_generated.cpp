@@ -346,14 +346,14 @@ static hipError_t playback_hipCtxSynchronize(PlaybackContext& ctx, const uint8_t
 static hipError_t playback_hipDestroyExternalMemory(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipDestroyExternalMemory",
-                        "argument extMem (hipExternalMemory_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDestroyExternalSemaphore(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipDestroyExternalSemaphore",
-                        "argument extSem (hipExternalSemaphore_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -864,7 +864,7 @@ static hipError_t playback_hipExtStreamGetCUMask(PlaybackContext& ctx, const uin
 static hipError_t playback_hipExternalMemoryGetMappedBuffer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExternalMemoryGetMappedBuffer",
-                        "argument extMem (hipExternalMemory_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -2238,14 +2238,14 @@ static hipError_t playback_hipGraphicsMapResources(PlaybackContext& ctx, const u
 static hipError_t playback_hipGraphicsResourceGetMappedPointer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipGraphicsResourceGetMappedPointer",
-                        "argument resource (hipGraphicsResource_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphicsSubResourceGetMappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipGraphicsSubResourceGetMappedArray",
-                        "argument resource (hipGraphicsResource_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -2263,7 +2263,7 @@ static hipError_t playback_hipGraphicsUnmapResources(PlaybackContext& ctx, const
 static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipGraphicsUnregisterResource",
-                        "argument resource (hipGraphicsResource_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -2313,14 +2313,14 @@ extern hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t
 static hipError_t playback_hipImportExternalMemory(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipImportExternalMemory",
-                        "argument memHandleDesc (const hipExternalMemoryHandleDesc*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipImportExternalSemaphore(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipImportExternalSemaphore",
-                        "argument semHandleDesc (const hipExternalSemaphoreHandleDesc*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -3303,7 +3303,7 @@ static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t*
 static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipSignalExternalSemaphoresAsync",
-                        "argument extSemArray (const hipExternalSemaphore_t*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -3811,7 +3811,7 @@ static hipError_t playback_hipUserObjectRetain(PlaybackContext& ctx, const uint8
 static hipError_t playback_hipWaitExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipWaitExternalSemaphoresAsync",
-                        "argument extSemArray (const hipExternalSemaphore_t*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -4615,7 +4615,7 @@ static hipError_t playback_hipGraphExecNodeSetParams(PlaybackContext& ctx, const
 static hipError_t playback_hipExternalMemoryGetMappedMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExternalMemoryGetMappedMipmappedArray",
-                        "argument extMem (hipExternalMemory_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -5324,21 +5324,21 @@ static hipError_t playback_hipOccupancyMaxActiveClusters(PlaybackContext& ctx, c
 static hipError_t playback_hipGreenCtxCreate(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipGreenCtxCreate",
-                        "argument desc (hipDevResourceDesc_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxDestroy",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxStreamCreate(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxStreamCreate",
-                        "argument greenctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -5393,21 +5393,21 @@ static hipError_t playback_hipDeviceGetExecutionCtx(PlaybackContext& ctx, const 
 static hipError_t playback_hipExecutionCtxGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxGetDevResource",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxGetDevice(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxGetDevice",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxGetId(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxGetId",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
@@ -5425,35 +5425,35 @@ static hipError_t playback_hipStreamGetDevResource(PlaybackContext& ctx, const u
 static hipError_t playback_hipExecutionCtxRecordEvent(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxRecordEvent",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxSynchronize",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipExecutionCtxWaitEvent",
-                        "argument ctx (hipExecutionCtx_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLibraryGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipLibraryGetGlobal",
-                        "argument library (hipLibrary_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLibraryGetManaged(PlaybackContext& ctx, const uint8_t* payload) {
   (void)payload;
   hrr_note_unreplayable(ctx, "hipLibraryGetManaged",
-                        "argument library (hipLibrary_t) is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
   return hipErrorNotSupported;
 }
 

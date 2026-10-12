@@ -519,11 +519,42 @@ UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {
 # playback-only table keeps this rule's output inside projects/hrr: the capture
 # side does not warn at record time about these, replay still refuses them by
 # name.
+_UNTRANSLATED_HANDLE_REASON = (
+    "the recorded argument is a handle recorded as an address from the "
+    "capturing process; replay has no translation for it, so passing it to "
+    "HIP would let the archive choose what the runtime dereferences"
+)
+
 PLAYBACK_ONLY_UNREPLAYABLE_APIS: Dict[str, str] = {
     "hipLinkAddFile": (
         "the recorded path names a file the archive chose, and replay would "
         "open whatever that names on this machine; an archive must not decide "
         "which file the replayer reads"),
+    # Grandfathered once as DIRECT_PLAYBACK_APIS with a raw cast of the archive
+    # integer. They pass an opaque handle replay does not translate, so they
+    # are refused by name rather than handed to HIP.
+    "hipDestroyExternalMemory": _UNTRANSLATED_HANDLE_REASON,
+    "hipDestroyExternalSemaphore": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxDestroy": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxGetDevResource": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxGetDevice": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxGetId": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxRecordEvent": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxStreamCreate": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxSynchronize": _UNTRANSLATED_HANDLE_REASON,
+    "hipExecutionCtxWaitEvent": _UNTRANSLATED_HANDLE_REASON,
+    "hipExternalMemoryGetMappedBuffer": _UNTRANSLATED_HANDLE_REASON,
+    "hipExternalMemoryGetMappedMipmappedArray": _UNTRANSLATED_HANDLE_REASON,
+    "hipGraphicsResourceGetMappedPointer": _UNTRANSLATED_HANDLE_REASON,
+    "hipGraphicsSubResourceGetMappedArray": _UNTRANSLATED_HANDLE_REASON,
+    "hipGraphicsUnregisterResource": _UNTRANSLATED_HANDLE_REASON,
+    "hipGreenCtxCreate": _UNTRANSLATED_HANDLE_REASON,
+    "hipImportExternalMemory": _UNTRANSLATED_HANDLE_REASON,
+    "hipImportExternalSemaphore": _UNTRANSLATED_HANDLE_REASON,
+    "hipLibraryGetGlobal": _UNTRANSLATED_HANDLE_REASON,
+    "hipLibraryGetManaged": _UNTRANSLATED_HANDLE_REASON,
+    "hipSignalExternalSemaphoresAsync": _UNTRANSLATED_HANDLE_REASON,
+    "hipWaitExternalSemaphoresAsync": _UNTRANSLATED_HANDLE_REASON,
 }
 
 # Filled in by generate_playback_shim: APIs the generator itself refused because
@@ -883,37 +914,16 @@ NOOP_PLAYBACK_APIS: Set[str] = {
 }
 
 # APIs that pass an opaque handle playback does not translate, but that
-# already replay through a generated call. A new API with one of those
-# parameter types replays as a no-op until it is added here or given another
-# playback class. A hand-written handler belongs in MANUAL_PLAYBACK_APIS and
+# already replay through a generated call and stay on it. A new API with one
+# of those parameter types replays as a no-op until it is added here or given
+# another playback class. The APIs that used to be here with a raw cast are in
+# PLAYBACK_ONLY_UNREPLAYABLE_APIS and are refused. A hand-written handler belongs in MANUAL_PLAYBACK_APIS and
 # must not also be listed here.
 DIRECT_PLAYBACK_APIS: Set[str] = {
-    "hipDestroyExternalMemory",
-    "hipDestroyExternalSemaphore",
     "hipDevResourceGenerateDesc",
     "hipDeviceGetExecutionCtx",
-    "hipExecutionCtxDestroy",
-    "hipExecutionCtxGetDevResource",
-    "hipExecutionCtxGetDevice",
-    "hipExecutionCtxGetId",
-    "hipExecutionCtxRecordEvent",
-    "hipExecutionCtxStreamCreate",
-    "hipExecutionCtxSynchronize",
-    "hipExecutionCtxWaitEvent",
-    "hipExternalMemoryGetMappedBuffer",
-    "hipExternalMemoryGetMappedMipmappedArray",
     "hipGraphicsMapResources",
-    "hipGraphicsResourceGetMappedPointer",
-    "hipGraphicsSubResourceGetMappedArray",
     "hipGraphicsUnmapResources",
-    "hipGraphicsUnregisterResource",
-    "hipGreenCtxCreate",
-    "hipImportExternalMemory",
-    "hipImportExternalSemaphore",
-    "hipLibraryGetGlobal",
-    "hipLibraryGetManaged",
-    "hipSignalExternalSemaphoresAsync",
-    "hipWaitExternalSemaphoresAsync",
 }
 
 # ---------------------------------------------------------------------------
