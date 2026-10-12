@@ -427,8 +427,10 @@ jobs:
     outputs:
       workspace: ${{ github.workspace }}
       # The nightly index moves every day. The integration jobs install exactly
-      # this version so the capture amdhip64 never runs against a newer ROCr
-      # than the one it was built with, however long a GPU queue is.
+      # this version so the toolchain (comgr, the device libraries) and the
+      # sysdeps sonames the in-tree ROCr and CLR use never drift from what they
+      # were built with, however long a GPU queue is. ROCr itself comes from
+      # this tree, not the SDK.
       sdk_version: ${{ steps.sdk.outputs.version }}
     runs-on: azure-linux-scale-rocm
     env:
@@ -1010,15 +1012,22 @@ jobs:
           # and replacing it makes python3 fail to start on some GPU machines.
           # rocm_sysdeps/lib holds the librocm_sysdeps_* libraries that rocr-install's
           # libhsa-runtime64 links (drm, numa, elf); it has no RUNPATH of its own.
-          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          base_ld="${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${base_ld}"
+          # The probe below uses the SDK's own amdhip64 and ROCr instead. CLR
+          # also returns hipErrorNoDevice when hsa_init fails, so probing with
+          # the in-tree ROCr would turn a broken in-tree ROCr into a green skip.
+          probe_ld="${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${base_ld}"
           # A labelled runner with no visible device is an infrastructure miss.
+          # The probe runs against the SDK's runtime, so only the machine can
+          # make it report no device; the suite below runs against this tree's.
           # Skip the suite and leave a skipped result so the check stays green.
           # Exit 1 is "confirmed no device": hipErrorNoDevice (100) or a count
           # of zero. Any other probe failure (broken ctypes, missing libpython,
           # an init or ABI error status) is not a device count and must not
           # skip the GPU suite.
           set +e
-          python3 - <<'PY'
+          LD_LIBRARY_PATH="${probe_ld}" python3 - <<'PY'
           import sys
 
           try:
