@@ -14,7 +14,6 @@
 
 namespace {
 
-// ginIbvMtuToInt: valid enum ibv_mtu values map to their byte size.
 TEST(GinMtuNegotiation, IbvMtuToIntValidValues) {
   EXPECT_EQ(ginTestIbvMtuToInt(IBV_MTU_256), 256);
   EXPECT_EQ(ginTestIbvMtuToInt(IBV_MTU_512), 512);
@@ -28,7 +27,6 @@ TEST(GinMtuNegotiation, IbvMtuToIntInvalidValue) {
   EXPECT_EQ(ginTestIbvMtuToInt(6), 0);
 }
 
-// ginNegotiatePathMtu: picks min(local, remote) in either direction.
 TEST(GinMtuNegotiation, NegotiatePicksSmallerRemote) {
   int out = -1;
   ASSERT_EQ(ginTestNegotiatePathMtu(IBV_MTU_4096, IBV_MTU_1024, &out), 0);
