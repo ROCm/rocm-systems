@@ -81,6 +81,7 @@ nav:
       - QEMU VFIO-user compute: qemu-vfio.md
       - Vulkan compute: vulkan-compute.md
       - Memory wait diagnostics: memory-wait-diagnostics.md
+      - ISA diagnostics: isa-diagnostics.md
   - Developer guide:
       - Architecture: architecture.md
       - Code style: style.md
