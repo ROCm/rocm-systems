@@ -35,6 +35,9 @@ class PlaybackDefaultTest(unittest.TestCase):
             "NOOP playback handler called for hipBrandNewApi", text
         )
         self.assertNotIn("hipBrandNewApi((", text)
+        # --multi-thread replay can run one handler on two threads at once.
+        self.assertIn("static std::atomic<bool> warned{false};", text)
+        self.assertIn("warned.exchange(true)", text)
 
     def test_grandfathered_untranslated_handle_still_calls_hip(self):
         self.assertIn("hipLibraryGetGlobal", gen.DIRECT_PLAYBACK_APIS)

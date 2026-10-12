@@ -3296,13 +3296,16 @@ def playback_defaults_to_noop(entry: ApiEntry) -> bool:
 
 
 def _noop_playback_shim(api: str) -> str:
-    """Warn once and return success. The call's effect is not reproduced."""
+    """Warn once and return success. The call's effect is not reproduced.
+
+    The flag is atomic: --multi-thread replay can enter one handler from two
+    threads, because non-ordering events advance next_seq before dispatch.
+    """
     return (f"static hipError_t playback_{api}"
             f"(PlaybackContext& ctx, const uint8_t* payload) {{\n"
             f"  (void)ctx; (void)payload;\n"
-            f"  static bool warned = false;\n"
-            f"  if (!warned) {{\n"
-            f"    warned = true;\n"
+            f"  static std::atomic<bool> warned{{false}};\n"
+            f"  if (!warned.exchange(true)) {{\n"
             f"    fprintf(stderr, \"[HRR] NOOP playback handler called for {api} — \"\n"
             f"            \"this API is not replayed; results may differ from capture.\\n\");\n"
             f"  }}\n"
