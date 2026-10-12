@@ -785,7 +785,8 @@ static bool resumed_file_matches(const fs::path& p, const std::string& hex) {
   return read_ok && hex == name;
 }
 
-static void index_existing_blobs_locked(const std::string& output_dir) {
+// `expected` is how many blob and code object files the earlier run wrote.
+static void index_existing_blobs_locked(const std::string& output_dir, uint64_t expected) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
   g_blob_claims.clear();  // as in the fresh-archive path of open()
@@ -867,6 +868,13 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
     mark_incomplete_locked(
         "a blob, code object or blob directory found on resume is not ours, or does not "
         "match its hash or its place");
+  }
+  // Fewer files than the earlier run wrote: one its events name may be gone.
+  if (g_written_blobs.size() < expected) {
+    LogPrintfWarning("[HRR capture] %s holds %zu of the %llu blob and code object files its "
+                     "earlier run wrote", output_dir.c_str(), g_written_blobs.size(),
+                     static_cast<unsigned long long>(expected));
+    mark_incomplete_locked("blob or code object files of the earlier run are missing on resume");
   }
 }
 
@@ -1501,7 +1509,10 @@ bool open(const char* output_dir) {
       return open_failed(out_dir, created_pid_dir);
     }
 
-    index_existing_blobs_locked(out_dir);
+    // Whichever of writer_state.json and manifest.json is later knows more files.
+    ProcessManifestEntry prior{};
+    (void)read_process_manifest(manifest_path, &prior);
+    index_existing_blobs_locked(out_dir, std::max<uint64_t>(fast ? bl_count : 0, prior.blob_count));
   } else {
     // Fresh per-process archive. Incomplete belongs to the archive, as in
     // atfork_child: a failure recorded against one closed earlier in this
