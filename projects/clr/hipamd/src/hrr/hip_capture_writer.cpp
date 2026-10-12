@@ -807,22 +807,29 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   // means fewer blobs are known to exist, and a blob written twice is harmless.
   // Only a file that is ours and matches its name counts; anything else is
   // replaced.
-  // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
-  // claim_private_dir contributes nothing, and write_blob refuses it later.
+  // A blobs/<xx> prefix is claimed before its files are trusted: one that is
+  // not a directory or fails claim_private_dir is not read, counts like a file
+  // that is not ours, since playback would read the blobs in it, and
+  // write_blob refuses it later.
   std::error_code ec;
   const fs::path blobs_root = output_dir + "/blobs";
   for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
     std::error_code entry_ec;
-    if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
+    const bool is_dir = dit->symlink_status(entry_ec).type() == fs::file_type::directory;
     const std::string name = dit->path().filename().string();
 #ifndef _WIN32
     const auto nibble = [](char c) -> int {
       return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
     };
     if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
-    if (!claim_private_dir(dit->path().string())) continue;
+    if (!is_dir || !claim_private_dir(dit->path().string())) {
+      ++mismatched;
+      continue;
+    }
     g_blob_prefix_claimed[(nibble(name[0]) << 4) | nibble(name[1])].store(
         true, std::memory_order_release);
+#else
+    if (!is_dir) continue;
 #endif
     for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
          it.increment(entry_ec)) {
@@ -843,12 +850,12 @@ static void index_existing_blobs_locked(const std::string& output_dir) {
   }
 
   if (mismatched) {
-    LogPrintfWarning("[HRR capture] %zu blob or code object files in %s are not ours, do not "
-                     "hold the bytes their names are the hash of, or are not where playback "
-                     "looks for them", mismatched, output_dir.c_str());
+    LogPrintfWarning("[HRR capture] %zu blob or code object files or blob directories in %s "
+                     "are not ours, do not hold the bytes their names are the hash of, or are "
+                     "not where playback looks for them", mismatched, output_dir.c_str());
     mark_incomplete_locked(
-        "a blob or code object found on resume is not ours, or does not match its hash or "
-        "its place");
+        "a blob, code object or blob directory found on resume is not ours, or does not "
+        "match its hash or its place");
   }
 }
 
