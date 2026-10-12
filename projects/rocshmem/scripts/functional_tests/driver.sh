@@ -184,6 +184,7 @@ declare -A TEST_NUMBERS=(
   ["signaladd"]="171"
   ["signalset"]="172"
   ["signalwaituntil"]="173"
+  ["defaultctxfadd"]="174"
 )
 
 # Detect which runtime to use
@@ -758,6 +759,8 @@ TestAMO() {
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
+
+  ExecTest  "defaultctxfadd"   2       8            1024
   else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1

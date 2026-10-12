@@ -69,6 +69,7 @@ test_categories:
       - "amo_add_.*"
       - "amo_inc_.*"
       - "amo_finc_.*"
+      - "defaultctxfadd_.*"
 
       # Collective operations (sync/barrier variants)
       - "barrierall_.*"

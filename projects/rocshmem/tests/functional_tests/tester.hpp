@@ -215,7 +215,8 @@
   X(TileGetWGColumnMajor,      170)  \
   X(SignalAdd,                 171)  \
   X(SignalSet,                 172)  \
-  X(SignalWaitUntil,           173)
+  X(SignalWaitUntil,           173)  \
+  X(DefaultCTXFAdd,            174)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
