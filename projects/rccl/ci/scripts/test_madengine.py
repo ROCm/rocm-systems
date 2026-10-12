@@ -588,6 +588,12 @@ ENV NCCL_DEBUG=WARN
     return tag
 
 
+def slurm_time_seconds(limit: str) -> int:
+    """Seconds in a SLURM ``HH:MM:SS`` time limit."""
+    hours, minutes, seconds = (int(part) for part in limit.split(":"))
+    return (hours * 60 + minutes) * 60 + seconds
+
+
 def generate_manifest(
     workload_name: str,
     workload_config: dict,
@@ -755,7 +761,9 @@ def generate_manifest(
                 "additional_docker_run_options": docker_run_opts,
                 "data": "",
                 "cred": "",
-                "timeout": None,
+                # None falls back to madengine's 2h default, which would stop a
+                # phase early; the allocation's own limit is the real cap.
+                "timeout": slurm_time_seconds(workload_config["time_limit"]),
             },
         },
         "context": {
