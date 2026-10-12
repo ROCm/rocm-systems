@@ -37,7 +37,7 @@ constexpr int kFlatIters = 20000;
 constexpr int kFlatSlice = 256;
 constexpr int kSkewSleeps = 4;  // ~16 us of s_sleep 127, well above an XGMI flag round trip
 
-// No host constructor works without a bootstrap, so build the objects bitwise; a layout change breaks the build.
+// No host constructor works without a bootstrap, so build the objects bitwise; the asserts catch size changes only.
 struct MailboxImage {
   int nBlocks;
   uint32_t* flags;
@@ -111,6 +111,8 @@ __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackM
 }
 
 // The DDA flat IPC shape: write own slice, barrier, read every peer slice, release-only barrier.
+// kAcquireOnly opens with the <false, true> entry barrier that follows a prior kernel or memcpy in production.
+template <bool kAcquireOnly>
 __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int iters, int slice,
                          unsigned long long* bad) {
   const int b = blockIdx.x;
@@ -126,7 +128,14 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
     for (int i = threadIdx.x; i < slice; i += blockDim.x) {
       mine[i] = payloadValue(self, it, b, i);
     }
-    bar.syncOnSameBlockIdx<true, true>();
+    if constexpr (kAcquireOnly) {
+      // Stands in for the kernel boundary that publishes the slice before the production entry barrier.
+      __syncthreads();
+      __threadfence_system();
+      bar.syncOnSameBlockIdx<false, true>();
+    } else {
+      bar.syncOnSameBlockIdx<true, true>();
+    }
     for (int p = 0; p < kRanks; ++p) {
       if (p == self) {
         continue;
@@ -155,7 +164,8 @@ enum class Alloc {
 enum class Shape {
   kPull,
   kPush,
-  kFlat
+  kFlat,
+  kFlatAcquireOnly
 };
 
 bool haveEightPeerGpus() {
@@ -200,7 +210,8 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
       }
     }
   }
-  const int words = shape == Shape::kFlat ? slice : kMpWords;
+  const bool flat = shape == Shape::kFlat || shape == Shape::kFlatAcquireOnly;
+  const int words = flat ? slice : kMpWords;
   const size_t payloadBytes = static_cast<size_t>(kBlocks) * words * sizeof(uint32_t);
   const size_t flagBytes = static_cast<size_t>(kRanks) * kBlocks * sizeof(uint32_t);
 
@@ -241,8 +252,11 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   for (int r = 0; r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
     if (shape == Shape::kFlat) {
-      hipLaunchKernelGGL(flatSync, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r, iters,
-                         slice, dBad[r]);
+      hipLaunchKernelGGL(flatSync<false>, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r,
+                         iters, slice, dBad[r]);
+    } else if (shape == Shape::kFlatAcquireOnly) {
+      hipLaunchKernelGGL(flatSync<true>, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r,
+                         iters, slice, dBad[r]);
     } else if (shape == Shape::kPull) {
       hipLaunchKernelGGL(mailboxMessagePassing<false>, dim3(kBlocks), dim3(64), 0, streams[r], dData[r], dAck[r],
                          dBufs[r], r, iters, dBad[r]);
@@ -322,6 +336,22 @@ TEST(DdaIpcGpuBarrierOrdering, FlatSync_Coarse) {
   }
   RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatSync_Coarse", Shape::kFlat, Alloc::kCoarse, kFlatIters,
                                 kFlatSlice));
+}
+
+TEST(DdaIpcGpuBarrierOrdering, FlatAcquireOnly_Uncached) {
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
+  }
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatAcquireOnly_Uncached", Shape::kFlatAcquireOnly,
+                                Alloc::kUncached, kFlatIters, kFlatSlice));
+}
+
+TEST(DdaIpcGpuBarrierOrdering, FlatAcquireOnly_Coarse) {
+  if (shouldSkip()) {
+    GTEST_SKIP() << kSkipReason;
+  }
+  RUN_ISOLATED_TESTS(makeConfig("DdaIpcGpuBarrierOrdering.FlatAcquireOnly_Coarse", Shape::kFlatAcquireOnly,
+                                Alloc::kCoarse, kFlatIters, kFlatSlice));
 }
 
 } // namespace RcclUnitTesting
