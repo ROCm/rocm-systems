@@ -488,7 +488,10 @@ TEST_F(roctx_core_api_test,
 
     on_fresh_thread([&] {
         detail::open_ranges<ext>::s_pushed.push(
-            { k_name_id, k_enter_ts, true, k_range_id });
+            detail::open_range<ext>{ .name_id         = k_name_id,
+                                     .begin_timestamp = k_enter_ts,
+                                     .write_enabled   = true,
+                                     .range_id        = k_range_id });
 
         on_roctx_core_exit<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
                                                          k_exit_ts);
@@ -523,7 +526,10 @@ TEST_F(roctx_core_api_test,
 
     on_fresh_thread([&] {
         detail::open_ranges<ext>::s_pushed.push(
-            { k_name_id, k_enter_ts, false, k_range_id });
+            detail::open_range<ext>{ .name_id         = k_name_id,
+                                     .begin_timestamp = k_enter_ts,
+                                     .write_enabled   = false,
+                                     .range_id        = k_range_id });
 
         on_roctx_core_exit<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
                                                          k_exit_ts);
@@ -545,7 +551,10 @@ TEST_F(roctx_core_api_test, range_pop_exit_skips_write_when_name_lookup_fails)
 
     on_fresh_thread([&] {
         detail::open_ranges<ext>::s_pushed.push(
-            { k_name_id, k_enter_ts, true, k_range_id });
+            detail::open_range<ext>{ .name_id         = k_name_id,
+                                     .begin_timestamp = k_enter_ts,
+                                     .write_enabled   = true,
+                                     .range_id        = k_range_id });
 
         on_roctx_core_exit<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
                                                          k_exit_ts);
@@ -621,7 +630,8 @@ TEST_F(roctx_core_api_test,
     EXPECT_CALL(*g_roctx_trigger_mock, on_range_stop(Eq(77u))).Times(1);
 
     on_fresh_thread([&] {
-        detail::open_ranges<ext>::s_started.push({ k_name_id, k_enter_ts, true });
+        detail::open_ranges<ext>::s_started.push(detail::open_range<ext>{
+            .name_id = k_name_id, .begin_timestamp = k_enter_ts, .write_enabled = true });
 
         on_roctx_core_exit<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
                                                          k_exit_ts);
@@ -714,7 +724,11 @@ TEST_F(roctx_core_api_test, exit_without_trigger_is_noop)
         make_core_record(sdk::MARKER_CORE_API_ID_roctxRangePop, &m_payload);
 
     on_fresh_thread([&] {
-        detail::open_ranges<ext>::s_pushed.push({ 11, k_enter_ts, true, 555 });
+        detail::open_ranges<ext>::s_pushed.push(
+            detail::open_range<ext>{ .name_id         = 11,
+                                     .begin_timestamp = k_enter_ts,
+                                     .write_enabled   = true,
+                                     .range_id        = 555 });
 
         on_roctx_core_exit<sdk, ext, roctx_api_category>(record, &m_user_data, nullptr,
                                                          k_exit_ts);

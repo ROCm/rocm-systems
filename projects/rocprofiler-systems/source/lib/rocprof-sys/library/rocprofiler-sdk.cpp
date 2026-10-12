@@ -465,6 +465,7 @@ struct external_dependencies
     // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view rocm_marker_api_category_name =
         trait::name<category::rocm_marker_api>::value;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr std::string_view roctx_trigger_name =
         control::triggers::roctx::k_trigger_name;
 
@@ -483,10 +484,10 @@ struct external_dependencies
 
     static string_id_t intern_string(const char* text) { return tim::add_hash_id(text); }
 
-    static const char* lookup_string(string_id_t id)
+    static const char* lookup_string(string_id_t string_hash)
     {
         const char* text = nullptr;
-        tim::get_hash_identifier_fast(id, text);
+        tim::get_hash_identifier_fast(string_hash, text);
         return text;
     }
 
