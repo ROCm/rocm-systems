@@ -211,9 +211,15 @@ struct test_kernels
     test_kernels(const rocprofiler::hsa::AgentCache& agent)
     {
         CHECK(agent.get_rocp_agent());
+        // The hsaco files are named after the HSA-reported ISA name (e.g. "gfx1250-strict"),
+        // since that is what CMake's GPU_TARGETS used to compile them for. This can differ
+        // from rocprofiler_agent_t::name, which is reconstructed from KFD's gfx_target_version
+        // and intentionally omits ISA variant suffixes such as "-strict".
+        char isa_name[64] = {};
+        CHECK_EQ(hsa_agent_get_info(agent.get_hsa_agent(), HSA_AGENT_INFO_NAME, isa_name),
+                 HSA_STATUS_SUCCESS);
         // Getting hasco Path
-        std::string hasco_file_path =
-            std::string(agent.get_rocp_agent()->name) + std::string("_agent_kernels.hsaco");
+        std::string hasco_file_path = std::string(isa_name) + std::string("_agent_kernels.hsaco");
         search_hasco(common::filesystem::current_path(), hasco_file_path);
         CHECK_EQ(load_code_object(hasco_file_path, agent.get_hsa_agent(), obj), HSA_STATUS_SUCCESS);
     }

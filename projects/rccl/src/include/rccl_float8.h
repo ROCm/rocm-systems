@@ -44,6 +44,7 @@ typedef struct {
 
 #include <hip/hip_fp8.h>
 
+// rcclFp8DeviceIsFnuz() in archinfo.h mirrors this selection for host code.
 #if __HIP_DEVICE_COMPILE__ && (defined(__gfx942__))
 typedef __hip_fp8_e4m3_fnuz rccl_float8;
 typedef __hip_fp8_e5m2_fnuz rccl_bfloat8;
@@ -51,6 +52,29 @@ typedef __hip_fp8_e5m2_fnuz rccl_bfloat8;
 typedef __hip_fp8_e4m3 rccl_float8;
 typedef __hip_fp8_e5m2 rccl_bfloat8;
 #endif
+
+// Host code always sees the OCP typedefs above, so decoding a byte in the encoding a
+// device uses has to name that encoding explicitly.
+inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool fnuz) {
+  if (isE5m2) {
+    if (fnuz) {
+      __hip_fp8_e5m2_fnuz v;
+      v.__x = bits;
+      return float(v);
+    }
+    __hip_fp8_e5m2 v;
+    v.__x = bits;
+    return float(v);
+  }
+  if (fnuz) {
+    __hip_fp8_e4m3_fnuz v;
+    v.__x = bits;
+    return float(v);
+  }
+  __hip_fp8_e4m3 v;
+  v.__x = bits;
+  return float(v);
+}
 
 typedef _Float16 half_t;
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
@@ -1027,6 +1051,18 @@ inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng) {
 }
 
 // =================================================================================================
+
+// This implementation is FNUZ in host and device code alike, so there is no encoding to choose.
+inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool /*fnuz*/) {
+  if (isE5m2) {
+    rccl_bfloat8 v;
+    v.data = bits;
+    return float(v);
+  }
+  rccl_float8 v;
+  v.data = bits;
+  return float(v);
+}
 
 #endif
 

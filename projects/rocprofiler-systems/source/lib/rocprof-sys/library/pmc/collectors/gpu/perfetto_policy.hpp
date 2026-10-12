@@ -32,7 +32,7 @@ constexpr std::uint32_t
 make_metric_value(std::initializer_list<std::uint8_t> bit_positions)
 {
     std::uint32_t value = 0;
-    for(auto bit : bit_positions)
+    for(auto const bit : bit_positions)
     {
         value |= (1u << bit);
     }
@@ -157,7 +157,7 @@ struct perfetto_policy
     {
         for(const auto& entry : device_entries)
         {
-            auto idx                         = entry.device->get_index();
+            auto const idx                   = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
                 std::make_unique<std::vector<detail::perfetto_amd_smi_sample>>(),
                 entry.supported_metrics,
@@ -180,7 +180,7 @@ struct perfetto_policy
     static void setup_counter_tracks(size_t                 device_index,
                                      const enabled_metrics& enabled_metric_config)
     {
-        auto addendum = [&](const char* name) {
+        auto const addendum = [&](const char* name) {
             return fmt::format("GPU {} [{}] (S)", name, device_index);
         };
 
@@ -212,7 +212,7 @@ struct perfetto_policy
 
         for(auto& [num, description] : tracks)
         {
-            auto enabled_metric = num & enabled_metric_config.value;
+            auto const enabled_metric = num & enabled_metric_config.value;
             if(enabled_metric == 0)
             {
                 continue;
@@ -233,9 +233,9 @@ struct perfetto_policy
                enabled_metric == detail::JPEG_BUSY_VALUE)
             {
                 // Per-XCP metrics (MI300): create tracks for each XCP partition
-                auto array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
-                                      ? MAX_NUM_VCN
-                                      : MAX_NUM_JPEG_V1;
+                auto const array_size = (enabled_metric == detail::VCN_BUSY_VALUE)
+                                            ? MAX_NUM_VCN
+                                            : MAX_NUM_JPEG_V1;
                 for(std::size_t xcp = 0; xcp < MAX_NUM_XCP; ++xcp)
                 {
                     process_xcp_array(description, array_size, xcp);
@@ -245,9 +245,9 @@ struct perfetto_policy
                     enabled_metric == detail::JPEG_ACTIVITY_VALUE)
             {
                 // Device-level metrics (Radeon): flat array, no XCP dimension
-                auto array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
-                                      ? MAX_NUM_VCN
-                                      : MAX_NUM_JPEG_V1;
+                auto const array_size = (enabled_metric == detail::VCN_ACTIVITY_VALUE)
+                                            ? MAX_NUM_VCN
+                                            : MAX_NUM_JPEG_V1;
                 for(std::size_t i = 0; i < array_size; ++i)
                 {
                     description.track_indexes.emplace_back(counter_track::emplace(
@@ -345,7 +345,7 @@ private:
         size_t device_index, pmc::collectors::gpu::enabled_metrics enabled_metrics_cfg,
         pmc::collectors::gpu::enabled_metrics supported_metrics)
     {
-        auto& samples = *detail::get_perfetto_data()[device_index].samples;
+        auto const& samples = *detail::get_perfetto_data()[device_index].samples;
 
         LOG_DEBUG("[GPU perfetto_policy] Post-processing {} PMC samples for device [{}], "
                   "enabled=0x{:x}, supported=0x{:x}",

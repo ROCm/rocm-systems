@@ -166,8 +166,8 @@ TEST(args_serialization_test, unescape_leaves_unrecognized_escapes_verbatim)
 
 TEST(args_serialization_test, source_object_present_serializes)
 {
-    auto out    = serialize_source_object("minimal-recursion");
-    auto parsed = process_arguments_string(out);
+    auto const out    = serialize_source_object("minimal-recursion");
+    auto       parsed = process_arguments_string(out);
 
     ASSERT_EQ(parsed.size(), 1u);
     EXPECT_EQ(parsed[0].arg_number, 0u);
@@ -205,7 +205,7 @@ TEST(args_serialization_test, negative_index_throws)
 
 TEST(args_serialization_test, overflowing_index_throws)
 {
-    auto too_big = std::to_string(
+    auto const too_big = std::to_string(
         static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()) + 1);
     EXPECT_THROW(process_arguments_string(too_big + ";;string;;name;;value;;"),
                  std::invalid_argument);
@@ -218,8 +218,8 @@ TEST(args_serialization_test, wrong_token_count_throws)
 
 TEST(args_serialization_test, max_uint32_index_is_accepted)
 {
-    auto max_idx = std::to_string(std::numeric_limits<std::uint32_t>::max());
-    auto parsed  = process_arguments_string(max_idx + ";;string;;name;;value;;");
+    auto const max_idx = std::to_string(std::numeric_limits<std::uint32_t>::max());
+    auto       parsed  = process_arguments_string(max_idx + ";;string;;name;;value;;");
 
     ASSERT_EQ(parsed.size(), 1u);
     EXPECT_EQ(parsed[0].arg_number, std::numeric_limits<std::uint32_t>::max());

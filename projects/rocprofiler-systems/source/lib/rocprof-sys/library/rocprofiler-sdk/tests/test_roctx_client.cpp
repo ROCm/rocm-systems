@@ -723,8 +723,8 @@ class marker_write_test : public mock_cleanup_base
 
 TEST_F(marker_write_test, all_backends_with_annotations)
 {
-    auto& mock   = *mock_marker_policy::api;
-    auto  record = make_record(42, 100, 200);
+    auto&      mock   = *mock_marker_policy::api;
+    auto const record = make_record(42, 100, 200);
 
     constexpr auto str = "rocm_marker_api";
     EXPECT_CALL(mock, add_string(std::string_view(str)));
@@ -761,8 +761,8 @@ TEST_F(marker_write_test, all_backends_with_annotations)
 
 TEST_F(marker_write_test, perfetto_disabled)
 {
-    auto& mock   = *mock_marker_policy::api;
-    auto  record = make_record(1, 10, 20);
+    auto&      mock   = *mock_marker_policy::api;
+    auto const record = make_record(1, 10, 20);
 
     EXPECT_CALL(mock, push_timemory(_));
     EXPECT_CALL(mock, pop_timemory(_));
@@ -777,8 +777,8 @@ TEST_F(marker_write_test, perfetto_disabled)
 
 TEST_F(marker_write_test, timemory_disabled_no_annotations)
 {
-    auto& mock   = *mock_marker_policy::api;
-    auto  record = make_record(1, 10, 20);
+    auto&      mock   = *mock_marker_policy::api;
+    auto const record = make_record(1, 10, 20);
 
     EXPECT_CALL(mock, push_timemory(_)).Times(0);
     EXPECT_CALL(mock, pop_timemory(_)).Times(0);
@@ -800,8 +800,8 @@ TEST_F(marker_write_test, sequential_writes_propagate_independent_data)
         captured.push_back(s);
     });
 
-    auto record1 = make_record(1, 100, 200);
-    auto record2 = make_record(2, 300, 400);
+    auto const record1 = make_record(1, 100, 200);
+    auto const record2 = make_record(2, 300, 400);
 
     const mock_marker_writer writer(false, false, false);
     writer.write_end("First", 1000, 2000, "a=1", record1);
@@ -828,8 +828,8 @@ TEST_F(marker_write_test, sequential_writes_propagate_independent_data)
 
 TEST_F(marker_write_test, write_end_with_empty_args)
 {
-    auto& mock   = *mock_marker_policy::api;
-    auto  record = make_record(1, 10, 20);
+    auto&      mock   = *mock_marker_policy::api;
+    auto const record = make_record(1, 10, 20);
 
     EXPECT_CALL(mock, store_region(Field(&region_sample::args_str, "")));
 

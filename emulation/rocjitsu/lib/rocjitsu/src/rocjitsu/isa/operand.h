@@ -188,6 +188,9 @@ public:
   /// parse the display string returned by name().
   [[nodiscard]] virtual std::optional<RegisterRef> to_register_ref() const;
 
+  /// @brief Whether encoding_value() belongs to the scalar/source selector namespace.
+  [[nodiscard]] virtual bool has_register_selector() const { return false; }
+
   /// @brief Map this operand to the architectural special register it denotes.
   ///
   /// @details Returns the special RegClass (EXEC/VCC/SCC/M0/PC) for a fieldless
@@ -219,6 +222,11 @@ public:
 
   /// @brief Operand width in bits.
   int size_bits() const { return size_bits_; }
+
+  /// @brief Encoding-derived bytes used by a qualified sub-dword access plan.
+  uint8_t register_byte_mask() const { return register_byte_mask_; }
+  /// @brief Construction-only, after literal and extension operands are finalized.
+  void set_register_byte_mask(uint8_t mask) { register_byte_mask_ = mask; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
   /// @details A construction-time capability flag. Field-bearing operands are
@@ -263,6 +271,7 @@ public:
     assert((reads_value || (!writable && !is_vgpr)) &&
            "fieldless caps: writable/is_vgpr require reads_value");
     fieldless_ = true;
+    decoded_vgpr_width_ = 0;
     reads_value_ = reads_value;
     writable_ = writable;
     is_vgpr_ = is_vgpr;
@@ -285,6 +294,14 @@ public:
     if (encoding_value_ >= 256)
       return static_cast<uint16_t>(encoding_value_ - 256);
     return static_cast<uint16_t>(encoding_value_);
+  }
+
+  /// @brief Decoded VGPR identity, with ACC in the unified 256+ register range.
+  /// @details The current wave's MSB/GPR_IDX state is deliberately not applied here.
+  [[nodiscard]] std::optional<RegisterRef> decoded_vgpr() const {
+    if (!decoded_vgpr_width_)
+      return std::nullopt;
+    return RegisterRef{RegClass::VGPR, decoded_vgpr_index_, decoded_vgpr_width_};
   }
 
   /// @brief Number of consecutive VGPRs this operand spans.
@@ -402,6 +419,7 @@ public:
   int size_bits_ = 0;
   int encoding_value_ = 0;
   amdgpu::VgprMsbRole vgpr_msb_role_ = amdgpu::VgprMsbRole::None;
+  uint8_t register_byte_mask_ = 0xf;
 
 protected:
   enum class EncodingError : uint8_t {
@@ -416,6 +434,13 @@ protected:
 
   void defer_encoding_error(EncodingError error) { encoding_error_ = error; }
 
+  /// Construction-only normalization of a selector into its decoded register.
+  void initialize_vgpr_reference(uint16_t index) {
+    decoded_vgpr_index_ = index;
+    assert(size_bits_ >= 0);
+    decoded_vgpr_width_ = static_cast<uint8_t>(std::max(1u, unsigned(size_bits_) / 32));
+  }
+
   /// @brief Capability/role flags, set once at construction and never
   /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
   /// operands get their (reads_value, writable, is_vgpr) triple from
@@ -426,10 +451,13 @@ protected:
   ///
   /// Defaults describe a normal field-bearing operand (readable, writable,
   /// not fieldless).
-  bool is_vgpr_ = false;
-  bool reads_value_ = true;
-  bool writable_ = true;
-  bool fieldless_ = false;
+  uint16_t decoded_vgpr_index_ = 0;
+  uint8_t decoded_vgpr_width_ = 0;
+  bool is_vgpr_ : 1 = false;
+  bool reads_value_ : 1 = true;
+  bool writable_ : 1 = true;
+  bool fieldless_ : 1 = false;
+  uint8_t reserved_caps_ : 4 = 0;
   EncodingError encoding_error_ = EncodingError::None;
 
 private:

@@ -12,6 +12,8 @@ add_library(
     test_rocshmem_api.cpp
     ${callback_domains_hsa_test_sources}
     ${callback_domains_hip_test_sources}
+    ${callback_domains_ompt_test_sources}
+    ${callback_domains_rccl_test_sources}
 )
 
 target_link_libraries(

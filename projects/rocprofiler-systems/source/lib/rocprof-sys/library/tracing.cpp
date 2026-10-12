@@ -5,6 +5,7 @@
 #include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "core/perfetto/emitter.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
@@ -66,8 +67,8 @@ copy_timemory_hash_ids()
     }
 
     // copy these over so that all hashes are known
-    auto& _hmain = tim::hash::get_main_hash_ids();
-    auto& _amain = tim::hash::get_main_hash_aliases();
+    auto const& _hmain = tim::hash::get_main_hash_ids();
+    auto const& _amain = tim::hash::get_main_hash_aliases();
     if(_hmain == nullptr)
     {
         LOG_CRITICAL("no main timemory hash ids");
@@ -131,7 +132,7 @@ copy_timemory_hash_ids()
             const auto num_entries = std::min(peak_threads, hash_storage->size());
             for(size_t i = 0; i < num_entries; ++i)
             {
-                auto& _hitr = (*hash_storage)[i];
+                auto const& _hitr = (*hash_storage)[i];
                 if(_hitr)
                 {
                     *_hitr = *_hmain;
@@ -144,7 +145,7 @@ copy_timemory_hash_ids()
             const auto num_entries = std::min(peak_threads, alias_storage->size());
             for(size_t i = 0; i < num_entries; ++i)
             {
-                auto& _aitr = (*alias_storage)[i];
+                auto const& _aitr = (*alias_storage)[i];
                 if(_aitr)
                 {
                     *_aitr = *_amain;
@@ -166,7 +167,7 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(comp::wall_clock::record(),
+        thread_info::set_start(control::clocks::timeline_ns(),
                                get_mode() != state::process::Mode::sampling);
     });
 }
@@ -179,7 +180,7 @@ thread_init()
         return;
     }
 
-    static thread_local auto _thread_dtor = scope::destructor{ []() {
+    static thread_local auto const _thread_dtor = scope::destructor{ []() {
         if(state::process::get() != state::process::Finalized)
         {
             if(get_use_causal())
@@ -204,7 +205,7 @@ thread_init()
         return;
     }
 
-    static thread_local auto _thread_setup = []() {
+    static thread_local auto const _thread_setup = []() {
         const auto& _tinfo = thread_info::init();
         auto _tidx = (_tinfo && _tinfo->index_data) ? _tinfo->index_data->sequent_value
                                                     : threading::get_id();
@@ -250,13 +251,13 @@ thread_init()
         return;
     }
 
-    static thread_local auto _sample_setup = []() {
+    static thread_local auto const _sample_setup = []() {
         auto _idx = utility::get_thread_index();
         // the main thread will initialize sampling when it initializes the tooling
         if(_idx > 0)
         {
-            auto _use_causal   = get_use_causal();
-            auto _use_sampling = get_use_sampling();
+            auto const _use_causal   = get_use_causal();
+            auto const _use_sampling = get_use_sampling();
             if(_use_causal || _use_sampling)
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);

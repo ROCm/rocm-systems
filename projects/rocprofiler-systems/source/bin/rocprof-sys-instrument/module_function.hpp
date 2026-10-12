@@ -137,11 +137,11 @@ public:
     {
         std::stringstream ss;
 
-        auto w0 = std::min<size_t>(get_width()[0], absolute_max_width);
-        auto w1 = std::min<size_t>(get_width()[1], absolute_max_width);
-        auto w2 = std::min<size_t>(get_width()[2], absolute_max_width);
+        auto const w0 = std::min<size_t>(get_width()[0], absolute_max_width);
+        auto const w1 = std::min<size_t>(get_width()[1], absolute_max_width);
+        auto const w2 = std::min<size_t>(get_width()[2], absolute_max_width);
 
-        auto _get_str = [](const std::string& _inc) {
+        auto const _get_str = [](const std::string& _inc) {
             if(_inc.length() > absolute_max_width)
             {
                 return _inc.substr(0, absolute_max_width - 3) + "...";

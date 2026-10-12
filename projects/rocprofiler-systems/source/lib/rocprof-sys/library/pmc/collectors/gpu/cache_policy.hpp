@@ -76,10 +76,10 @@ struct cache_policy
               .thread_id = thread_id,
               .extdata   = "{}" });
 
-        auto add_vcn_track = [&](std::optional<int> xcp_idx) {
+        auto const add_vcn_track = [&](std::optional<int> xcp_idx) {
             for(size_t clk = 0; clk < MAX_NUM_VCN; ++clk)
             {
-                auto name =
+                auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                         xcp_idx, clk);
                 trace_cache::get_metadata_registry().add_track(
@@ -87,10 +87,10 @@ struct cache_policy
             }
         };
 
-        auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
+        auto const add_jpeg_track = [&](std::optional<int> xcp_idx) {
             for(size_t clk = 0; clk < MAX_NUM_JPEG_V1; ++clk)
             {
-                auto name =
+                auto const name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                         xcp_idx, clk);
                 trace_cache::get_metadata_registry().add_track(
@@ -117,7 +117,7 @@ struct cache_policy
 
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
-            auto vcn_name =
+            auto const vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                     std::nullopt, vcn);
             trace_cache::get_metadata_registry().add_track(
@@ -126,7 +126,7 @@ struct cache_policy
 
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
         {
-            auto jpeg_name =
+            auto const jpeg_name =
                 trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                     std::nullopt, jpeg);
             trace_cache::get_metadata_registry().add_track(
@@ -135,12 +135,12 @@ struct cache_policy
 
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
-            auto read_name = trace_cache::info::format_link_track_name(
+            auto const read_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_read_data>::value, link);
             trace_cache::get_metadata_registry().add_track(
                 { .track_name = read_name, .thread_id = thread_id, .extdata = "{}" });
 
-            auto write_name = trace_cache::info::format_link_track_name(
+            auto const write_name = trace_cache::info::format_link_track_name(
                 trait::name<category::amd_smi_xgmi_write_data>::value, link);
             trace_cache::get_metadata_registry().add_track(
                 { .track_name = write_name, .thread_id = thread_id, .extdata = "{}" });
@@ -321,7 +321,7 @@ struct cache_policy
 
         for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
         {
-            auto vcn_name =
+            auto const vcn_name =
                 trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(vcn);
 
             trace_cache::get_metadata_registry().add_pmc_info(
@@ -346,7 +346,7 @@ struct cache_policy
 
         for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG; ++jpeg)
         {
-            auto jpeg_name =
+            auto const jpeg_name =
                 trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                     jpeg);
 
@@ -374,7 +374,7 @@ struct cache_policy
         {
             for(size_t vcn = 0; vcn < MAX_NUM_VCN; ++vcn)
             {
-                auto vcn_name =
+                auto const vcn_name =
                     trace_cache::info::format_track_name<category::amd_smi_vcn_activity>(
                         xcp, vcn);
 
@@ -403,7 +403,7 @@ struct cache_policy
         {
             for(size_t jpeg = 0; jpeg < MAX_NUM_JPEG_V1; ++jpeg)
             {
-                auto jpeg_name =
+                auto const jpeg_name =
                     trace_cache::info::format_track_name<category::amd_smi_jpeg_activity>(
                         xcp, jpeg);
                 trace_cache::get_metadata_registry().add_pmc_info(
@@ -525,7 +525,7 @@ struct cache_policy
         // XGMI data accumulators are reported per-link, so one PMC per link is needed
         for(size_t link = 0; link < MAX_NUM_XGMI_LINKS; ++link)
         {
-            auto read_name = trace_cache::info::format_link_pmc_name(
+            auto const read_name = trace_cache::info::format_link_pmc_name(
                 trait::name<category::amd_smi_xgmi_read_data>::value, link);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { .type             = agent_type::gpu,
@@ -547,7 +547,7 @@ struct cache_policy
                   .is_derived       = 0,
                   .extdata          = "{}" });
 
-            auto write_name = trace_cache::info::format_link_pmc_name(
+            auto const write_name = trace_cache::info::format_link_pmc_name(
                 trait::name<category::amd_smi_xgmi_write_data>::value, link);
             trace_cache::get_metadata_registry().add_pmc_info(
                 { .type             = agent_type::gpu,

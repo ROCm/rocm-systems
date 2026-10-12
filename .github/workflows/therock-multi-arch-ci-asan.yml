@@ -72,13 +72,9 @@ jobs:
       # Runtime-only build: everything outside these two stages, math-libs
       # included, is dropped from the build graph.
       build_stages: "compiler-runtime,runtime-tests"
-      # No presubmit opt-in input here: host-asan lists "pull_request" in its
-      # test_triggers in amdgpu_family_matrix.py, so reaching this gate with a
-      # host-asan build is enough to claim a sandbox test runner.
-      # The sanity check currently reports a LeakSanitizer failure originating
-      # in libamdhip64, which would otherwise hide every hip-tests and rocrtst
-      # result behind it. Sanity still runs and still reports its own status.
-      #sanity_blocks_components: false
+      # No presubmit opt-in input here: host-asan lists "presubmit" in its
+      # tests_on_trigger in amdgpu_family_matrix.py, so reaching this gate with
+      # a host-asan build is enough to claim a sandbox test runner.
       build_native_linux: false
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false

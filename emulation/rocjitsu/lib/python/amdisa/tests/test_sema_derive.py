@@ -552,7 +552,7 @@ class TestDeriveScalarSaveexec:
         sem = _FakeSem('S_AND_SAVEEXEC_B64', 'scalar_saveexec', 'and', 'b64', 'nonzero')
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'wf.read_exec()' in cpp
+        assert 'wf.exec_raw()' in cpp
         assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 
@@ -561,7 +561,7 @@ class TestDeriveScalarSaveexec:
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
-        assert 'wf.read_exec()' in cpp
+        assert 'wf.exec_raw()' in cpp
 
     def test_not1_saveexec_uses_source_and_negated_exec(self):
         sem = _FakeSem(
@@ -1573,7 +1573,11 @@ class TestDerivePseudoScalarUnary:
         assert 'if (exec != 0)' not in cpp
         assert 'for (uint32_t lane = 0' not in cpp
         assert 'write_scalar' in cpp
-        assert 'amdgpu::pseudo_scalar::execute_' in cpp
+        assert (
+            'amdgpu::transcendental::execute_pseudo_f16'
+            if name.endswith('_F16')
+            else 'amdgpu::pseudo_scalar::execute_f32'
+        ) in cpp
         assert 'wf.fp_round_mode_' in cpp
         assert 'wf.fp_denorm_mode_' in cpp
 
@@ -2905,9 +2909,9 @@ class TestDeriveSpecialScalar:
         if dtype == 'b32':
             assert 'wf.exec()' in cpp
             assert 'wf.set_exec(' in cpp
-            assert 'wf.read_exec()' not in cpp
+            assert 'wf.exec_raw()' not in cpp
         else:
-            assert 'wf.read_exec()' in cpp
+            assert 'wf.exec_raw()' in cpp
             assert 'wf.write_exec(' in cpp
         assert 'write_scc' in cpp
 

@@ -2,19 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 /// @file vop3_fp16_transcendental_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the FTZ-bearing
-/// f16 VOP3 transcendentals on CDNA4: v_rcp/v_rsq/v_exp/v_log_f16. The scalar
-/// body widens f16 -> f32, applies src0 abs/neg, calls the
-/// `transcendental::*_f32` reference (which flushes input denormals to ±0,
-/// has NaN/±0/±Inf carve-outs, and re-flushes the result), applies dst
-/// omod/clamp, and narrows back via f32_to_f16. The SIMD glue runs the matching
-/// `util::*_f32_simd` helpers in-vector. Each case runs TWICE in the same process
-/// -- once forcing the scalar body, once the SIMD fast path, with identical
-/// inputs/EXEC -- and the results are asserted equal per active, non-skipped lane
-/// (util::set_force_scalar_for_testing flips the gate in-process). NaN-result
-/// lanes carry an accepted payload divergence and are excluded from the
-/// comparison — NaN-ness is deterministic from the inputs, so both runs skip the
-/// same lanes. In-process inactive lanes must keep the sentinel.
+/// @brief SIMD/scalar comparison for the CDNA4 F16 VOP3 transcendentals.
+/// Inputs are promoted to F32, modified, evaluated, and narrowed to F16.
+/// RSQ honors the F16 input-denormal mode and preserves quieted NaN payloads.
+/// Each case runs with scalar execution forced and then with SIMD allowed,
+/// using identical inputs and EXEC. RSQ compares every active lane exactly;
+/// the other operations retain their existing NaN-result exclusions.
+/// Inactive lanes must keep the sentinel.
 
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
@@ -63,9 +57,11 @@ struct Case {
   uint32_t opcode;
 };
 
+constexpr uint32_t kRsqOpcode = 383;
+
 const std::array<Case, 4> kCases = {{
     {"v_rcp_f16_vop3", 381},
-    {"v_rsq_f16_vop3", 383},
+    {"v_rsq_f16_vop3", kRsqOpcode},
     {"v_exp_f16_vop3", 385},
     {"v_log_f16_vop3", 384},
 }};
@@ -82,8 +78,8 @@ const std::array<uint32_t, 16> kF16Edges = {{
     0xDEADFC00u, // -Inf
     0xDEAD7E00u, // +qNaN
     0xDEADFD00u, // -sNaN
-    0xDEAD0001u, // +smallest denormal (gets FTZ-flushed to +0)
-    0xDEAD8001u, // -smallest denormal (gets FTZ-flushed to -0)
+    0xDEAD0001u, // +smallest denormal
+    0xDEAD8001u, // -smallest denormal
     0xDEAD03FFu, // +largest denormal
     0xDEAD0400u, // +smallest normal
     0xDEAD7BFFu, // +HALF_MAX
@@ -142,13 +138,15 @@ struct ForceScalarGuard {
 
 template <typename InputFn>
 void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t clamp,
-                uint64_t exec, InputFn lane_input, const std::string &extra = "") {
+                uint64_t exec, InputFn lane_input, const std::string &extra = "",
+                uint32_t mode = 0) {
   (void)extra;
   ForceScalarGuard gate_guard;
 
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    fx.wf->set_mode_raw(mode);
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -164,11 +162,11 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   const auto simd_out = run_mode(/*force_scalar=*/false);
 
   // Core A/B equivalence per active, non-skipped lane. NaN-result lanes carry an
-  // accepted f16 NaN-payload divergence and are excluded identically in both runs.
+  // accepted payload divergence outside RSQ and are excluded in those operations.
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (exec >> lane) & 1ULL;
     if (active) {
-      if (is_f16_nan(scalar_out[lane]) || is_f16_nan(simd_out[lane]))
+      if (c.opcode != kRsqOpcode && (is_f16_nan(scalar_out[lane]) || is_f16_nan(simd_out[lane])))
         continue;
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.name << " abs=" << abs << " neg=" << neg << " omod=" << omod << " clamp=" << clamp
@@ -209,6 +207,19 @@ TEST(Vop3Fp16TranscendentalSimdCorrectness, EdgeInputs_PartialExec) {
   for (const auto &c : kCases)
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0,
                /*exec=*/0xA5A5'F0F0'1234'8001ULL, edge_in);
+}
+
+TEST(Vop3Fp16TranscendentalSimdCorrectness, ReciprocalSquareRootModes) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+    return;
+  }
+  const Case rsq{"v_rsq_f16_vop3", kRsqOpcode};
+  auto edge_in = [](uint32_t lane) { return kF16Edges[lane % kF16Edges.size()]; };
+  for (uint32_t mode = 0; mode < 16; ++mode) {
+    SCOPED_TRACE(mode);
+    check_case(rsq, 0, 0, 0, 0, ~0ULL, edge_in, "", ((mode & 3u) << 2) | ((mode >> 2) << 6));
+  }
 }
 
 /// Exhaustive 65536-input sweep: every f16 bit pattern, batched 64 lanes per

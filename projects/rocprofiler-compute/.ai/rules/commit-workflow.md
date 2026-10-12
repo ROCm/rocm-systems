@@ -95,7 +95,9 @@ while hooks are skipped because pre-commit is missing.
 
 ## Branch safety
 
-- Never commit directly to `develop` and `rocprofiler-compute-develop`
+- Never commit directly to `develop` or `rocprofiler-compute-develop`; commit on a
+  feature branch and open a PR. PRs target `rocprofiler-compute-develop`; target
+  `develop` only for an urgent hotfix that must go into the upcoming release.
 - Always check current branch and apply commit over there, unless user specifies another branch
 - If a commit was accidentally made on the wrong branch, move it:
   1. `git branch <correct-branch>` (create branch at current HEAD)

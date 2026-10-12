@@ -1354,7 +1354,16 @@ class SetValueCommands:
                     amdsmi_interface.amdsmi_set_gpu_memory_partition_mode(
                         args.gpu, memory_partition
                     )
-                    out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
+                    if memory_dict["current"] == args.memory_partition:
+                        # The driver keeps a different mode set earlier staged: a
+                        # request for the current mode does not cancel it.
+                        out = (
+                            f"Memory partition is already {args.memory_partition}; nothing changed. "
+                            "If a different memory partition was set since the driver was loaded, "
+                            "the next driver reload still applies it."
+                        )
+                    else:
+                        out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
@@ -2075,6 +2084,7 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        node_balancing_mode=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -2120,7 +2130,7 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt/--node-balancing-mode is misused
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2134,6 +2144,8 @@ class SetValueCommands:
             args.cpu = cpu
         if core:
             args.core = core
+        if node_balancing_mode:
+            args.node_balancing_mode = node_balancing_mode
 
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt is not None:
@@ -2168,6 +2180,47 @@ class SetValueCommands:
                 self.helpers.error_collector.record_library_error(e.get_error_code())
                 self.logger.print_output()
                 return
+
+        # Special node balancing mode handling (system-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, "node_balancing_mode") and args.node_balancing_mode is not None:
+            if hasattr(args, "gpu") and args.gpu is not None:
+                msg = (
+                    "amd-smi set: error: argument --node-balancing-mode: not allowed with argument "
+                    "--gpu/-g (--node-balancing-mode is a system-wide setting, not per-GPU)"
+                )
+                raise AmdSmiInvalidParameterException(
+                    "set", "--node-balancing-mode", self.helpers.get_output_format(), msg
+                )
+            result = self.helpers.validate_and_set_node_balancing_mode(
+                self.node_handle, args.node_balancing_mode, self.logger
+            )
+            self.logger.output["set_node_balancing_mode"] = result
+            self.logger.print_output()
+            return
+
+        # Special node power limit handling (node-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, "node_power_limit") and args.node_power_limit is not None:
+            if hasattr(args, "gpu") and args.gpu is not None:
+                print(
+                    "amd-smi set: error: argument --node-power-limit/-n: not allowed with "
+                    "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            requested_limit = args.node_power_limit
+            if self.node_handle is None:
+                self.logger.output["set_node_power_limit"] = (
+                    "[AMDSMI_STATUS_NOT_SUPPORTED - Feature not supported] "
+                    "Unable to set node power limit: no NPM-capable node found"
+                )
+                self.logger.print_output()
+                return
+            result = self.helpers.validate_and_set_node_power_limit(
+                self.node_handle, requested_limit, self.logger
+            )
+            self.logger.output["set_node_power_limit"] = result
+            self.logger.print_output()
+            return
 
         # Check if a GPU argument has been set
         gpu_args_enabled = False

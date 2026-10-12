@@ -1422,6 +1422,15 @@ TEST(Rcclwrap, RcclUseHierarchicalAllGatherTests)
         {"Enabled_64Nodes_AtFull",       64, true,  FULL,        true,  {}},
         // env var forces off --> disabled
         {"DisabledByEnvVar",             16, true,  1ULL << 20,  false, {{"RCCL_HIERARCHICAL_ALLGATHER", "0"}}},
+        // Per-rank floor, default 16 B; CreateMockComm sets nRanks = 8 * nNodes.
+        // PyTorch DDP's startup AllGather of one int64 stays off at any job size.
+        {"Bootstrap_8Nodes_8BPerRank",       8,  true, 8ULL * 64,        false, {}},
+        {"Bootstrap_16Nodes_8BPerRank",      16, true, 8ULL * 128,       false, {}},
+        {"Bootstrap_32Nodes_8BPerRank",      32, true, 8ULL * 256,       false, {}},
+        {"Enabled_32Nodes_At16BPerRank",     32, true, 16ULL * 256,      true,  {}},
+        {"Disabled_32Nodes_Under16BPerRank", 32, true, 16ULL * 256 - 1,  false, {}},
+        {"MinBytesPerRankZeroRemovesFloor",  16, true, 8ULL * 128,       true,
+         {{"RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK", "0"}}},
     };
 
     // Base environment shared by every case
@@ -1521,6 +1530,11 @@ TEST(Rcclwrap, RcclUseHierarchicalReduceScatterTests)
         {"Enabled_16Nodes_AboveHalf", 16, true,  HALF + 1,   true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
         // 16 nodes, exactly at threshold --> enabled
         {"Enabled_16Nodes_AtFull",    16, true,  FULL,       true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        // Per-rank floor, default 16 B, as for AllGather.
+        {"Enabled_32Nodes_At16BPerRank",     32, true,  16ULL * 256,     true,  {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"Disabled_32Nodes_Under16BPerRank", 32, true,  16ULL * 256 - 1, false, {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}}},
+        {"MinBytesPerRankZeroRemovesFloor",  16, true,  8,               true,
+         {{"RCCL_HIERARCHICAL_REDUCE_SCATTER", "1"}, {"RCCL_HIERARCHICAL_REDUCE_SCATTER_MIN_BYTES_PER_RANK", "0"}}},
     };
 
     // Base environment shared by every case

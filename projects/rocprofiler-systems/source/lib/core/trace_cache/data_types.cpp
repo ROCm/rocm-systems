@@ -77,8 +77,7 @@ enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept
 void
 enabled_formats_t::print() const
 {
-    if(std::none_of(formats.begin(), formats.end(),
-                    [](const auto& f) { return f.enabled; }))
+    if(std::ranges::none_of(formats, [](const auto& f) { return f.enabled; }))
     {
         return;
     }
@@ -103,15 +102,15 @@ enabled_formats_t::print() const
 bool
 enabled_formats_t::has_parallel_formats() const
 {
-    return std::any_of(formats.begin(), formats.end(),
-                       [](const auto& f) { return f.enabled && f.process_parallel; });
+    return std::ranges::any_of(
+        formats, [](const auto& f) { return f.enabled && f.process_parallel; });
 }
 
 bool
 enabled_formats_t::has_sequential_formats() const
 {
-    return std::any_of(formats.begin(), formats.end(),
-                       [](const auto& f) { return f.enabled && !f.process_parallel; });
+    return std::ranges::any_of(
+        formats, [](const auto& f) { return f.enabled && !f.process_parallel; });
 }
 
 enabled_formats_t
@@ -129,25 +128,24 @@ enabled_formats_t::get_sequential_formats() const
 bool
 enabled_formats_t::is_rocpd_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::rocpd; });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::rocpd; });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_perfetto_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(),
-                           [](const auto& f) { return f.kind == format_kind::perfetto; });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::perfetto; });
     return it != formats.end() && it->enabled;
 }
 
 bool
 enabled_formats_t::is_unified_memory_enabled() const
 {
-    auto it = std::find_if(formats.begin(), formats.end(), [](const auto& f) {
-        return f.kind == format_kind::unified_memory;
-    });
+    auto const it = std::ranges::find_if(
+        formats, [](const auto& f) { return f.kind == format_kind::unified_memory; });
     return it != formats.end() && it->enabled;
 }
 

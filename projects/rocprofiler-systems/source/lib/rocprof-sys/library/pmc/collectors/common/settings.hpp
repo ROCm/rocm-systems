@@ -10,11 +10,13 @@
 #include "library/pmc/collectors/cpu/types.hpp"
 #include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
+#include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/pmc/collectors/nic/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -112,14 +114,109 @@ struct settings_policy
         return rocprofsys::gpu::get_visible_gpu_bdfs();
     }
 
+    /**
+     * @brief Profiler GPU indices of the GPUs the HIP runtime exposes, in HIP ordinal
+     *        order.
+     *
+     * Element k is the device_type_index of HIP ordinal k, which is how hipFile indexes
+     * per_gpu_stats. Empty when the visibility mask is a permutation or UUID list, so
+     * hipFile telemetry is not recorded under the wrong GPU. See
+     * rocprofsys::gpu::get_visible_gpu_type_indices.
+     */
+    static std::vector<std::size_t> get_visible_gpu_type_indices()
+    {
+        return rocprofsys::gpu::get_visible_gpu_type_indices();
+    }
+
+    /**
+     * @brief hipFile metrics selected by ROCPROFSYS_HIPFILE_METRICS.
+     *
+     * Accepts "all"/"on", "none"/"off", or a comma or semicolon separated list of group
+     * keys (e.g. "fastpath,fallback,bandwidth,bytes,errors"), case-insensitively. Each
+     * key selects a read/write pair. The setting's own default
+     * (@c env_vars::HIPFILE_METRICS_DEFAULT) is registered in config.cpp; the "all"
+     * below applies only when the setting is absent entirely, as it is in unit tests.
+     */
+    static hipfile::enabled_metrics get_hipfile_enabled_metrics() noexcept
+    {
+        static auto _enabled_metrics = []() noexcept {
+            try
+            {
+                auto setting = get_setting_value<std::string>(
+                    std::string{ env_vars::HIPFILE_METRICS });
+                return parse_hipfile_enabled_metrics(setting.value_or("all"));
+            } catch(const std::exception& ex)
+            {
+                LOG_ERROR("Failed to apply {}: {}. Collecting all hipFile metrics.",
+                          env_vars::HIPFILE_METRICS, ex.what());
+            } catch(...)
+            {
+                LOG_ERROR("Failed to apply {}: unknown exception. Collecting all hipFile "
+                          "metrics.",
+                          env_vars::HIPFILE_METRICS);
+            }
+            hipfile::enabled_metrics fallback;
+            fallback.value = hipfile::ALL_HIPFILE_METRICS;
+            return fallback;
+        }();
+        return _enabled_metrics;
+    }
+
+    static hipfile::enabled_metrics parse_hipfile_enabled_metrics(
+        const std::string& setting)
+    {
+        // Case and stray whitespace are folded away exactly as ROCPROFSYS_AMD_SMI_METRICS
+        // does it, so "All" and " fastpath, fallback " behave as written.
+        const auto normalized = utility::string::to_lower(utility::string::trim(setting));
+
+        hipfile::enabled_metrics metrics;
+
+        if(normalized.empty() || normalized == "all" || normalized == "on")
+        {
+            metrics.value = hipfile::ALL_HIPFILE_METRICS;
+            return metrics;
+        }
+        if(normalized == "none" || normalized == "off")
+        {
+            metrics.value = 0U;
+            return metrics;
+        }
+
+        for(const auto& token : parse_name_list(normalized))
+        {
+            const auto mask = hipfile::metric_group_mask(token);
+            if(mask == 0U)
+            {
+                LOG_WARNING("Unknown hipFile metric group '{}' in {}, ignoring", token,
+                            env_vars::HIPFILE_METRICS);
+                continue;
+            }
+            metrics.value |= mask;
+        }
+        return metrics;
+    }
+
     static gpu::enabled_metrics get_enabled_metrics() noexcept
     {
-        static auto _enabled_metrics = []() {
-            auto setting =
-                get_setting_value<std::string>(std::string{ env_vars::AMD_SMI_METRICS });
-            auto value_str = setting.has_value() ? setting.value() : "all";
-            auto result    = parse_enabled_metrics(value_str);
-            return result;
+        static auto const _enabled_metrics = []() noexcept {
+            try
+            {
+                auto setting = get_setting_value<std::string>(
+                    std::string{ env_vars::AMD_SMI_METRICS });
+                auto value_str = setting.has_value() ? setting.value() : "all";
+                return parse_enabled_metrics(value_str);
+            } catch(const std::exception& ex)
+            {
+                LOG_ERROR("Failed to apply {}: {}. Using default AMD SMI metrics "
+                          "(busy, temp, power, mem_usage).",
+                          env_vars::AMD_SMI_METRICS, ex.what());
+            } catch(...)
+            {
+                LOG_ERROR("Failed to apply {}: unknown exception. Using default AMD SMI "
+                          "metrics (busy, temp, power, mem_usage).",
+                          env_vars::AMD_SMI_METRICS);
+            }
+            return parse_enabled_metrics("busy, temp, power, mem_usage");
         }();
         return _enabled_metrics;
     }
@@ -134,36 +231,53 @@ struct settings_policy
      */
     static nic::nic_device_filter get_nic_device_filter() noexcept
     {
-        auto filter =
-            get_setting_value<std::string>(std::string{ env_vars::SAMPLING_AINICS });
-        if(!filter.has_value())
-        {
-            // NIC sampling disabled by default
+        static auto _filter = []() noexcept {
+            try
+            {
+                auto filter = get_setting_value<std::string>(
+                    std::string{ env_vars::SAMPLING_AINICS });
+                if(!filter.has_value())
+                {
+                    // NIC sampling disabled by default
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::none;
+                    return result;
+                }
+
+                const auto& filter_str = filter.value();
+                if(filter_str == "all" || filter_str == "on")
+                {
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::all;
+                    return result;
+                }
+
+                if(filter_str == "none" || filter_str == "off" || filter_str.empty())
+                {
+                    nic::nic_device_filter result;
+                    result.mode = nic::device_selection_mode::none;
+                    return result;
+                }
+
+                nic::nic_device_filter result;
+                result.mode  = nic::device_selection_mode::specific;
+                result.names = parse_name_list(filter_str);
+                return result;
+            } catch(const std::exception& ex)
+            {
+                LOG_ERROR("Failed to apply {}: {}. Disabling NIC sampling only.",
+                          env_vars::SAMPLING_AINICS, ex.what());
+            } catch(...)
+            {
+                LOG_ERROR("Failed to apply {}: unknown exception. Disabling NIC sampling "
+                          "only.",
+                          env_vars::SAMPLING_AINICS);
+            }
             nic::nic_device_filter result;
             result.mode = nic::device_selection_mode::none;
             return result;
-        }
-
-        const auto& filter_str = filter.value();
-        if(filter_str == "all" || filter_str == "on")
-        {
-            nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::all;
-            return result;
-        }
-
-        if(filter_str == "none" || filter_str == "off" || filter_str.empty())
-        {
-            nic::nic_device_filter result;
-            result.mode = nic::device_selection_mode::none;
-            return result;
-        }
-
-        // Parse comma-separated names
-        nic::nic_device_filter result;
-        result.mode  = nic::device_selection_mode::specific;
-        result.names = parse_name_list(filter_str);
-        return result;
+        }();
+        return _filter;
     }
 
     /**
@@ -186,7 +300,7 @@ struct settings_policy
      */
     static cpu::enabled_metrics get_cpu_enabled_metrics()
     {
-        static auto _result = []() {
+        static auto const _result = []() {
             auto setting =
                 get_setting_value<std::string>(std::string{ env_vars::CPU_METRICS });
             const auto value_str = setting.has_value() ? setting.value() : "all";
@@ -198,13 +312,13 @@ struct settings_policy
     static gpu_perf_counter::gpu_perf_counter_settings
     get_gpu_perf_counter_enabled_metrics() noexcept
     {
-        auto value_str = rocprofsys::get_gpu_perf_counters();
+        auto const value_str = rocprofsys::get_gpu_perf_counters();
         if(value_str.empty())
         {
             return gpu_perf_counter::gpu_perf_counter_settings{};
         }
 
-        auto trimmed = utility::string::trim(value_str);
+        auto const trimmed = utility::string::trim(value_str);
 
         gpu_perf_counter::gpu_perf_counter_settings result;
 
@@ -222,21 +336,20 @@ struct settings_policy
                 {
                     continue;
                 }
-                auto pos = subtoken.find(device_qualifier);
+                auto const pos = subtoken.find(device_qualifier);
                 if(pos == std::string::npos)
                 {
                     result.broadcast_names.push_back(subtoken);
                 }
                 else
                 {
-                    auto name       = subtoken.substr(0, pos);
+                    auto const name = subtoken.substr(0, pos);
                     auto device_str = subtoken.substr(pos + device_qualifier.size());
                     if(name.empty())
                     {
                         continue;
                     }
-                    if(device_str.empty() ||
-                       !std::all_of(device_str.begin(), device_str.end(), ::isdigit))
+                    if(device_str.empty() || !std::ranges::all_of(device_str, ::isdigit))
                     {
                         LOG_ERROR("Invalid :device= value in "
                                   "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
@@ -278,10 +391,10 @@ private:
             return result;
         }
 
-        auto make_bits =
+        auto const make_bits =
             [](std::initializer_list<std::uint8_t> positions) -> std::uint32_t {
             std::uint32_t v = 0;
-            for(auto b : positions)
+            for(auto const b : positions)
             {
                 v |= (1u << b);
             }
@@ -353,9 +466,9 @@ private:
             return result;
         }
 
-        auto make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
+        auto const make_metric = [](std::initializer_list<std::uint8_t> bit_positions) {
             std::uint32_t value = 0;
-            for(auto bit : bit_positions)
+            for(auto const bit : bit_positions)
             {
                 value |= (1u << bit);
             }
@@ -387,7 +500,7 @@ private:
 
         for(; it != end; ++it)
         {
-            auto found = mapper.find(it->str());
+            auto const found = mapper.find(it->str());
             if(found != mapper.end())
             {
                 metrics.value |= found->second;
@@ -413,7 +526,7 @@ private:
             std::string       subtoken;
             while(std::getline(ss2, subtoken, ';'))
             {
-                auto trimmed = rocprofsys::utility::string::trim(subtoken);
+                auto const trimmed = rocprofsys::utility::string::trim(subtoken);
                 if(!trimmed.empty())
                 {
                     result.insert(std::string{ trimmed });
