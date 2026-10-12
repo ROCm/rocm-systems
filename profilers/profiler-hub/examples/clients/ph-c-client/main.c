@@ -116,12 +116,20 @@ print_agents(const ph_agent_list_t* agents)
     for(uint32_t i = 0; i < agents->list_size; ++i)
     {
         const ph_agent_t* agent = &agents->agents[i];
-        printf("%-4d %-6s %-6d %-6d %-8d %-40s %-8s %-14s %s\n",
-               agent->id,
-               agent->agent_type,
-               agent->absolute_index,
-               agent->logical_index,
-               agent->uuid,
+        printf("%-4d %-6s ", agent->id, agent->agent_type);
+        if(agent->absolute_index.is_valid)
+            printf("%-6llu ", (unsigned long long) agent->absolute_index.value);
+        else
+            printf("%-6s ", "-");
+        if(agent->logical_index.is_valid)
+            printf("%-6llu ", (unsigned long long) agent->logical_index.value);
+        else
+            printf("%-6s ", "-");
+        if(agent->uuid.is_valid)
+            printf("%-8llu ", (unsigned long long) agent->uuid.value);
+        else
+            printf("%-8s ", "-");
+        printf("%-40s %-8s %-14s %s\n",
                agent->name,
                agent->vendor_name,
                agent->model_name,

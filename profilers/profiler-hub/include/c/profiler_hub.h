@@ -97,7 +97,8 @@ extern "C"
                                   ph_future_t      future);
 
     /**
-     * @brief Retrieves node information (agents and tracks) for the trace.
+     * @brief Retrieves node information (agents, processes, threads, streams,
+     *        queues, PMC info, and tracks) for the trace.
      * @param ctx Context to query.
      * @param node Out parameter receiving the node info.
      * @param future Null to run the call before returning. Otherwise a future from

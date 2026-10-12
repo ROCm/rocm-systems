@@ -303,7 +303,7 @@ TEST_F(c_api_async_ctx_test, the_context_is_read_in_the_background_and_reports_i
     EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
     EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
     EXPECT_STREQ(g_log.last_description.load(), "Reading node info");
-    EXPECT_EQ(g_log.progress_calls, 8);
+    EXPECT_EQ(g_log.progress_calls, 12);
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);

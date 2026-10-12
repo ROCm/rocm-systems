@@ -22,6 +22,10 @@ downstream consumer of the library.
 
 ### Added
 
+- `ph_get_node()` also returns the trace's threads, streams, queues, and PMC
+  descriptions (`ph_thread_list_t`, `ph_stream_list_t`, `ph_queue_list_t`,
+  `ph_pmc_info_list_t`). Optional numeric fields use `ph_optional_uint64_t`:
+  `value` is 0 and `is_valid` is 0 when the trace did not record that field.
 - New public C ABI (`c/profiler_hub.h`, `c/profiler_hub_types.h`):
   `ph_ctx_create`/`ph_ctx_free`, `ph_get_library_version`, `ph_get_schema_version`,
   `ph_get_track_list`, `ph_get_node`, `ph_get_track_events`, `ph_get_track_samples`,
@@ -84,6 +88,12 @@ downstream consumer of the library.
 
 ### Changed
 
+- **Breaking:** `ph_process_t` now carries `ppid`, `init`, `fini`, `start`, `end`,
+  `environment`, and `extdata` from the trace. The new numeric fields are
+  `ph_optional_uint64_t`.
+- **Breaking:** `ph_agent_t` now carries `extdata`. `absolute_index`,
+  `logical_index`, and `uuid` are `ph_optional_uint64_t` instead of `uint32_t`,
+  so a missing value is distinct from zero.
 - **Breaking:** `ph_progress_fn` now takes a `ph_progress_description_t`
   (`const char*`) describing the work in progress. The pointer is valid only
   for the duration of the callback and may be null. Loading a trace reports
