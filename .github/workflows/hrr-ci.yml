@@ -122,9 +122,11 @@ jobs:
           if [ -n "${PR_NUMBER}" ]; then
             reason="the pull request changes an HRR path"
             # The files API lists at most 3000 files; a PR that large is treated
-            # as relevant rather than guessed at.
+            # as relevant rather than guessed at. A rename lists only the new
+            # path in filename, so previous_filename is listed as well: moving a
+            # file out of an HRR path is an HRR change.
             gh api --paginate "repos/${REPO}/pulls/${PR_NUMBER}/files" \
-              --jq '.[].filename' > changed-files.txt
+              --jq '.[] | .filename, (.previous_filename // empty)' > changed-files.txt
             if ! python3 - changed-files.txt <<'PY'
           import sys
 
@@ -770,7 +772,7 @@ jobs:
           action="poll"
           while true; do
             job_status="$(gh run view "${run_id}" --json jobs \
-              --jq "[.jobs[] | select(.name==\"Integration GPU (${FAMILY})\")][0].status // empty" \
+              --jq "[.jobs[] | select(.name==\"Integration GPU\")][0].status // empty" \
               || true)"
             run_status="$(gh run view "${run_id}" --json status --jq .status || true)"
             action="$(python3 "${sched}" --elapsed "${SECONDS}" \
@@ -805,7 +807,7 @@ jobs:
             exit 1
           fi
           job_conclusion="$(gh run view "${run_id}" --json jobs \
-            --jq "[.jobs[] | select(.name==\"Integration GPU (${FAMILY})\")][0].conclusion // empty" \
+            --jq "[.jobs[] | select(.name==\"Integration GPU\")][0].conclusion // empty" \
             || true)"
           run_conclusion="$(gh run view "${run_id}" --json conclusion --jq .conclusion)"
           if [ -z "${job_conclusion}" ] || [ "${job_conclusion}" = "skipped" ]; then
@@ -1011,8 +1013,9 @@ jobs:
           export LD_LIBRARY_PATH="${PWD}/build/clr/hipamd/lib:${PWD}/build/rocr-install/lib:${ROCM_SDK}/lib:${ROCM_SDK}/lib/rocm_sysdeps/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           # A labelled runner with no visible device is an infrastructure miss.
           # Skip the suite and leave a skipped result so the check stays green.
-          # Exit 1 is "confirmed no device". Any other probe failure (broken
-          # ctypes, missing libpython) is not a device count and must not
+          # Exit 1 is "confirmed no device": hipErrorNoDevice (100) or a count
+          # of zero. Any other probe failure (broken ctypes, missing libpython,
+          # an init or ABI error status) is not a device count and must not
           # skip the GPU suite.
           set +e
           python3 - <<'PY'
@@ -1027,7 +1030,11 @@ jobs:
               print(f"GPU probe unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
               sys.exit(2)
           print(f"hipGetDeviceCount: status={status}, devices={count.value}")
-          sys.exit(0 if status == 0 and count.value > 0 else 1)
+          if status == 0 and count.value > 0:
+              sys.exit(0)
+          # hipErrorNoDevice. Other statuses fall through to the suite, which
+          # then fails visibly instead of being reported as a skip.
+          sys.exit(1 if status == 100 or (status == 0 and count.value == 0) else 3)
           PY
           probe_rc=$?
           set -e
