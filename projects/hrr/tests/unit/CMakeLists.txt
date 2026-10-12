@@ -71,12 +71,16 @@ add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
 # Built with AddressSanitizer by default so an over-read of a record aborts the
 # run instead of passing by luck; set HRR_HANDLER_TESTS_ASAN=OFF for a
 # toolchain without the sanitizer runtime.
-if(TARGET hrr-playback)
+#
+# POSIX only: hrr_handler_test_util.h captures stderr with mkstemp/dup2, which
+# MSVC does not provide.
+if(TARGET hrr-playback AND NOT WIN32)
   option(HRR_HANDLER_TESTS_ASAN "Build hrr-handler-tests with AddressSanitizer" ON)
 
   set(HRR_HANDLER_TEST_SOURCES
     hrr_query_retry_test.cc
     hrr_host_budget_test.cc
+    hrr_blob_refusal_test.cc
   )
 
   add_executable(hrr-handler-tests

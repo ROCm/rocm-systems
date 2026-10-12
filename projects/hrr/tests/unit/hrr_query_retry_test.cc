@@ -110,4 +110,34 @@ TEST_CASE("Unit_HRR_Query_ZeroBoundMakesNoCall", "[hrr]") {
   CHECK(ctx.fatal_error.load());
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - By default a query has no attempt bound: one that returns
+ *     hipErrorNotReady far more often than the old 5,000,000-attempt default
+ *     would have allowed still completes (a long-polled kernel must replay).
+ */
+TEST_CASE("Unit_HRR_Query_DefaultHasNoAttemptBound", "[hrr]") {
+  PlaybackContext ctx;
+  Probe probe;
+  probe.succeed_on = 5000100;
+  CHECK(replay_query_until_success(ctx, "hipEventQuery", query_probe, &probe) == hipSuccess);
+  CHECK(probe.calls == 5000100);
+  CHECK_FALSE(ctx.fatal_error.load());
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A spinning query ends when another thread has already failed the replay.
+ */
+TEST_CASE("Unit_HRR_Query_StopsWhenReplayIsFatal", "[hrr]") {
+  PlaybackContext ctx;
+  ctx.fatal_error.store(true);
+  Probe probe;
+  CHECK(replay_query_until_success(ctx, "hipEventQuery", query_probe, &probe) ==
+        hipErrorUnknown);
+  CHECK(probe.calls == 0);
+}
+
 /** @} */
