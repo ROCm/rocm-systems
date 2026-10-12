@@ -6,13 +6,10 @@
 
 // Tensor-data-mover path for the LL128 user destination buffer: each warp's slice is
 // staged in LDS and pushed out as one bulk transfer instead of per-lane vector stores.
-//
-// The source buffer is deliberately NOT staged. An async source load through the same
-// per-warp window corrupted one slice per run on gfx1250 (~2% of 2-node ReduceScatter
-// runs at 4 GiB) and measured no faster than this, so the load leg was removed rather
-// than fixed. The receive and send FIFO legs are not eligible either: both interleave
+
+// The receive and send FIFO legs are not eligible either: both interleave
 // protocol flag words into the payload.
-//
+
 // Every entry point is gated on tdmEnable, captured from shmem in the Primitives
 // constructor, so the off case costs one register test per slice and no shmem read.
 
