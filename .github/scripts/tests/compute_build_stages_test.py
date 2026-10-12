@@ -129,6 +129,37 @@ class ComputeBuildStagesTest(unittest.TestCase):
             ["compiler-runtime", "dctools-core"],
         )
 
+    def test_emulation_keeps_sanity_prerequisites(self):
+        # Emulation has no compiler/runtime build dependencies, but the GPU
+        # sanity job still needs rocminfo, HIP, OpenCL, and hipify-clang.
+        self._install_fake_topology(
+            all_stages=["compiler-runtime", "emulation", "math-libs"],
+            required=["emulation"],
+            known={"rocjitsu", "mirage"},
+        )
+        for project in ["rocjitsu", "mirage"]:
+            with self.subTest(project=project):
+                self.assertEqual(
+                    cbs.compute_build_stages(f"emulation/{project}", "_therock"),
+                    ["compiler-runtime", "emulation"],
+                )
+
+    def test_missing_sanity_stage_builds_everything(self):
+        self._install_fake_topology(
+            all_stages=["emulation", "math-libs"],
+            required=["emulation"],
+            known={"rocjitsu"},
+        )
+        self.assertEqual(cbs.compute_build_stages("emulation/rocjitsu", "_therock"), [])
+
+    def test_sanity_prerequisites_complete_allowlist(self):
+        self._install_fake_topology(
+            all_stages=["compiler-runtime", "emulation"],
+            required=["emulation"],
+            known={"rocjitsu"},
+        )
+        self.assertEqual(cbs.compute_build_stages("emulation/rocjitsu", "_therock"), [])
+
     def test_mixed_known_and_unknown_builds_everything(self):
         # rdc is known, but the unknown project is silently dropped by
         # get_stages_for_artifacts; we must NOT narrow in that case.

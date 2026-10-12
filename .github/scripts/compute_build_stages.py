@@ -7,8 +7,9 @@ This is the rocm-systems half of per-PR selective builds. It maps the changed
 projects to the minimal set of TheRock build stages needed to build them and
 emits that set as ``build_stages`` -- an *allowlist* consumed by TheRock's
 ``setup_multi_arch.yml`` (added in ROCm/TheRock#7600). Every stage outside the
-allowlist is skipped by TheRock outright: no build, no artifact copy. An empty
-allowlist means "build every stage" (the safe default).
+allowlist is skipped by TheRock outright: no build, no artifact copy. The
+compiler-runtime stage is also retained for the always-enabled sanity tests.
+An empty allowlist means "build every stage" (the safe default).
 
 Why an allowlist (not a skip list): callers declare the stages they *want*, so
 adding a new stage to BUILD_TOPOLOGY.toml never silently widens a narrow PR's
@@ -27,7 +28,8 @@ math and cannot drift from the actual build graph:
 Fail-safe: whenever the change set cannot be confidently narrowed, this prints
 an empty ``build_stages`` so TheRock builds everything. That happens for: a
 run_all_tests (CI-infra) change, no changed projects, a full-build project (see
-FULL_BUILD_PROJECTS), an unknown/unmapped project, or any topology-load error.
+FULL_BUILD_PROJECTS), an unknown/unmapped project, a missing sanity stage, or any
+topology-load error.
 
 Usage:
     python compute_build_stages.py \
@@ -147,6 +149,15 @@ def compute_build_stages(
     if not required:
         logger.info("No stages mapped for changed projects -> build all stages")
         return []
+
+    # TheRock runs sanity tests even for projects with no compiler/runtime build
+    # dependencies (e.g. rocjitsu). Keep the stage providing rocminfo, HIP, OpenCL,
+    # and hipify-clang; otherwise these tests run against missing artifacts.
+    # Fall back to a full build if the topology no longer defines this stage.
+    if "compiler-runtime" not in all_stages:
+        logger.warning("Sanity prerequisite stage missing -> build all stages")
+        return []
+    required.add("compiler-runtime")
 
     # If everything is required, emit empty (build all) rather than a redundant
     # full list -- semantically identical to TheRock and easier to read in logs.
