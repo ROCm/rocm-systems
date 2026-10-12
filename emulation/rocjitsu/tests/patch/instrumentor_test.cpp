@@ -719,7 +719,7 @@ TEST(Instrumentor, CarriesSClauseCoverageAcrossBasicBlockBoundary) {
       0xF4002200u, 0xF8000020u, // s_load_b64 s[8:9], s[0:1], 0x20
       0xF4006000u, 0xF8000000u, // s_load_b256 s[0:7], s[0:1], 0x0; branch target.
       0x06040F06u,              // v_add_f32_e32 v2, v6, v7
-      0xBF82FFFCu,              // s_branch from 0x18 back to 0x0c.
+      0xBFA0FFFCu,              // s_branch from 0x18 back to 0x0c.
   };
   auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
   AmdGpuCodeObject obj(image.data(), image.size());
@@ -781,6 +781,84 @@ TEST(Instrumentor, PreservesOuterCoverageAcrossOverlappingSClauses) {
       << (after_result.errors.empty() ? std::string{} : after_result.errors.front());
   ASSERT_EQ(after_result.sites.size(), 1u);
   EXPECT_EQ(after_result.sites.front().anchor_offset, 20u);
+}
+
+TEST(Instrumentor, FirstAnchorSkipsSClauseCoverageAcrossBlocks) {
+  // Same layout as CarriesSClauseCoverageAcrossBasicBlockBoundary. Block 0
+  // holds the s_clause and the load it covers, so it has no anchor. Block 1
+  // starts at the branch target, whose load is still covered, so its anchor is
+  // the v_add.
+  const std::vector<uint32_t> words = {
+      0xBF850001u,              // s_clause 1: covers the next two instructions.
+      0xF4002200u, 0xF8000020u, // s_load_b64 s[8:9], s[0:1], 0x20
+      0xF4006000u, 0xF8000000u, // s_load_b256 s[0:7], s[0:1], 0x0; branch target.
+      0x06040F06u,              // v_add_f32_e32 v2, v6, v7
+      0xBFA0FFFCu,              // s_branch from 0x18 back to 0x0c.
+  };
+  auto image = make_gfx950_elf_with_text_words(words, EF_AMDGPU_MACH_AMDGCN_GFX1201);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  std::string error;
+  const std::vector<std::unique_ptr<BasicBlock>> *blocks = instrumentor.blocks(&error);
+  ASSERT_NE(blocks, nullptr) << error;
+  ASSERT_EQ(blocks->size(), 2u);
+  ASSERT_EQ((*blocks)[1]->start_offset(), 0x0cu);
+  EXPECT_EQ(instrumentor.first_anchor(*(*blocks)[0]), std::nullopt);
+  EXPECT_EQ(instrumentor.first_anchor(*(*blocks)[1]), std::optional<uint64_t>(0x14u));
+}
+
+TEST(Instrumentor, KernelEntryStartsABlockAfterPadding) {
+  // The entry at 8 follows two s_nop of padding with no terminator between
+  // them, so only the split at the entry keeps the padding from being the
+  // entry block's anchor.
+  const std::vector<uint32_t> words = {0xBF800000u, 0xBF800000u, kMovV2Zero, 0xBF810000u};
+  auto image = test::make_kernarg_kernel_elf(words, /*private_bytes=*/0,
+                                             EF_AMDGPU_MACH_AMDGCN_GFX950, /*kernarg_size=*/0,
+                                             /*wave32=*/false, /*granulated_sgpr_count=*/3,
+                                             /*entry_text_offset=*/8);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  std::string error;
+  const std::vector<std::unique_ptr<BasicBlock>> *blocks = instrumentor.blocks(&error);
+  ASSERT_NE(blocks, nullptr) << error;
+  ASSERT_EQ(blocks->size(), 2u);
+  EXPECT_EQ((*blocks)[1]->start_offset(), 8u);
+  EXPECT_EQ(instrumentor.first_anchor(*(*blocks)[1]), std::optional<uint64_t>(8u));
+}
+
+TEST(Instrumentor, BlocksLeavePatchAttemptUnspent) {
+  auto image = make_gfx950_kernel_elf_with_two_nops();
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  std::string error;
+  const std::vector<std::unique_ptr<BasicBlock>> *blocks = instrumentor.blocks(&error);
+  ASSERT_NE(blocks, nullptr) << error;
+  ASSERT_EQ(blocks->size(), 1u);
+  const std::optional<uint64_t> anchor = instrumentor.first_anchor(*blocks->front());
+  ASSERT_EQ(anchor, std::optional<uint64_t>(0u));
+
+  instrumentor.add_point_by_offset(*anchor);
+  InstrumentedCodeObject patched = instrumentor.patch();
+  EXPECT_TRUE(patched.errors.empty())
+      << (patched.errors.empty() ? std::string{} : patched.errors.front());
+  EXPECT_FALSE(patched.elf_bytes.empty());
+}
+
+TEST(Instrumentor, BlocksReportsMultiTextObject) {
+  auto image = make_gfx950_elf_with_two_text_sections();
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  std::string error;
+  EXPECT_EQ(instrumentor.blocks(&error), nullptr);
+  EXPECT_NE(error.find("multiple .text sections"), std::string::npos) << "error was: " << error;
 }
 
 TEST(Instrumentor, UnsupportedArchReportsErrorInsteadOfCrashing) {
