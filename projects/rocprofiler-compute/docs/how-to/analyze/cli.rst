@@ -961,8 +961,9 @@ Display all Triton kernels captured during profiling:
    Sorted by total GPU kernel duration.
    ================================================================================
 
-   triton.JITFunction.rmsnorm_kernel llama_triton_layer.py:381 (calls: 1)
-      └─ rmsnorm_kernel (id 0) (dispatches: 39, total: 4.22 ms)
+   triton.JITFunction.rmsnorm_kernel triton_ffn.py:109 (calls: 1)
+      └─ triton.CompiledKernel.rmsnorm_kernel triton_ffn.py:109 (calls: 1)
+         └─ rmsnorm_kernel (id 0) (dispatches: 39, total: 4.22 ms)
 
 Filter the Triton kernels
 -------------------------
