@@ -27,6 +27,10 @@
 # a captured no-op is exactly what the matrix needs to observe — and asserts
 # every API's replay class still matches what HRR's generator declares.
 #
+# hrr_capture_access_test.cc covers what capture does with the file system: a
+# private archive, no writes through planted symbolic and hard links, and no
+# wait on a planted FIFO.
+#
 # hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
 # api_matrix.yaml.  Regenerate after an upstream classification change with:
 #   aim-labs/scenarios/prep/hrr-api-matrix/check_matrix.py --emit-cxx \
@@ -36,6 +40,14 @@
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
 # [.][hrr-direct] workload.
+#
+# hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
+# wrapped keeps its wrapper, nothing is recorded after the trailer, and a failed
+# blob write leaves the archive incomplete, in the parent only across fork().
+# A write that fails only when its file is closed does too, and a call made
+# after the trailer leaves no unreplayable API in the manifest.
+# It reaches the live dispatch table through rocprofiler-register, with
+# hrr_dispatch_tool.cc as the tool library. Linux only.
 #
 # hrr_fatbin_header_test.cc covers which registered fat binaries capture stores:
 # its hidden [.][hrr-direct] workload registers valid and altered bundle
@@ -55,9 +67,9 @@
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc and hrr_secure_exec_test.cc are
-# host-only drivers (subprocess orchestration + hipRTC host calls) and stay plain
-# C++ translation units.
+# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc, hrr_capture_access_test.cc and
+# hrr_secure_exec_test.cc are host-only drivers (subprocess orchestration +
+# host-side HIP and hipRTC calls) and stay plain C++ translation units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
@@ -82,6 +94,8 @@ add_executable(hrr-integration-tests
   hrr_pitched_d2h_test.cc
   hrr_roundtrip_test.cc
   hrr_api_matrix_test.cc
+  hrr_dispatch_swap_test.cc
+  hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
   hrr_secure_exec_test.cc
   hrr_clock_hook.cc
@@ -166,5 +180,23 @@ target_compile_definitions(hrr-integration-tests PRIVATE
 
 # The integration tests spawn hrr-playback; make sure it is built first.
 add_dependencies(hrr-integration-tests hrr-playback)
+
+# The rocprofiler-register tool library hrr_dispatch_swap_test.cc loads into its
+# workloads. libamdhip64 registers with rocprofiler-register on Linux only, and
+# not in every Linux build: a test that needs the table checks at run time and
+# skips when the runtime did not register.
+if(NOT WIN32)
+  add_library(hrr-test-dispatch-tool MODULE hrr_dispatch_tool.cc)
+  set_target_properties(hrr-test-dispatch-tool PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_VISIBILITY_PRESET hidden)
+  target_link_libraries(hrr-test-dispatch-tool PRIVATE ${CMAKE_DL_LIBS})
+  find_package(Threads REQUIRED)
+  target_link_libraries(hrr-integration-tests PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+  target_compile_definitions(hrr-integration-tests PRIVATE
+    HRR_DISPATCH_TOOL="$<TARGET_FILE:hrr-test-dispatch-tool>")
+  add_dependencies(hrr-integration-tests hrr-test-dispatch-tool)
+endif()
 
 add_test(NAME hrr-integration-tests COMMAND hrr-integration-tests)
