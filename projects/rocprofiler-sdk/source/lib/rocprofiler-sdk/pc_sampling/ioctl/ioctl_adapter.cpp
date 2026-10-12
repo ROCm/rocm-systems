@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/platform/wsl/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -94,12 +95,6 @@ kfd_open()
     constexpr auto* kfd_device_name = "/dev/kfd";
 
     fd = open(kfd_device_name, O_RDWR | O_CLOEXEC);
-
-    if(fd == -1)
-    {
-        ROCP_CI_LOG(WARNING) << fmt::format("Cannot open {} for pc sampling", kfd_device_name);
-        return -1;
-    }
 
     return fd;
 }
@@ -462,7 +457,15 @@ is_pc_sampling_method_supported(rocprofiler_ioctl_pc_sampling_method_kind_t ioct
 int
 get_kfd_fd()
 {
-    static auto _v = kfd_open();
+    static auto _v = []() {
+        // WSL exposes /dev/dxg rather than /dev/kfd. Do not attempt to open
+        // /dev/kfd on that platform.
+        if(platform::wsl::is_available()) return -1;
+
+        auto fd = kfd_open();
+        if(fd == -1) ROCP_CI_LOG(WARNING) << "Cannot open /dev/kfd for pc sampling";
+        return fd;
+    }();
     return _v;
 }
 
