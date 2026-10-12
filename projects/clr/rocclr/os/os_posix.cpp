@@ -974,29 +974,37 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
 }
 
 bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
-                                bool exclusive) {
+                                ShmMode mode) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  int fd = exclusive ? shm_open(fname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
-                     : shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+  const bool create = (mode == ShmMode::kCreateNew);
+  int fd = create ? shm_open(fname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+                  : shm_open(fname, O_RDWR, 0);
   if (fd < 0) {
     return false;
   }
 
-  if (ftruncate(fd, mmap_size) != 0) {
-    close(fd);
-    return false;
+  bool ok = false;
+  if (create) {
+    ok = (ftruncate(fd, mmap_size) == 0);
+  } else {
+    struct stat stat_buf;
+    ok = (fstat(fd, &stat_buf) == 0) && (static_cast<size_t>(stat_buf.st_size) >= mmap_size);
   }
-  *mmap_ptr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  void* ptr = ok ? mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0) : MAP_FAILED;
 
   close(fd);
 
-  if (*mmap_ptr == MAP_FAILED) {
+  if (ptr == MAP_FAILED) {
+    if (create) {
+      shm_unlink(fname);
+    }
     return false;
   }
 
+  *mmap_ptr = ptr;
   return true;
 }
 

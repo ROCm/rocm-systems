@@ -47,9 +47,9 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
   if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
                                        const_cast<const void**>(shmem_ptr),
-                                       sizeof(hip::ihipIpcEventShmem_t), true)) {
-    ipc_evt_.ipc_shmem_ = nullptr;
-    ipc_evt_.ipc_name_.clear();
+                                       sizeof(hip::ihipIpcEventShmem_t),
+                                       amd::Os::ShmMode::kCreateNew)) {
+    ipc_evt_.ipc_name_.clear();  // not ours: the destructor must not unlink it
     return false;
   }
 
@@ -66,7 +66,8 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   return status == hipSuccess;
 }
 
-// Indices live in shared memory and start at -1; % keeps the sign, so map into [0, N).
+// Indices live in shared memory (a peer can write any value) and start at -1; % keeps the
+// sign, so map into [0, N). Arithmetic on them is done in 64 bits so it can't overflow.
 static inline int ihipSignalSlot(int idx) {
   const int slot = idx % IPC_SIGNALS_PER_EVENT;
   return slot < 0 ? slot + IPC_SIGNALS_PER_EVENT : slot;
@@ -79,7 +80,7 @@ hipError_t IPCEventEmulated::query() {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     const int offset = ihipSignalSlot(prev_read_idx);
 
-    if (ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT &&
+    if (ipc_evt_.ipc_shmem_->read_index < int64_t{prev_read_idx} + IPC_SIGNALS_PER_EVENT &&
         ipc_evt_.ipc_shmem_->signal[offset] != 0) {
       return hipErrorNotReady;
     }
@@ -94,7 +95,7 @@ hipError_t IPCEventEmulated::synchronize() {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
       int offset = ihipSignalSlot(prev_read_idx);
-      while ((ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT) &&
+      while ((ipc_evt_.ipc_shmem_->read_index < int64_t{prev_read_idx} + IPC_SIGNALS_PER_EVENT) &&
              (ipc_evt_.ipc_shmem_->signal[offset] != 0)) {
         amd::Os::sleep(1);
       }
@@ -162,7 +163,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   }
 
   // Update read index to indicate new signal
-  int expected = write_index - 1;
+  int expected = static_cast<int>(int64_t{write_index} - 1);  // wraps like write_index does
   while (!shmem->read_index.compare_exchange_weak(expected, write_index)) {
     amd::Os::sleep(1);
   }
@@ -200,7 +201,9 @@ hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
   if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
                                        const_cast<const void**>(shmem_ptr),
-                                       sizeof(ihipIpcEventShmem_t))) {
+                                       sizeof(ihipIpcEventShmem_t),
+                                       amd::Os::ShmMode::kOpenExisting)) {
+    ipc_evt_.ipc_name_.clear();  // not opened: the destructor must not unlink it
     return hipErrorInvalidValue;
   }
 

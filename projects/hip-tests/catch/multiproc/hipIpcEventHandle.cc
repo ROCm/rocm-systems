@@ -419,6 +419,28 @@ HIP_TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
     REQUIRE(ret == hipErrorInvalidValue);
     REQUIRE(fd < 0);  // a rejected handle must not leave a shared memory object behind
   }
+
+  SECTION("Open emulated handle whose shared memory object does not exist") {
+    const std::string name = "/hip_missing_" + std::to_string(getpid());
+    shm_unlink(name.c_str());
+
+    hipIpcEventHandle_t ipc_handle{};
+    auto* h = reinterpret_cast<EmulatedIpcEventHandle*>(&ipc_handle);
+    std::strncpy(h->shmem_name, name.c_str(), sizeof(h->shmem_name) - 1);
+
+    hipEvent_t opened = nullptr;
+    ret = hipIpcOpenEventHandle(&opened, ipc_handle);
+    const int fd = shm_open(name.c_str(), O_RDONLY, 0);
+    if (fd >= 0) {
+      close(fd);
+      shm_unlink(name.c_str());
+    }
+    if (ret == hipSuccess) {
+      HIP_CHECK(hipEventDestroy(opened));
+    }
+    REQUIRE(ret == hipErrorInvalidValue);
+    REQUIRE(fd < 0);  // opening must never create the object
+  }
 #endif
 
   SECTION("Open handle in process that created it") {
