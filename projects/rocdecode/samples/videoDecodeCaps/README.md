@@ -35,10 +35,8 @@ cmake --build . --config Release
 ```
 
 > [!NOTE]
-> Before running, add the rocDecode DLL directory to your PATH:
-> ```bat
-> set PATH=%ROCM_PATH%\bin;%PATH%
-> ```
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running; see
+> [Windows setup](../README.md#windows-setup).
 
 ## Run
 
