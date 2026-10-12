@@ -85,7 +85,26 @@ class WindowInfoVerbs : public WindowInfo {
   uint64_t amo_fadd(void *dst, uint64_t add, int pe);
   uint64_t amo_cas(void *dst, uint64_t cmp, uint64_t swp, int pe);
 
+  // --- put-with-signal + signal query -------------------------------------
+  //! Blocking put-with-signal: deliver @p n bytes to @p dst at @p pe, then
+  //! update the remote 8-byte signal word @p sig_addr with @p signal according
+  //! to @p sig_op (ROCSHMEM_SIGNAL_SET => ordered inline write,
+  //! ROCSHMEM_SIGNAL_ADD => fetch-and-add). Local-complete on return.
+  void put_signal(void *dst, const void *src, size_t n, uint64_t *sig_addr,
+                  uint64_t signal, int sig_op, int pe);
+  //! Non-blocking put-with-signal; completed by a later quiet().
+  void put_signal_nbi(void *dst, const void *src, size_t n, uint64_t *sig_addr,
+                      uint64_t signal, int sig_op, int pe);
+  //! Local read of the signal word (HDP-flushed direct load of fine-grained
+  //! host-coherent heap). No fabric op.
+  uint64_t signal_fetch(const uint64_t *sig_addr);
+  //! Spin on the local signal word until (word @p cmp @p cmp_val) holds.
+  void signal_wait_until(const uint64_t *sig_addr, int cmp, uint64_t cmp_val);
+
  private:
+  //! Post the signal update (SET or ADD) on @p lane, ordered after the payload.
+  void post_signal(int lane, uint64_t *sig_addr, uint64_t signal, int sig_op,
+                   int pe);
   //! Spin the context CQ until all posted ops on it have completed.
   void wait_all();
   //! Lane (QP) for a given peer within this context.

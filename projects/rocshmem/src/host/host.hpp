@@ -193,6 +193,27 @@ class HostInterface {
   __host__ T amo_fetch_cas(void* dst, T value, T cond, int pe,
                            WindowInfo* window_info);
 
+  /**
+   * @brief Blocking host-initiated signal operations (verbs transport).
+   *
+   * Parallel to the blocking putmem/amo above: dispatched by window subtype.
+   * On a WindowInfoVerbs these run synchronously on the calling host thread via
+   * the net::RmaEngine (put-with-signal: ordered RDMA_WRITE for SIGNAL_SET /
+   * fetch-add for SIGNAL_ADD; fetch/wait: HDP-flushed direct load of the
+   * fine-grained host-coherent heap). No public blocking C API routes here yet
+   * -- these are the seam for that follow-up; today they are exercised by the
+   * net unit tests which drive WindowInfoVerbs directly.
+   */
+  __host__ void putmem_signal(void* dest, const void* source, size_t nelems,
+                              uint64_t* sig_addr, uint64_t signal, int sig_op,
+                              int pe, WindowInfo* window_info);
+
+  __host__ uint64_t signal_fetch(const uint64_t* sig_addr,
+                                 WindowInfo* window_info);
+
+  __host__ void signal_wait_until(uint64_t* sig_addr, int cmp,
+                                  uint64_t cmp_value, WindowInfo* window_info);
+
   __host__ void fence(WindowInfo* window_info);
 
   __host__ void quiet(WindowInfo* window_info);

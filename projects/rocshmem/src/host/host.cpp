@@ -300,6 +300,58 @@ __host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
 }
 #endif  // USE_VERBS
 
+/*
+ * Blocking host-initiated signal ops. Dispatched by window subtype like the
+ * blocking putmem/amo: served by WindowInfoVerbs on the verbs transport. No
+ * public blocking C API routes here yet (follow-up); today the net unit tests
+ * drive WindowInfoVerbs directly. A non-verbs window has no blocking signal
+ * path, so it aborts rather than silently no-op.
+ */
+__host__ void HostInterface::putmem_signal(
+    [[maybe_unused]] void* dest, [[maybe_unused]] const void* source,
+    [[maybe_unused]] size_t nelems, [[maybe_unused]] uint64_t* sig_addr,
+    [[maybe_unused]] uint64_t signal, [[maybe_unused]] int sig_op,
+    [[maybe_unused]] int pe, [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->put_signal(dest, source, nelems, sig_addr, signal, sig_op, pe);
+    return;
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host putmem_signal is only supported on the verbs host "
+      "transport");
+}
+
+__host__ uint64_t HostInterface::signal_fetch(
+    [[maybe_unused]] const uint64_t* sig_addr,
+    [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    return w->signal_fetch(sig_addr);
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host signal_fetch is only supported on the verbs host "
+      "transport");
+  return 0;
+}
+
+__host__ void HostInterface::signal_wait_until(
+    [[maybe_unused]] uint64_t* sig_addr, [[maybe_unused]] int cmp,
+    [[maybe_unused]] uint64_t cmp_value,
+    [[maybe_unused]] WindowInfo* window_info) {
+#ifdef USE_VERBS
+  if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
+    w->signal_wait_until(sig_addr, cmp, cmp_value);
+    return;
+  }
+#endif
+  LOG_ERROR_ABORT(
+      "blocking host signal_wait_until is only supported on the verbs host "
+      "transport");
+}
+
 __host__ HostInterface::~HostInterface() {
 #if defined USE_HDP_FLUSH
   mpilib_ftable_.Win_unlock_all(hdp_win);

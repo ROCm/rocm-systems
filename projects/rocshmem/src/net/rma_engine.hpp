@@ -78,6 +78,13 @@ class RmaEngine {
                       uint32_t rk, uint32_t len, bool inl, uint64_t wr_id);
   uint64_t post_read(int lane, uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
                      uint32_t rk, uint32_t len, uint64_t wr_id);
+  //! 8-byte inline RDMA_WRITE of an immediate value (the OpenSHMEM SIGNAL_SET
+  //! realization). Inline => the value is copied into the WQE at post time, so
+  //! no registered local source/lkey is required. Used for put-with-signal:
+  //! posted after the payload write on the same RC QP, RC in-order placement
+  //! guarantees the signal lands after the data at the responder.
+  uint64_t post_signal_set(int lane, uintptr_t raddr, uint32_t rk,
+                           uint64_t value, uint64_t wr_id);
   uint64_t post_fadd(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
                      uint32_t rk, uint64_t add, uint64_t wr_id);
   uint64_t post_cas(int lane, uintptr_t result, uint32_t lkey, uintptr_t raddr,
