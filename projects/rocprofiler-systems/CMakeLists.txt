@@ -590,6 +590,7 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/skills
     COMPONENT setup
     USE_SOURCE_PERMISSIONS
+    PATTERN "evals" EXCLUDE
 )
 
 # ------------------------------------------------------------------------------#

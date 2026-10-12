@@ -60,8 +60,8 @@ Every skill directory holds:
 `SKILL.md` states which command to run, when, and where the boundaries are. The skills
 are self-contained: they describe behavior that `--help` does not state and point to
 `<tool> --help` for the full, current flag list instead of copying it, so they do not
-go stale when options are added. The install script leaves `evals/` out of the copy
-it makes for the agent.
+go stale when options are added. The `evals/` directories are for local testing only:
+neither the CMake install nor the install script copies them.
 
 ## Keeping skills correct
 
