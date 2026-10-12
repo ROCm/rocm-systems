@@ -668,8 +668,7 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
-  # nccl_device/utility.h built as plain C++ (no GPU): its !NCCL_DEVICE_COMPILE branches, such as the
-  # volatile-load testAbort overload, never compile in a HIP TU, so they need their own non-HIP binary.
+  # utility.h as plain C++: its !NCCL_DEVICE_COMPILE branches (host testAbort) never compile in a HIP TU.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
   set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
   target_include_directories(rccl-UnitTestsUtilityHostOnly PRIVATE ${PROJECT_SOURCE_DIR}/src/include)

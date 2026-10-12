@@ -200,8 +200,7 @@ static_assert(std::is_same<AlignDownResult<char*>::Type, char*>::value, "alignDo
 static_assert(std::is_same<AlignDownResult<char const*>::Type, char const*>::value, "keeps const");
 static_assert(std::is_same<AlignDownResult<uint8_t*>::Type, uint8_t*>::value, "uint8_t deduces T*");
 static_assert(std::is_same<AlignUpResult<char const*>::Type, char const*>::value, "alignUp keeps const");
-// The void const* overloads have a non-deducible T: a plain call binds T* with T = const void (whose static_assert
-// rejects it once instantiated), so they are reachable only as alignDown<AnyT>(p, a) and they drop const.
+// void const* overloads have a non-deducible T: a plain call picks T* with T = const void, so only alignDown<AnyT>(p, a) works.
 static_assert(std::is_same<AlignDownResult<void const*>::Type, void const*>::value,
               "plain call resolves to T* with T = const void, not to the void const* overload");
 static_assert(std::is_same<AlignUpResult<void const*>::Type, void const*>::value,
@@ -513,8 +512,7 @@ TEST(NcclUtilityRcp, ImulRcpComposesReciprocals) {
   EXPECT_GT(zeroCases64, 0);
 }
 
-// imulRcp returns 0 (the divide-by-1 sentinel) when mul32hi(xrcp, yrcp) is 0 but the true reciprocal is 1, because
-// rem = 0 - x*y*0 wraps to 0 instead of 2^32. idivFast then returns the dividend unchanged. All callers use tiny x*y.
+// When the true reciprocal is 1, imulRcp returns 0 (the divide-by-1 sentinel), so idivFast returns x unchanged.
 TEST(NcclUtilityRcp, ImulRcpReturnsZeroWhenTrueReciprocalIsOne) {
   const uint32_t x = 34;
   const uint32_t y = 123489041;
