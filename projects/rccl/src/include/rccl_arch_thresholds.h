@@ -25,11 +25,19 @@ enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 // inconsistent with the no-suppression meaning needed for symMaxR2 unused/uncapped slots.
 static constexpr size_t kThreshUnlimited = SIZE_MAX;
 
-// Returns true when totalBytes falls within the [ceMin, ceMax] window.
-// ceMax == 0 means disabled (returns false for any size).
-// ceMax == SIZE_MAX (kThreshUnlimited) means no upper bound.
-inline bool rcclWindowFits(size_t totalBytes, size_t ceMin, size_t ceMax) {
-  return ceMax > 0 && totalBytes >= ceMin && totalBytes <= ceMax;
+// Returns true when totalBytes falls within the [minBytes, maxBytes] window.
+// maxBytes == 0 means disabled (returns false for any size).
+// maxBytes == kThreshUnlimited (SIZE_MAX) means no upper bound.
+// Warns once if minBytes > maxBytes with maxBytes != 0 (contradictory overrides).
+inline bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {
+  if (maxBytes != 0 && minBytes > maxBytes) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      WARN("rcclWindowFits: min threshold (%zu) > max threshold (%zu); path silently disabled", minBytes, maxBytes);
+    }
+  }
+  return maxBytes > 0 && totalBytes >= minBytes && totalBytes <= maxBytes;
 }
 
 struct rcclArchThresholds {
