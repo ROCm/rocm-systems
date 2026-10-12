@@ -293,6 +293,39 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNcclDeviceCft -- src/nccl_device/core.cc + src/cft_dev_runtime.cc.
+  # Its own binary: rccl-UnitTestsMicro's fakes/dev_runtime_micro_fakes.cc, fakes/devcomm_fakes.cc,
+  # and gin-host-test.cc between them fake 6 of core.cc's 7 functions. core.cc is compiled for
+  # real here (not faked) because cft_dev_runtime.cc's ncclGet*DeviceLeInfo functions call
+  # ncclTeamCft/ncclTeamCftMultimem, and faking those would just re-derive core.cc's own
+  # already-tested logic. Links the lightweight fakes/dev_runtime_fakes.cc (hookable
+  # ncclDevrInitOnce) for core.cc's sake, and the new fakes/cft_dev_runtime_fakes.cc for
+  # cft_dev_runtime.cc's own dev_runtime.cc callees (computeLsaSize, symTeamObtain,
+  # findCommAndHostWindowFromDeviceWindow, ncclDevrWinRegEnabled) -- not the real
+  # dev_runtime.cc, which neither production file needs beyond those four symbols.
+  set(TEST_MICRO_NCCL_DEVICE_CFT_SOURCE_FILES
+    nccl-cft-dev-runtime-test.cc
+    fakes/cft_dev_runtime_fakes.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
@@ -1053,6 +1086,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNcclDeviceCft
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNcclDeviceCft
+  SOURCES ${TEST_MICRO_NCCL_DEVICE_CFT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # core.cc includes "nccl_device/impl/core__funcs.h" unqualified
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
+    CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
