@@ -53,6 +53,7 @@ import pytest
 
 from .gin_sdma_harness import (
     BCAST_OOB_RE as _OOB_RE,
+    DATA_FAIL_RE,
     _NUM,
     _WRONG,
     bcast_wrong_count as _wrong_count,
@@ -78,14 +79,10 @@ _enabled = os.environ.get("RCCL_TESTS_GIN_SDMA_DEVTIME", "") not in (
 
 DEVTIME_LINE_RE = re.compile(
     r"#\[a2a-devtime\].*?\bdevtime\s+([0-9]+(?:\.[0-9]+)?)\s+us")
+_NO_KERNEL_TIME_WARN = "WARN --device_timing=2: no in-kernel device-time"
 
-# Release alltoall_perf prints a results row, not the DEBUG_PRINT `#wrong=`
-# line in common.cu. Root is -1 (AlltoAllRunTest), so BCAST_ROW_RE, which
-# captures root as (\d+), cannot match it. The first #wrong column is
-# out-of-place; in-place is N/A because alltoall.cu sets reportErrors = 0 there.
-# Both #wrong groups are required, as in BCAST_ROW_RE: a skipped out-of-place
-# row (writeBenchMarkLineNullBody pads it with spaces) then does not match,
-# instead of capturing the in-place #wrong as out-of-place.
+# Local because AllToAll root is -1. Both #wrong groups are required so a
+# skipped out-of-place row cannot capture the in-place N/A.
 _A2A_OOP_WRONG_RE = re.compile(
     r"^\s*\d+\s+\d+\s+\S+\s+\S+\s+-?\d+"
     r"\s+{n}\s+{n}\s+{n}\s+({w})"
@@ -109,6 +106,23 @@ _gpu = pytest.mark.skipif(
     not _enabled,
     reason="GIN AllToAll devtime smoke tests are opt-in; set "
            "RCCL_TESTS_GIN_SDMA_DEVTIME=1 on a GIN-capable node to enable.")
+
+
+def _a2a_data_failed(out):
+    """Data error: DATA_FAIL_RE, or a nonzero out-of-place #wrong column."""
+    text = out or ""
+    if DATA_FAIL_RE.search(text):
+        return True
+    for wrong in _A2A_OOP_WRONG_RE.findall(text):
+        if _wrong_count(wrong) not in (None, 0.0):
+            return True
+    return False
+
+
+def _assert_kernel_time_measured(out):
+    assert _NO_KERNEL_TIME_WARN not in (out or ""), (
+        "device-time-only mode produced no valid measurement:\n{}".format(
+            (out or "")[-2000:]))
 
 
 def _assert_datacheck_clean(out):
@@ -185,6 +199,7 @@ def _run_devtime(request, device_timing_mode, devtime_check=False):
     return run_with_conn_gate_retry(
         lambda: _launch_devtime(request, device_timing_mode, devtime_check),
         CONN_RETRIES,
+        is_data_failure=_a2a_data_failed,
     )
 
 
@@ -206,10 +221,7 @@ def test_AllToAllDevtimeMode2DeviceOnly(request):
     """Mode 2: reported metric is in-kernel device latency (no host graph loop)."""
     rc, out = _run_devtime(request, device_timing_mode=2)
     assert rc == 0, "alltoall_perf exited {} (mode -B 2)".format(rc)
-    # Check this before the datacheck: a skipped out-of-place row leaves no
-    # #wrong row to match, and this warning names the real cause.
-    assert "WARN --device_timing=2: no in-kernel device-time" not in out, (
-        "device-time-only mode produced no valid measurement:\n{}".format(out[-2000:]))
+    _assert_kernel_time_measured(out)
     _assert_datacheck_clean(out)
 
 
@@ -218,6 +230,7 @@ def test_AllToAllDevtimeMode2WithTimedCheck(request):
     """Mode 2 + --devtime_check: validate timed-kernel output before datacheck."""
     rc, out = _run_devtime(request, device_timing_mode=2, devtime_check=True)
     assert rc == 0, "alltoall_perf exited {} (mode -B 2 -H 1)".format(rc)
+    _assert_kernel_time_measured(out)
     _assert_datacheck_clean(out)
     assert "ERROR: --devtime_check:" not in out, (
         "timed-kernel datacheck failed:\n{}".format(out[-2000:]))
@@ -249,6 +262,25 @@ def test_AllToAllDevtimeDatacheckAcceptsScientificNotation():
         "# Out of bounds values : 0 OK\n"
     )
     _assert_datacheck_clean(line)
+
+
+def test_AllToAllDevtimeDatacheckRejectsMissingOutOfBounds():
+    """A clean results row with no footer must fail before any GPU run."""
+    lines = [
+        line for line in _sample_output().splitlines()
+        if "Out of bounds values" not in line
+    ]
+    with pytest.raises(pytest.fail.Exception, match="out-of-bounds count is absent"):
+        _assert_datacheck_clean("\n".join(lines) + "\n")
+
+
+def test_AllToAllDevtimeDataFailureSeesWrongColumn():
+    """A nonzero #wrong column is a data failure even beside a gate abort."""
+    assert not _a2a_data_failed(_sample_output())
+    assert _a2a_data_failed(_sample_output(oop_wrong="3"))
+    assert _a2a_data_failed(
+        _sample_output(oop_wrong="3") + "\nunhandled system error\n")
+    assert not _a2a_data_failed("unhandled system error\n")
 
 
 def test_AllToAllDevtimeDatacheckRejectsNonzeroOutOfBounds():
