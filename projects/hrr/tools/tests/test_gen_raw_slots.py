@@ -84,6 +84,19 @@ def manual_raw_pointer_casts(text):
     return out
 
 
+def manual_slot_casts(text):
+    """Hand-written handlers: every cast of a recorded field to a pointer or an
+    opaque handle. Runs both scanners: the broad one catches handle casts such as
+    `(hipExecutionCtx_t)a->ctx` and multi-word pointer casts such as
+    `(const unsigned char*)a->p`; the manual one adds `reinterpret_cast<T*>`
+    forms the broad one reads differently. Duplicates are reported once."""
+    found = list(raw_slot_casts(text))
+    for _, field in manual_raw_pointer_casts(text):
+        if field not in {f for _, f in found}:
+            found.append(("pointer cast", field))
+    return found
+
+
 def _handler_body(text, api):
     m = re.search(r"static hipError_t playback_%s\(PlaybackContext& ctx.*?\n\}\n" % re.escape(api), text, re.S)
     return m.group(0) if m else ""
@@ -117,8 +130,8 @@ class RawSlotRule(unittest.TestCase):
         self.assertEqual(bad, [], "committed hip_playback_generated.cpp casts an archive field to a pointer/handle: %r" % bad[:10])
 
     def test_manual_handlers_do_not_use_a_recorded_field_as_an_address(self):
-        bad = manual_raw_pointer_casts(MANUAL_PLAYBACK.read_text())
-        self.assertEqual(bad, [], "hip_playback.cpp casts a recorded field to a pointer: %r" % bad[:10])
+        bad = manual_slot_casts(MANUAL_PLAYBACK.read_text())
+        self.assertEqual(bad, [], "hip_playback.cpp casts a recorded field to a pointer or handle: %r" % bad[:10])
 
     def test_attribute_union_window_pointer_is_translated(self):
         body = _handler_body(self.playback, "hipGraphKernelNodeSetAttribute")
@@ -134,6 +147,13 @@ class RawSlotRule(unittest.TestCase):
         self.assertTrue(manual_raw_pointer_casts("void* dst = reinterpret_cast<void*>(a->dst);"))
         self.assertTrue(manual_raw_pointer_casts("auto p = (const char*)a->name;"))
         self.assertFalse(manual_raw_pointer_casts("auto p = reinterpret_cast<const char*>(a->name_bytes);"))
+        # What the manual-handler test runs: opaque handles and multi-word
+        # pointer types, which the pointer-only scanner does not see.
+        self.assertTrue(manual_slot_casts("auto c = (hipExecutionCtx_t)a->ctx;"))
+        self.assertTrue(manual_slot_casts("auto p = (const unsigned char*)a->src;"))
+        self.assertTrue(manual_slot_casts("auto p = reinterpret_cast<void*>(a->dst);"))
+        self.assertFalse(manual_slot_casts("auto d = (hipDevice_t)a->device; auto n = (size_t)a->size;"))
+        self.assertFalse(manual_slot_casts("auto p = reinterpret_cast<const char*>(a->name_bytes);"))
         self.assertFalse(manual_raw_pointer_casts("const auto* a = reinterpret_cast<const hrr_args_X*>(pl);"))
         # If the scanner stopped matching, the two tests above would pass for
         # the wrong reason.
