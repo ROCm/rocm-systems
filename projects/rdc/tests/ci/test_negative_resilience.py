@@ -2,7 +2,8 @@
 4.4  Negative / Error / Resilience Tests
 =========================================
 Validates error handling: missing certs, port blocked, daemon crash recovery,
-unsupported fields, and unauthorized operations.
+unsupported fields, unauthorized operations, and that rdc_shutdown() keeps the
+client library loaded.
 """
 
 import os
@@ -147,6 +148,8 @@ class TestDaemonResilience:
 # ---------------------------------------------------------------------------
 # Client library lifetime (no GPU or daemon needed)
 # ---------------------------------------------------------------------------
+_PT_DYNAMIC = 2
+_DT_NULL = 0
 _DT_FLAGS_1 = 0x6FFFFFFB
 _DF_1_NODELETE = 0x8
 
@@ -155,11 +158,13 @@ _DF_1_NODELETE = 0x8
 _SHUTDOWN_PROBE = """
 import ctypes, os, sys
 P = ctypes.c_void_p
-rdc = ctypes.CDLL(os.path.join(sys.argv[1], "librdc_bootstrap.so"))
+lib_dir = sys.argv[1]
+rdc = ctypes.CDLL(os.path.join(lib_dir, "librdc_bootstrap.so"))
 rdc.rdc_init.argtypes = [ctypes.c_uint64]
 rdc.rdc_connect.argtypes = [ctypes.c_char_p, ctypes.POINTER(P)] + [ctypes.c_char_p] * 3
 rdc.rdc_device_get_all.argtypes = [P, P, P]
 rdc.rdc_disconnect.argtypes = [P]
+rdc.rdc_shutdown.argtypes = []
 handle = P()
 assert rdc.rdc_init(0) == 0
 assert rdc.rdc_connect(b"localhost:1", ctypes.byref(handle), None, None, None) == 0
@@ -168,7 +173,7 @@ rdc.rdc_device_get_all(handle, ids, ctypes.byref(count))  # nothing listens on p
 assert rdc.rdc_disconnect(handle) == 0
 assert rdc.rdc_shutdown() == 0
 try:
-    ctypes.CDLL("librdc_client.so", mode=os.RTLD_NOLOAD)
+    ctypes.CDLL(os.path.join(lib_dir, "librdc_client.so"), mode=os.RTLD_NOLOAD)
     print("resident")
 except OSError:
     print("unloaded")
@@ -180,18 +185,19 @@ def _dt_flags_1(path):
     with open(path, "rb") as f:
         hdr = f.read(64)
         assert hdr[:6] == b"\x7fELF\x02\x01", f"{path} is not a 64-bit little-endian ELF file"
-        (phoff,) = struct.unpack_from("<Q", hdr, 0x20)
-        phentsize, phnum = struct.unpack_from("<HH", hdr, 0x36)
+        (phoff,) = struct.unpack_from("<Q", hdr, 0x20)  # e_phoff
+        phentsize, phnum = struct.unpack_from("<HH", hdr, 0x36)  # e_phentsize, e_phnum
         for i in range(phnum):
             f.seek(phoff + i * phentsize)
+            # Elf64_Phdr up to p_filesz: p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz
             p_type, _, p_offset, _, _, p_filesz = struct.unpack("<IIQQQQ", f.read(40))
-            if p_type != 2:  # PT_DYNAMIC
+            if p_type != _PT_DYNAMIC:
                 continue
             f.seek(p_offset)
             dyn = f.read(p_filesz)
             for off in range(0, len(dyn) - 15, 16):
                 tag, val = struct.unpack_from("<qQ", dyn, off)
-                if tag == 0:  # DT_NULL
+                if tag == _DT_NULL:
                     break
                 if tag == _DT_FLAGS_1:
                     return val
@@ -217,8 +223,14 @@ class TestClientLibraryLifetime:
         assert _dt_flags_1(path) & _DF_1_NODELETE, "librdc_client.so is not linked -z nodelete"
 
     def test_client_library_stays_loaded_after_shutdown(self, client_lib_dir):
+        # Make the bootstrap's dlopen("librdc_client.so") resolve to the library under test.
+        env = dict(os.environ)
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(
+            filter(None, [client_lib_dir, env.get("LD_LIBRARY_PATH")])
+        )
         r = subprocess.run(
             [sys.executable, "-c", _SHUTDOWN_PROBE, client_lib_dir],
+            env=env,
             capture_output=True,
             text=True,
             timeout=60,
