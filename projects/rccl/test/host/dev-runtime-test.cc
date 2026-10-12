@@ -5546,10 +5546,11 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // ---------------------------------------------------------------------------
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
-// is touched and rejects combinations the communicator cannot serve.
+// is touched and rejects combinations the communicator cannot serve, and the
+// resource-window sizing that follows it, up to the cuMemCreate call.
 //
-// The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// The rest of the devcomm build -- symmetric-memory window creation, GIN
+// window registration, barriers -- is not covered here.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -5627,8 +5628,9 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 // connection, so it fails the same support check rather than being ignored.
 //
 // The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: it continues into the devcomm
-// build, which this fixture does not set up for.
+// nothing and passes the gate -- is not tested: passing the gate is only
+// observable once the devcomm build completes, and this fixture stops that
+// build at the resource-window cuMemCreate.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
@@ -5643,6 +5645,8 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
 // unrelated symmetric-memory window.
 TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCount) {
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  // 4 discriminates: ROUNDUP(4, 4) = 4 but ROUNDUP(4, 3) = 6.
+  reqs.ginContextCount = 4;
   reqs.ginSignalCount = 1;
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
   comm->sharedRes->ginState.numActiveBackends = 2;
