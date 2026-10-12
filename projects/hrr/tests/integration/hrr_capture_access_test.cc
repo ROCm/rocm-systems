@@ -1122,7 +1122,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
  *     that blob again where it belongs, and the archive is marked incomplete,
  *     since events from the first run named the bytes it lost. The stray file
  *     and the linked prefix are not read, and leave the archive marked
- *     incomplete as well.
+ *     incomplete as well, as does a first run whose manifest says incomplete.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 #ifdef _WIN32
@@ -1158,6 +1158,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
   }
   SECTION("deleted") {
     fs::remove(first_archive / changed);
+  }
+  SECTION("after an incomplete run") {
+    std::string manifest = read_text_file(first_archive / "manifest.json");
+    const size_t at = manifest.find("\"complete\": true");
+    REQUIRE(at != std::string::npos);
+    write_text(first_archive / "manifest.json",
+               manifest.replace(at, 16, "\"complete\": false"));
   }
   SECTION("under a directory that is not a prefix") {
     fs::create_directories(first_archive / "blobs" / "zz");

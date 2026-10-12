@@ -1510,8 +1510,12 @@ bool open(const char* output_dir) {
     }
 
     // Whichever of writer_state.json and manifest.json is later knows more files.
+    // An earlier run that ended incomplete lost what no resume brings back.
     ProcessManifestEntry prior{};
-    (void)read_process_manifest(manifest_path, &prior);
+    if (read_process_manifest(manifest_path, &prior) && !prior.complete) {
+      std::lock_guard<std::mutex> lk(g_blob_mu);
+      mark_incomplete_locked("the archive resumed here was already incomplete");
+    }
     index_existing_blobs_locked(out_dir, std::max<uint64_t>(fast ? bl_count : 0, prior.blob_count));
   } else {
     // Fresh per-process archive. Incomplete belongs to the archive, as in
@@ -1814,6 +1818,7 @@ void emergency_finalize(bool clean_shutdown) {
   // already-written bytes; if it was clear we now own it and can safely flush.
   // clear() releases it on the way out.
   bool locked = !g_buf_busy.test_and_set(std::memory_order_acquire);
+  bool synced = false;  // the trailer below synced events.bin, or was taken back
   if (locked) {
     flush_buffer_locked();
     // Clean shutdowns append the fixed-size trailer so the reader does not treat
@@ -1836,6 +1841,7 @@ void emergency_finalize(bool clean_shutdown) {
           g_events_io_failed.store(true, std::memory_order_relaxed);
           (void)drop_trailer_locked(g_events_fd, trailer_at);
         }
+        synced = true;
       }
       g_events_finalized = true;
     }
@@ -1843,7 +1849,7 @@ void emergency_finalize(bool clean_shutdown) {
   }
   // After a space stop there is no descriptor, and on Windows _commit(-1) calls
   // the CRT invalid parameter handler, which ends the process by default.
-  if (g_events_fd >= 0 && HRR_FSYNC(g_events_fd) != 0)
+  if (g_events_fd >= 0 && !synced && HRR_FSYNC(g_events_fd) != 0)
     g_events_io_failed.store(true, std::memory_order_relaxed);
 
   // Best-effort manifest via raw open/write only. A clean shutdown writes
