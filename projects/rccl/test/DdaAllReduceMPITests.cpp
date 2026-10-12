@@ -199,6 +199,10 @@ protected:
         const std::string fabricSkip = fabricInitSkipReason();
         if(!fabricSkip.empty())
         {
+            if(DdaFabricMPI::fabricInitRequired())
+            {
+                FAIL() << fabricSkip << " (" << DdaFabricMPI::kRequireFabricEnvVar << "=1)";
+            }
             GTEST_SKIP() << fabricSkip;
         }
 

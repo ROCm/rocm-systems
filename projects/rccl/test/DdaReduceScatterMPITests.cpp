@@ -39,8 +39,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <sstream>
@@ -231,17 +231,22 @@ protected:
         const std::string fabricSkip = fabricInitSkipReason();
         if(!fabricSkip.empty())
         {
+            if(DdaFabricMPI::fabricInitRequired())
+            {
+                FAIL() << fabricSkip << " (" << DdaFabricMPI::kRequireFabricEnvVar << "=1)";
+            }
             GTEST_SKIP() << fabricSkip;
         }
 
         ncclComm_t comm = getActiveCommunicator();
         // These switch every DDA LL tier off for the process, so there is no LL path to assert.
-        const bool ddaOff = rcclParamDdaEnable() == 0 || rcclParamDdaLL() == 0
+        const bool ddaOff = rcclNcclAlgoEnvIsSet() || rcclParamDdaEnable() == 0 || rcclParamDdaLL() == 0
                             || comm->config.launchOrderImplicit == 1
                             || rcclDdaLLThreshold(comm, ncclFuncReduceScatter) == 0
                             || (needsLL128 && rcclDdaLL128Threshold(comm, ncclFuncReduceScatter) == 0);
         const std::string ddaOffSkip = mpiCoordinatedSkipReason(
-            ddaOff, "DDA ReduceScatter LL tier off (RCCL_DDA_ENABLE/LL/LL128, thresholds, or implicit launch order)");
+            ddaOff,
+            "DDA ReduceScatter LL tier off (NCCL_ALGO, RCCL_DDA_ENABLE/LL/LL128, thresholds, implicit launch order)");
         if(!ddaOffSkip.empty())
         {
             GTEST_SKIP() << ddaOffSkip;
@@ -325,6 +330,7 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, recvPoison);
 
         // No host sync between calls: a fast rank may start call k+1 while a peer still drains call k.
+        // After a failed launch this rank stops launching but keeps looping, so all ranks reach the same collectives.
         ncclResult_t launchRes  = ncclSuccess;
         size_t       launchFail = steps.size();
         for(size_t s = 0; s < steps.size(); ++s)
@@ -336,12 +342,15 @@ protected:
                 DdaFabricMPI::abortJobUnlessAllRanksDrained(switchDrained, testId);
                 MPI_Barrier(MPI_COMM_WORLD);
             }
+            if(launchRes != ncclSuccess)
+            {
+                continue;
+            }
             launchRes = ncclReduceScatter(sendBase + sendOffset[s], recvBase + recvOffset[s], steps[s].recvcount,
                                           ncclFloat32, ncclSum, comm, getActiveStream());
             if(launchRes != ncclSuccess)
             {
                 launchFail = s;
-                break;
             }
         }
 
@@ -443,8 +452,9 @@ TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
              /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
-    // BUG: an unsynchronised LL<->LL128 switch hangs or sums stale slots (seen at 2 blocks, np 3 and 8); enable when fixed.
-    // runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", true, interleavedSteps, nullptr, /*syncOnTierSwitch=*/false);
+    // BUG: an unsynchronised LL<->LL128 switch hangs or sums stale slots (2 blocks, np 3 and 8); pass false when fixed.
+    // runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
+    //          /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/false);
 }
 
 // The default block cap fits every LL128 shard in one pass; two blocks make both kernels grid-stride.

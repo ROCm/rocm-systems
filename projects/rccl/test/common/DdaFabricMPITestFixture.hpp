@@ -25,12 +25,25 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
 
 namespace DdaFabricMPI
 {
+
+// Opt-in CI strictness: when set to 1, a gfx1250 comm whose fabric DDA did not initialize fails instead of skipping.
+constexpr const char* kRequireFabricEnvVar = "UT_DDA_FABRIC_REQUIRE_INIT";
+
+// Every rank must call this; a rank-local env difference still yields one FAIL-or-SKIP decision for the job.
+inline bool fabricInitRequired()
+{
+    const char* value = std::getenv(kRequireFabricEnvVar);
+    int         flag  = (value != nullptr && std::string(value) == "1") ? 1 : 0;
+    MPI_Allreduce(MPI_IN_PLACE, &flag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+    return flag == 1;
+}
 
 inline bool isGfx1250Device()
 {
