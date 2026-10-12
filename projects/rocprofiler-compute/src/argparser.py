@@ -691,7 +691,8 @@ Examples:
         action="store_true",
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
-            "\t\tCannot be used with --output-format csv or db."
+            "\t\tCannot be used with --output-format csv or db.\n"
+            "\t\tIgnores --*-operator; the full kernel stats table is shown."
         ),
     )
     analyze_group.add_argument(
@@ -712,7 +713,9 @@ Examples:
         feature_label="List torch operators",
         help=(
             "\t\tList PyTorch operators as a unified call tree with kernel "
-            "launch stats."
+            "launch stats.\n"
+            "\t\tRequires --output-format stdout. Ignores --*-operator if both "
+            "are given."
         ),
     )
     analyze_group.add_argument(
@@ -736,7 +739,9 @@ Examples:
             "\t\t\t  all  or  '*'        match every operator\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\tCombine with -k to intersect with kernel IDs.\n"
+            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tIgnored when --list-*-operators or --list-stats is set."
         ),
     )
     analyze_group.add_argument(
@@ -750,7 +755,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List triton operators",
         help=(
-            "\t\tList Triton kernels as a unified call tree with kernel launch stats."
+            "\t\tList Triton kernels as a unified call tree with kernel launch "
+            "stats.\n"
+            "\t\tRequires --output-format stdout. Ignores --*-operator if both "
+            "are given."
         ),
     )
     analyze_group.add_argument(
@@ -772,7 +780,9 @@ Examples:
             "\t\t\t  all  or  '*'        match every kernel\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
             "\t\t\t  --triton-operator *matmul*,*softmax*\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\tCombine with -k to intersect with kernel IDs.\n"
+            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tIgnored when --list-*-operators or --list-stats is set."
         ),
     )
     analyze_group.add_argument(

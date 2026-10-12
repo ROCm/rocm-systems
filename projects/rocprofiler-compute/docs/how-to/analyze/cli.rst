@@ -691,6 +691,8 @@ analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``.
 format is ``stdout``.
 
 ``--list-stats`` is available only with ``stdout`` and ``txt`` output.
+``--list-torch-operators``, ``--list-triton-operators``, ``--torch-operator``,
+and ``--triton-operator`` are available only with ``stdout``.
 
 * ``stdout`` format:
    * Print analysis report to the terminal.
@@ -794,6 +796,11 @@ PyTorch operator analysis
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
+
+These flags require ``--output-format stdout`` (the default). Combining
+``--list-*-operators`` with ``--*-operator`` warns and lists all operators.
+``--list-stats`` ignores ``--*-operator`` and prints the full kernel stats
+table.
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
 and counter CSV pair. The on-disk join column is ``Correlation_Id``; analyze
