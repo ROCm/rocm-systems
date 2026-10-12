@@ -151,9 +151,11 @@ RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) con
             decode_caps->hw_roi_decode = vcn_jpeg_spec.can_roi_decode ? 1 : 0;
             decode_caps->max_components = NUM_COMPONENTS - 1;
             decode_caps->num_jpeg_cores = vcn_jpeg_spec.num_jpeg_cores;
-            // Report the stricter of the limit enforced at decode time and the one reported by the VA-API driver.
-            decode_caps->min_width = std::max(jpeg_vaapi_decoder_.GetMinPictureWidth(), jpeg_vaapi_decoder_.GetDriverMinSurfaceWidth());
-            decode_caps->min_height = std::max(jpeg_vaapi_decoder_.GetMinPictureHeight(), jpeg_vaapi_decoder_.GetDriverMinSurfaceHeight());
+            // These are the limits SubmitDecode/SubmitDecodeBatched enforce on the coded image dimensions.
+            // VASurfaceAttribMinWidth/Height are not used here: they bound the allocated VA surface, which is
+            // always at least default_surface_width_ x default_surface_height_, so they never reject an image.
+            decode_caps->min_width = jpeg_vaapi_decoder_.GetMinPictureWidth();
+            decode_caps->min_height = jpeg_vaapi_decoder_.GetMinPictureHeight();
             // The parser rejects dimensions above MAX_SAFE_DIMENSION regardless of the VA-API limit.
             decode_caps->max_width = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureWidth(), MAX_SAFE_DIMENSION);
             decode_caps->max_height = std::min<uint32_t>(jpeg_vaapi_decoder_.GetMaxPictureHeight(), MAX_SAFE_DIMENSION);

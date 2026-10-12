@@ -259,7 +259,8 @@ int main(int argc, char **argv) {
     }
     uint32_t sw_rgb_subsampling_mask = decode_caps.subsampling_mask & ~decode_caps.hw_rgb_subsampling_mask;
     if (sw_rgb_subsampling_mask != 0) {
-        rgb_conversion += rgb_conversion.empty() ? "software" : ", software (" + SubsamplingsString(sw_rgb_subsampling_mask) + ")";
+        rgb_conversion += (rgb_conversion.empty() ? "" : ", ");
+        rgb_conversion += "software (" + SubsamplingsString(sw_rgb_subsampling_mask) + ")";
     }
     std::cout << std::left
               << std::setw(label_width) << "Backend" << ": " << backend_name << std::endl

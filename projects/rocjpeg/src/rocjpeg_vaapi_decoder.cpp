@@ -385,7 +385,7 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
  * @param device_id The ID of the device to be used for decoding.
  */
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
-    max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, driver_min_surface_width_{0}, driver_min_surface_height_{0}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
+    max_picture_width_{4096}, max_picture_height_{4096}, default_surface_width_{3840}, default_surface_height_{2160}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
     vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{1, false, false}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {
 #ifdef ROCJPEG_USE_DLOPEN_VA
@@ -684,10 +684,6 @@ RocJpegStatus RocJpegVappiDecoder::CreateDecoderConfig() {
                 supports_modifiers_ = true;
             } else if (attrib.type == VASurfaceAttribPixelFormat && attrib.value.type == VAGenericValueTypeInteger) {
                 driver_pixel_formats_.push_back(static_cast<uint32_t>(attrib.value.value.i));
-            } else if (attrib.type == VASurfaceAttribMinWidth && attrib.value.type == VAGenericValueTypeInteger) {
-                driver_min_surface_width_ = static_cast<uint32_t>(attrib.value.value.i);
-            } else if (attrib.type == VASurfaceAttribMinHeight && attrib.value.type == VAGenericValueTypeInteger) {
-                driver_min_surface_height_ = static_cast<uint32_t>(attrib.value.value.i);
             }
         }
         return ROCJPEG_STATUS_SUCCESS;

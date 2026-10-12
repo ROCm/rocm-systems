@@ -340,12 +340,6 @@ public:
     uint32_t GetMaxPictureHeight() const {return max_picture_height_;}
 
     /**
-     * @brief Returns the minimum surface dimensions reported by the VA-API driver, or 0 if not reported.
-     */
-    uint32_t GetDriverMinSurfaceWidth() const {return driver_min_surface_width_;}
-    uint32_t GetDriverMinSurfaceHeight() const {return driver_min_surface_height_;}
-
-    /**
      * @brief Returns the layout the VCN JPEG decoder writes for a chroma subsampling.
      *
      * The layout is the one SubmitDecode/SubmitDecodeBatched request for non-RGB output. If the VA-API driver reports
@@ -380,8 +374,6 @@ private:
     uint32_t default_surface_height_; // The default height of the surface
     bool supports_modifiers_; // DRM format modifiers support
     std::vector<uint32_t> driver_pixel_formats_; // Surface pixel formats (fourcc) reported by the VA-API driver for the JPEG config
-    uint32_t driver_min_surface_width_; // Minimum surface width reported by the VA-API driver (0 if not reported)
-    uint32_t driver_min_surface_height_; // Minimum surface height reported by the VA-API driver (0 if not reported)
     VADisplay va_display_; // The VAAPI display
     VAContextID va_context_id_; // The VAAPI context ID
     std::vector<VAConfigAttrib> va_config_attrib_; // The VAAPI configuration attributes
