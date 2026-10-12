@@ -502,8 +502,9 @@ HRR_TEST_CASE(Unit_HRR_Limits_WallClockWatchdog) {
  * Test Description
  * ----------------
  *   - Host allocations are charged before they are made and released when the
- *     recorded address is freed or recorded again (a second pass replays the
- *     same events), so the budget does not drift upward; a refused charge ends
+ *     recorded address is freed or replaced (a second pass replays the same
+ *     events; record_alloc itself leaves the charge with the live entry), so
+ *     the budget does not drift upward; a refused charge ends
  *     the whole replay (fatal_error), not just the call, and takes no charge.
  */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
@@ -514,9 +515,25 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   ctx.record_alloc(0x10, nullptr, 60, AllocKind::HostMalloc);
   CHECK(ctx.host_budget.used() == 60);
 
-  // The same recorded address replayed again: the old entry's charge goes back.
+  // record_alloc over a live host entry does not give its charge back: the
+  // buffer is still allocated, so the charge stays with it. The replaying
+  // handlers free the replaced entry first (remove_alloc is the budget side of
+  // that), which is what returns the charge.
   REQUIRE(ctx.charge_host(40, "second"));
   CHECK(ctx.host_budget.used() == 100);
+  ctx.record_alloc(0x10, nullptr, 40, AllocKind::HostMalloc);
+  CHECK(ctx.host_budget.used() == 100);
+  ctx.remove_alloc(0x10);
+  CHECK(ctx.host_budget.used() == 60);
+  ctx.host_budget.release(60);  // the replaced 60-byte buffer's own release
+  CHECK(ctx.host_budget.used() == 0);
+
+  // Replaced the way the handlers do it: free the old entry, then charge the new.
+  REQUIRE(ctx.charge_host(60, "third"));
+  ctx.record_alloc(0x10, nullptr, 60, AllocKind::HostMalloc);
+  ctx.remove_alloc(0x10);
+  CHECK(ctx.host_budget.used() == 0);
+  REQUIRE(ctx.charge_host(40, "fourth"));
   ctx.record_alloc(0x10, nullptr, 40, AllocKind::HostMalloc);
   CHECK(ctx.host_budget.used() == 40);
 
