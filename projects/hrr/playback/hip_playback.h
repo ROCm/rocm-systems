@@ -406,6 +406,7 @@ struct PlaybackContext {
         size_t mapped   = 0;        // mapped/backed bytes
         hipMemGenericAllocationHandle_t handle{};
         bool   placed   = false;    // a placed allocation, not a guarded one
+        bool   async    = false;    // placed for hipMallocAsync
     };
     std::unordered_map<void*, GuardAlloc> guard_allocs;
 

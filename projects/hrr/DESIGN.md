@@ -1128,8 +1128,9 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
   runtime answers with another address, no VMM support), that allocation falls
   back to the normal allocator, named under `--verbose`. The summary prints
   `Placement : N placed at capture address, M fell back`.
-- `hipFree` unmaps and releases at once; `hipFreeAsync` first synchronizes its
-  stream. The range is then held again for the next allocation recorded there.
+- `hipFree` first synchronizes the device, as it does for `hipMalloc` memory
+  (not for `hipMallocAsync` memory, unmapped at once); `hipFreeAsync` first
+  synchronizes its stream. Both then unmap and release. The range is then held again for the next allocation recorded there.
   Inside a graph capture `hipFreeAsync` leaves the mapping in place, since the
   graph may still use it.
 - After each such unmap replay allocates and frees 4 MiB with `hipMalloc`: on
@@ -1141,7 +1142,9 @@ addresses, so that pointer is right again; `--no-placement` turns this off.
 - Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
   allocation node), allocations exported with `hipIpcGetMemHandle` and any other
   recorded over the same pages (IPC refuses VMM memory), every other allocation
-  API, and everything under `--guard-segments` or on Windows.
+  API, and everything under `--guard-segments`, with
+  `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` above 1 (a padded allocation would run over
+  its neighbours' recorded addresses) or on Windows.
 - Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
   released so the timed pass can place them again.
 

@@ -18,6 +18,7 @@
 #include "hrr_test_common.hh"
 #include "hrr_test_process.hh"
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,15 @@
 namespace {
 constexpr int    kElems = 1024;
 constexpr size_t kBytes = kElems * sizeof(int);
+
+// The summary's placed and fell-back counts; false without a summary line.
+bool hrr_place_counts(const std::string& out, unsigned long long& placed,
+                      unsigned long long& fell) {
+  const auto at = out.find("Placement");
+  return at != std::string::npos &&
+         std::sscanf(out.c_str() + at, "Placement : %llu placed at capture address, %llu fell back",
+                     &placed, &fell) == 2;
+}
 }  // namespace
 
 __global__ void hrr_place_deref(int* out, int* const* cell, const int* expect, int n) {
@@ -104,12 +114,19 @@ HRR_TEST_CASE(Unit_HRR_VaPlacement_StoredPointer) {
     CHECK(pass == 2);
     CHECK(fail == 0);
     CHECK(rc == 0);
-    CHECK(out.find("placed at capture address, 0 fell back") != std::string::npos);
+    unsigned long long placed = 0, fell = 1;
+    REQUIRE(hrr_place_counts(out, placed, fell));
+    CHECK(placed > 0);
+    CHECK(fell == 0);
   }
   {
     auto [rc, out] = hrr_playback_merged(archive, "--kernel-filter hrr_place_deref");
     INFO("Replay --kernel-filter:\n" << out);
-    CHECK(out.find("placed at capture address, 0 fell back") != std::string::npos);
+    CHECK(rc == 0);
+    unsigned long long placed = 0, fell = 1;
+    REQUIRE(hrr_place_counts(out, placed, fell));
+    CHECK(placed > 0);
+    CHECK(fell == 0);
   }
   {
     // Without placement both rounds read through a stale pointer.

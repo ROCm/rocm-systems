@@ -2438,6 +2438,8 @@ static bool hrr_place_mmap(uint64_t b, uint64_t e) {
 
 void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan) {
 #ifndef _WIN32
+    // A padded allocation would run over its neighbours' recorded addresses.
+    if (replay_padded_alloc_size(1) > 1) return;
     std::lock_guard<std::mutex> lk(ctx.place_mutex);
     for (const auto& r : plan)
         if (hrr_place_mmap(r.base, r.end)) ctx.place_held.add(r.base, r.end);
@@ -2449,7 +2451,8 @@ void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan) {
 
 // Map the granules holding `size` bytes at the recorded address `rec` (a
 // stream-ordered allocation need not start on one). False: allocate as before.
-static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, void** out) {
+static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, void** out,
+                            bool async = false) {
 #ifndef _WIN32
     if (!ctx.place) return false;
     const int      dev  = hrr_current_device();
@@ -2470,7 +2473,7 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
         {
             std::unique_lock lk(ctx.map_mutex);
             ctx.guard_allocs[reinterpret_cast<void*>(rec)] = {va, reserved, len, handle,
-                                                              /*placed=*/true};
+                                                              /*placed=*/true, async};
         }
         ctx.placed++;
         *out = reinterpret_cast<void*>(rec);
@@ -2486,7 +2489,7 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
     }
     ctx.place_fell_back++;
 #else
-    (void)ctx; (void)rec; (void)size; (void)out;
+    (void)ctx; (void)rec; (void)size; (void)out; (void)async;
 #endif
     return false;
 }
@@ -2515,6 +2518,14 @@ static bool hrr_is_placed(PlaybackContext& ctx, void* live) {
     std::shared_lock lk(ctx.map_mutex);
     auto it = ctx.guard_allocs.find(live);
     return it != ctx.guard_allocs.end() && it->second.placed;
+}
+
+// hipFree waits for the device before it frees hipMalloc memory, though not
+// hipMallocAsync memory; unmapping a VMM allocation in its place does not.
+static bool hrr_free_needs_sync(PlaybackContext& ctx, void* live) {
+    std::shared_lock lk(ctx.map_mutex);
+    auto it = ctx.guard_allocs.find(live);
+    return it != ctx.guard_allocs.end() && !it->second.async;
 }
 
 // ---- Segment-tail guard (--guard-segments) ----------------------------------
@@ -2909,9 +2920,9 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     // Inside a graph capture this is a graph allocation node; not placed.
-    hipError_t r = !ctx.in_graph_capture && hrr_place_alloc(ctx, a->dev_ptr, pad_sz, &live)
-                       ? hipSuccess
-                       : hipMallocAsync(&live, pad_sz, stream);
+    const bool placed = !ctx.in_graph_capture &&
+                        hrr_place_alloc(ctx, a->dev_ptr, pad_sz, &live, /*async=*/true);
+    hipError_t r = placed ? hipSuccess : hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -3153,7 +3164,9 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
-    if (hrr_guard_free(ctx, live)) {  // --guard-segments: a VMM mapping
+    if (!ctx.in_graph_capture && hrr_free_needs_sync(ctx, live))
+        if (hipError_t sr = hipDeviceSynchronize(); sr != hipSuccess) return sr;
+    if (hrr_guard_free(ctx, live)) {  // placed or --guard-segments: a VMM mapping
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
