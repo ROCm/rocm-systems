@@ -117,7 +117,7 @@ class OverlappingMarkerRangeError(MlApiTraceError):
 
 
 class MissingSourceLocationError(MlApiTraceError):
-    """An unlocated torch or triton call-tree root with no launcher thread."""
+    """Unlocated root in KNOWN_ML_API_BACKENDS with no launcher thread."""
 
     def __init__(
         self,

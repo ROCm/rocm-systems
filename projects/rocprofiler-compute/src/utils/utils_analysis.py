@@ -779,7 +779,7 @@ def _record_missing_source_location_errors(
     forest: dict[str, list[CallTreeNode]],
     errors: Optional[list[MlApiTraceError]] = None,
 ) -> None:
-    """Record unlocated torch/triton roots with no launcher thread."""
+    """Record unlocated roots in KNOWN_ML_API_BACKENDS with no launcher thread."""
     for thread_id, roots in forest.items():
         for root in roots:
             if root.file_name is not None:
