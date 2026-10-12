@@ -280,6 +280,7 @@ if(BUILD_TESTS)
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp

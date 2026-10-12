@@ -127,6 +127,15 @@ Collect the following information about the RCCL installation and configuration.
 
       export NCCL_DEBUG=INFO
 
+*  Check that all ranks run with the same ``NCCL_*`` environment and driver
+   version with the RAS diagnostics, and collect the ``NCCL DIAG`` lines from the
+   output of the process that hosts rank 0. For details, see
+   :ref:`using-rccl-ras-diagnostics`.
+
+   .. code:: shell
+
+      export NCCL_RUN_RAS_DIAGNOSTICS=1
+
 .. _use-rccl-replayer:
 
 Using the RCCL Replayer
