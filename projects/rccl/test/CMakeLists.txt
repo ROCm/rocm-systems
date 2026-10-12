@@ -177,6 +177,7 @@ if(BUILD_TESTS)
     ${PROJECT_BINARY_DIR}/hipify/src/include/plugin # for recorder tests, nccl_tuner.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport/net_ib_cast # for net_ib_fault_inject.h, net_ib_cast_inspect.h
     ${PROJECT_BINARY_DIR}/hipify/src/transport             # for net_ib_limits.h
+    ${PROJECT_BINARY_DIR}/hipify/src/gin                   # for gin_rocshmem_gda_inspect.h
     ${ROCM_PATH}/include
     ${ROCM_PATH}
   )
@@ -824,6 +825,7 @@ if(BUILD_TESTS)
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       transport/NetIbCast/NetIbCastUdmaTests.cpp
+      transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/ProcessIsolatedTestRunner.cpp
