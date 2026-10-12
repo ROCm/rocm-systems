@@ -106,6 +106,11 @@ TEST_F(ParamRegistryMicrotest, Add_RegistersSoFindReturnsTheSameEntry) {
 }
 
 TEST_F(ParamRegistryMicrotest, Find_UnknownKeyReturnsNullptr) {
+  // A live entry must be registered first: otherwise a find() that ignored
+  // its key argument and returned the map's first entry would pass this test
+  // vacuously against an empty map.
+  FakeParam live(3);
+  ASSERT_EQ(ncclSuccess, Register(Key(), &live));
   EXPECT_EQ(nullptr, ncclParamRegistry::find(Key("_NEVER_REGISTERED")));
 }
 
