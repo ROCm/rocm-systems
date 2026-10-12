@@ -71,14 +71,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 
 	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_AIS_OP, &args);
 
-	/* in and out share a union. If the AIS handler ran, the KFD copied out
-	 * back with out.status set to the ioctl's error. If it rejected the
-	 * ioctl first, out still holds the input args, so report errno and no
-	 * progress instead. ENOTTY (no AIS ioctl) only comes from the rejection
-	 * path; for other errors, a status that doesn't match errno means out
-	 * wasn't written.
+	/* in and out share a union. If the KFD rejected the ioctl before the AIS
+	 * handler ran (e.g. ENOTTY when AIS is unsupported), out still holds the
+	 * input args, so report errno and no progress instead. The KFD never
+	 * reports more than transfer_size bytes copied, while an untouched
+	 * out.size_copied is in.handle, which is >= 2^32 because its upper half
+	 * is the GPU ID and the KFD never assigns GPU ID 0.
 	 */
-	if (ret < 0 && (errno == ENOTTY || args.out.status != -errno)) {
+	if (ret < 0 && args.out.size_copied > transfer_size) {
 		args.out.status = -errno;
 		args.out.size_copied = 0;
 	}
