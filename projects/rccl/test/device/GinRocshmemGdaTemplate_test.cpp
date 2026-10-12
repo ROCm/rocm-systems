@@ -18,7 +18,8 @@
 // the rocshmem::QueuePairMock mock QueuePair object type mirrors how Suite H
 // shadows the SDMA engine with test/device/sdma/anvil_device.hpp.
 // projects/rccl/test/CMakeLists.txt defines GDA_QUEUEPAIR_MOCK for targets
-// rccl-UnitTestsFixtures and rccl-UnitTestsGinAnvilPlugin
+// rccl-UnitTestsFixtures, rccl-UnitTestsGinAnvilPlugin and
+// rccl-UnitTestsGinRocshmemGdaPlugin
 
 #include "DeviceTestBase.hpp"
 
