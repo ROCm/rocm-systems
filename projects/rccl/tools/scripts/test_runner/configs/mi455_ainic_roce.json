@@ -6024,6 +6024,11 @@
         }
       ]
     },
+    "dda_fabric_allreduce_ll_2rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
     "dda_fabric_allreduce_ll_4rank": {
       "extends": "dda_fabric_allreduce_ll_base",
       "num_ranks": 4,
@@ -6948,31 +6953,37 @@
     },
     {
       "name": "DDA Fabric ReduceScatter LL/LL128 - 2-Rank",
-      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_2rank",
       "enabled": true
     },
     {
       "name": "DDA Fabric ReduceScatter LL/LL128 - 4-Rank",
-      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 4 GPUs, unrolled NRANKS_CT=4 kernel. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 4 GPUs, unrolled NRANKS_CT=4 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_4rank",
       "enabled": true
     },
     {
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
-      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
       "enabled": true
     },
     {
+      "name": "DDA Fabric AllReduce LL/LL128 - 2-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 2 GPUs, runtime-nRanks kernels. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_2rank",
+      "enabled": true
+    },
+    {
       "name": "DDA Fabric AllReduce LL/LL128 - 4-Rank",
-      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 4 GPUs. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_allreduce_ll_4rank",
       "enabled": true
     },
     {
       "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
-      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Skips on every rank unless gfx1250 with MNNVL fabric DDA initialised.",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_allreduce_ll_8rank",
       "enabled": true
     }
