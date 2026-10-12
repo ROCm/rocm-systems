@@ -563,13 +563,8 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_sge sge;
 };
 
-// Wrapper to track an MR per-device, if needed.
-//
-// Single-segment buffers (the common case) use only mrs[]; nSegments == 1.
-// Multi-segment cuMem/VMM buffers register one dma-buf MR per physical segment
-// per device; segStart/segLen describe the segment VA layout and segMrs holds
-// the per-segment, per-device MRs. mrs[] aliases segment 0 for compatibility
-// with the single-segment fast path.
+// Wrapper to track an MR per-device, if needed
+// RCCL: multi-segment buffers add one MR per segment; mrs[] aliases segment 0.
 struct ncclIbMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
   int nSegments; // 1 = legacy single MR

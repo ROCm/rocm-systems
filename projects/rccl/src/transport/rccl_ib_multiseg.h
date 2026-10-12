@@ -12,10 +12,11 @@
 
 // RCCL: one dma-buf MR per physical segment. Not part of the NCCL plugin API.
 // Classic: ncclIbRegMrDmaBuf calls ncclIbRegMrDmaBufMultiSeg when fd < 0.
-// CAST: IbCastRegMrDmaBufMultiSeg is defined in net_ib_cast/reg.cc.
+// CAST: IbCastRegMrDmaBufMultiSeg is defined in net_ib_cast/rccl_reg_multiseg_cast.cc.
 ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle);
 ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle);
+ncclResult_t rcclIbCastDeregMrMultiSeg(void* comm, void* mhandle);
 
 #endif

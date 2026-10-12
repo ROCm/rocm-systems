@@ -7,6 +7,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/connect_cast.h
     src/transport/net_ib_cast/gin_cast.h
     src/transport/net_ib_cast/p2p_cast.h
+    src/transport/net_ib_cast/p2p_multiseg_cast.h
     src/transport/net_ib_cast/p2p_resiliency_cast.h
     src/transport/net_ib_cast/p2p_resiliency_recovery_cast.h
     src/transport/net_ib_cast/p2p_resiliency_recovery_internal.h
@@ -25,6 +26,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/p2p_resiliency_recovery.cc
     src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc
     src/transport/net_ib_cast/reg.cc
+    src/transport/net_ib_cast/rccl_reg_multiseg_cast.cc
     src/transport/net_ib_cast/scheduler.cc
     src/transport/net_ib_cast/gin.cc
     src/transport/net_ib_cast/qp_sharing.cc
