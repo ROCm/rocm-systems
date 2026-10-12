@@ -47,7 +47,7 @@ get_profiler_ioctl_request()
 {
     static auto request = []() {
         kfd_ioctl_get_version_args args = {};
-        if(pc_sampling::ioctl::ioctl(
+        if(pc_sampling::ioctl::kfd_ioctl(
                pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
         {
             auto err      = errno;
@@ -80,7 +80,7 @@ profiler_ioctl(kfd_ioctl_profiler_args& args)
 {
     const auto fd = pc_sampling::ioctl::get_kfd_fd();
     if(fd < 0) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
-    if(pc_sampling::ioctl::ioctl(fd, get_profiler_ioctl_request(), &args) == 0)
+    if(pc_sampling::ioctl::kfd_ioctl(fd, get_profiler_ioctl_request(), &args) == 0)
         return ROCPROFILER_STATUS_SUCCESS;
     return ROCPROFILER_STATUS_ERROR;
 }

@@ -116,7 +116,7 @@ kfd_open()
  * Taken from libhsakmt.c
  */
 int
-ioctl(int fd, unsigned long request, void* arg)
+kfd_ioctl(int fd, unsigned long request, void* arg)
 {
     if(fd < 0)
     {
@@ -154,7 +154,7 @@ rocprofiler_status_t
 get_ioctl_version(rocprofiler_ioctl_version_info_t& ioctl_version)
 {
     struct kfd_ioctl_get_version_args args = {.major_version = 0, .minor_version = 0};
-    if(ioctl(get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
+    if(kfd_ioctl(get_kfd_fd(), AMDKFD_IOC_GET_VERSION, &args) != 0)
     {
         // An error occurred while querying KFD IOCTL version.
         return ROCPROFILER_STATUS_ERROR;
@@ -192,7 +192,7 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pcs_ioctl_version_t* pcs_ioct
     args.flags           = 0;
     args.version         = 0;
 
-    auto ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    auto ret = kfd_ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
 
     if(ret == -EBUSY)
     {
@@ -304,7 +304,7 @@ ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
     args.num_sample_info = sample_info_sz;
     args.flags           = 0;
 
-    ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    ret = kfd_ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
 
     if(ret != 0)
     {
@@ -640,7 +640,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 
     if(get_kfd_fd() == -1) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 
-    auto ioctl_ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+    auto ioctl_ret = kfd_ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
     *ioctl_pcs_id  = args.trace_id;
 
     if(ioctl_ret != 0)

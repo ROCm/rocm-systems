@@ -47,7 +47,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint32_t*                        ioctl_pcs_id);
 
 /**
- * @brief Issue a KFD ioctl, restarting it while it fails with EINTR or EAGAIN.
+ * @brief Issue a KFD ioctl through ::ioctl, restarting it while it fails with EINTR or EAGAIN.
  *
  * A negative @p fd (KFD unavailable, see @ref get_kfd_fd) is rejected without calling ::ioctl
  * or printing: errno is set to EBADF and -EBADF is returned.
@@ -55,7 +55,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
  * @return 0 on success, otherwise the negated errno of the failure.
  */
 int
-ioctl(int fd, unsigned long request, void* arg);
+kfd_ioctl(int fd, unsigned long request, void* arg);
 
 /**
  * @brief Get the process-wide file descriptor for /dev/kfd.
