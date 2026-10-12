@@ -110,6 +110,16 @@ class GinAnvilPluginTest : public ::testing::Test {
     ASSERT_EQ(plugin_.createContext(*coll, &cfg, ginCtx, &devHandle), ncclSuccess);
   }
 
+  // The IPC device table is process-lifetime and allocated on the first span
+  // registration, so it is excluded when counting context-owned allocations.
+  static int liveHipAllocsExcludingIpcTable() {
+    const ncclGinAnvilIpcBufEntry* ipcTable = nullptr;
+    int ipcCount = 0;
+    ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
+    return GinAnvilPluginStubs::GetLiveHipAllocationCount() -
+           (GinAnvilPluginStubs::IsLiveHipAllocation(ipcTable) ? 1 : 0);
+  }
+
   void stopGin(void* ictx, void* coll, void* ginCtx) {
     if (ginCtx) plugin_.destroyContext(ginCtx);
     if (coll) plugin_.closeColl(coll);
@@ -284,6 +294,31 @@ TEST_F(GinAnvilPluginTest, CreateContext_EnvAndCounters) {
   plugin_.finalize(ictx);
 }
 
+// AICOMRCCL-2339: the counter span is allocated after the nContexts-slot GPU
+// context array, so its failure must take the array down with it.
+TEST_F(GinAnvilPluginTest, CreateContext_CounterAllocFailureReleasesContextArray) {
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  const int hipAllocsBefore = liveHipAllocsExcludingIpcTable();
+
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = 3;
+  cfg.nSignals = 2;
+  cfg.nCounters = 5;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  GinAnvilPluginStubs::SetFailNextExtMalloc(true);
+  EXPECT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSystemError);
+  EXPECT_EQ(ginCtx, nullptr);
+  EXPECT_EQ(devHandle, nullptr);
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable(), hipAllocsBefore);
+
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
 // G12: bind resource window signals — invalid args.
 TEST_F(GinAnvilPluginTest, BindSignals_InvalidArgs) {
   EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(nullptr, reinterpret_cast<void*>(0x100), 0, 1, 1),
@@ -330,6 +365,7 @@ TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRangeInsideLogicalContexts) {
   ncclGinConfig_t cfg{};
   cfg.nContexts = 3;
   cfg.nSignals = 1;
+  const int hipAllocsBefore = liveHipAllocsExcludingIpcTable();
   void* ginCtx = nullptr;
   ncclNetDeviceHandle_v11_t* devHandle = nullptr;
   ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
@@ -342,7 +378,9 @@ TEST_F(GinAnvilPluginTest, BindSignals_SlotOutOfRangeInsideLogicalContexts) {
   ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
   EXPECT_EQ(ipcCount, 0);
 
+  // Contexts 0 and 1 bound their peer tables before slot 2 overflowed; destroy frees them.
   plugin_.destroyContext(ginCtx);
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable(), hipAllocsBefore);
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }
@@ -532,6 +570,46 @@ TEST_F(GinAnvilPluginTest, BindSignals_LogicalContextsUseDistinctSignalStripes) 
   plugin_.destroyContext(ginCtxB);
   ncclGinAnvilIpcTableGetDevice(&ipcTable, &ipcCount);
   EXPECT_EQ(ipcCount, 0);
+  plugin_.closeColl(coll);
+  plugin_.finalize(ictx);
+}
+
+// AICOMRCCL-2339: destroy releases the nContexts-slot GPU context array, the
+// counter span, and every logical context's bound peer table, but not the SDMA
+// queues and dirty word the connection owns.
+TEST_F(GinAnvilPluginTest, DestroyContext_ReleasesEveryLogicalContextAllocation) {
+  constexpr int kContexts = 3;
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  const int hipAllocsBefore = liveHipAllocsExcludingIpcTable();
+
+  ncclGinConfig_t cfg{};
+  cfg.nContexts = kContexts;
+  cfg.nSignals = 2;
+  cfg.nCounters = 5;
+  void* ginCtx = nullptr;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  char arena[8192] = {};
+  ASSERT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, kContexts, 2), ncclSuccess);
+
+  ncclGinAnvilSdmaGPUContext hostCtx[kContexts]{};
+  ASSERT_EQ(hipMemcpy(hostCtx, devHandle->handle, sizeof(hostCtx), hipMemcpyDeviceToHost), hipSuccess);
+  std::vector<const void*> owned = {devHandle->handle, hostCtx[0].counters};
+  for (const auto& ctx : hostCtx) owned.push_back(ctx.signal_remote_addrs);
+  for (const void* p : owned) EXPECT_TRUE(GinAnvilPluginStubs::IsLiveHipAllocation(p)) << p;
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable() - hipAllocsBefore, static_cast<int>(owned.size()));
+  ASSERT_TRUE(GinAnvilPluginStubs::IsLiveHipAllocation(hostCtx[0].queueHandles));
+  ASSERT_TRUE(GinAnvilPluginStubs::IsLiveHipAllocation(hostCtx[0].sdmaDirty));
+
+  EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  for (const void* p : owned) EXPECT_FALSE(GinAnvilPluginStubs::IsLiveHipAllocation(p)) << p;
+  EXPECT_EQ(liveHipAllocsExcludingIpcTable(), hipAllocsBefore);
+  EXPECT_TRUE(GinAnvilPluginStubs::IsLiveHipAllocation(hostCtx[0].queueHandles));
+  EXPECT_TRUE(GinAnvilPluginStubs::IsLiveHipAllocation(hostCtx[0].sdmaDirty));
+
   plugin_.closeColl(coll);
   plugin_.finalize(ictx);
 }

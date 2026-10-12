@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Test doubles for gin_plugin_anvil_sdma.cc (bootstrap, devr, factory, debug).
+// Test doubles for gin_plugin_anvil_sdma.cc (bootstrap, devr, factory, debug,
+// and a HIP allocation ledger).
 
 #include "gin_anvil_plugin_test_stubs.h"
 
@@ -13,10 +14,12 @@
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
+#include <dlfcn.h>
 #include <hip/hip_runtime.h>
 #include <malloc.h>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <vector>
 
 namespace GinAnvilPluginStubs {
@@ -52,6 +55,8 @@ struct State {
   // so an input of 0 is not mistaken for "unset".
   uintptr_t lsaInputBase = 0;
   bool lsaInputBaseSet = false;
+  std::set<const void*> liveHipAllocs;
+  bool failNextExtMalloc = false;
 };
 
 struct FakeSdmaOpaque {
@@ -100,8 +105,39 @@ int GetIntraNodeAllGatherCalls() { return g.intraNodeAllGatherCalls; }
 const std::vector<int>& GetLastIntraNodeBarrierRanks() { return g.lastIntraNodeBarrier.ranks; }
 int GetLastIntraNodeBarrierRank() { return g.lastIntraNodeBarrier.rank; }
 int GetLastIntraNodeBarrierTag() { return g.lastIntraNodeBarrier.tag; }
+bool IsLiveHipAllocation(const void* ptr) { return g.liveHipAllocs.count(ptr) == 1; }
+int GetLiveHipAllocationCount() { return static_cast<int>(g.liveHipAllocs.size()); }
+void SetFailNextExtMalloc(bool fail) { g.failNextExtMalloc = fail; }
 
 }  // namespace GinAnvilPluginStubs
+
+extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
+  using Fn = hipError_t (*)(void**, size_t);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipMalloc"));
+  const hipError_t err = real(ptr, size);
+  if (err == hipSuccess) GinAnvilPluginStubs::g.liveHipAllocs.insert(*ptr);
+  return err;
+}
+
+extern "C" hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flags) {
+  if (GinAnvilPluginStubs::g.failNextExtMalloc) {
+    GinAnvilPluginStubs::g.failNextExtMalloc = false;
+    *ptr = nullptr;
+    return hipErrorOutOfMemory;
+  }
+  using Fn = hipError_t (*)(void**, size_t, unsigned int);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipExtMallocWithFlags"));
+  const hipError_t err = real(ptr, sizeBytes, flags);
+  if (err == hipSuccess) GinAnvilPluginStubs::g.liveHipAllocs.insert(*ptr);
+  return err;
+}
+
+extern "C" hipError_t hipFree(void* ptr) {
+  using Fn = hipError_t (*)(void*);
+  static Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "hipFree"));
+  GinAnvilPluginStubs::g.liveHipAllocs.erase(ptr);
+  return real(ptr);
+}
 
 uint32_t ncclDebugLevelMask = (1u << NCCL_LOG_ERROR) | (1u << NCCL_LOG_VERSION);
 uint64_t ncclDebugMask = NCCL_INIT;
