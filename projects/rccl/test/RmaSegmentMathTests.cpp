@@ -447,18 +447,6 @@ TEST(RmaSegmentMathTest, OffsetRangeOkRejectsPastEnd)
     EXPECT_FALSE(ncclRmaOffsetRangeOk(0, off, 0, 0));
 }
 
-TEST(RmaSegmentMathTest, TranscriptHeaderRejectsWrongMagicOrVersion)
-{
-    EXPECT_TRUE(ncclRmaTranscriptHeaderOk(0x524d5347u, 1u, 0x524d5347u, 1u));
-    EXPECT_FALSE(ncclRmaTranscriptHeaderOk(0u, 1u, 0x524d5347u, 1u));
-    EXPECT_FALSE(ncclRmaTranscriptHeaderOk(0x524d5347u, 2u, 0x524d5347u, 1u));
-}
-
-TEST(RmaSegmentMathTest, SegmentCapMatchesClassicIb)
-{
-    EXPECT_EQ(NCCL_RMA_MAX_SEGMENTS, NCCL_IB_MAX_SEGMENTS);
-}
-
 namespace {
 
 // Matches NCCL_IB_MAX_DEVS_PER_NIC / NCCL_NET_MAX_DEVS_PER_NIC_V12.

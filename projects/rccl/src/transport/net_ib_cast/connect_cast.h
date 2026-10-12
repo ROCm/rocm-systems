@@ -132,11 +132,6 @@ extern int64_t ncclParamMultiSegmentRegister();
 // NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
 static inline bool IbCastAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
 
-// Multi-segment iflush posts one RDMA_READ per recv per segment.
-static inline int IbCastFlushQpSendDepth() {
-  return NET_IB_MAX_REQUESTS + (IbCastAdvertiseMultiSeg() ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
-}
-
 // Initialize QP sharing fields to defaults (sharing disabled)
 static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr) {
   attr->isQpSharingEnabled = false;
@@ -146,7 +141,9 @@ static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr
 }
 
 // Loopback flush QPs post only RDMA_READs, so non-RMA comms keep the flush depth, not the CTS depth.
+// Multi-segment iflush posts one RDMA_READ per recv per segment; the switch off keeps the legacy depth.
 static inline int IbCastFlushQpSendDepth(const struct ncclIbNetCommBase* base) {
+  if (!IbCastAdvertiseMultiSeg()) return NET_IB_MAX_REQUESTS;
   return base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
 }
 

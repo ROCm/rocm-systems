@@ -22,7 +22,7 @@
 // RMA credits and fail in-flight requests so Test() does not wait for CQEs that
 // the recreated QP will never produce.
 static void IbCastRmaAbandonDeviceRequests(struct ncclIbNetCommBase* base, int devIndex) {
-  if (!base->isRma) return;
+  if (!base->isRma || !rcclRmaMultiSegEnabled()) return;
   for (int i = 0; i < NET_IB_MAX_REQUESTS; i++) {
     struct ncclIbRequest* req = &base->reqs[i];
     if (req->type == NCCL_NET_IB_REQ_UNUSED) continue;

@@ -554,18 +554,18 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
-    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
   } else {
     if (base->resiliency) {
       IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     } else {
       out->maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
     }
-    // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
-    // RMA recv QPs are flush QPs. IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL.
+    // Multi-segment CTS posts a side-table WR before each CTS WR; multi-segment RMA recv QPs are flush QPs.
+    // IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL (AINIC recovery also rebuilds here).
     out->maxSendWorkRequest =
       IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
-    if (base->isRma) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_FLUSH_WRS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_FLUSH_WRS;
   }
 }
 
