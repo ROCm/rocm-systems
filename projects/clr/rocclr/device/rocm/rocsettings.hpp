@@ -83,8 +83,9 @@ class Settings : public device::Settings {
   void override();
 
   //! Determine how kernel arguments should be implemented given ASIC (host
-  //! memory, device memory, device memory with memory ordering workaround)
-  void setKernelArgImpl(const amd::Isa& isa, bool isXgmi);
+  //! memory, device memory, device memory with memory ordering workaround).
+  //! Also configures AQL ring placement for supported discrete asics.
+  void setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool isAPU);
 };
 
 /*@}*/  // namespace amd::roc

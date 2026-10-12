@@ -285,8 +285,8 @@ release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
 release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
 release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
-        "Device-memory AQL ring buffer for supported asics "                  \
-        "(1=enabled, 0=force system mem (default))")                          \
+        "Device-memory AQL ring buffer for supported discrete asics "         \
+        "(1=enabled (default), 0=force system mem; ignored on APUs)")         \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \
         "Use MOVDIR64B full-packet writes for AQL + metadata rings"           \
         "(1=enabled (default), 0=non-temporal store path)")                   \

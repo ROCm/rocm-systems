@@ -3565,11 +3565,13 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Build the queue creation descriptor with priority, CU mask, and flags.
   // settings().aql_device_ring_buf_ controls queue ring buffer placement (enabled
-  // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
+  // by default on discrete gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
-  const bool device_mem_ring_buf =
-      settings().aql_device_ring_buf_ && info_.largeBar_ && Hsa::amd_queue_create_available();
+  // CLR largeBar_ can be true on APUs because the CPU can access GPU pools, but
+  // ROCr LargeBarEnabled is false for integrated agents and rejects device rings.
+  bool device_mem_ring_buf = settings().aql_device_ring_buf_ && info_.largeBar_ && !isAPU_ &&
+                             Hsa::amd_queue_create_available();
   hsa_amd_queue_create_desc_t desc = {};
   desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
   desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
@@ -3588,7 +3590,21 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     desc.engine.compute.cu_mask = final_mask.data();
   }
 
+  bool tried_system_mem_fallback = false;
   while (Hsa::amd_queue_create(bkendDevice_, &desc, 1) != HSA_STATUS_SUCCESS) {
+    // If device-memory ring creation is rejected, fall back once to a
+    // system-memory ring before shrinking the queue size.
+    if (device_mem_ring_buf && !tried_system_mem_fallback) {
+      tried_system_mem_fallback = true;
+      device_mem_ring_buf = false;
+      desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
+          static_cast<uint32_t>(desc.flags) &
+          ~static_cast<uint32_t>(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF));
+      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
+              "Device::acquireQueue: device-memory AQL ring rejected; "
+              "falling back to system-memory ring");
+      continue;
+    }
     queue_size >>= 1;
     desc.queue_size_bytes = queue_size * sizeof(hsa_kernel_dispatch_packet_t);
     if (queue_size < 64) {
