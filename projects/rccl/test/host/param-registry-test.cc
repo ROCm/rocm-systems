@@ -187,6 +187,11 @@ TEST_F(ParamRegistryMicrotest, Instance_ReflectsEveryAddedEntryByKey) {
   auto it = map.find(key);
   ASSERT_NE(map.end(), it);
   EXPECT_EQ(&fake, it->second.param);
+  // find() hands back a pointer into the map, not a copy of the entry: the C
+  // API resolves long-lived handles through it (param_registry.h:42) and
+  // dereferences them later (c_api.cc:64), so a copy would be a use-after-free
+  // waiting to happen.
+  EXPECT_EQ(&it->second, ncclParamRegistry::find(key));
 }
 
 TEST_F(ParamRegistryMicrotest, State_IsASingletonSharedAcrossAllAccessors) {
