@@ -253,6 +253,34 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - Recording a pinned allocation again at an address that still holds one,
+ *     through the dispatch entries replay calls, frees the old entry and gives
+ *     its charge back before the new one is charged. The new allocation is
+ *     over budget here so no HIP allocation is made: only the replaced entry's
+ *     release is observed, which a handler that skips the free leaves at 60.
+ */
+TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
+  auto run = [](uint32_t api, auto& rec) {
+    PlaybackContext ctx;
+    ctx.host_budget.set_cap(100);
+    REQUIRE(ctx.charge_host(60, "seed"));
+    ctx.record_alloc(0x5000, nullptr, 60, AllocKind::HostMalloc);
+    REQUIRE(ctx.host_budget.used() == 60);
+    rec.get()->ptr = 0x5000;
+    rec.get()->size = 101;
+    (void)hrr_test::capture_stderr([&] { (void)hrr_playback_dispatch[api](ctx, rec.bytes()); });
+    CHECK_FALSE(ctx.has_alloc(0x5000));
+    CHECK(ctx.host_budget.used() == 0);
+  };
+  hrr_test::ExactRecord<hrr_args_hipHostMalloc> hm;
+  run(HRR_API_HIPHOSTMALLOC, hm);
+  hrr_test::ExactRecord<hrr_args_hipMallocHost> mh;
+  run(HRR_API_HIPMALLOCHOST, mh);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - host_landing_buffer charges only a buffer's growth, hands back the same
  *     buffer for a smaller request, and on a refusal returns null, ends the
  *     replay and leaves the buffer as it was.
