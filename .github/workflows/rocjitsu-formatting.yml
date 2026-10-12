@@ -1,13 +1,11 @@
-# Formatting checks for the emulation/ subtrees.
+# Formatting checks for emulation/ and shared CI scripts.
 name: "rocjitsu-formatting"
 
 on:
   pull_request:
     # NOTE: Only files under these paths trigger CI formatting checks.
-    # Shared files (e.g. .github/scripts/) are not covered — run
-    # `pre-commit run --all-files` locally to catch issues outside this
-    # scope. We should incrementally add more paths here as projects
-    # adopt pre-commit.
+    # Run `pre-commit run --all-files` locally to catch issues outside this
+    # scope. Add more paths here as projects adopt pre-commit.
     # This job is named `pre-commit`, which is the one entry in
     # `checks.required_check_runs` in tools/systems_pr_bot/policy.yml, so a
     # path that is missing here leaves therock-pr-bot waiting out its timeout
@@ -15,6 +13,7 @@ on:
     paths:
       - "emulation/mirage/**"
       - "emulation/rocjitsu/**"
+      - ".github/scripts/**"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
 
@@ -34,7 +33,7 @@ jobs:
           fetch-depth: 0
           # Sparse checkout controls which files are on disk, and therefore
           # which files pre-commit can check. To add a new project to this
-          # CI job, add its path here. That's the only change needed.
+          # CI job, add its path here and to pull_request.paths above.
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
