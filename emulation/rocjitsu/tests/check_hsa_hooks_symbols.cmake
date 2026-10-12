@@ -1,8 +1,19 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-if(NOT NM OR NOT HOOK_LIBRARY OR NOT TEST_HOOK_LIBRARY)
-    message(FATAL_ERROR "NM, HOOK_LIBRARY and TEST_HOOK_LIBRARY are required")
+# HOOK_EXPORTS and TEST_HOOK_EXPORTS are comma-separated, because a semicolon
+# list would be split into separate arguments on the test command line.
+if(
+    NOT NM
+    OR NOT HOOK_LIBRARY
+    OR NOT TEST_HOOK_LIBRARY
+    OR NOT HOOK_EXPORTS
+    OR NOT TEST_HOOK_EXPORTS
+)
+    message(
+        FATAL_ERROR
+        "NM, HOOK_LIBRARY, TEST_HOOK_LIBRARY, HOOK_EXPORTS and TEST_HOOK_EXPORTS are required"
+    )
 endif()
 
 # Check the actual dynamic ABI, including accidental RTTI or template exports
@@ -32,10 +43,7 @@ function(check_exports library)
     endif()
 endfunction()
 
-check_exports("${HOOK_LIBRARY}" OnLoad OnUnload)
-check_exports(
-    "${TEST_HOOK_LIBRARY}"
-    OnLoad
-    OnUnload
-    rj_hsa_dbt_set_topology_nodes_root_for_test
-)
+string(REPLACE "," ";" _hook_exports "${HOOK_EXPORTS}")
+string(REPLACE "," ";" _test_hook_exports "${TEST_HOOK_EXPORTS}")
+check_exports("${HOOK_LIBRARY}" ${_hook_exports})
+check_exports("${TEST_HOOK_LIBRARY}" ${_test_hook_exports})
