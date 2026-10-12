@@ -229,14 +229,7 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
   }
 }
 
-// Checks if memcpy_func waits for the preceding work in kernel_stream before it returns. A
-// WaitForHostRelease kernel blocks kernel_stream until a helper thread releases it. Thus the
-// result does not depend on the duration of the copy. If should_sync is true, the helper thread
-// releases the kernel after a short delay, because a blocking memcpy_func cannot return before
-// the release. If should_sync is false, the helper thread releases the kernel after the
-// query or after a long timeout. Thus a memcpy_func that blocks causes a failure, not a hang.
-// The query examines an event that follows the kernel, not the stream. A memcpy_func can return
-// before its own copy completes, for example a copy from pageable host memory to the device.
+// Synchronization behavior checks
 template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
                             const hipStream_t kernel_stream) {
