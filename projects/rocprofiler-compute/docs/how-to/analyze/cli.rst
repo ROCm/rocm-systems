@@ -886,8 +886,7 @@ milliseconds and microseconds per cell; missing values render as ``N/A``.
 
 * **Operator** — reconstructed path (for example
   ``nn.Module.Net.forward/aten::addmm``).
-* **Calls** — how many times the operator was invoked. ``N/A`` when the
-  trace did not include marker invocation ids.
+* **Calls** — how many nested marker intervals ran for that operator.
 * **Dispatches** — how many GPU kernels ran while the operator was on the
   call stack (kernels launched by operators it called also count).
 * **Total** — total GPU time spent while the operator was on the call
