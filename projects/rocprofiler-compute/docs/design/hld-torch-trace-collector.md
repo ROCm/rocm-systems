@@ -107,7 +107,7 @@ Adjacent ranges (`A.end == B.start`) are siblings. Analysis also uses the
 launcher id and interval containment to attach worker ranges to the
 launcher's call.
 
-Join steps and recorded error types are in the
+Join steps and the warn-versus-abort split are in the
 [low-level design](lld-torch-trace-collector.md).
 
 ## Build and runtime compatibility
