@@ -88,7 +88,7 @@ TEST_CASE("Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused", "[hrr]") {
   a->numDependencies = 20;
   std::memset(a->pDependencies_bytes, 0, sizeof(a->pDependencies_bytes));
 
-  hrr_dispatch_index = 7;
+  hrr_dispatch_seq = 7;
   hipError_t r = hipErrorUnknown;
   const std::string err = capture_stderr(
       [&] { r = playback_hipGraphAddMemAllocNode(ctx, rec.bytes()); });
@@ -107,7 +107,7 @@ TEST_CASE("Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused", "[hrr]") {
  *   - hipGraphAddMemAllocNode with a dependency count of 17, 1000 and
  *     UINT32_MAX against a 16-slot field is refused: it returns without a HIP
  *     call, the graph is marked incomplete, and the message names the API and
- *     the event index. Under AddressSanitizer nothing is read past the record.
+ *     the event's sequence number. Under AddressSanitizer nothing is read past the record.
  */
 TEST_CASE("Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount", "[hrr]") {
   for (uint32_t n : {17u, 1000u, UINT32_MAX}) {
@@ -122,7 +122,7 @@ TEST_CASE("Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount", "[hrr]") {
     a->pDependencies_n = n;
     std::memset(a->pDependencies_bytes, 0xAB, sizeof(a->pDependencies_bytes));
 
-    hrr_dispatch_index = 42;
+    hrr_dispatch_seq = 42;
     hipError_t r = hipSuccess;
     const std::string err = capture_stderr(
         [&] { r = playback_hipGraphAddMemAllocNode(ctx, rec.bytes()); });
@@ -131,7 +131,7 @@ TEST_CASE("Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount", "[hrr]") {
     CHECK(r == hipSuccess);
     CHECK(ctx.graph_is_incomplete(kGraph));
     CHECK(err.find("hipGraphAddMemAllocNode") != std::string::npos);
-    CHECK(err.find("event 42") != std::string::npos);
+    CHECK(err.find("sequence number 42") != std::string::npos);
     CHECK(err.find(std::to_string(n)) != std::string::npos);
   }
 }
@@ -167,7 +167,7 @@ TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
     a->pDependencies_n = 1000;
     std::memset(a->pDependencies_bytes, 0xCD, sizeof(a->pDependencies_bytes));
 
-    hrr_dispatch_index = 7;
+    hrr_dispatch_seq = 7;
     hipError_t r = hipErrorUnknown;
     const std::string err = capture_stderr(
         [&] { r = playback_hipGraphAddMemcpyNodeToSymbol(ctx, rec.bytes()); });
@@ -175,7 +175,7 @@ TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
     CHECK(r == hipSuccess);
     CHECK(ctx.graph_is_incomplete(kGraph));
     CHECK(err.find("hipGraphAddMemcpyNodeToSymbol") != std::string::npos);
-    CHECK(err.find("event 7") != std::string::npos);
+    CHECK(err.find("sequence number 7") != std::string::npos);
   }
 
   {  // hipGraphAddMemcpyNodeFromSymbol: the destination is device memory
@@ -192,7 +192,7 @@ TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
     a->pDependencies_n = 1000;
     std::memset(a->pDependencies_bytes, 0xCD, sizeof(a->pDependencies_bytes));
 
-    hrr_dispatch_index = 9;
+    hrr_dispatch_seq = 9;
     hipError_t r = hipErrorUnknown;
     const std::string err = capture_stderr(
         [&] { r = playback_hipGraphAddMemcpyNodeFromSymbol(ctx, rec.bytes()); });
@@ -200,7 +200,82 @@ TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
     CHECK(r == hipSuccess);
     CHECK(ctx.graph_is_incomplete(kGraph));
     CHECK(err.find("hipGraphAddMemcpyNodeFromSymbol") != std::string::npos);
-    CHECK(err.find("event 9") != std::string::npos);
+    CHECK(err.find("sequence number 9") != std::string::npos);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - The truncated-list refusal in the two symbol-copy handlers (dep_array):
+ *     16 dependencies stored and 20 recorded is refused, not replayed with the
+ *     missing ordering edges, as for the nodes that use translate_node_deps.
+ */
+TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseTruncatedList", "[hrr]") {
+  constexpr uint64_t kSym = 0x2000, kDev = 0x3000;
+  char symbol_storage[64];
+  char dev_storage[64];
+
+  auto make_ctx = [&](PlaybackContext& ctx) {
+    ctx.record_graph(kGraph, reinterpret_cast<hipGraph_t>(0x1));
+    ctx.record_symbol(kSym, "sym", symbol_storage, sizeof(symbol_storage));
+    ctx.record_alloc(kDev, dev_storage, sizeof(dev_storage));
+  };
+
+  {  // hipGraphAddMemcpyNodeToSymbol
+    PlaybackContext ctx;
+    make_ctx(ctx);
+    ExactRecord<hrr_args_hipGraphAddMemcpyNodeToSymbol> rec;
+    auto* a = rec.get();
+    a->graph = kGraph;
+    a->symbol = kSym;
+    a->src = kDev;
+    a->kind = hipMemcpyDeviceToDevice;
+    a->count = 8;
+    a->pDependencies_present = 1;
+    a->pDependencies_n = 16;
+    a->numDependencies = 20;
+    std::memset(a->pDependencies_bytes, 0, sizeof(a->pDependencies_bytes));
+
+    hrr_dispatch_seq = 11;
+    hipError_t r = hipErrorUnknown;
+    const std::string err = capture_stderr(
+        [&] { r = playback_hipGraphAddMemcpyNodeToSymbol(ctx, rec.bytes()); });
+    INFO(err);
+    CHECK(r == hipSuccess);
+    CHECK(ctx.graph_is_incomplete(kGraph));
+    CHECK(err.find("hipGraphAddMemcpyNodeToSymbol") != std::string::npos);
+    CHECK(err.find("sequence number 11") != std::string::npos);
+    CHECK(err.find("20 dependencies") != std::string::npos);
+    CHECK(err.find("holds 16") != std::string::npos);
+  }
+
+  {  // hipGraphAddMemcpyNodeFromSymbol
+    PlaybackContext ctx;
+    make_ctx(ctx);
+    ExactRecord<hrr_args_hipGraphAddMemcpyNodeFromSymbol> rec;
+    auto* a = rec.get();
+    a->graph = kGraph;
+    a->symbol = kSym;
+    a->dst = kDev;
+    a->kind = hipMemcpyDeviceToDevice;
+    a->count = 8;
+    a->pDependencies_present = 1;
+    a->pDependencies_n = 16;
+    a->numDependencies = 20;
+    std::memset(a->pDependencies_bytes, 0, sizeof(a->pDependencies_bytes));
+
+    hrr_dispatch_seq = 12;
+    hipError_t r = hipErrorUnknown;
+    const std::string err = capture_stderr(
+        [&] { r = playback_hipGraphAddMemcpyNodeFromSymbol(ctx, rec.bytes()); });
+    INFO(err);
+    CHECK(r == hipSuccess);
+    CHECK(ctx.graph_is_incomplete(kGraph));
+    CHECK(err.find("hipGraphAddMemcpyNodeFromSymbol") != std::string::npos);
+    CHECK(err.find("sequence number 12") != std::string::npos);
+    CHECK(err.find("20 dependencies") != std::string::npos);
+    CHECK(err.find("holds 16") != std::string::npos);
   }
 }
 

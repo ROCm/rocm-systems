@@ -56,7 +56,6 @@
 // Kernel-launch handlers use this to wait for their submission turn and then
 // immediately unblock the next thread before doing timing/sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
-thread_local size_t   hrr_dispatch_index = 0;
 
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
                            const char* reason) {
@@ -1700,7 +1699,7 @@ hipError_t playback_hipGetSymbolSize(PlaybackContext& ctx,
 // Resolve a recorded dependency list into live nodes for the hand-written
 // graph handlers. The record holds its dependencies inline, so a count above
 // what the field holds is a malformed record: it is refused with the API name
-// and the event index, and nothing is read past the field. Returns false then;
+// and the event's sequence number, and nothing is read past the field. Returns false then;
 // on success *ptr is the array to hand to HIP (null when there are none).
 static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* bytes,
                       size_t field_bytes, uint8_t present, uint32_t n, uint64_t recorded_n,
@@ -1710,17 +1709,17 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     if (!present || n == 0) return true;
     if (!hrr::deps_complete(recorded_n, n)) {
         fprintf(stderr,
-                "[HRR] %s: event %zu was built with %llu dependencies but its record "
+                "[HRR] %s: event with sequence number %llu was built with %llu dependencies but its record "
                 "holds %u; the others were dropped at capture, so the ordering cannot "
                 "be reproduced; refusing the call\n",
-                api, hrr_dispatch_index, (unsigned long long)recorded_n, n);
+                api, (unsigned long long)hrr_dispatch_seq, (unsigned long long)recorded_n, n);
         return false;
     }
     if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
         fprintf(stderr,
-                "[HRR] %s: event %zu records %u dependencies but its record holds "
+                "[HRR] %s: event with sequence number %llu records %u dependencies but its record holds "
                 "at most %zu; refusing the call\n",
-                api, hrr_dispatch_index, n,
+                api, (unsigned long long)hrr_dispatch_seq, n,
                 hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
         return false;
     }
@@ -2976,15 +2975,6 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
@@ -5125,18 +5115,18 @@ static bool translate_node_deps(PlaybackContext& ctx, const char* api,
     // replay the node with fewer dependencies than it was built with.
     if (!hrr::deps_complete(recorded_n, n)) {
         fprintf(stderr,
-                "[HRR] %s: event %zu was built with %llu dependencies but its record "
+                "[HRR] %s: event with sequence number %llu was built with %llu dependencies but its record "
                 "holds %u; the others were dropped at capture, so the ordering cannot "
                 "be reproduced; refusing the call\n",
-                api, hrr_dispatch_index, (unsigned long long)recorded_n, n);
+                api, (unsigned long long)hrr_dispatch_seq, (unsigned long long)recorded_n, n);
         return false;
     }
     // The record holds its dependencies inline; a larger count is malformed.
     if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
         fprintf(stderr,
-                "[HRR] %s: event %zu records %u dependencies but its record holds "
+                "[HRR] %s: event with sequence number %llu records %u dependencies but its record holds "
                 "at most %zu; refusing the call\n",
-                api, hrr_dispatch_index, n,
+                api, (unsigned long long)hrr_dispatch_seq, n,
                 hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
         return false;
     }

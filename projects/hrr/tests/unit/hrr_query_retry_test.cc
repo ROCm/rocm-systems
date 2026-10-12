@@ -113,16 +113,19 @@ TEST_CASE("Unit_HRR_Query_ZeroBoundMakesNoCall", "[hrr]") {
 /**
  * Test Description
  * ----------------
- *   - By default a query has no attempt bound: one that returns
- *     hipErrorNotReady far more often than the old 5,000,000-attempt default
- *     would have allowed still completes (a long-polled kernel must replay).
+ *   - By default a query has no attempt bound (the default is UINT64_MAX), so
+ *     one that returns hipErrorNotReady many times still completes (a
+ *     long-polled kernel must replay). The count is small: the bound is
+ *     checked as a value, not by running past the old 5,000,000 default.
  */
 TEST_CASE("Unit_HRR_Query_DefaultHasNoAttemptBound", "[hrr]") {
   PlaybackContext ctx;
+  CHECK(ctx.max_query_attempts == UINT64_MAX);
+  CHECK(hrr::kDefaultMaxQueryAttempts == UINT64_MAX);
   Probe probe;
-  probe.succeed_on = 5000100;
+  probe.succeed_on = 1000;
   CHECK(replay_query_until_success(ctx, "hipEventQuery", query_probe, &probe) == hipSuccess);
-  CHECK(probe.calls == 5000100);
+  CHECK(probe.calls == 1000);
   CHECK_FALSE(ctx.fatal_error.load());
 }
 

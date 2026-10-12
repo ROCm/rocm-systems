@@ -574,4 +574,24 @@ HRR_TEST_CASE(Unit_HRR_Limits_FindDuplicateSeq) {
   CHECK(dup == 1);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - find_seq_gap reports the first number missing between the smallest and
+ *     largest, wherever the events sit in the stream; a contiguous stream (not
+ *     necessarily starting at 0), an empty one and duplicates are not a gap.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_FindSeqGap) {
+  uint64_t missing = 0;
+  CHECK_FALSE(hrr::find_seq_gap({}, &missing));
+  CHECK_FALSE(hrr::find_seq_gap({7}, &missing));
+  CHECK_FALSE(hrr::find_seq_gap({0, 1, 2, 3}, &missing));
+  CHECK_FALSE(hrr::find_seq_gap({12, 10, 11}, &missing));
+  CHECK_FALSE(hrr::find_seq_gap({1, 1, 2}, &missing));
+  CHECK(hrr::find_seq_gap({0, 1, 2, 5}, &missing));
+  CHECK(missing == 3);
+  CHECK(hrr::find_seq_gap({13, 11, 10}, &missing));
+  CHECK(missing == 12);
+}
+
 /** @} */
