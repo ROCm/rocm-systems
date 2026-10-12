@@ -52,6 +52,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed per-process memory and engine usage in `amd-smi process`**.  
   - VRAM, GTT and CPU memory read 2.3% low and could be counted several times for one process. A process that opened the same GPU more than once showed the engine usage of only one of those opens.
 
+- **Fixed `amdsmi_get_gpu_compute_process_gpus()` failing when it counts a process's GPUs**.  
+  - The documented count call, with a NULL index list, returned an invalid-argument error, so the Python and Rust APIs always failed.
+
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 

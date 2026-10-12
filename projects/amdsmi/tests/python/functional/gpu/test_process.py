@@ -4,6 +4,7 @@
 
 """GPU process: compute process info, process isolation, local data cleanup."""
 
+import os
 import unittest
 
 import common.common as common
@@ -43,16 +44,9 @@ class TestGpuProcess(unittest.TestCase):
 
     def test_get_gpu_compute_process_gpus(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_NOT_COMPLETE:
-            msg = (
-                "\tSkipping test_get_gpu_compute_process_gpus as it is not complete (Inval Error)."
-            )
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_gpu_compute_process_gpus=amdsmi.amdsmi_get_gpu_compute_process_gpus
+        self.common.Test_API(
+            amdsmi_get_gpu_compute_process_gpus=amdsmi.amdsmi_get_gpu_compute_process_gpus,
+            pid=os.getpid(),
         )
         return
 

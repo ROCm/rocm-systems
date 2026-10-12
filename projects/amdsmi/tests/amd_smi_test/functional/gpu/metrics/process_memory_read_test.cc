@@ -269,4 +269,21 @@ void TestProcessMemoryRead::Run(void) {
               << found.memory_usage.gtt_mem << ", cpu " << found.memory_usage.cpu_mem << ", mem "
               << found.mem << std::endl;
   }
+
+  // The helper holds VRAM on GPU 0, so it uses at least one GPU. Count its GPUs,
+  // then read them. A smaller buffer is reported, and a NULL count rejected.
+  uint32_t gpu_count = 0;
+  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, nullptr, &gpu_count),
+            AMDSMI_STATUS_SUCCESS);
+  ASSERT_GE(gpu_count, 1u);
+  std::vector<uint32_t> gpu_indices(gpu_count);
+  uint32_t read_count = gpu_count;
+  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), &read_count),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(read_count, gpu_count);
+  uint32_t too_few = gpu_count - 1;
+  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), &too_few),
+            AMDSMI_STATUS_INSUFFICIENT_SIZE);
+  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), nullptr),
+            AMDSMI_STATUS_INVAL);
 }
