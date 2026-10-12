@@ -211,44 +211,46 @@ __global__ void kernelTestAbort(uint32_t* flag, uint32_t startSteps, AbortOut* o
   *out = o;
 }
 
-AbortOut runTestAbort(uint32_t* d_flag, uint32_t startSteps) {
+void runTestAbort(uint32_t* d_flag, uint32_t startSteps, AbortOut* out) {
   DeviceBuffer<AbortOut> d_out(1);
-  d_out.zero();
+  ASSERT_NO_FATAL_FAILURE(d_out.zero());
   kernelTestAbort<<<1, 1>>>(d_flag, startSteps, d_out.ptr);
-  EXPECT_EQ(hipGetLastError(), hipSuccess);
-  EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
-  return d_out.download();
+  ASSERT_EQ(hipGetLastError(), hipSuccess);
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  *out = d_out.download();
 }
 
 TEST_F(NcclUtilityDeviceTest, TestAbortPollsOncePerInterval) {
   DeviceBuffer<uint32_t> d_flag(1);
   ASSERT_NO_FATAL_FAILURE(d_flag.upload(1u));
-  AbortOut o = runTestAbort(d_flag.ptr, 0);
+  AbortOut o{};
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, 0, &o));
   EXPECT_EQ(o.firstTrueCall, kMaxSteps);
   EXPECT_EQ(o.falsesBefore, kMaxSteps - 1);
   EXPECT_EQ(o.stepsAfter, 0u);
-  o = runTestAbort(d_flag.ptr, kMaxSteps - 2);
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, kMaxSteps - 2, &o));
   EXPECT_EQ(o.firstTrueCall, 2u);
   // A count already past the interval polls on the next call.
-  o = runTestAbort(d_flag.ptr, kMaxSteps + 7);
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, kMaxSteps + 7, &o));
   EXPECT_EQ(o.firstTrueCall, 1u);
   EXPECT_EQ(o.stepsAfter, 0u);
   ASSERT_NO_FATAL_FAILURE(d_flag.upload(0x80000000u));
-  o = runTestAbort(d_flag.ptr, kMaxSteps - 1);
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, kMaxSteps - 1, &o));
   EXPECT_EQ(o.firstTrueCall, 1u);
 }
 
 TEST_F(NcclUtilityDeviceTest, TestAbortClearOrNullFlagNeverAborts) {
   DeviceBuffer<uint32_t> d_flag(1);
   ASSERT_NO_FATAL_FAILURE(d_flag.upload(0u));
-  AbortOut o = runTestAbort(d_flag.ptr, 0);
+  AbortOut o{};
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, 0, &o));
   EXPECT_EQ(o.firstTrueCall, 0u);
   EXPECT_EQ(o.falsesBefore, 3 * kMaxSteps);
   EXPECT_EQ(o.stepsAfter, 0u);  // Reset at each of the three polls, then no further calls.
-  o = runTestAbort(nullptr, 0);
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(nullptr, 0, &o));
   EXPECT_EQ(o.firstTrueCall, 0u);
   EXPECT_EQ(o.stepsAfter, 0u);
-  o = runTestAbort(d_flag.ptr, 5);
+  ASSERT_NO_FATAL_FAILURE(runTestAbort(d_flag.ptr, 5, &o));
   EXPECT_EQ(o.stepsAfter, 5u);  // Polls reset at calls 9995, 19995 and 29995; 5 calls remain.
 }
 
