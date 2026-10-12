@@ -459,16 +459,17 @@ TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
 // that fails, with EIO, every write to it, every fsync of it, or closing it,
 // as HRR_TEST_FAIL_EVENTS says. With ftruncate the filter goes in only at the
 // fsync after flush() wrote the trailer, and fails that fsync and every
-// ftruncate; with close-nodup it fails fcntl as well as closing it, so the
-// descriptor cannot be duplicated either, and with seek-close lseek, so the
-// writer cannot find where its trailer would start. Then it records a few events and
-// exits normally, so the writer meets the failure while it finishes the
-// archive. With close-link it first moves events.bin aside to
-// events.bin.written and plants a link to HRR_TEST_DECOY in its place, so a
-// writer that cut the trailer off by path would cut the decoy instead. With
-// fork it fails writes, records, and forks, so the flush before fork() fails;
-// the child records, which opens its own archive, and exits normally. Without
-// a filter it says so.
+// ftruncate; trailer-fsync does the same with fsync alone, so the trailer can
+// be cut off but the cut not synced. With close-nodup it fails fcntl as well
+// as closing it, so the descriptor cannot be duplicated either, and with
+// seek-close lseek, so the writer cannot find where its trailer would start.
+// Then it records a few events and exits normally, so the writer meets the
+// failure while it finishes the archive. With close-link it first moves
+// events.bin aside to events.bin.written and plants a link to HRR_TEST_DECOY in
+// its place, so a writer that cut the trailer off by path would cut the decoy
+// instead. With fork it fails writes, records, and forks, so the flush before
+// fork() fails; the child records, which opens its own archive, and exits
+// normally. Without a filter it says so.
 // ---------------------------------------------------------------------------
 #ifdef HRR_TEST_HAVE_SECCOMP
 // Defined in hrr_workload_test.cc and run by the fsync() of this binary.
@@ -510,13 +511,16 @@ bool fail_on_fd(int fd, std::uint32_t nr_a, std::uint32_t nr_b) {
          ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0;
 }
 
-// events.bin's descriptor, for fail_after_trailer.
-int g_trailer_events_fd = -1;
+// events.bin's descriptor, for fail_after_trailer, and whether ftruncate
+// fails there as well as fsync.
+int  g_trailer_events_fd = -1;
+bool g_trailer_ftruncate_fails = true;
 
-// fsync hook for the ftruncate case. The first fsync of events.bin that finds
-// the file ending in a whole trailer is the one flush() makes after writing
-// it. From that one on, fsync and ftruncate of events.bin fail, so the writer
-// can neither sync the trailer nor cut it off again.
+// fsync hook for the ftruncate and trailer-fsync cases. The first fsync of
+// events.bin that finds the file ending in a whole trailer is the one flush()
+// makes after writing it. From that one on, fsync of events.bin fails, and
+// with ftruncate so does ftruncate: the writer cannot sync the trailer, nor
+// cut it off again or sync what it does instead.
 void fail_after_trailer(int fd) {
   if (fd != g_trailer_events_fd) return;
   struct stat st{};
@@ -527,7 +531,7 @@ void fail_after_trailer(int fd) {
       rec.hdr.event_type != HRR_EOF_MARKER || rec.eof_magic != HRR_EOF_MAGIC)
     return;
   g_hrr_fsync_hook = nullptr;
-  if (!fail_on_fd(fd, __NR_fsync, __NR_ftruncate)) {
+  if (!fail_on_fd(fd, __NR_fsync, g_trailer_ftruncate_fails ? __NR_ftruncate : __NR_fsync)) {
     std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
     std::fflush(stdout);
   }
@@ -543,8 +547,8 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   if (mode == nullptr) HRR_SKIP("HRR_TEST_FAIL_EVENTS is not set");
   const std::string fail(mode);
   REQUIRE((fail == "write" || fail == "fsync" || fail == "close" || fail == "close-link" ||
-           fail == "fork" || fail == "ftruncate" || fail == "close-nodup" ||
-           fail == "seek-close"));
+           fail == "fork" || fail == "ftruncate" || fail == "trailer-fsync" ||
+           fail == "close-nodup" || fail == "seek-close"));
 
   if (fail == "fork") REQUIRE(std::atexit(events_fail_child_exit) == 0);
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -579,8 +583,9 @@ TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
   const std::uint32_t nr_b = fail == "close-nodup" ? __NR_fcntl
                              : fail == "seek-close" ? __NR_lseek
                                                     : nr;
-  if (fail == "ftruncate") {
+  if (fail == "ftruncate" || fail == "trailer-fsync") {
     g_trailer_events_fd = events_fd;
+    g_trailer_ftruncate_fails = fail == "ftruncate";
     g_hrr_fsync_hook = fail_after_trailer;
   } else if (!fail_on_fd(events_fd, nr, nr_b)) {
     std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
@@ -1161,10 +1166,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
 /**
  * Test Description
  * ----------------
- *   - Runs Unit_HRR_CaptureEventsFail_Direct seven times: once with every
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct eight times: once with every
  *     write to events.bin failing once the archive is open, once with every
  *     fsync of it failing, once with the fsync after the trailer failing and
- *     no ftruncate able to cut the trailer off, once with closing events.bin
+ *     no ftruncate able to cut the trailer off, once like that with ftruncate
+ *     working but no fsync to make the cut last, once with closing events.bin
  *     failing after the archive is finished, once like that with its
  *     descriptor unable to be duplicated, once like that with no seek able
  *     to find the end of the file, and once more with events.bin moved aside
@@ -1172,8 +1178,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
  *   - Each time the file the writer wrote ends without a clean-shutdown
  *     trailer, the reader does not load it as complete, and the manifest says
  *     the archive is incomplete, so neither the reader nor the root index
- *     takes it for a whole capture. The decoy is left as it was. Skipped
- *     where the workload cannot install its filter.
+ *     takes it for a whole capture. The decoy is left as it was. Where the
+ *     trailer was taken back without a sync, the writer says the trailer may
+ *     stay. Skipped where the workload cannot install its filter.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
 #ifdef _WIN32
@@ -1182,7 +1189,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
   ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
   constexpr const char* kDecoyText = "not part of the archive\n";
   for (const char* fail :
-       {"write", "fsync", "ftruncate", "close", "close-nodup", "seek-close", "close-link"}) {
+       {"write", "fsync", "ftruncate", "trailer-fsync", "close", "close-nodup", "seek-close",
+        "close-link"}) {
     DYNAMIC_SECTION("failing " << fail) {
       const std::string mode(fail);
       const fs::path base = work.path / mode;
@@ -1192,7 +1200,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
       const PlantedRun run = capture_after_planting(
           base, work.path / (mode + ".sh"),
           "export HRR_TEST_FAIL_EVENTS=" + mode + "\nexport HRR_TEST_DECOY='" +
-              decoy.string() + "'\n",
+              decoy.string() + "'\nexport AMD_LOG_LEVEL=1\n",
           "Unit_HRR_CaptureEventsFail_Direct");
       INFO("Workload exit code: " << run.ret << "\n" << run.output);
       REQUIRE(run.ret == 0);
@@ -1207,6 +1215,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
       // The reader goes by the trailer alone.
       hrr::Archive arc;
       if (hrr::load_archive(archives.front().string(), arc)) CHECK_FALSE(arc.complete);
+      // No fsync made taking the trailer back last, so the writer must not
+      // count it as done.
+      if (mode == "ftruncate" || mode == "trailer-fsync")
+        CHECK(run.output.find("Cannot take the clean-shutdown trailer back out of") !=
+              std::string::npos);
     }
   }
 #endif

@@ -382,21 +382,22 @@ static bool note_events_io_locked() {
 // Take back the trailer that starts at trailer_at in events.bin, once a failure
 // means it claims nothing: the reader takes a file that ends in a trailer for
 // a whole capture, whatever the manifest says. Cut it off, or if that fails,
-// overwrite its magic so it no longer reads as a trailer. False if neither
-// worked. Caller holds g_file_mu, or g_buf_busy in the crash callback: only
-// async-signal-safe calls.
+// overwrite its magic so it no longer reads as a trailer. Either change is
+// synced, since the trailer itself may already be on disk. False if neither
+// could be made and synced. Caller holds g_file_mu, or g_buf_busy in the crash
+// callback: only async-signal-safe calls.
 static bool drop_trailer_locked(int fd, std::int64_t trailer_at) {
   int rc;
   do {
     rc = hrr_ftruncate_fd(fd, trailer_at);
   } while (rc != 0 && errno == EINTR);
-  if (rc == 0) return true;
-  const uint32_t no_magic = 0;
-  if (!hrr_pwrite_fd(fd, &no_magic, sizeof(no_magic),
-                     trailer_at + static_cast<std::int64_t>(offsetof(hrr_eof_record, eof_magic))))
-    return false;
-  (void)HRR_FSYNC(fd);
-  return true;
+  if (rc != 0) {
+    const uint32_t no_magic = 0;
+    if (!hrr_pwrite_fd(fd, &no_magic, sizeof(no_magic),
+                       trailer_at + static_cast<std::int64_t>(offsetof(hrr_eof_record, eof_magic))))
+      return false;
+  }
+  return HRR_FSYNC(fd) == 0;
 }
 
 // Append `len` bytes of one complete record to the buffer, flushing first if it
