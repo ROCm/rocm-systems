@@ -348,7 +348,7 @@ def io_bw_encodings_for_proto_ver(proto_ver):
     """``[(link_name, bw_type, expected)]`` valid on *proto_ver*; empty below ver5.
 
     Consumers pass element 0 as ``link_name`` and element 1 as the encoding int.
-    Protocol version 6 (MI300) has its own link set; version 7 and anything newer
+    Protocol version 6 has its own link set; version 7 and anything newer
     reuse the version 5 set, matching the ``default:`` branch of
     ``init_platform_info()``.
     """
