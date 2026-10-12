@@ -195,6 +195,15 @@ bool EventState::has_page() const {
   return page_ != nullptr;
 }
 
+bool EventState::overlaps_page(const void *addr, size_t length) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!page_ || page_size_ == 0 || length == 0)
+    return false;
+  const auto start = reinterpret_cast<uintptr_t>(addr);
+  const auto page = reinterpret_cast<uintptr_t>(page_);
+  return start <= page ? page - start < length : start - page < page_size_;
+}
+
 /// @brief Allocate a new KFD event and return its ID and slot index.
 int EventState::create_event(void *arg, uint32_t gpu_id) {
   assert(arg && "create_event called with null arg");
