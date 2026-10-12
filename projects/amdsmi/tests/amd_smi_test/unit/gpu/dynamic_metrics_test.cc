@@ -414,14 +414,23 @@ class FakeMetricsDevice {
   FakeMetricsDevice& operator=(const FakeMetricsDevice&) = delete;
 
   void WriteMetrics(const std::vector<uint8_t>& blob) const {
-    std::ofstream stream(root_ / "device" / "gpu_metrics", std::ios::binary | std::ios::trunc);
-    stream.write(reinterpret_cast<const char*>(blob.data()),
-                 static_cast<std::streamsize>(blob.size()));
+    Write(root_ / "device" / "gpu_metrics", blob);
+  }
+
+  void WritePartitionMetrics(const std::vector<uint8_t>& blob) const {
+    std::filesystem::create_directories(root_ / "device" / "xcp");
+    Write(root_ / "device" / "xcp" / "xcp_metrics", blob);
   }
 
   std::string path() const { return root_.string(); }
 
  private:
+  static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
+    std::ofstream stream(file, std::ios::binary | std::ios::trunc);
+    stream.write(reinterpret_cast<const char*>(blob.data()),
+                 static_cast<std::streamsize>(blob.size()));
+  }
+
   std::filesystem::path root_;
 };
 
@@ -682,4 +691,76 @@ TEST(GpuUnit, PublicMetricsEntryReportsUnsupportedRevision) {
 
   EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
             rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// A table that cannot even hold the header it was selected by has nothing to
+// read. Without a lower bound the read is a no-op that reports success, and the
+// copy stage then reports the not-applicable fill back as the metrics version,
+// contradicting the header the device published.
+TEST(GpuUnit, MetricsTableSmallerThanItsHeaderIsRejected) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("declared_size_zero");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, 0));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// A malformed table must reach the caller as the reason setup gave. Only the
+// unreadable-revision case used to be forwarded, so every other setup failure
+// arrived as the copy stage's generic unexpected-data result.
+TEST(GpuUnit, PublicMetricsEntryReportsAMalformedTable) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("public_declared_size_zero");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, 0));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+// The partition entry point carries the same guard as the GPU one, so pin it
+// too: the two have drifted apart before.
+TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("partition_unsupported_v1_9");
+  // Partition metrics are read from device/xcp/xcp_metrics.
+  fake_device.WritePartitionMetrics(BuildMetricsBlob(sizeof(ApuMetrics), 9, 9, sizeof(ApuMetrics)));
+
+  const ScopedLibraryDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  EXPECT_EQ(rsmi_dev_gpu_partition_metrics_info_get(library_device.index(), &metrics),
+            rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// The PLX reading comes out of gpu_metrics, so drive it from a device whose
+// table really was read rather than from a hand-built struct: an APU leaves the
+// sensor at the sentinel, which is what makes the query unsupported.
+TEST(GpuUnit, PlxTemperatureFromAFakeApuDeviceIsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("plx_apu_v2_1");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size)));
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+
+  amdsmi_gpu_metrics_t public_metrics{};
+  static_assert(sizeof(public_metrics) == sizeof(metrics),
+                "the rsmi and amdsmi metrics structs must stay layout-compatible");
+  std::memcpy(&public_metrics, &metrics, sizeof(public_metrics));
+
+  int64_t temperature = -1;
+  EXPECT_EQ(smi_amdgpu_plx_temp_from_metrics(public_metrics, &temperature),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(temperature, -1);
 }
