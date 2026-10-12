@@ -6,12 +6,17 @@ import inspect
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from threading import Thread
 from typing import Set
 from unittest.mock import Mock
+
+import numpy as np
+import pandas as pd
 
 from utils import csv_compression
 
@@ -379,8 +384,6 @@ def normalize_kernel_names(names: Set[str]) -> Set[str]:
 
 def read_counter_results(workload_dir):
     """Read all long-form counter artifacts in deterministic filename order."""
-    import pandas as pd
-
     result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert result_files, f"No counter result files in {workload_dir}"
     return pd.concat([pd.read_csv(path) for path in result_files], ignore_index=True)
@@ -388,9 +391,6 @@ def read_counter_results(workload_dir):
 
 def check_counter_results(df, *, required_counters=()):
     """Validate the identities, launch fields, values and timing of counters."""
-    import numpy as np
-    import pandas as pd
-
     assert not df.empty, "Counter results are empty"
     assert set(COUNTER_RESULT_COLUMNS) <= set(df.columns), "Missing counter columns"
     for column in ("Counter_Value", "Start_Timestamp", "End_Timestamp"):
@@ -409,16 +409,11 @@ def check_counter_results(df, *, required_counters=()):
 
 def check_sysinfo(path):
     """Read and validate the hardware metadata of every profiled device."""
-    import pandas as pd
-
     return _check_sysinfo_frame(pd.read_csv(path))
 
 
 def _check_sysinfo_frame(df):
     """Validate model, architecture and positive finite hardware counts."""
-    import numpy as np
-    import pandas as pd
-
     required = {"gpu_model", "gpu_arch", "cu_per_gpu", "se_per_gpu", "simd_per_cu"}
     assert not df.empty, "Sysinfo is empty"
     assert required <= set(df.columns), "Missing sysinfo columns"
@@ -433,9 +428,6 @@ def _check_sysinfo_frame(df):
 
 def check_analysis_db(db_path, *, expected_workloads):
     """Validate a saved analysis database and summarize workload ownership."""
-    import sqlite3
-    from contextlib import closing
-
     assert Path(db_path).is_file(), f"Missing analysis database: {db_path}"
     with closing(sqlite3.connect(db_path)) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
@@ -485,8 +477,6 @@ def _check_analysis_rows(workloads, kernels, dispatches, expected_workloads):
 
 def check_analysis_csv_dir(directory):
     """Read every analysis CSV and validate ordered headers and composite owners."""
-    import pandas as pd
-
     frames = {}
     for name, columns in ANALYSIS_CSV_HEADERS.items():
         path = Path(directory) / f"{name}.csv"
@@ -517,17 +507,12 @@ def _check_analysis_csv_owners(frames):
 
 def check_roofline_csv(path, *, allowed_zero=()):
     """Read and validate ordered benchmark mean/Low/High triplets."""
-    import pandas as pd
-
     assert Path(path).is_file(), f"Missing roofline CSV: {path}"
     return _check_roofline_frame(pd.read_csv(path), allowed_zero)
 
 
 def _check_roofline_frame(df, allowed_zero):
     """Check benchmark layout, zero allowances and measurement bounds."""
-    import numpy as np
-    import pandas as pd
-
     assert not df.empty, "Empty roofline CSV"
     # Historical MI200 exports spell this one column with an extra F.
     aliases = {"mfmafi8opslow": "mfmai8opslow"}

@@ -23,7 +23,6 @@ import pandas as pd
 import pytest
 import yaml
 from common import SUPPORTED_ARCHS
-from common import read_counter_results as read_counter_results
 
 from utils.utils_common import canonical_config_arch
 
