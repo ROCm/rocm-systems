@@ -27,7 +27,11 @@ from rocm_kpack.binutils import BundledBinary, Toolchain
 from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
-from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
+from rocm_kpack.kpack_transform import (
+    is_kpack_processed,
+    kpack_offload_binary,
+    NotFatBinaryError,
+)
 
 
 def strip_target_features(target: str) -> str:
@@ -52,10 +56,14 @@ def base_arch(arch: str) -> str:
 class ExtractedKernel:
     """Represents a kernel extracted from a fat binary."""
 
-    target_name: str  # Target identifier from bundler (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
+    target_name: (
+        str  # Target identifier from bundler (e.g., "hip-amdgcn-amd-amdhsa-gfx1100")
+    )
     kernel_data: bytes  # The actual kernel binary data
     source_binary_relpath: str  # Path to the original fat binary relative to prefix
-    source_prefix: str  # The prefix this kernel came from (e.g., "math-libs/BLAS/rocBLAS/stage")
+    source_prefix: (
+        str  # The prefix this kernel came from (e.g., "math-libs/BLAS/rocBLAS/stage")
+    )
     architecture: str  # Architecture (e.g., "gfx1100")
 
 
@@ -94,9 +102,10 @@ class FileClassificationVisitor:
 
         # Accumulated results
         self.fat_binaries: List[Path] = []
-        self.database_files_by_arch: Dict[
-            str, List[Tuple[Path, DatabaseHandler]]
-        ] = defaultdict(list)
+        self.kpack_processed_binaries: List[Path] = []
+        self.database_files_by_arch: Dict[str, List[Tuple[Path, DatabaseHandler]]] = (
+            defaultdict(list)
+        )
         self.exclude_from_generic: Set[Path] = set()
 
     def visit_file(self, file_path: Path, prefix_path: Path) -> None:
@@ -140,6 +149,12 @@ class FileClassificationVisitor:
                         f"  Found {handler.name()} database file for {arch}: {file_path.relative_to(prefix_path)}"
                     )
                 return  # First matching handler wins
+
+        # Keep processed binaries distinct from ordinary host-only files so
+        # the splitter can reject partial rebuilds before replacing archives.
+        if is_kpack_processed(file_path):
+            self.kpack_processed_binaries.append(file_path)
+            return
 
         # Check if it's a fat binary
         if is_fat_binary(file_path, self.toolchain):
@@ -707,15 +722,16 @@ class ArtifactSplitter:
         Args:
             input_dir: Input artifact directory
             output_dir: Output directory for split artifacts
+
+        Raises:
+            RuntimeError: The artifact mixes already kpack-processed binaries
+                with unprocessed fat binaries. No output is written in this case.
         """
         input_dir = Path(input_dir)
         output_dir = Path(output_dir)
 
         if not input_dir.exists():
             raise FileNotFoundError(f"Input directory does not exist: {input_dir}")
-
-        # Create output directory
-        output_dir.mkdir(parents=True, exist_ok=True)
 
         # Read artifact manifest
         prefixes = read_artifact_manifest(input_dir)
@@ -724,16 +740,10 @@ class ArtifactSplitter:
             for prefix in prefixes:
                 print(f"  - {prefix}")
 
-        # Accumulate all kernels from all prefixes
-        all_kernels_by_arch: Dict[str, List[ExtractedKernel]] = defaultdict(list)
-
-        # Track fat binaries by prefix for later processing
-        fat_binaries_by_prefix: Dict[str, List[Path]] = {}
-
-        # Track prefixes that were actually processed (for manifest)
-        processed_prefixes: List[str] = []
-
-        # Process each prefix
+        # Classify the entire artifact before copying or extracting anything.
+        # Prefixes share archives, so a check within each prefix is insufficient:
+        # a rebuilt subproject can coexist with a prebuilt, already-split one.
+        classified_prefixes: List[Tuple[str, FileClassificationVisitor]] = []
         for prefix in prefixes:
             prefix_path = input_dir / prefix
 
@@ -754,6 +764,45 @@ class ArtifactSplitter:
                 gpu_targets=self.gpu_targets,
             )
             self.scan_prefix(prefix_path, classifier)
+            classified_prefixes.append((prefix, classifier))
+
+        processed_binary = next(
+            (
+                path
+                for _, c in classified_prefixes
+                for path in c.kpack_processed_binaries
+            ),
+            None,
+        )
+        fat_binary = next(
+            (path for _, c in classified_prefixes for path in c.fat_binaries),
+            None,
+        )
+        if processed_binary is not None and fat_binary is not None:
+            raise RuntimeError(
+                f"Cannot split artifact '{self.artifact_prefix}': it contains both "
+                "already kpack-processed and unprocessed fat binaries "
+                f"(processed: {processed_binary.relative_to(input_dir).as_posix()}; "
+                f"unprocessed: {fat_binary.relative_to(input_dir).as_posix()}). "
+                "Regenerating archives from only the unprocessed binaries would "
+                "lose kernels needed by the processed binaries. Rebuild all "
+                "subprojects contributing to this artifact from source, then "
+                "regenerate the artifact into a clean output directory."
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Accumulate all kernels from all prefixes
+        all_kernels_by_arch: Dict[str, List[ExtractedKernel]] = defaultdict(list)
+
+        # Track fat binaries by prefix for later processing
+        fat_binaries_by_prefix: Dict[str, List[Path]] = {}
+
+        # Track prefixes that were actually processed (for manifest)
+        processed_prefixes: List[str] = []
+
+        for prefix, classifier in classified_prefixes:
+            prefix_path = input_dir / prefix
 
             # Phase 2: Process database files (move to arch-specific artifacts)
             if self.database_handlers and classifier.database_files_by_arch:

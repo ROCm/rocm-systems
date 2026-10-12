@@ -3748,6 +3748,66 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
 }
 
 // ===========================================================================
+// ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
+// ===========================================================================
+
+// Comm ready for ceCollTaskAppend: CE initialized, out of every group; leaves the thread's group heads clean.
+struct CeAppendScene {
+  CollTaskComm cc;
+  CeAppendScene() {
+    ClearGroupHeads();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      cc.get()->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    cc.get()->ceColl.initialized = true;
+  }
+  ~CeAppendScene() { ClearGroupHeads(); }
+  static void ClearGroupHeads() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      ncclGroupCommHead[type] = nullptr;
+    }
+  }
+  ncclResult_t Append(ncclFunc_t func) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_CE_REGISTERED);
+    info.coll = func;
+    return ceCollTaskAppend(cc.get(), &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{});
+  }
+  bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
+};
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceAlreadyPending_StillJoinsSymRegister) {
+  CeAppendScene scene;
+  scene.cc.get()->ceColl.stagingPending = true;  // left by a group that failed before its SymRegister job ran
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithStaging_QueuesNoSetup) {
+  CeAppendScene scene;
+  uint8_t staging = 0;
+  scene.cc.get()->ceColl.ceARTmpBuf = &staging;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllGather_QueuesNoSetup) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+// ===========================================================================
 // addP2pToPlan (enqueue.cc:1334) -- gfx1250 SendRecv protocol selection.
 // GPU SendRecvTests skip off gfx1250, so host CI never reached this planner.
 // These tests fake cudaArch=1250 / nRanks=4 and inspect the emitted

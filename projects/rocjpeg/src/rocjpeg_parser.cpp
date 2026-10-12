@@ -63,6 +63,7 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
     jpeg_stream_parameters_ = {};
     bool soi_marker_found = false;
     bool sos_marker_found = false;
+    bool sof_marker_found = false;
     bool dht_marker_found = false;
     bool dqt_marker_found = false;
     uint8_t marker;
@@ -152,17 +153,54 @@ bool RocJpegStreamParser::ParseJpegStream(const uint8_t *jpeg_stream, uint32_t j
         }
         next_chunck = stream_ + chuck_len;
 
-        switch (marker) {
-            case SOF:
-                if (!ParseSOF()) {
-                    FunctionExitLog(g_rocjpeg_logger);
-                    return false;
+        // Frame headers are handled ahead of the switch because they are a range
+        // of marker codes rather than a single one. Matching only SOF0 and SOF2
+        // would leave the other twelve to fall through as unknown segments, and
+        // an unknown segment is skipped: a stream could then pair a valid SOF0
+        // with an SOF1 and carry two frame headers past both checks below.
+        if (IsFrameMarker(marker)) {
+            // Of the frame headers only SOF0 names a coding process this library
+            // decodes. The rest are rejected on the marker alone, whether or not
+            // a frame has already been seen, since none of them describes a
+            // stream the decoder could go on to handle.
+            if (marker != SOF) {
+                if (marker == SOF2) {
+                    ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
+                } else {
+                    std::ostringstream oss;
+                    oss << "Unsupported JPEG: frame header 0xFF" << std::uppercase << std::hex
+                        << static_cast<int>(marker)
+                        << " names a coding process other than baseline sequential DCT!";
+                    ErrorLog(g_rocjpeg_logger, oss.str());
                 }
-                break;
-            case SOF2:
-                ErrorLog(g_rocjpeg_logger, "Progressive JPEG is not supported!");
                 FunctionExitLog(g_rocjpeg_logger);
                 return false;
+            }
+            // ISO/IEC 10918-1 B.2: a baseline image has exactly one frame.
+            // A second frame header is not just redundant - ParseSOF writes
+            // only the components it declares, so a shorter frame behind a
+            // longer one leaves the earlier frame's sampling factors in the
+            // unused slots. GetChromaSubsampling reads components 1 and 2
+            // unconditionally and matches 4:0:0 on their factors being
+            // zero, so a one-component frame behind a three-component one
+            // is classified as a colour subsampling: num_components says 1
+            // while chroma_subsampling says 4:2:0, and the decoder then
+            // allocates and copies out a chroma plane nothing ever wrote.
+            if (sof_marker_found) {
+                ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the stream has more than one frame header!");
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            if (!ParseSOF()) {
+                FunctionExitLog(g_rocjpeg_logger);
+                return false;
+            }
+            sof_marker_found = true;
+            stream_ = next_chunck;
+            continue;
+        }
+
+        switch (marker) {
             case DHT:
                 if (!ParseDHT()) {
                     FunctionExitLog(g_rocjpeg_logger);
@@ -298,6 +336,13 @@ bool RocJpegStreamParser::ParseSOF() {
         return false;
     }
 
+    // A frame with no components has nothing to decode, and leaves every
+    // sampling factor at zero for the divisions further down.
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components == 0) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header declares no components!");
+        return false;
+    }
+
     if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > NUM_COMPONENTS - 1) {
         ErrorLog(g_rocjpeg_logger, "Unsupported JPEG: " +
             ROCJPEG_TOSTR(static_cast<int>(jpeg_stream_parameters_.picture_parameter_buffer.num_components)) +
@@ -328,16 +373,50 @@ bool RocJpegStreamParser::ParseSOF() {
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor = sampling_factor & 0xF;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor = sampling_factor >> 4;
         jpeg_stream_parameters_.picture_parameter_buffer.components[i].quantiser_table_selector = quantiser_table_selector;
+
+        // ISO/IEC 10918-1 B.2.2: H and V are in the range 1 to 4 for every
+        // component of the frame, not just the first one. Checking only
+        // component 0 would let the chroma factors be zero, which
+        // GetChromaSubsampling reads as 4:0:0 and so turns a multi-component
+        // frame header into what looks like a valid grayscale image.
+        const uint8_t h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor;
+        const uint8_t v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+        if (h_factor < 1 || h_factor > 4 || v_factor < 1 || v_factor > 4) {
+            ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor for component " + ROCJPEG_TOSTR(i) +
+                " (H=" + ROCJPEG_TOSTR(static_cast<int>(h_factor)) +
+                ", V=" + ROCJPEG_TOSTR(static_cast<int>(v_factor)) + "); both must be between 1 and 4!");
+            return false;
+        }
+    }
+
+    // ISO/IEC 10918-1 A.2.2: an interleaved MCU holds sum(H_i * V_i) blocks and
+    // that total shall not exceed 10. The per-component range check above is not
+    // enough on its own, because every factor can sit inside 1 to 4 while the
+    // products still add up past the limit: three 4x4 components describe a
+    // 48-block MCU, which GetChromaSubsampling happily classifies as 4:4:4. The
+    // components of a baseline frame are all carried in one interleaved scan, so
+    // the frame is where the limit can be applied.
+    //
+    // Only when the frame has more than one component, though. A.2.2 is the
+    // interleaved case; a single-component scan is non-interleaved and A.2.1
+    // gives it an MCU of exactly one data unit whatever H and V say. Summing the
+    // products there would reject 4x4 grayscale, which is one of the two
+    // layouts GetChromaSubsampling maps to 4:0:0.
+    uint32_t blocks_per_mcu = 0;
+    for (int32_t i = 0; i < jpeg_stream_parameters_.picture_parameter_buffer.num_components; i++) {
+        blocks_per_mcu += jpeg_stream_parameters_.picture_parameter_buffer.components[i].h_sampling_factor *
+                          jpeg_stream_parameters_.picture_parameter_buffer.components[i].v_sampling_factor;
+    }
+    if (jpeg_stream_parameters_.picture_parameter_buffer.num_components > 1 &&
+        blocks_per_mcu > MAX_BLOCKS_PER_MCU) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the frame header describes an MCU of " +
+            ROCJPEG_TOSTR(static_cast<int>(blocks_per_mcu)) + " blocks; at most " +
+            ROCJPEG_TOSTR(static_cast<int>(MAX_BLOCKS_PER_MCU)) + " are allowed!");
+        return false;
     }
 
     uint8_t max_h_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].h_sampling_factor;
     uint8_t max_v_factor = jpeg_stream_parameters_.picture_parameter_buffer.components[0].v_sampling_factor;
-
-    // Validate sampling factors before using them as divisors.
-    if (max_h_factor == 0 || max_v_factor == 0) {
-        ErrorLog(g_rocjpeg_logger, "Invalid SOF sampling factor (zero)!");
-        return false;
-    }
 
     // Compute pixel-count product in 64-bit to detect overflow before it
     // propagates to allocations. Reject images whose raw pixel footprint
@@ -838,6 +917,53 @@ bool RocJpegStreamParser::ParseEOI() {
 
     jpeg_stream_parameters_.slice_parameter_buffer.slice_data_size = stream_temp - stream_;
     jpeg_stream_parameters_.slice_data_buffer = stream_;
+
+    // A scan header with no entropy-coded data behind it describes nothing to
+    // decode. This happens when the buffer ends right after the SOS segment,
+    // when an EOI immediately follows it, and when the only thing between them
+    // is fill or restart markers, and all of those were reported as a
+    // successful parse.
+    //
+    // Deciding that from the byte count alone is not enough, because not every
+    // byte of the scan is coded data. Walk the scan as ISO/IEC 10918-1 B.1.1.2
+    // and B.1.1.3 define it instead: a 0xFF starts either a run of fill bytes
+    // before a marker, a stuffed 0x00 that stands for a real 0xFF of coded
+    // data, or a restart marker that carries no bits of its own. Anything else
+    // is coded data. Counting bytes rather than tokens let a scan of "FF FF D9"
+    // measure one byte, an all-0xFF tail measure its whole length, and a scan
+    // of nothing but RST0 measure two, none of which contain a coded bit.
+    bool has_entropy_data = false;
+    const uint8_t *scan = stream_;
+    while (scan < stream_temp) {
+        if (*scan != 0xFF) {
+            has_entropy_data = true;
+            break;
+        }
+        // Any number of 0xFF fill bytes may precede a marker, so the code is
+        // the first byte after the run.
+        while (scan < stream_temp && *scan == 0xFF) {
+            scan++;
+        }
+        if (scan >= stream_temp) {
+            // A trailing 0xFF run is fill or a truncated marker, never data.
+            break;
+        }
+        const uint8_t marker_code = *scan;
+        if (marker_code == 0x00) {
+            // Byte stuffing: this pair stands for one 0xFF of coded data.
+            has_entropy_data = true;
+            break;
+        }
+        if (marker_code < RST0 || marker_code > RST7) {
+            // Any other marker terminates the scan, so nothing beyond it counts.
+            break;
+        }
+        scan++;
+    }
+    if (!has_entropy_data) {
+        ErrorLog(g_rocjpeg_logger, "Invalid JPEG: the scan contains no entropy-coded data!");
+        return false;
+    }
 
     if (g_rocjpeg_logger.GetLogLevel() >= kRocJpegLogDebug) {
         uint32_t eoi_offset = static_cast<uint32_t>(stream_temp - stream_start_);

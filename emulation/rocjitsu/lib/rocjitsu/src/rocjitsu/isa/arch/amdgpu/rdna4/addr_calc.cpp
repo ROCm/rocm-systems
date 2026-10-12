@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -65,12 +66,19 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!base)
     return std::nullopt;
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  const int64_t immediate = off;
   auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
   *base &= ~align_mask;
   off = (off & ~static_cast<int64_t>(align_mask)) + (*soffset & ~align_mask);
-  if (amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op)) {
+  // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
+  const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
+  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
+    wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
+                                             : "negative combined scalar-memory offset");
+  if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
   }
@@ -95,9 +103,6 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
     }
     saddr_val = *saddr;
   }
-  uint32_t priv_hi = static_cast<uint32_t>(wf.private_aperture_base() >> 32);
-  uint64_t scratch_base = wf.scratch_base();
-  uint32_t lane_stride = wf.scratch_lane_size();
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -110,8 +115,7 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    if (priv_hi != 0 && static_cast<uint32_t>(addr >> 32) == priv_hi)
-      addr = scratch_base + static_cast<uint64_t>(lane) * lane_stride + (addr & 0xFFFFFFFFULL);
+    addr = amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
     d.per_lane_addr[lane] = addr;
   }
 }

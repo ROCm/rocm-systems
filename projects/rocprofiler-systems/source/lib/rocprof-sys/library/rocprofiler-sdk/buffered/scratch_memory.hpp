@@ -78,10 +78,12 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
     metadata_registry.add_queue(record->queue_id.handle);
     metadata_registry.add_stream(stream_id);
 
+    const auto name =
+        SdkBackend::get_buffer_tracing_names().at(record->kind, record->operation);
+
     Externals::get_buffer_storage().store(typename Externals::scratch_memory_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, record->queue_id.handle,
-        static_cast<std::int32_t>(record->kind),
+        record->agent_id.handle, record->queue_id.handle, name,
         static_cast<std::int32_t>(record->operation),
         static_cast<std::int32_t>(record->flags),
         SdkBackend::get_scratch_memory_allocation_size(*record),
@@ -93,9 +95,6 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
         if(const auto sequent_tid =
                Externals::get_thread_info_sequent_tid(record->thread_id))
         {
-            const auto name = SdkBackend::get_buffer_tracing_names().at(
-                SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY, record->operation);
-
             Externals::write_timemory_bundle(
                 name, *sequent_tid, record->end_timestamp - record->start_timestamp);
         }
