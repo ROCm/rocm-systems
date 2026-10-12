@@ -123,6 +123,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A section named on the command line is never emptied. Plain `amd-smi metric` drops a section the version can populate nothing of, which on a metrics v1.3 GPU removes the whole `throttle` section; `amd-smi metric --throttle` prints all 31 rows instead. A named section that is only partly suppressed is still filtered. `--partition` scopes the data rather than naming a section, so `amd-smi metric --partition` protects nothing and filters like plain `amd-smi metric`.
   - A field the version does carry but the ASIC or driver leaves unpopulated still prints `N/A`, a field reporting a real value is never removed, and an unrecognized metrics version or an unreadable header suppresses nothing.
 
+- **`amd-smi static` shows NUMA information on Linux guests**.  
+  - `--numa` was previously limited to Linux baremetal and passthrough guests.
+  - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -162,6 +166,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
+
+- **Fixed `amd-smi static --numa --csv` dropping socket affinity**.  
+  - When NUMA-node CPU affinity was unavailable, as on guests, the CSV row printed `N/A` for the socket columns that human-readable and JSON output showed. It also no longer fails when only the socket affinity is unavailable.
 
 - **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
   - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
