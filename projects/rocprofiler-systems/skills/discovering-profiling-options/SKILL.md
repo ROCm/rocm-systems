@@ -93,8 +93,10 @@ Names found with the commands above are applied through these settings:
   `papi_vector*`). Without the component the run succeeds but writes no counter files. All
   events must come from one namespace — mixing `PAPI_*` presets with `perf::*`
   events only prints a "Failure to add named event" warning and drops the
-  counters, the run still exits 0. Reading most counters needs
-  `/proc/sys/kernel/perf_event_paranoid` <= 2.
+  counters, the run still exits 0.
+  - Host CPU counters read through Linux `perf_event` need `/proc/sys/kernel/perf_event_paranoid` <= 2.
+    That limit does not apply to metrics read from other sources, such as the PAPI `net:::`
+    network events, which read `/proc/net/dev`.
 - **CPU overflow sampling**: sample on a hardware event instead of a timer.
   Set `ROCPROFSYS_USE_SAMPLING=ON`, `ROCPROFSYS_SAMPLING_OVERFLOW=ON`,
   `ROCPROFSYS_SAMPLING_OVERFLOW_EVENT=<event>` (list events with
@@ -102,22 +104,24 @@ Names found with the commands above are applied through these settings:
   `ROCPROFSYS_SAMPLING_OVERFLOW_FREQ` (events per sample, e.g. `10000000`).
   Setting only the event does nothing (it falls back to CPU-time sampling), and
   leaving the interval at its default of 300 events aborted the run when tested.
+  It also needs `perf_event_paranoid` <= 2.
 - **GPU counters** (`-H -c GPU`): names are listed per device, e.g.
   `FETCH_SIZE:device=0`. Set `ROCPROFSYS_ROCM_EVENTS` for kernel-dispatch
   counters (writes `rocprof-device-<N>-<counter>.txt/json`), or
   `ROCPROFSYS_GPU_PERF_COUNTERS` for polled (PMC) sampling. A name without the
   `:device=N` suffix is collected on every device.
-- **GPU metrics** (power, temperature, utilization): collected by default via
-  AMD SMI. `ROCPROFSYS_AMD_SMI_METRICS` selects which (default
-  `busy,temp,power,mem_usage`; `none` collects nothing) and
-  `ROCPROFSYS_USE_AMD_SMI=OFF` disables them entirely.
+- **GPU metrics** (power, temperature, utilization): collected via
+  AMD SMI. `ROCPROFSYS_AMD_SMI_METRICS` selects which metrics to enable.
+  - By default, `busy,temp,power,mem_usage` are enabled.
+  - The value `all` collects everything.
+  - `ROCPROFSYS_USE_AMD_SMI=OFF` disables this backend entirely.
 - **ROCm API tracing**: set `ROCPROFSYS_ROCM_DOMAINS` to a comma-separated list,
-  e.g. `hip_runtime_api,kernel_dispatch,memory_copy`. Copy names exactly from
-  `rocprof-sys-avail -bd -r ROCM_DOMAINS`: one unknown name silently disables
-  the whole list (no warning, exit 0, no kernel dispatches recorded when tested).
-  `kfd_events` also needs `HSA_XNACK=1` and an XNACK-capable GPU; check with
-  `rocminfo | grep -i xnack` (a `xnack-`/`xnack+` suffix on the GPU target means
-  capable). On a GPU without XNACK it records nothing and prints nothing.
+  e.g. `hip_runtime_api,kernel_dispatch,memory_copy`.
+  - Copy names exactly from `rocprof-sys-avail -bd -r ROCM_DOMAINS`: one unknown
+    name will fail produce a failure
+  - `kfd_events` also needs `HSA_XNACK=1` and an XNACK-capable GPU; check with
+    `rocminfo | grep -i xnack` (a `xnack-`/`xnack+` suffix on the GPU target means
+    capable). On a GPU without XNACK it records nothing and prints nothing.
 
 ## Common Mistakes
 
