@@ -59,10 +59,6 @@ if(NOT WIN32)
   else()
     set(ROCDECODE_SAMPLE_COMPILE_OPTIONS -O3 -DNDEBUG -fPIC)
   endif()
-else()
-  # MSVC supplies optimization and NDEBUG per configuration; these are the
-  # defines the sample sources need.
-  set(ROCDECODE_SAMPLE_COMPILE_OPTIONS /DNOMINMAX /D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Set supported GPU Targets
@@ -127,6 +123,9 @@ if(HIP_FOUND AND FFMPEG_FOUND AND rocdecode_FOUND AND (WIN32 OR rocprofiler-regi
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodemem.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
     target_compile_options(${PROJECT_NAME} PRIVATE ${ROCDECODE_SAMPLE_COMPILE_OPTIONS})
+    if(WIN32)
+      target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    endif()
     # On TheRock installs libva is vendored under lib/rocm_sysdeps, but FFmpeg still
     # links the system libva, so both load at runtime. librocdecode already depends
     # on the vendored libva, so force librocdecode to be the FIRST direct dependency

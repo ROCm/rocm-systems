@@ -702,6 +702,9 @@ public:
   /// @retval false Slot is active (running, waiting, or at a barrier).
   bool is_halted() const { return state_ == WfState::HALTED; }
 
+  /// @brief Warn about qualified ISA undefined behavior on the issuing thread.
+  void report_undefined_behavior(std::string_view reason) const;
+
   /// @brief Record a fail-closed instruction execution error.
   /// @details Execution callbacks use this for inputs whose architectural
   /// behavior is not implemented. Callers must not treat it as a hardware trap.
