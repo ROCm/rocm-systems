@@ -2938,6 +2938,9 @@ class AMDSMIHelpers:
         collected_json_rows = []
         entries = {}
         cper_data = []
+        gpu_cper_unavailable = False
+        gpu_cper_error_code = None
+
         while True:
             try:
                 entries, new_cursor, cper_data, _status_code = (
@@ -2958,11 +2961,11 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-                        logger.format,
-                        e.get_error_code(),
-                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
-                    ) from e
+                    # GPU CPER unavailable; try fabric before raising
+                    gpu_cper_unavailable = True
+                    gpu_cper_error_code = e.get_error_code()
+                    logging.debug(f"GPU CPER unavailable: {e}")
+                    break
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
@@ -3028,18 +3031,20 @@ class AMDSMIHelpers:
                 if (
                     e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_OUT_OF_RESOURCES
-                    or e.get_error_code()
-                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE
                 ):
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
                         e.get_error_code(),
-                        detail="Buffer too small for fabric CPER entries",
+                        detail="Fabric CPER entries exceed internal buffer capacity",
                     ) from e
                 logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
                 break
 
-            fabric_cursors[gpu_idx] = new_fabric_cursor
+            # Only update cursor if we got entries or if the library advanced it (non-zero).
+            # When cursor returns 0 with no entries, it means "end of current data" —
+            # preserve the last valid cursor so --follow doesn't restart from 0.
+            if len(fabric_entries) > 0 or new_fabric_cursor != 0:
+                fabric_cursors[gpu_idx] = new_fabric_cursor
 
             # Emit output if we have entries
             if len(fabric_entries) > 0:
@@ -3054,9 +3059,17 @@ class AMDSMIHelpers:
                     cper_counter,
                 )
 
-            # Stop pagination when cursor is 0 (no more data) or no entries returned
-            if new_fabric_cursor == 0 or (len(fabric_entries) == 0 and not fabric_has_more):
+            # Stop pagination when we got no entries and the library signals no more data
+            if len(fabric_entries) == 0 and not fabric_has_more:
                 break
+
+        # If both GPU and fabric CPER are unavailable, raise now
+        if gpu_cper_unavailable and num_entries == 0:
+            raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                logger.format,
+                gpu_cper_error_code,
+                detail="Error accessing CPER files. This command requires CPER to be enabled.",
+            )
 
         if num_entries == 0 and not args.follow:
             # If nothing was found, still emit the warning/header logic.

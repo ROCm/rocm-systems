@@ -3671,17 +3671,18 @@ def amdsmi_get_fabric_cper_entries(
             }
         )
 
-        year = entry_ptr.contents.timestamp.year
-        if year < 100:
-            year += 2000
+        # Decode BCD timestamp (UEFI CPER spec uses BCD encoding)
+        bcd = lambda v: ((v >> 4) * 10) + (v & 0x0F)
+        ts = entry_ptr.contents.timestamp
+        year = bcd(ts.century) * 100 + bcd(ts.year)
 
         formatted_timestamp = (
             f"{year:04d}/"
-            f"{entry_ptr.contents.timestamp.month:02d}/"
-            f"{entry_ptr.contents.timestamp.day:02d} "
-            f"{entry_ptr.contents.timestamp.hours:02d}:"
-            f"{entry_ptr.contents.timestamp.minutes:02d}:"
-            f"{entry_ptr.contents.timestamp.seconds:02d}"
+            f"{bcd(ts.month):02d}/"
+            f"{bcd(ts.day):02d} "
+            f"{bcd(ts.hours):02d}:"
+            f"{bcd(ts.minutes):02d}:"
+            f"{bcd(ts.seconds):02d}"
         )
 
         cper_entry = {
