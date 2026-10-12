@@ -153,6 +153,10 @@ struct rocshmem_gin_qp_set {
   std::vector<struct ibv_qp*> ibv_qps;
   std::vector<struct ibv_cq*> ibv_cqs;
 
+  // Per-peer negotiated MTU; BNXT's GPU SQ needs it for PSN/packet-count math (see
+  // initialize_host_gpu_qp). Set in gin_modify_qps_init_to_rtr.
+  std::vector<enum ibv_mtu> negotiated_mtu;
+
   // QueuePair objects
   QueuePair* host_qps = nullptr;
   QueuePair* gpu_qps = nullptr;
@@ -913,10 +917,13 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
     return -1;
   }
 
+  set->negotiated_mtu.resize(set->nRanks);
+
   for (int i = 0; i < set->nRanks; i++) {
     if (ginNegotiatePathMtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
       return -1;
     }
+    set->negotiated_mtu[i] = attr.path_mtu;
 
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
@@ -1097,7 +1104,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       void*    msntbl      = bnxt_qps[idx].msntbl;
       uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
-      uint32_t mtu         = 128 << nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
+      // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
+      uint32_t mtu         = 128 << negotiated_mtu[idx]; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
 
       void*    cq_buf   = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;
