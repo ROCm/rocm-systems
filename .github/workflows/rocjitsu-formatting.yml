@@ -36,7 +36,8 @@ jobs:
           fetch-depth: 0
           # Sparse checkout controls which files are on disk, and therefore
           # which files pre-commit can check. The helper's full scan includes
-          # every tracked emulation file present in this checkout.
+          # tracked files in checked-out emulation component directories;
+          # unchanged direct emulation/ files are outside the trigger scope.
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu

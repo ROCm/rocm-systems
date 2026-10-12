@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run pre-commit on PR changes or all checked-out emulation files."""
+"""Run pre-commit on PR changes or all checked-out emulation component files."""
 
 import os
 from pathlib import Path
@@ -26,7 +26,11 @@ def select_files(base_sha: str, head_sha: str) -> list[str]:
     )
     files = {os.fsdecode(path) for path in changed.split(b"\0") if path}
     if files & FORMATTING_POLICY_FILES:
-        tracked = subprocess.check_output(["git", "ls-files", "-z", "--", "emulation/"])
+        # Scan component directories, excluding direct emulation/ files that
+        # cone-mode checkout materializes but that do not trigger the workflow.
+        tracked = subprocess.check_output(
+            ["git", "ls-files", "-z", "--", ":(glob)emulation/*/**"]
+        )
         files.update(os.fsdecode(path) for path in tracked.split(b"\0") if path)
 
     # Sparse checkout determines which tracked components are available to check.

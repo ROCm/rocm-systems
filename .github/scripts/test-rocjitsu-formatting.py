@@ -13,13 +13,18 @@ import sys
 import tempfile
 import unittest
 
-HELPER = Path(__file__).resolve().with_name("rocjitsu_formatting.py")
+HELPER_SCRIPT = Path(__file__).resolve().with_name("rocjitsu_formatting.py")
 CONFIG_PATH = ".pre-commit-config.yaml"
 WORKFLOW_PATH = ".github/workflows/rocjitsu-formatting.yml"
-HELPER_PATH = ".github/scripts/rocjitsu_formatting.py"
+HELPER_FIXTURE_PATH = ".github/scripts/rocjitsu_formatting.py"
 MIRAGE_FILE = "emulation/mirage/core/src/metric.rs"
 ROCJITSU_FILE = "emulation/rocjitsu/tests/example.cpp"
 THIRD_COMPONENT_FILE = "emulation/third-component/source.py"
+PARENT_FILES = (
+    "emulation/README.md",
+    "emulation/Dockerfile",
+    "emulation/.dockerignore",
+)
 
 
 class FormattingSelectionTest(unittest.TestCase):
@@ -38,7 +43,7 @@ class FormattingSelectionTest(unittest.TestCase):
         self.git("config", "commit.gpgsign", "false")
         self.write(CONFIG_PATH, "repos: []\n")
         self.write(WORKFLOW_PATH, "name: formatting\n")
-        self.write(HELPER_PATH, "# Formatting selector fixture.\n")
+        self.write(HELPER_FIXTURE_PATH, "# Formatting selector fixture.\n")
         self.write(MIRAGE_FILE, "//! Metrics module.\n")
         self.write(ROCJITSU_FILE, "// Test fixture.\n")
         self.write(".github/scripts/unrelated.py", "pass\n")
@@ -85,7 +90,7 @@ class FormattingSelectionTest(unittest.TestCase):
         }
         # Disable site-packages to verify that the helper needs only the stdlib.
         return subprocess.run(
-            [sys.executable, "-S", str(HELPER)],
+            [sys.executable, "-S", str(HELPER_SCRIPT)],
             cwd=self.repo,
             env=environment,
             capture_output=True,
@@ -104,7 +109,7 @@ class FormattingSelectionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.selected_files(), [MIRAGE_FILE])
 
-    def test_hook_config_change_checks_both_complete_subtrees(self):
+    def test_hook_config_change_checks_checked_out_emulation_files(self):
         self.write(CONFIG_PATH, "repos: []\n# Update a hook version.\n")
         self.commit()
         result = self.run_helper()
@@ -113,7 +118,7 @@ class FormattingSelectionTest(unittest.TestCase):
             self.selected_files(), [CONFIG_PATH, MIRAGE_FILE, ROCJITSU_FILE]
         )
 
-    def test_workflow_change_checks_both_complete_subtrees(self):
+    def test_workflow_change_checks_checked_out_emulation_files(self):
         self.write(WORKFLOW_PATH, "name: updated-formatting\n")
         self.commit()
         result = self.run_helper()
@@ -131,13 +136,13 @@ class FormattingSelectionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(self.selected_files(), [CONFIG_PATH, MIRAGE_FILE])
 
-    def test_helper_change_checks_complete_subtrees(self):
-        self.write(HELPER_PATH, "# Updated formatting selector fixture.\n")
+    def test_helper_change_checks_checked_out_emulation_files(self):
+        self.write(HELPER_FIXTURE_PATH, "# Updated formatting selector fixture.\n")
         self.commit()
         result = self.run_helper()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
-            self.selected_files(), [HELPER_PATH, MIRAGE_FILE, ROCJITSU_FILE]
+            self.selected_files(), [HELPER_FIXTURE_PATH, MIRAGE_FILE, ROCJITSU_FILE]
         )
 
     def test_full_scan_includes_unchanged_third_component(self):
@@ -152,8 +157,10 @@ class FormattingSelectionTest(unittest.TestCase):
             [CONFIG_PATH, MIRAGE_FILE, ROCJITSU_FILE, THIRD_COMPONENT_FILE],
         )
 
-    def test_full_scan_excludes_components_outside_sparse_checkout(self):
+    def test_sparse_full_scan_excludes_parent_files_and_missing_components(self):
         self.write(THIRD_COMPONENT_FILE, "# Third component fixture.\n")
+        for path in PARENT_FILES:
+            self.write(path, "# Parent file fixture.\n")
         self.base = self.commit()
         self.write(CONFIG_PATH, "repos: []\n# Update formatting.\n")
         self.commit()
@@ -166,10 +173,25 @@ class FormattingSelectionTest(unittest.TestCase):
             ".github",
         )
         self.assertFalse((self.repo / THIRD_COMPONENT_FILE).exists())
+        for path in PARENT_FILES:
+            self.assertTrue((self.repo / path).is_file(), path)
         result = self.run_helper()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertCountEqual(
             self.selected_files(), [CONFIG_PATH, MIRAGE_FILE, ROCJITSU_FILE]
+        )
+
+    def test_full_scan_preserves_explicitly_changed_parent_file(self):
+        parent = PARENT_FILES[0]
+        self.write(parent, "# Parent file fixture.\n")
+        self.base = self.commit()
+        self.write(parent, "# Updated parent file fixture.\n")
+        self.write(CONFIG_PATH, "repos: []\n# Update formatting.\n")
+        self.commit()
+        result = self.run_helper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertCountEqual(
+            self.selected_files(), [CONFIG_PATH, MIRAGE_FILE, ROCJITSU_FILE, parent]
         )
 
     def test_full_scan_deduplicates_changed_source_files(self):
@@ -189,7 +211,7 @@ class FormattingSelectionTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.record.exists())
 
-    def test_sparse_checkout_can_leave_no_files_to_check(self):
+    def test_on_disk_filter_can_leave_no_files_to_check(self):
         self.write(MIRAGE_FILE, "//! Updated metrics module.\n")
         self.commit()
         (self.repo / MIRAGE_FILE).unlink()
