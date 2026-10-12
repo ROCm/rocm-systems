@@ -57,6 +57,8 @@ constexpr char kLLNeedle[]    = "DDA fabric ReduceScatter LL:";
 constexpr char kLL128Needle[] = "DDA fabric ReduceScatter LL128:";
 
 constexpr int      kCallsPerShape = 3;
+constexpr size_t   kLLShapes      = 3;      // llShapes() under the default gfx1250 thresholds at up to 16 ranks
+constexpr size_t   kLL128Shapes   = 4;      // ll128Shapes() under the default gfx1250 thresholds at up to 87 ranks
 constexpr size_t   kGuardElems    = 64;     // past recvcount; a store beyond the shard lands here
 constexpr size_t   kAlignElems    = 64;     // 256 B between per-call buffers in one arena
 constexpr uint32_t kPoisonBits    = ~0u;    // NaN; an unwritten output never compares equal
@@ -137,6 +139,10 @@ std::vector<size_t> ll128Shapes(const ncclComm* comm, int nRanks)
     const size_t capBytes = std::min(dda::common::kDdaLL128RsMaxBytes,
                                      rcclDdaLL128Threshold(comm, ncclFuncReduceScatter) / nRanks);
     const size_t maxWords = capBytes / 8;
+    if(maxWords == 0)
+    {
+        return {};
+    }
     std::vector<size_t> words;
     // 1: a lone partial line. 77: five lines plus two words. 3007: 201 lines, four blocks of 64 line groups.
     for(size_t w : {size_t{1}, size_t{77}, size_t{3007}})
@@ -206,7 +212,7 @@ protected:
     using StepBuilder = std::function<std::vector<Step>(const ncclComm*, int)>;
 
     // Must be the last statement of the test body: the coordinated skips and asserts return from here.
-    void runSteps(const char* testId, bool needsLL128, const StepBuilder& buildSteps,
+    void runSteps(const char* testId, bool needsLL128, const StepBuilder& buildSteps, size_t expectedSteps,
                   const char* maxBlocks = nullptr, bool syncOnTierSwitch = false)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
@@ -214,11 +220,7 @@ protected:
             GTEST_SKIP() << "Need at least 2 MPI ranks";
         }
 
-        const std::string archSkip = archSkipReason("DDA fabric ReduceScatter LL/LL128 requires gfx1250");
-        if(!archSkip.empty())
-        {
-            GTEST_SKIP() << archSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric ReduceScatter LL/LL128 requires gfx1250"));
 
         // Fabric init reads RCCL_DDA_FABRIC_MAXBLOCKS with getenv on every comm, so the override is per test.
         std::unique_ptr<MPIHelpers::MpiEnvGuard> maxBlocksGuard;
@@ -229,15 +231,7 @@ protected:
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        const std::string fabricSkip = fabricInitSkipReason();
-        if(!fabricSkip.empty())
-        {
-            if(DdaFabricMPI::fabricInitRequired())
-            {
-                FAIL() << fabricSkip << " (" << DdaFabricMPI::kRequireFabricEnvVar << "=1)";
-            }
-            GTEST_SKIP() << fabricSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
 
         ncclComm_t comm = getActiveCommunicator();
         // These switch every DDA LL tier off for the process, so there is no LL path to assert.
@@ -263,7 +257,13 @@ protected:
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(comm, &nRanks));
 
         const std::vector<Step> steps = buildSteps(comm, nRanks);
-        ASSERT_MPI_TRUE(!steps.empty());
+        // A lowered threshold silently drops the grid-striding shapes, so the full shape set is required.
+        if(steps.size() != expectedSteps)
+        {
+            ADD_FAILURE() << "Rank " << rank << ": " << testId << " built " << steps.size() << " calls, expected "
+                          << expectedSteps << "; DDA ReduceScatter thresholds differ from the gfx1250 defaults";
+        }
+        ASSERT_MPI_EQ(expectedSteps, steps.size());
 
         std::vector<size_t> sendOffset(steps.size()), recvOffset(steps.size());
         size_t              sendElems = 0, recvElems = 0;
@@ -339,8 +339,8 @@ protected:
             if(syncOnTierSwitch && s > 0 && steps[s].tier != steps[s - 1].tier)
             {
                 // LL and LL128 banks alias in the scratch, so a rank must not switch protocol while a peer still polls.
-                const bool switchDrained = DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout);
-                DdaFabricMPI::abortJobUnlessAllRanksDrained(switchDrained, testId);
+                DdaFabricMPI::abortJobUnlessAllRanksDrained(
+                    DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout), testId);
                 MPI_Barrier(MPI_COMM_WORLD);
             }
             if(launchRes != ncclSuccess)
@@ -355,8 +355,8 @@ protected:
             }
         }
 
-        const bool drained = DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout);
-        DdaFabricMPI::abortJobUnlessAllRanksDrained(drained, testId);
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(getActiveStream(), kDrainTimeout),
+                                                    testId);
         if(launchRes != ncclSuccess)
         {
             ADD_FAILURE() << "Rank " << rank << ": ncclReduceScatter call " << launchFail
@@ -436,7 +436,8 @@ protected:
 TEST_F(DdaMPI_ReduceScatter, LLTierBackToBackShapes)
 {
     runSteps("DdaMPI_ReduceScatter/LLTierBackToBackShapes", /*needsLL128=*/false,
-             [](const ncclComm* comm, int nRanks) { return repeatEachShape(Tier::kLL, llShapes(comm, nRanks)); });
+             [](const ncclComm* comm, int nRanks) { return repeatEachShape(Tier::kLL, llShapes(comm, nRanks)); },
+             kLLShapes * kCallsPerShape);
 }
 
 // Shards of an odd number of 8 B words: one partial line, several lines with a partial last one, many blocks.
@@ -445,24 +446,29 @@ TEST_F(DdaMPI_ReduceScatter, LL128TierBackToBackShapes)
     runSteps("DdaMPI_ReduceScatter/LL128TierBackToBackShapes", /*needsLL128=*/true,
              [](const ncclComm* comm, int nRanks) {
                  return repeatEachShape(Tier::kLL128, ll128Shapes(comm, nRanks));
-             });
+             },
+             kLL128Shapes * kCallsPerShape);
 }
 
 // Same-tier calls stay back to back; each tier switch drains and barriers because LL and LL128 banks overlap.
 TEST_F(DdaMPI_ReduceScatter, LLAndLL128Interleaved)
 {
     runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
-             /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
-    // BUG: an unsynchronised LL<->LL128 switch hangs or sums stale slots (2 blocks, np 3 and 8); pass false when fixed.
-    // runSteps("DdaMPI_ReduceScatter/LLAndLL128Interleaved", /*needsLL128=*/true, interleavedSteps,
-    //          /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/false);
+             2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/nullptr, /*syncOnTierSwitch=*/true);
+}
+
+// BUG: unsynced LL<->LL128 switches hang (job aborts) or sum stale slots at 2 blocks, np 3 and 8. Enable when fixed.
+TEST_F(DdaMPI_ReduceScatter, DISABLED_LLAndLL128InterleavedUnsynchronised)
+{
+    runSteps("DdaMPI_ReduceScatter/LLAndLL128InterleavedUnsynchronised", /*needsLL128=*/true, interleavedSteps,
+             2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/false);
 }
 
 // The default block cap fits every LL128 shard in one pass; two blocks make both kernels grid-stride.
 TEST_F(DdaMPI_ReduceScatter, GridStrideWithTwoBlocks)
 {
     runSteps("DdaMPI_ReduceScatter/GridStrideWithTwoBlocks", /*needsLL128=*/true, interleavedSteps,
-             /*maxBlocks=*/"2", /*syncOnTierSwitch=*/true);
+             2 * (kLLShapes + kLL128Shapes), /*maxBlocks=*/"2", /*syncOnTierSwitch=*/true);
 }
 
 #endif // MPI_TESTS_ENABLED

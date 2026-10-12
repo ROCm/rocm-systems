@@ -33,7 +33,7 @@
 namespace DdaFabricMPI
 {
 
-// Opt-in CI strictness: when set to 1, a gfx1250 comm whose fabric DDA did not initialize fails instead of skipping.
+// Opt-in CI strictness: when set to 1, a non-gfx1250 device or an uninitialized fabric DDA fails instead of skipping.
 constexpr const char* kRequireFabricEnvVar = "UT_DDA_FABRIC_REQUIRE_INIT";
 
 // Every rank must call this; a rank-local env difference still yields one FAIL-or-SKIP decision for the job.
@@ -80,40 +80,66 @@ inline bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx,
 }
 
 // Polls so that a kernel spinning on a peer flag that never arrives is reported instead of hanging.
-inline bool waitStreamBounded(hipStream_t stream, std::chrono::milliseconds timeout)
+// Returns hipSuccess, the stream's error, or hipErrorNotReady when the timeout expires.
+inline hipError_t waitStreamBounded(hipStream_t stream, std::chrono::milliseconds timeout)
 {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while(true)
     {
         const hipError_t query = hipStreamQuery(stream);
-        if(query != hipErrorNotReady)
+        if(query != hipErrorNotReady || std::chrono::steady_clock::now() >= deadline)
         {
-            return query == hipSuccess;
-        }
-        if(std::chrono::steady_clock::now() >= deadline)
-        {
-            return false;
+            return query;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
-// Every rank must call this. A kernel still spinning cannot be torn down, so a timeout anywhere aborts the job.
-inline void abortJobUnlessAllRanksDrained(bool drained, const char* what)
+// Every rank must call this. A spinning kernel or a sticky HIP error cannot be recovered, so either aborts the job.
+inline void abortJobUnlessAllRanksDrained(hipError_t status, const char* what)
 {
-    int flag = drained ? 1 : 0;
+    int flag = status == hipSuccess ? 1 : 0;
     MPI_Allreduce(MPI_IN_PLACE, &flag, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
     if(flag == 1)
     {
         return;
     }
-    std::fprintf(stderr, "[rank %d] FATAL: %s did not complete on %s; aborting the MPI job\n",
-                 getTestMpiRank(), what, drained ? "another rank" : "this rank");
+    if(status == hipSuccess)
+    {
+        std::fprintf(stderr, "[rank %d] FATAL: %s failed on another rank; aborting the MPI job\n", getTestMpiRank(),
+                     what);
+    }
+    else if(status == hipErrorNotReady)
+    {
+        std::fprintf(stderr, "[rank %d] FATAL: %s did not complete before the timeout; aborting the MPI job\n",
+                     getTestMpiRank(), what);
+    }
+    else
+    {
+        std::fprintf(stderr, "[rank %d] FATAL: %s stream error %s; aborting the MPI job\n", getTestMpiRank(), what,
+                     hipGetErrorString(status));
+    }
     std::fflush(stderr);
     MPI_Abort(MPI_COMM_WORLD, 1);
 }
 
 } // namespace DdaFabricMPI
+
+// Coordinated skip, escalated to FAIL on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1. Expand in the test body
+// or in a helper whose call ends the body; every rank must reach it with the same (coordinated) reason.
+#define DDA_FABRIC_SKIP_OR_FAIL(reasonExpr)                                                                 \
+    do                                                                                                      \
+    {                                                                                                       \
+        const std::string ddaFabricReason = (reasonExpr);                                                  \
+        if(!ddaFabricReason.empty())                                                                        \
+        {                                                                                                   \
+            if(DdaFabricMPI::fabricInitRequired())                                                          \
+            {                                                                                               \
+                FAIL() << ddaFabricReason << " (" << DdaFabricMPI::kRequireFabricEnvVar << "=1)";          \
+            }                                                                                               \
+            GTEST_SKIP() << ddaFabricReason;                                                                \
+        }                                                                                                   \
+    } while(0)
 
 /**
  * @class DdaFabricMPITest

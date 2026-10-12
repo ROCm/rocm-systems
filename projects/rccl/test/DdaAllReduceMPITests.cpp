@@ -188,23 +188,11 @@ protected:
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        const std::string archSkip = archSkipReason("DDA fabric LL requires gfx1250");
-        if(!archSkip.empty())
-        {
-            GTEST_SKIP() << archSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
 
-        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        const std::string fabricSkip = fabricInitSkipReason();
-        if(!fabricSkip.empty())
-        {
-            if(DdaFabricMPI::fabricInitRequired())
-            {
-                FAIL() << fabricSkip << " (" << DdaFabricMPI::kRequireFabricEnvVar << "=1)";
-            }
-            GTEST_SKIP() << fabricSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
