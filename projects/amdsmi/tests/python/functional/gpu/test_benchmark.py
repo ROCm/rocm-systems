@@ -229,9 +229,13 @@ class TestGpuBenchmark(unittest.TestCase):
         # active mode does not cancel it, so the set benchmarks time only the active mode.
         try:
             active = amdsmi.amdsmi_get_gpu_memory_partition(processor)
-        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            self.common.print(f"  Memory partition unreadable ({e}); set not timed")
             return []
-        return [t for t in common.MEMORY_PARTITION_TYPES if t[0] == active]
+        matched = [t for t in common.MEMORY_PARTITION_TYPES if t[0] == active]
+        if not matched:
+            self.common.print(f"  Memory partition {active!r} is not settable; set not timed")
+        return matched
 
     def test_performance_clean_gpu_local_data(self):
         self.common.print_func_name("")

@@ -88,7 +88,8 @@ class TestSet(TestCliBase):
                 )
 
             # set --memory-partition defaults
-            # Safe to write back: the mode only takes effect after a driver reload.
+            # A request for the active mode, which the sweep also limits itself to:
+            # it cannot cancel another mode already staged for the next reload.
             memory_partition = self.partition_data["current_partition"][index]["memory"]
             if memory_partition != "N/A":
                 cmds.append(
