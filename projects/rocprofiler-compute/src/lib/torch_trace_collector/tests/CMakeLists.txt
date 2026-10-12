@@ -44,7 +44,13 @@ foreach(_lib IN ITEMS torch torch_cpu c10)
 endforeach()
 
 set(target test-torch-trace-collector)
-add_executable(${target} test_torch_trace_collector.cpp roctx_range_intercept.cpp)
+add_executable(
+    ${target}
+    test_torch_trace_collector.cpp
+    test_torch_trace_collector.h
+    roctx_range_intercept.cpp
+    roctx_range_intercept.h
+)
 target_link_libraries(
     ${target}
     PRIVATE

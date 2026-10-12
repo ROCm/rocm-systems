@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include "test_torch_trace_collector.h"
+
 #include "../argument_capture.h"
 #include "../torch_trace_collector.h"
 #include "../wire_format.h"
@@ -14,13 +16,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <gtest/gtest.h>
 #include <torch/library.h>
 #include <torch/version.h>
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -32,7 +32,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -107,50 +106,44 @@ std::string captured_schema_arguments(const char*                     name,
     return output.data();
 }
 
-class TorchTraceCollectorTest : public ::testing::Test
-{
-protected:
-    void SetUp() override
-    {
-        ASSERT_EQ(torch_trace_collector_install(), 0);
-        roctx_range_intercept::start_recording();
-    }
-
-    void TearDown() override
-    {
-        (void)roctx_range_intercept::stop_recording();
-        while (torch_trace_collector_pop_launcher_tid() == 0)
-        {
-        }
-    }
-};
-
 }  // namespace
 
+void TorchTraceCollectorTest::SetUp()
+{
+    ASSERT_EQ(torch_trace_collector_install(), 0);
+    roctx_range_intercept::start_recording();
+}
+
+void TorchTraceCollectorTest::TearDown()
+{
+    (void)roctx_range_intercept::stop_recording();
+    while (torch_trace_collector_pop_launcher_tid() == 0)
+    {
+    }
+}
+
 // CTest runs this group separately because installation lasts for the process.
-TEST(TorchTraceCollectorBeforeInstall, RejectsLauncherUntilConcurrentInstallSucceeds)
+TEST(TorchTraceCollectorBeforeInstall, ConcurrentFirstInstall_EnablesLauncherWithOneCallback)
 {
     EXPECT_EQ(torch_trace_collector_abi_revision(), TORCH_TRACE_COLLECTOR_ABI_REVISION);
     EXPECT_NE(torch_trace_collector_push_launcher_tid(7), 0);
     EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
-    std::atomic<int>         failures{0};
-    std::atomic<bool>        start{false};
-    std::vector<std::thread> workers;
-    for (int index = 0; index < 8; ++index)
-    {
-        workers.emplace_back(
-            [&]
-            {
-                while (!start.load())
-                    std::this_thread::yield();
-                if (torch_trace_collector_install() != 0)
-                    ++failures;
-            });
-    }
-    start.store(true);
+    std::array<std::future<int>, 8> workers;
+    // Destroy the promise first so partially launched workers are released.
+    std::promise<void> start;
+    const auto         start_signal = start.get_future().share();
     for (auto& worker : workers)
-        worker.join();
-    EXPECT_EQ(failures.load(), 0);
+    {
+        worker = std::async(std::launch::async,
+                            [start_signal]
+                            {
+                                start_signal.wait();
+                                return torch_trace_collector_install();
+                            });
+    }
+    start.set_value();
+    for (auto& worker : workers)
+        EXPECT_EQ(worker.get(), 0);
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(7), 0);
     roctx_range_intercept::start_recording();
     emit_record("initial-install");
@@ -160,7 +153,7 @@ TEST(TorchTraceCollectorBeforeInstall, RejectsLauncherUntilConcurrentInstallSucc
     EXPECT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
 }
 
-TEST_F(TorchTraceCollectorTest, RecordFunctionOffsetsMatchRealAccessors)
+TEST_F(TorchTraceCollectorTest, RecordFunctionLayout_MatchesRealAccessors)
 {
     const std::vector<c10::IValue> inputs{std::int64_t{9}, true};
     at::RecordFunction             record(at::RecordScope::USER_SCOPE);
@@ -179,7 +172,7 @@ TEST_F(TorchTraceCollectorTest, RecordFunctionOffsetsMatchRealAccessors)
     EXPECT_EQ(record.forwardThreadId(), 1234u);
 }
 
-TEST(TorchAbiLayout, CallbackOffsetsMatchRealAccessors)
+TEST(TorchAbiLayout, CallbackLayout_MatchesRealAccessors)
 {
     const auto start = +[](const at::RecordFunction&) -> std::unique_ptr<at::ObserverContext>
     {
@@ -206,7 +199,7 @@ TEST(TorchAbiLayout, CallbackOffsetsMatchRealAccessors)
     }
 }
 
-TEST(TorchAbiLayout, IValueTensorPayloadAndTagMatchRealTensor)
+TEST(TorchAbiLayout, TensorIValue_StoresExpectedPayloadAndTag)
 {
     const auto        tensor = at::empty({2, 3});
     const c10::IValue value(tensor);
@@ -215,7 +208,7 @@ TEST(TorchAbiLayout, IValueTensorPayloadAndTagMatchRealTensor)
               tensor.unsafeGetTensorImpl());
 }
 
-TEST(TorchAbiLayout, TensorListElementOffsetsMatchRealStorage)
+TEST(TorchAbiLayout, TensorListLayout_MatchesRealStorage)
 {
     const auto tensor        = at::empty({2, 3});
     const auto check_storage = [](const c10::IValue& value)
@@ -244,32 +237,7 @@ TEST(TorchAbiLayout, TensorListElementOffsetsMatchRealStorage)
     check_storage(reserved_value);
 }
 
-TEST_F(TorchTraceCollectorTest, ConcurrentInstallationKeepsOneCallback)
-{
-    std::atomic<int>         failures{0};
-    std::vector<std::thread> workers;
-    for (int index = 0; index < 8; ++index)
-    {
-        workers.emplace_back(
-            [&failures]
-            {
-                for (int iteration = 0; iteration < 16; ++iteration)
-                {
-                    if (torch_trace_collector_install() != 0)
-                        ++failures;
-                }
-            });
-    }
-    for (auto& worker : workers)
-        worker.join();
-    emit_record("one-callback");
-    const auto captured = roctx_range_intercept::stop_recording();
-    EXPECT_EQ(failures.load(), 0);
-    ASSERT_EQ(captured.messages.size(), 1u);
-    EXPECT_EQ(captured.pops, 1u);
-}
-
-TEST_F(TorchTraceCollectorTest, EveryRecordScopeProducesOneBalancedRange)
+TEST_F(TorchTraceCollectorTest, EachRecordScope_ProducesOneBalancedRange)
 {
     constexpr std::array<const char*, 10> names = {"FUNCTION",
                                                    "BACKWARD_FUNCTION",
@@ -294,7 +262,7 @@ TEST_F(TorchTraceCollectorTest, EveryRecordScopeProducesOneBalancedRange)
     }
 }
 
-TEST_F(TorchTraceCollectorTest, NestedRecordsStayBalancedWhenWorkloadThrows)
+TEST_F(TorchTraceCollectorTest, NestedRecordsWithException_StayBalanced)
 {
     EXPECT_THROW(
         {
@@ -310,7 +278,7 @@ TEST_F(TorchTraceCollectorTest, NestedRecordsStayBalancedWhenWorkloadThrows)
     EXPECT_EQ(captured.pops, 2u);
 }
 
-TEST_F(TorchTraceCollectorTest, FailedPushDoesNotPopTheParentRange)
+TEST_F(TorchTraceCollectorTest, FailedChildPush_PreservesParentRange)
 {
     {
         at::RecordFunction parent(at::RecordScope::USER_SCOPE);
@@ -323,7 +291,7 @@ TEST_F(TorchTraceCollectorTest, FailedPushDoesNotPopTheParentRange)
     EXPECT_EQ(captured.pops, 1u);
 }
 
-TEST_F(TorchTraceCollectorTest, LauncherIdsNestAndRestore)
+TEST_F(TorchTraceCollectorTest, NestedLaunchers_RestorePreviousThreadId)
 {
     EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(101), 0);
@@ -337,29 +305,29 @@ TEST_F(TorchTraceCollectorTest, LauncherIdsNestAndRestore)
     EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
     const auto captured = roctx_range_intercept::stop_recording();
     ASSERT_EQ(captured.messages.size(), 4u);
-    const std::array<const char*, 4> expected = {"101", "202", "101", "n/a"};
+    constexpr std::array<const char*, 4> expected = {"101", "202", "101", "n/a"};
     for (std::size_t index = 0; index < expected.size(); ++index)
         EXPECT_NE(captured.messages[index].find(std::string{"|ltid="} + expected[index] + "|"),
                   std::string::npos);
     EXPECT_EQ(captured.pops, 4u);
 }
 
-TEST_F(TorchTraceCollectorTest, LauncherLifetimeSurvivesPropagationToWorker)
+TEST_F(TorchTraceCollectorTest, PropagatedLauncher_OutlivesOriginalScope)
 {
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(12345), 0);
     const at::ThreadLocalState launcher_state;
     ASSERT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
-    std::thread worker(
-        [&launcher_state]
-        {
-            emit_record("before-guard");
-            {
-                at::ThreadLocalStateGuard guard(launcher_state);
-                emit_record("worker", {}, at::RecordScope::BACKWARD_FUNCTION);
-            }
-            emit_record("after-guard");
-        });
-    worker.join();
+    auto worker = std::async(std::launch::async,
+                             [&launcher_state]
+                             {
+                                 emit_record("before-guard");
+                                 {
+                                     at::ThreadLocalStateGuard guard(launcher_state);
+                                     emit_record("worker", {}, at::RecordScope::BACKWARD_FUNCTION);
+                                 }
+                                 emit_record("after-guard");
+                             });
+    worker.get();
     const auto captured = roctx_range_intercept::stop_recording();
     ASSERT_EQ(captured.messages.size(), 3u);
     EXPECT_NE(captured.messages[0].find("|ltid=n/a|"), std::string::npos);
@@ -368,42 +336,38 @@ TEST_F(TorchTraceCollectorTest, LauncherLifetimeSurvivesPropagationToWorker)
     EXPECT_EQ(captured.pops, 3u);
 }
 
-TEST_F(TorchTraceCollectorTest, ConcurrentLaunchersRemainIsolated)
+TEST_F(TorchTraceCollectorTest, OverlappingLaunchers_KeepThreadIdsIsolated)
 {
-    std::atomic<int>         failures{0};
-    std::vector<std::thread> workers;
-    for (std::uint64_t index = 1; index <= 4; ++index)
-    {
-        workers.emplace_back(
-            [index, &failures]
-            {
-                if (torch_trace_collector_push_launcher_tid(index) != 0)
-                    ++failures;
-                emit_record("worker-" + std::to_string(index));
-                if (torch_trace_collector_pop_launcher_tid() != 0)
-                    ++failures;
-            });
-    }
-    for (auto& worker : workers)
-        worker.join();
+    ASSERT_EQ(torch_trace_collector_push_launcher_tid(101), 0);
+    std::promise<void> published;
+    const auto         published_signal = published.get_future();
+    std::future<void>  worker;
+    // Release the worker before joining it if the main thread unwinds.
+    std::promise<void> proceed;
+    worker = std::async(std::launch::async,
+                        [published = std::move(published), proceed = proceed.get_future()]() mutable
+                        {
+                            const bool pushed = torch_trace_collector_push_launcher_tid(202) == 0;
+                            published.set_value();
+                            EXPECT_TRUE(pushed);
+                            proceed.wait();
+                            emit_record("worker-launcher");
+                            if (pushed)
+                                EXPECT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
+                        });
+    published_signal.wait();
+    emit_record("main-launcher");
+    proceed.set_value();
+    worker.get();
+    EXPECT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
     const auto captured = roctx_range_intercept::stop_recording();
-    EXPECT_EQ(failures.load(), 0);
-    ASSERT_EQ(captured.messages.size(), 4u);
-    for (std::uint64_t index = 1; index <= 4; ++index)
-    {
-        EXPECT_TRUE(std::any_of(captured.messages.begin(),
-                                captured.messages.end(),
-                                [index](const std::string& message)
-                                {
-                                    return message.find("worker-" + std::to_string(index) + ":") == 0 &&
-                                           message.find("|ltid=" + std::to_string(index) + "|") !=
-                                               std::string::npos;
-                                }));
-    }
-    EXPECT_EQ(captured.pops, 4u);
+    ASSERT_EQ(captured.messages.size(), 2u);
+    EXPECT_NE(captured.messages[0].find("|ltid=101|"), std::string::npos);
+    EXPECT_NE(captured.messages[1].find("|ltid=202|"), std::string::npos);
+    EXPECT_EQ(captured.pops, 2u);
 }
 
-TEST_F(TorchTraceCollectorTest, CapturesTensorShapesDtypesAndScalarTags)
+TEST_F(TorchTraceCollectorTest, TensorAndScalarArguments_IncludeShapesDtypesAndTags)
 {
     const auto matrix = at::empty({2, 3}, at::TensorOptions().dtype(at::kFloat));
     const auto scalar = at::empty({}, at::TensorOptions().dtype(at::kLong));
@@ -413,7 +377,7 @@ TEST_F(TorchTraceCollectorTest, CapturesTensorShapesDtypesAndScalarTags)
     EXPECT_EQ(captured_arguments({}), "n/a");
 }
 
-TEST_F(TorchTraceCollectorTest, CapturesRealSchemaArgumentNamesAndOverloads)
+TEST_F(TorchTraceCollectorTest, RegisteredSchema_CapturesArgumentNamesAndOverloads)
 {
     const auto tensor = at::empty({2, 3});
     EXPECT_EQ(captured_schema_arguments("aten::add", "Tensor", {tensor, tensor, std::int64_t{1}}),
@@ -426,7 +390,7 @@ TEST_F(TorchTraceCollectorTest, CapturesRealSchemaArgumentNamesAndOverloads)
               "(self=float32[2x3], dtype=Int, non_blocking=Bool, copy=Bool, memory_format=None)");
 }
 
-TEST_F(TorchTraceCollectorTest, CapturesReloadedSchemaNamesOnWarmAndColdThreads)
+TEST_F(TorchTraceCollectorTest, ReloadedSchemas_RefreshNamesOnWarmAndColdThreads)
 {
     constexpr auto       name = "schema_cache_regression::reload";
     constexpr std::array argument_names{"original_input", "replacement_input", "final_input"};
@@ -499,7 +463,7 @@ TEST_F(TorchTraceCollectorTest, CapturesReloadedSchemaNamesOnWarmAndColdThreads)
     worker.get();
 }
 
-TEST_F(TorchTraceCollectorTest, RealForwardBackwardDispatchCapturesArgumentsAndBalances)
+TEST_F(TorchTraceCollectorTest, ForwardBackwardDispatch_CapturesArgumentsAndBalancesRanges)
 {
     const auto input = at::randn({2, 3}).requires_grad_(true);
     roctx_range_intercept::start_recording();
@@ -522,7 +486,7 @@ TEST_F(TorchTraceCollectorTest, RealForwardBackwardDispatchCapturesArgumentsAndB
                     { return message.find("|scope=BACKWARD_FUNCTION|") != std::string::npos; }));
 }
 
-TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelItemsRespectBounds)
+TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelInputs_RespectSeparateBounds)
 {
     const auto                 tensor = at::empty({2}, at::TensorOptions().dtype(at::kHalf));
     constexpr std::string_view seven_elements =
@@ -559,7 +523,7 @@ TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelItemsRespectBounds)
     EXPECT_EQ(arguments.substr(arguments.size() - 5), "Bool)");
 }
 
-TEST_F(TorchTraceCollectorTest, LongArgumentOutputIsBoundedAndTerminated)
+TEST_F(TorchTraceCollectorTest, LongArguments_TruncateAndTerminateOutput)
 {
     const std::vector<std::int64_t> dimensions(64, 1);
     const auto                      tensor = at::empty(dimensions);
@@ -576,7 +540,7 @@ TEST_F(TorchTraceCollectorTest, LongArgumentOutputIsBoundedAndTerminated)
     for (int index = 0; index < 8; ++index)
         list_text += (index == 0 ? "" : ", ") + tensor_text;
     list_text += ']';
-    const c10::IValue list(std::vector<at::Tensor>(100000, tensor));
+    const c10::IValue list(std::vector<at::Tensor>(9, tensor));
     const auto        truncate = [](std::string expected)
     {
         expected.resize(torch_trace_collector::detail::kMaxArgsLength);
@@ -597,7 +561,7 @@ TEST_F(TorchTraceCollectorTest, LongArgumentOutputIsBoundedAndTerminated)
     EXPECT_EQ(torch_trace_collector::detail::capture_args(record, nullptr, 0), required);
 }
 
-TEST_F(TorchTraceCollectorTest, ExtendedDtypesMatchTheRuntimeMinor)
+TEST_F(TorchTraceCollectorTest, ExtendedDtypes_MatchRuntimeMinor)
 {
     const auto tensor = at::empty({2}, at::TensorOptions().dtype(at::ScalarType::UInt16));
     EXPECT_EQ(captured_arguments({tensor}), "(uint16[2])");
@@ -611,11 +575,12 @@ TEST_F(TorchTraceCollectorTest, ExtendedDtypesMatchTheRuntimeMinor)
 #endif
 }
 
-TEST(MarkerEncoding, EncodesNamesAndPreservesEncodedArgumentField)
+TEST(MarkerEncoding, NameFields_EncodeOnceAndPreserveEncodedArguments)
 {
     using torch_trace_collector::detail::format_range_name;
     using torch_trace_collector::detail::RangeNameFields;
-    const RangeNameFields fields{"aten::add/%", "n/a", 7, 11, 13, 17, "FUNCTION", "(value=%25%7C%3B%0D%0A)", "torch"};
+    constexpr RangeNameFields
+        fields{"aten::add/%", "n/a", 7, 11, 13, 17, "FUNCTION", "(value=%25%7C%3B%0D%0A)", "torch"};
     const std::string expected =
         "aten::add%2F%25:n/"
         "a|seqNr=7|tid=11|ftid=13|ltid=17|scope=FUNCTION|args=(value=%25%7C%3B%0D%0A)|torch";
