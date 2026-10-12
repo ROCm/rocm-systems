@@ -91,8 +91,7 @@ class TestCpuHsmp(unittest.TestCase):
     def test_get_hsmp_metrics_table(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_hsmp_metrics_table,
-            "amdsmi_get_hsmp_metrics_table",
+            amdsmi.amdsmi_get_hsmp_metrics_table, "amdsmi_get_hsmp_metrics_table"
         )
         return
 
