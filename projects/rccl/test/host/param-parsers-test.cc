@@ -202,6 +202,11 @@ TEST(ParamParsersMicrotest, Bounded_ResolveAndToStringDelegateToTheDefaultParser
   EXPECT_EQ(ncclSuccess, parser.resolve("7", out));
   EXPECT_EQ(7, out);
   EXPECT_EQ("7", parser.toString(7));
+  // resolve() only delegates parsing to the default parser; bounds are enforced
+  // separately by validate(), so an out-of-range value still resolves here.
+  EXPECT_EQ(ncclSuccess, parser.resolve("11", out));
+  EXPECT_EQ(11, out);
+  EXPECT_FALSE(parser.validate(out));
 }
 
 TEST(ParamParsersMicrotest, Bounded_DescribesTheClosedRange) {
@@ -366,6 +371,14 @@ TEST(ParamParsersMicrotest, Bitset_ToStringOfZeroOrNoMatchIsNone) {
   // 8u matches no alias and no listed single bit, so this reaches the
   // fallback's own "NONE" arm rather than the exact-match pass above.
   EXPECT_EQ("NONE", parser.toString(8u));
+}
+
+TEST(ParamParsersMicrotest, Bitset_ToStringSilentlyDropsAnUnlistedBit) {
+  auto parser = MakeFlagParser();
+  // 9u is A (1, listed) | an unlisted bit (8). Decomposition only emits listed
+  // single-bit options, so the unlisted bit is dropped from the string with no
+  // indication it was ever set -- toString is not round-trippable here.
+  EXPECT_EQ("A", parser.toString(9u));
 }
 
 TEST(ParamParsersMicrotest, Bitset_DescribesEachOptionWithOrWithoutADescription) {
