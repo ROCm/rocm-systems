@@ -219,6 +219,29 @@ def test_ReduceScatterGinSdmaNarrowingDtypes(request, dtype, op):
 
 
 @_rs_skip
+@pytest.mark.parametrize("dtype", ["int32", "float"])
+def test_ReduceScatterGinSdmaLowCtaSdma(request, dtype):
+    # A pin below 16 CTAs selects SDMA-scatter + local reduce. Two launches per
+    # dtype: 1 MiB/rank and 8 MiB/rank.
+    saved = os.environ.get("RCCL_TESTS_RS_XENV", "")
+    extra = "NCCL_GIN_ANVIL_RS_CTAS=4"
+    os.environ["RCCL_TESTS_RS_XENV"] = (saved + " " + extra).strip()
+    global RS_XENV
+    RS_XENV = shlex.split(os.environ["RCCL_TESTS_RS_XENV"])
+    try:
+        rc, _ = _run_rs_gin_sdma(request, 1 * MiB, dtype, "sum")
+        assert rc == 0, "ReduceScatter low-CTA SDMA datacheck failed dtype={}".format(dtype)
+        rc, _ = _run_rs_gin_sdma(request, 8 * MiB, dtype, "sum")
+        assert rc == 0, "ReduceScatter low-CTA SDMA mid-band datacheck failed dtype={}".format(dtype)
+    finally:
+        if saved:
+            os.environ["RCCL_TESTS_RS_XENV"] = saved
+        else:
+            os.environ.pop("RCCL_TESTS_RS_XENV", None)
+        RS_XENV = shlex.split(os.environ.get("RCCL_TESTS_RS_XENV", ""))
+
+
+@_rs_skip
 @pytest.mark.parametrize("dtype", ["int32", "int64", "half"])
 def test_ReduceScatterGinSdma2GiBTotalHangGuard(request, dtype):
     # 256 MiB/rank * NP. At NP=8 that is the 2 GiB total the single-tier
