@@ -38,6 +38,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
 ### Resolved issues
+* Fixed `ncclAllGather` returning `ncclInvalidArgument` instead of falling back to another algorithm when `RCCL_DDA_THRESHOLD` is raised above the DDA scratch size and the gathered total does not fit the scratch. The DDA IPC and fabric AllGather eligibility checks now test the gathered total, as their launchers do.
+* Fixed DDA kernels launching with `blockDim.x=0` for payloads of 64 GiB or more, which `RCCL_DDA_THRESHOLD` can make reachable on the DDA fabric path.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
