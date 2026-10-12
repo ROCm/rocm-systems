@@ -47,6 +47,9 @@ ncclResult_t ResolveAddsCtx(const void* ctx, const char* input, int32_t& out) {
   out = *static_cast<const int32_t*>(ctx) + std::atoi(input);
   return ncclSuccess;
 }
+std::string ToStringAddsCtx(const void* ctx, const int32_t& val) {
+  return std::to_string(*static_cast<const int32_t*>(ctx) + val);
+}
 bool ValidateNonNegative(const void*, const int32_t& val) {
   return val >= 0;
 }
@@ -105,6 +108,26 @@ TEST(ParamUtilsMicrotest, FlagsStr_OrdersMultipleFlagsDeprecatedBeforeSensitive)
             flagsStr(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_DEPRECATED | NCCL_PARAM_FLAG_SENSITIVE));
 }
 
+// Each of these four flags otherwise appears only alongside another flag
+// above, so swapping two rows of the label table would leave those tests
+// byte-identical (the labels follow table order, not which bit matched).
+// One flag isolated per test pins each flag to its own label.
+TEST(ParamUtilsMicrotest, FlagsStr_DeprecatedAlone) {
+  EXPECT_EQ("Deprecated", flagsStr(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_DEPRECATED));
+}
+
+TEST(ParamUtilsMicrotest, FlagsStr_UnusedAlone) {
+  EXPECT_EQ("Unused", flagsStr(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_UNUSED));
+}
+
+TEST(ParamUtilsMicrotest, FlagsStr_NoEnvPluginInitAlone) {
+  EXPECT_EQ("NoEnvPluginInit", flagsStr(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT));
+}
+
+TEST(ParamUtilsMicrotest, FlagsStr_SensitiveAlone) {
+  EXPECT_EQ("Sensitive", flagsStr(NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_SENSITIVE));
+}
+
 TEST(ParamUtilsMicrotest, FlagsStr_AllFlagsJoinInDeclarationOrder) {
   uint64_t all = NCCL_PARAM_FLAG_PUBLISHED | NCCL_PARAM_FLAG_DEPRECATED | NCCL_PARAM_FLAG_CACHED |
                  NCCL_PARAM_FLAG_UNUSED | NCCL_PARAM_FLAG_NO_ENVPLUGIN_INIT | NCCL_PARAM_FLAG_SENSITIVE;
@@ -129,6 +152,13 @@ TEST(ParamUtilsMicrotest, StringFormat_SubstitutesArguments) {
 }
 
 TEST(ParamUtilsMicrotest, StringFormat_NoSubstitutionsReturnsTheLiteral) {
+  // This zero-argument instantiation makes utils.h:96/100 a runtime
+  // snprintf(..., fmt) with no substitutions -- -Wformat-security flags that
+  // (WERROR defaults off, so it's a warning, not a break). The real fix is a
+  // sizeof...(Args) == 0 guard in the header itself (pre-existing, not
+  // introduced by this test); contrib/nccl_m2n/src/m2n_log.h:111-117 already
+  // has that guard for the same construct. Left as a follow-up rather than
+  // dropping this case, since it's the only test pinning the no-op path.
   EXPECT_EQ("literal text", stringFormat("literal text"));
 }
 
@@ -241,6 +271,18 @@ TEST(ParamUtilsMicrotest, Parser_ResolveForwardsItsCtxToTheCallee) {
   EXPECT_EQ(105, value);
 }
 
+TEST(ParamUtilsMicrotest, Parser_ToStringForwardsItsCtxToTheCallee) {
+  // Same gap as resolve() above, for toString(): oneOfToString, bitsetToString,
+  // and listOfToString all dereference ctx.get() unchecked, so toStringFn
+  // being called with nullptr instead of the real ctx would be a null
+  // dereference in every production parser's toString -- ToStringWithSuffix
+  // above ignores ctx, so nothing else here would catch that.
+  auto ctx = std::make_shared<const int32_t>(100);
+  ncclParamParser<int32_t> parser{ResolveAddsCtx, ValidateNonNegative, ToStringAddsCtx, ctx, "withCtx"};
+
+  EXPECT_EQ("105", parser.toString(5));
+}
+
 TEST(ParamUtilsMicrotest, Parser_ResolvePropagatesTheCalleesFailure) {
   ncclParamParser<int32_t> parser{ResolveAlwaysFails, ValidateNonNegative, ToStringWithSuffix, nullptr, "fails"};
   int32_t value = 0;
@@ -307,7 +349,11 @@ TEST(ParamUtilsMicrotest, MakeOptions_UniqueNamesLogNoWarning) {
 
 TEST(ParamUtilsMicrotest, MakeOptions_DuplicateNameWarns) {
   std::string log = CaptureLog([&]() {
-    auto opts = makeOptions(makeOption<int32_t>("ON", 1), makeOption<int32_t>("ON", 2));
+    // The duplicate sits at indices 1 and 2, not 0 and 1: the outer loop must
+    // reach i=1 to find it, so an outer bound narrowed to i < 1 (which a
+    // two-option duplicate-at-(0,1) case would not catch) still fails here.
+    auto opts = makeOptions(makeOption<int32_t>("OFF", 0), makeOption<int32_t>("ON", 1),
+                             makeOption<int32_t>("ON", 2));
     (void)opts;
   });
   EXPECT_TRUE(LogHas(log, "Duplicate option name \"ON\""));
