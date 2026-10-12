@@ -582,6 +582,9 @@ TEST(NcclUtilityRcp, ImulRcpReturnsZeroWhenTrueReciprocalIsOne) {
   const uint64_t rcp64 = nu::imulRcp64(bigX, nu::idivRcp64(bigX), bigY, nu::idivRcp64(bigY));
   EXPECT_EQ(rcp64, 0u) << "imulRcp64 now returns the true reciprocal: delete this pin and uncomment the check below";
   // EXPECT_EQ(rcp64, 1u);  // Correct with `if (rcp == 0 || x * y <= rem) rcp += 1;` in imulRcp64.
+  EXPECT_EQ(nu::imodFast64(~uint64_t{0}, bigD, rcp64), bigD - 1)
+      << "imulRcp64 now returns the true reciprocal: delete this pin and uncomment the check below";
+  // EXPECT_EQ(nu::imodFast64(~uint64_t{0}, bigD, rcp64), ~uint64_t{0} % bigD);  // Correct once imulRcp64 returns 1 here.
 }
 
 // ---------------------------------------------------------------------------
