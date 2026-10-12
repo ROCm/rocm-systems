@@ -1,6 +1,6 @@
 ---
 name: instrumenting-binaries
-description: Guides instrumentation with `rocprof-sys-instrument` - choosing runtime instrumentation vs binary rewrite (`-o`), including or excluding functions and modules with regex options, previewing what will be instrumented with a dry run (`--simulate`, `--dump-info`, `--print-*`), tuning granularity (`--min-instructions`, `--min-address-range`, `--instrument-loops`), rewriting libraries, and diagnosing why a function is missing from, or too numerous in, a trace. Use when the user asks about rocprof-sys-instrument, binary rewrite, instrumenting a shared library, function or module include/exclude regexes, dry runs, or the difference between a function and a module. Do NOT use to pick a `--preset` (use `choosing-a-profiling-preset`), to list settings, counters or ROCm domains (use `discovering-profiling-options`), or to attach to a running process (use `rocprof-sys-attach`).
+description: Guides instrumentation with `rocprof-sys-instrument` - choosing runtime instrumentation vs binary rewrite (`-o`), including or excluding functions and modules with regex options, previewing what will be instrumented with a dry run (`--simulate`, `--dump-info`, `--print-*`), tuning granularity (`--min-instructions`, `--min-address-range`, `--instrument-loops`), rewriting libraries, and diagnosing why a function is missing from, or too numerous in, a trace. Use when the user asks about rocprof-sys-instrument, binary rewrite, instrumenting a shared library, function or module include/exclude regexes, dry runs, or the difference between a function and a module. Do NOT use to pick a `--preset` (use `choosing-a-profiling-preset`), to list settings, counters or ROCm domains (use `discovering-profiling-options`), or to attach to an already-running process (a separate tool, `rocprof-sys-attach`).
 ---
 
 # Instrumenting Binaries
@@ -8,10 +8,7 @@ description: Guides instrumentation with `rocprof-sys-instrument` - choosing run
 `rocprof-sys-instrument` decides which functions of a program get instrumented and
 either does it while the program runs or writes a new instrumented binary. For the
 full, current flag list run `rocprof-sys-instrument --help` (use
-`--help | grep -A3 -- --<flag>` for one flag). This skill explains the behavior
-that `--help` does not state. Everything below was checked on a real build (v1.9.0;
-the size thresholds and `--print-dir` also on v1.10.0) unless it is marked
-"upstream guidance".
+`--help | grep -A3 -- --<flag>` for one flag).
 
 ## Prerequisites
 
@@ -32,10 +29,6 @@ the size thresholds and `--print-dir` also on v1.10.0) unless it is marked
 | Runs the app | yes, immediately, with `args` | no; run `rocprof-sys-run -- ./app.inst args` later |
 | Arguments after the target | passed to the app | ignored (give them when you run the result) |
 
-Measured on a small test program with one shared library: runtime mode saw 753
-available functions in 7 modules and instrumented the library's function; binary
-rewrite saw 14 functions in 4 modules and did not.
-
 - Pick **runtime** when the performance of the libraries the app loads matters.
 - Pick **binary rewrite** for the lowest overhead, for repeated runs, and for MPI
   applications (upstream guidance).
@@ -44,7 +37,6 @@ rewrite saw 14 functions in 4 modules and did not.
   (default 20000; `0` disables the check).
 - `-o` with no file name writes `<name>.inst` in the current directory (target in the
   current directory) or `instrumented/<name>` for a library.
-- To profile a process that is already running use `rocprof-sys-attach`, not this tool.
 
 ## Function vs module
 
@@ -147,7 +139,10 @@ Interactions that surprise people:
 
 - Giving only `-i N` sets the address-range minimum to 0 (only instruction count
   matters), and giving only `-r N` sets the instruction minimum to 0. Giving both
-  applies both. `-i 0` or `-r 0` instruments every function.
+  applies both. `-i 0` or `-r 0` therefore disables both size checks. It does not
+  instrument every function: a function must still have at least 2 instructions, be
+  instrumentable by Dyninst, and pass the exclude, overlap, trap, linkage and visibility
+  checks, and it is never taken from the profiler's own or system modules.
 - The environment variable `ROCPROFSYS_DEFAULT_MIN_INSTRUCTIONS` changes the default
   instruction minimum, and the default range with it.
 - Functions that contain loops use `--min-instructions-loop` and
@@ -178,16 +173,29 @@ overhead. Other gates (`--dynamic-callsites`, `--traps`, `--loop-traps`,
 Missing function:
 
 1. List what was skipped: `--simulate --print-excluded pair`, or `--dump-info --simulate`.
-2. Open `excluded.json`, find the function and read its `heuristics` block. The true
-   entries explain the exclusion:
-   - `is_address_range_constrained`, `is_num_instructions_constrained` (and the
-     `is_loop_*` variants): too small. Lower `-i`/`-r`, or add `-I`.
-   - `is_user_excluded`: one of your `-E`/`-ME` patterns matches it.
-   - `is_user_restricted`: a `-R`/`-MR` pattern did not match it.
-   - `is_overlapping_constrained`: needs `--allow-overlapping`.
-   - `is_entry_trap_constrained`, `is_exit_trap_constrained`: needs `--traps`.
-   - `is_linkage_constrained`, `is_visibility_constrained`: see `--linkage`, `--visibility`.
-   - `is_internal_constrained`: it belongs to the profiler's own libraries.
+2. Open `excluded.json`, find the function and read its `heuristics` block
+   (`should_instrument: false` is the verdict). The fields come in two kinds, and the
+   cause is a different value in each.
+   - **Capability fields: false is the cause.** `is_instrumentable`,
+     `can_instrument_entry` and `can_instrument_exit` false mean Dyninst has no usable
+     entry or exit point for the function. No option fixes that, so accept the gap or
+     instrument its callers.
+   - **Constraint fields: true is the cause.**
+     - `is_address_range_constrained`, `is_num_instructions_constrained` (and the
+       `is_loop_*` variants): too small. Lower `-i`/`-r`, or add `-I`.
+     - `is_user_excluded`: one of your `-E`/`-ME` patterns matches it.
+     - `is_user_restricted`: a `-R`/`-MR` pattern did not match it.
+     - `is_overlapping_constrained`: needs `--allow-overlapping`.
+     - `is_entry_trap_constrained`, `is_exit_trap_constrained`: needs `--traps`.
+     - `is_linkage_constrained`, `is_visibility_constrained`: see `--linkage`, `--visibility`.
+     - `is_internal_constrained`: it belongs to the profiler's own libraries.
+     - `is_module_constrained`: its module is one the profiler never instruments
+       (system library, Dyninst, or its own libraries).
+     - `is_routine_constrained`: its name is one the profiler never instruments.
+   - **No field at all:** a function with fewer than 2 instructions is always skipped.
+     If every capability field is true and no constraint field is true, check
+     `num_instructions` (verified: a 1-instruction function stays excluded even with
+     `-i 0`).
 3. If the function is in a shared library, remember binary rewrite never sees it.
 
 Too much data or too slow: raise `-i`, restrict to the modules you care about
@@ -206,12 +214,17 @@ ldd ./app.inst | grep libfoo      # must resolve into inst/
 
 - Keep the same file name for the rewritten library (`libfoo.so`, or the soname
   that `ldd` shows) and write it to a different directory.
-- **RPATH vs RUNPATH:** a binary that has `DT_RPATH` ignores `LD_LIBRARY_PATH`, so the
-  original library is still loaded (verified; no `foo_*` entries appeared in the
-  profile). Check with `objdump -p <exe> | egrep 'RPATH|RUNPATH'`. `RUNPATH` honors
-  `LD_LIBRARY_PATH` (verified). Relink with `-Wl,--enable-new-dtags`, or change the
-  entry with `patchelf --remove-rpath` / `--set-rpath` (upstream guidance, not tested
-  here, `patchelf` was not installed).
+- **RPATH vs RUNPATH:** the loader searches `DT_RPATH` directories before
+  `LD_LIBRARY_PATH`, so if the original library is in an RPATH directory it is loaded
+  instead of your rewritten copy.
+  If the RPATH directories do not contain the library, `LD_LIBRARY_PATH` is still used,
+  and a binary with `RUNPATH` searches `LD_LIBRARY_PATH` first.
+  Check with `objdump -p <exe> | egrep 'RPATH|RUNPATH'` and `ldd`. Only patch the
+  binary when `ldd` shows the original library. Relink with `-Wl,--enable-new-dtags`,
+  or change the entry with `patchelf`:
+  `patchelf --remove-rpath <exe>` makes `LD_LIBRARY_PATH` win, and
+  `patchelf --set-rpath <dir> <exe>` writes a `RUNPATH`, so it does too. Adding
+  `--force-rpath` keeps a `DT_RPATH`, which brings the problem back.
 - **Library as a runtime target:** `rocprof-sys-instrument -- ./libfoo.so` prints
   "is not executable ... Switching to binary rewrite mode and assuming
   '--simulate --all-functions'", so you get a dry-run approximation and no run.
