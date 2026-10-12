@@ -1994,8 +1994,12 @@ _HEADER_PREAMBLE = """\
  * old recording.
  * v7: the host blobs of the pitched copies are packed, and the writer sets
  * HRR_FILE_FLAG_PACKED_HOST_RECTS. A v6 reader ignored the flag and replayed
- * a packed blob with the recorded pitch, reading past its end. */
-#define HRR_VERSION ((uint16_t)7u)
+ * a packed blob with the recorded pitch, reading past its end.
+ * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
+ * appended to HipDispatchTable. Each took a compiler ID, so the compiler
+ * API IDs moved up by two. develop still records both under v7. A v7
+ * reader decodes those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)8u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2434,7 +2438,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     that the payload is partial and replay would treat it as faithful. Each
     truncation therefore also calls note_unreplayable(), which lists the API,
     with the clipped argument as the reason, under manifest.unreplayable_apis
-    where replay can see it.
+    where replay can see it. The warning is printed once per process, but the
+    note is made on every truncation: the writer lists notes per archive, and
+    a forked child or a fresh archive starts with none.
 
     note_unreplayable(), not mark_incomplete(): the event is written and the
     archive stays well-formed — only the clipped argument makes the call
@@ -2453,10 +2459,10 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"          LogPrintfWarning(")
             lines.append(f"              \"[HRR] {entry.name}: {d.param} is %zu characters; \"")
             lines.append(f"              \"recording the first {d.max_count - 1} only\", _n);")
-            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
-            lines.append(f"              \"{d.param} was truncated to {d.max_count - 1} characters at capture \"")
-            lines.append(f"              \"time; replay would pass a shortened string\");")
             lines.append(f"        }}")
+            lines.append(f"        hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"            \"{d.param} was truncated to {d.max_count - 1} characters at capture \"")
+            lines.append(f"            \"time; replay would pass a shortened string\");")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
@@ -2474,10 +2480,10 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"              \"[HRR] {entry.name}: recording only the first {d.max_count} \"")
             lines.append(f"              \"of %u {d.param} entries; replay of this call will be \"")
             lines.append(f"              \"incomplete\", _n);")
-            lines.append(f"          hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
-            lines.append(f"              \"only the first {d.max_count} {d.param} entries were recorded at \"")
-            lines.append(f"              \"capture time; replay would pass a partial array\");")
             lines.append(f"        }}")
+            lines.append(f"        hrr_cap::writer::note_unreplayable(\"{entry.name}\",")
+            lines.append(f"            \"only the first {d.max_count} {d.param} entries were recorded at \"")
+            lines.append(f"            \"capture time; replay would pass a partial array\");")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param},"
@@ -2747,8 +2753,7 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
         if e.reserved:
             continue
         lines.append(f"  cap.{e.name}_fn = capture_{e.name};")
-    lines.append("  std::memcpy(const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable()),")
-    lines.append("              &cap, sizeof(HipCompilerDispatchTable));")
+    lines.append("  hip_capture_install_compiler_table(cap);")
     lines.append("}")
     lines.append("")
 
@@ -3051,6 +3056,17 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 #   param : dispatch-table parameter name being bridged
 #   pre   : lines emitted inside the guard ({name} -> param name)
 #   expr  : expression substituted for that argument inside the guard
+# APIs the tree declares before any SDK that CI builds playback against exports
+# them. The call is made through a symbol looked up in the loaded runtime at
+# replay time instead of a link-time reference, so hrr-playback still links
+# against an older amdhip64 and a replay on that runtime skips the call with a
+# warning. Declarations (and the enum types in the signature) must come from
+# the in-tree headers; see HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt.
+# Add an API here when its first CI build fails to link against the SDK.
+_PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
+    "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+})
+
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The table
     # (and therefore the recorded field) keeps the int device ordinal, so the
@@ -3523,11 +3539,30 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     args_str = ", ".join(call_args)
     void_ret = _is_void_return(entry.ret_type)
 
+    resolved = entry.name in _PLAYBACK_RUNTIME_RESOLVED_APIS
+    if resolved:
+        if entry.name in _PLAYBACK_ARG_BRIDGES:
+            sys.exit(f"ERROR: {entry.name} is runtime-resolved and has an arg bridge; "
+                     f"the two cannot be combined")
+        lines.append(f"  static const auto _fn = reinterpret_cast<decltype(&{entry.name})>(")
+        lines.append(f"      hrr_runtime_symbol(\"{entry.name}\"));")
+        lines.append(f"  if (_fn == nullptr) {{")
+        lines.append(f"    static bool warned = false;")
+        lines.append(f"    if (!warned) {{")
+        lines.append(f"      warned = true;")
+        lines.append(f"      fprintf(stderr, \"[HRR] {entry.name} is not exported by this \"")
+        lines.append(f"              \"HIP runtime; skipping it during replay, results may \"")
+        lines.append(f"              \"differ from capture.\\n\");")
+        lines.append(f"    }}")
+        lines.append(f"    return hipSuccess;")
+        lines.append(f"  }}")
+
     def _emit_call(target_lines: List[str], a_str: str) -> None:
+        callee = "_fn" if resolved else entry.name
         if void_ret:
-            target_lines.append(f"  {entry.name}({a_str});")
+            target_lines.append(f"  {callee}({a_str});")
         else:
-            target_lines.append(f"  hipError_t _r = (hipError_t){entry.name}({a_str});")
+            target_lines.append(f"  hipError_t _r = (hipError_t){callee}({a_str});")
 
     bridge = _PLAYBACK_ARG_BRIDGES.get(entry.name)
     if bridge:
