@@ -139,6 +139,44 @@ TEST(ReduceScatterPolicyCtas, MaxCtasIsTheMidBandValue) {
   EXPECT_EQ(reduceScatterMaxCtas(), 48);
 }
 
+TEST(ReduceScatterPolicySdmaTier, GridBelowCeilIsSdma) {
+  EXPECT_FALSE(usesSdmaTier(0));
+  EXPECT_TRUE(usesSdmaTier(1));
+  EXPECT_TRUE(usesSdmaTier(4));
+  EXPECT_TRUE(usesSdmaTier(15));
+  EXPECT_FALSE(usesSdmaTier(16));
+  EXPECT_FALSE(usesSdmaTier(32));
+  EXPECT_FALSE(usesSdmaTier(48));
+}
+
+TEST(ReduceScatterPolicySdmaTier, SdmaCtasCapsAtFourOrNRanks) {
+  EXPECT_EQ(reduceScatterSdmaCtas(8), 4);
+  EXPECT_EQ(reduceScatterSdmaCtas(2), 2);
+  EXPECT_EQ(reduceScatterSdmaCtas(1), 1);
+}
+
+TEST(ReduceScatterPolicySdmaTier, SmallEnvPinSelectsSdmaGrid) {
+  const int pool = 128;
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, 4, pool), 4);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterGridCtas(33ull * 1024 * 1024, 4, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, 8, pool), 8);
+  EXPECT_TRUE(usesSdmaTier(reduceScatterGridCtas(1, 8, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(33ull * 1024 * 1024, kThresholdUnset, pool), 48);
+  EXPECT_FALSE(usesSdmaTier(reduceScatterGridCtas(33ull * 1024 * 1024, kThresholdUnset, pool)));
+  EXPECT_EQ(reduceScatterGridCtas(64ull * 1024 * 1024, kThresholdUnset, pool), 32);
+}
+
+TEST(ReduceScatterPolicyScratchFits, NeedsNSlotsAndRejectsOverflow) {
+  EXPECT_FALSE(sdmaScratchFits(0, 8, 1024));
+  EXPECT_FALSE(sdmaScratchFits(1024, 0, 1024));
+  EXPECT_FALSE(sdmaScratchFits(1024, 8, 1024 * 7));
+  EXPECT_TRUE(sdmaScratchFits(1024, 8, 1024 * 8));
+  EXPECT_FALSE(sdmaScratchFits((size_t)-1, 8, (size_t)-1));
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(8, kReduceScatterSdmaSlotMaxDefault),
+            reduceScatterScratchBytes(8ull * kReduceScatterSdmaSlotMaxDefault));
+  EXPECT_EQ(reduceScatterSdmaScratchBytes(0, kReduceScatterSdmaSlotMaxDefault), 0u);
+}
+
 // ---- grid <= pool ------------------------------------------------------------
 // The kernel indexes devComm.lsaBarrier/barrier/signal by blockIdx.x, and the
 // pools are sized by reduceScatterPoolCtas in ReduceScatterGetDevCommRequirements.
