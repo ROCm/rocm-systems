@@ -77,16 +77,20 @@ Select the format with `-F txt|json|xml`; they load differently:
   'rocprofiler-systems' root object"); load it with
   `rocprof-sys-run --preset=<file>.json -- <app>`.
 
-An explicit environment variable always overrides the same setting in a config
-file (e.g. `ROCPROFSYS_SAMPLING_FREQ=77` beats `ROCPROFSYS_SAMPLING_FREQ = 50`
-in the file).
+When the same setting is given in more than one place, the order of priority is:
+config file, then environment variable, then command-line parameter, each overriding
+the one before. For example, with `ROCPROFSYS_SAMPLING_FREQ = 50` in the file,
+`ROCPROFSYS_SAMPLING_FREQ=77` in the environment beats it, and
+`rocprof-sys-run --sampling-freq=100 -- <app>` beats both.
 
 ## Using what you discover
 
 Names found with the commands above are applied through these settings:
 
-- **CPU counters** (`-H -c CPU`): set `ROCPROFSYS_PAPI_EVENTS` together with
-  `ROCPROFSYS_PROFILE=ON`; results are written to `papi_array*.txt/json`. All
+- **CPU counters** (`-H -c CPU`): set `ROCPROFSYS_PAPI_EVENTS`, `ROCPROFSYS_PROFILE=ON`
+  **and** add `papi_array` (or `papi_vector`) to `ROCPROFSYS_TIMEMORY_COMPONENTS`, e.g.
+  `wall_clock,papi_array`; results are written to `papi_array*.txt/json` (or
+  `papi_vector*`). Without the component the run succeeds but writes no counter files. All
   events must come from one namespace — mixing `PAPI_*` presets with `perf::*`
   events only prints a "Failure to add named event" warning and drops the
   counters, the run still exits 0. Reading most counters needs
