@@ -85,14 +85,17 @@ def write_skill(root, name, cases=None):
 class FakeRun:
     """Stand-in for subprocess.run that records calls and returns canned output."""
 
-    def __init__(self, stdout="", returncode=0):
+    def __init__(self, stdout="", returncode=0, stderr=""):
         self.stdout = stdout
         self.returncode = returncode
+        self.stderr = stderr
         self.calls = []
 
     def __call__(self, command, **kwargs):
         self.calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, self.returncode, self.stdout, "")
+        return subprocess.CompletedProcess(
+            command, self.returncode, self.stdout, self.stderr
+        )
 
 
 def tool_use(name, **payload):
@@ -187,6 +190,56 @@ class TestLoadCases:
                 "judged behaviour",
                 id="logs-contain-is-not-judged",
             ),
+            pytest.param(
+                lambda c: c[1].pop("id"),
+                "case #2 needs a non-empty string id",
+                id="missing-id",
+            ),
+            pytest.param(
+                lambda c: c[1].update(id=5),
+                "needs a non-empty string id",
+                id="non-string-id",
+            ),
+            pytest.param(
+                lambda c: c[1].pop("prompt"),
+                "p2 needs a non-empty string prompt",
+                id="missing-prompt",
+            ),
+            pytest.param(
+                lambda c: c[1].update(prompt="  "),
+                "p2 needs a non-empty string prompt",
+                id="blank-prompt",
+            ),
+            pytest.param(
+                lambda c: c.__setitem__(1, "not an object"),
+                "case #2 must be an object",
+                id="case-is-not-an-object",
+            ),
+            pytest.param(
+                lambda c: c[0].update(expected_behavior="recommends x"),
+                "expected_behavior must be a list of non-empty strings",
+                id="string-instead-of-list",
+            ),
+            pytest.param(
+                lambda c: c[0].update(expected_behavior=["fine", ""]),
+                "expected_behavior must be a list of non-empty strings",
+                id="empty-claim",
+            ),
+            pytest.param(
+                lambda c: c[0].update(unexpected_behavior=[3]),
+                "unexpected_behavior must be a list of non-empty strings",
+                id="non-string-claim",
+            ),
+            pytest.param(
+                lambda c: c[0].update(logs_contain="x"),
+                "logs_contain must be a list of non-empty strings",
+                id="logs-contain-string",
+            ),
+            pytest.param(
+                lambda c: c[0].update(files_exist=None),
+                "files_exist must be a list of non-empty strings",
+                id="files-exist-null",
+            ),
         ],
     )
     def test_rejects_malformed_dataset(self, evals, tmp_path, mutate, message):
@@ -197,6 +250,15 @@ class TestLoadCases:
             evals.load_cases(skill)
         assert message in str(exc.value)
         assert "demo" in str(exc.value)
+
+    @pytest.mark.parametrize("body", [{}, {"evaluations": "x"}, [], {"evaluations": {}}])
+    def test_evaluations_must_be_a_list(self, evals, tmp_path, body):
+        skill = tmp_path / "demo"
+        (skill / "evals").mkdir(parents=True)
+        (skill / "evals" / "evals.json").write_text(json.dumps(body))
+        with pytest.raises(SystemExit) as exc:
+            evals.load_cases(skill)
+        assert "needs an 'evaluations' list" in str(exc.value)
 
 
 # --- check_unique_ids -------------------------------------------------------------
@@ -343,62 +405,103 @@ class TestPersonalSkills:
 
 
 class TestGradeJudged:
+    """The judge only says whether a behaviour happened; the code decides what that means."""
+
     OPTIONS = None
 
     @pytest.fixture(autouse=True)
     def options(self, evals):
         self.OPTIONS = evals.Options("m", True, True)
 
-    def judge(self, evals, monkeypatch, stdout, claim="c", hold=True, transcript="t"):
-        fake = FakeRun(stdout)
+    def judge(
+        self, evals, monkeypatch, stdout, claim="c", hold=True, transcript="t", **kw
+    ):
+        fake = FakeRun(stdout, **kw)
         monkeypatch.setattr(subprocess, "run", fake)
         return evals.grade_judged(claim, transcript, hold, self.OPTIONS), fake
 
     def test_direct_json_verdict(self, evals, monkeypatch):
-        result, _ = self.judge(evals, monkeypatch, '{"pass": true, "reason": "ok"}')
+        result, _ = self.judge(evals, monkeypatch, '{"occurred": true, "reason": "ok"}')
         assert result == (True, "ok")
 
     def test_verdict_wrapped_in_a_result_string(self, evals, monkeypatch):
-        wrapped = json.dumps({"result": json.dumps({"pass": False, "reason": "no"})})
+        wrapped = json.dumps({"result": json.dumps({"occurred": False, "reason": "no"})})
         result, _ = self.judge(evals, monkeypatch, wrapped)
         assert result == (False, "no")
 
-    def test_claim_that_should_not_hold_inverts_the_verdict(self, evals, monkeypatch):
-        verdict = '{"pass": false, "reason": "did not happen"}'
-        result, _ = self.judge(evals, monkeypatch, verdict, hold=False)
-        assert result == (True, "did not happen")
+    @pytest.mark.parametrize(
+        "should_hold, occurred, wanted",
+        [
+            (True, True, True),
+            (True, False, False),
+            (False, False, True),
+            (False, True, False),
+        ],
+    )
+    def test_outcome_is_wanted_when_what_happened_matches_what_should(
+        self, evals, monkeypatch, should_hold, occurred, wanted
+    ):
+        verdict = json.dumps({"occurred": occurred, "reason": "r"})
+        (ok, _), _ = self.judge(evals, monkeypatch, verdict, hold=should_hold)
+        assert ok is wanted
+
+    def test_the_prompt_is_the_same_whether_or_not_the_behaviour_is_wanted(
+        self, evals, monkeypatch
+    ):
+        verdict = '{"occurred": true, "reason": ""}'
+        _, wanted = self.judge(evals, monkeypatch, verdict, hold=True)
+        _, unwanted = self.judge(evals, monkeypatch, verdict, hold=False)
+        assert wanted.calls[0][0][2] == unwanted.calls[0][0][2]
 
     @pytest.mark.parametrize(
-        "stdout", ["not json", "[]", '{"result": "also not json"}', '{"result": 3}', ""]
+        "stdout",
+        [
+            "not json",
+            "[]",
+            '{"result": "also not json"}',
+            '{"result": 3}',
+            "",
+            '{"reason": "no verdict"}',
+            '{"occurred": "yes", "reason": ""}',
+        ],
     )
-    def test_unparseable_output_fails_the_claim(self, evals, monkeypatch, stdout):
-        result, _ = self.judge(evals, monkeypatch, stdout)
-        assert result == (False, "judge returned unparseable output")
+    def test_unparseable_output_is_a_judge_error(self, evals, monkeypatch, stdout):
+        with pytest.raises(evals.JudgeError, match="unparseable"):
+            self.judge(evals, monkeypatch, stdout)
 
-    def test_command_and_prompt(self, evals, monkeypatch):
+    def test_nonzero_exit_is_a_judge_error_with_stderr(self, evals, monkeypatch):
+        with pytest.raises(evals.JudgeError, match=r"exit 1.*rate limited"):
+            self.judge(evals, monkeypatch, "", returncode=1, stderr="rate limited")
+
+    def test_error_result_is_a_judge_error_with_its_text(self, evals, monkeypatch):
+        error = json.dumps({"is_error": True, "result": "API Error: 400 bad model"})
+        with pytest.raises(evals.JudgeError, match="API Error: 400 bad model"):
+            self.judge(evals, monkeypatch, error, returncode=1)
+
+    def test_error_result_with_a_zero_exit_is_still_an_error(self, evals, monkeypatch):
+        error = json.dumps({"is_error": True, "result": "overloaded"})
+        with pytest.raises(evals.JudgeError, match="overloaded"):
+            self.judge(evals, monkeypatch, error)
+
+    def test_command(self, evals, monkeypatch):
         _, fake = self.judge(
-            evals,
-            monkeypatch,
-            '{"pass": true, "reason": ""}',
-            claim="my claim",
-            hold=False,
+            evals, monkeypatch, '{"occurred": true, "reason": ""}', claim="my claim"
         )
         command, kwargs = fake.calls[0]
         assert command[:2] == ["claude", "-p"]
-        assert "my claim" in command[2] and "NOT met" in command[2]
+        assert "my claim" in command[2]
         assert command[command.index("--output-format") + 1] == "json"
         schema = json.loads(command[command.index("--json-schema") + 1])
-        assert schema["required"] == ["pass", "reason"]
+        assert schema["required"] == ["occurred", "reason"]
         assert "--model" in command and "--setting-sources" in command
         assert kwargs["stdin"] == subprocess.DEVNULL and kwargs["check"] is False
 
-    def test_met_wording_when_the_claim_should_hold(self, evals, monkeypatch):
-        _, fake = self.judge(evals, monkeypatch, '{"pass": true, "reason": ""}')
-        assert "should be met" in fake.calls[0][0][2]
-
     def test_long_transcripts_are_truncated(self, evals, monkeypatch):
         _, fake = self.judge(
-            evals, monkeypatch, '{"pass": true, "reason": ""}', transcript="Z" * 300000
+            evals,
+            monkeypatch,
+            '{"occurred": true, "reason": ""}',
+            transcript="Z" * 300000,
         )
         assert fake.calls[0][0][2].count("Z") == 200000
 
@@ -475,6 +578,21 @@ class TestGrade:
             "unexpected behaviour occurred: dont (why dont)",
         ]
 
+    def test_a_judge_error_is_a_failure_and_the_other_claims_still_run(
+        self, evals, tmp_path, behavioural, monkeypatch
+    ):
+        def flaky(claim, _transcript, _should_hold, _options):
+            if claim == "first":
+                raise evals.JudgeError("claude failed (exit 1): rate limited")
+            return True, ""
+
+        monkeypatch.setattr(evals, "grade_judged", flaky)
+        positive = case("c", True, expected_behavior=["first", "second"])
+        failures = evals.grade(positive, "demo", "", ["demo"], tmp_path, behavioural)
+        assert failures == [
+            "judge failed for 'first': claude failed (exit 1): rate limited"
+        ]
+
     def test_passing_judge_adds_no_failure(
         self, evals, tmp_path, behavioural, monkeypatch
     ):
@@ -543,6 +661,42 @@ class TestRunAgent:
         kept = [json.loads(line) for line in transcript.splitlines()]
         assert denied in kept
         assert all(isinstance(entry, dict) for entry in kept)
+
+    def test_nonzero_exit_is_an_agent_error_not_a_graded_run(
+        self, evals, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            subprocess, "run", FakeRun("", returncode=1, stderr="no auth")
+        )
+        with pytest.raises(evals.AgentError, match=r"exit 1.*no auth"):
+            evals.run_agent("hi", tmp_path, evals.Options(None, True, False))
+
+    def test_error_result_event_is_an_agent_error_with_its_text(
+        self, evals, tmp_path, monkeypatch
+    ):
+        stream = "\n".join(
+            [
+                json.dumps({"type": "system", "subtype": "init", "skills": ["a"]}),
+                json.dumps({"type": "result", "is_error": True, "result": "API Error"}),
+            ]
+        )
+        monkeypatch.setattr(subprocess, "run", FakeRun(stream, returncode=1))
+        with pytest.raises(evals.AgentError, match="API Error") as exc:
+            evals.run_agent("hi", tmp_path, evals.Options(None, True, False))
+        assert '"subtype": "init"' in exc.value.transcript
+
+    def test_error_result_with_a_zero_exit_is_still_an_error(
+        self, evals, tmp_path, monkeypatch
+    ):
+        stream = json.dumps({"type": "result", "is_error": True, "result": "overloaded"})
+        monkeypatch.setattr(subprocess, "run", FakeRun(stream))
+        with pytest.raises(evals.AgentError, match="overloaded"):
+            evals.run_agent("hi", tmp_path, evals.Options(None, True, False))
+
+    def test_successful_result_event_is_not_an_error(self, evals, tmp_path, monkeypatch):
+        stream = json.dumps({"type": "result", "is_error": False, "result": "done"})
+        monkeypatch.setattr(subprocess, "run", FakeRun(stream))
+        evals.run_agent("hi", tmp_path, evals.Options(None, True, False))
 
     def test_empty_output_is_handled(self, evals, tmp_path, monkeypatch):
         monkeypatch.setattr(subprocess, "run", FakeRun(""))
@@ -686,6 +840,31 @@ class TestRunCase:
             "demo", case("c", True), tmp_path, evals.Options(None, True, False)
         )
         assert outcome == evals.Outcome("demo", "c", ["timed out"], set())
+
+    def test_a_failed_agent_fails_a_negative_case_instead_of_passing_it(
+        self, evals, tmp_path, patched
+    ):
+        def broken(*_args):
+            raise evals.AgentError("claude failed (exit 1): API Error", "partial")
+
+        patched.setattr(evals, "run_agent", broken)
+        outcome = evals.run_case(
+            "demo", case("c", False), tmp_path, evals.Options(None, True, False)
+        )
+        assert outcome == evals.Outcome(
+            "demo", "c", ["claude failed (exit 1): API Error"], set()
+        )
+
+    def test_the_transcript_of_a_failed_agent_is_still_saved(
+        self, evals, tmp_path, patched
+    ):
+        def broken(*_args):
+            raise evals.AgentError("claude failed", "partial transcript")
+
+        patched.setattr(evals, "run_agent", broken)
+        options = evals.Options(None, True, False, transcripts=tmp_path / "out")
+        evals.run_case("demo", case("c", True), tmp_path, options)
+        assert (tmp_path / "out" / "demo--c.jsonl").read_text() == "partial transcript"
 
     def test_transcript_is_saved_when_asked(self, evals, tmp_path, patched):
         patched.setattr(

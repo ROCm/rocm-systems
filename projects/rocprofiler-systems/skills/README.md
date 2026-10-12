@@ -105,6 +105,9 @@ How a case is graded:
   a name containing the skill or the case id hinted at the answer: with such names a
   vague negative prompt loaded the preset skill in about 1 run in 7, against 0 in 120
   with neutral names.
+- If the `claude` CLI itself fails (a bad `--model`, an authentication problem or a rate
+  limit), the case is reported as a failure with the error text and is not graded.
+  Otherwise every negative case would pass, because nothing loaded.
 - The agent is a language model, so a result can differ between runs. Re-run a failing
   case before changing a skill or its dataset, and use `--save-transcripts` to see what
   the agent actually did.

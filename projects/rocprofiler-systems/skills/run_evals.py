@@ -52,14 +52,28 @@ KNOWN_KEYS = {
 JUDGED_KEYS = ("expected_behavior", "unexpected_behavior")
 BEHAVIOURAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
 
+# The judge only says whether a behaviour happened. Whether that is good or bad is
+# decided here, so the judge never has to reason about "should" or "should not".
 JUDGE_SCHEMA = {
     "type": "object",
     "properties": {
-        "pass": {"type": "boolean"},
+        "occurred": {"type": "boolean"},
         "reason": {"type": "string"},
     },
-    "required": ["pass", "reason"],
+    "required": ["occurred", "reason"],
 }
+
+
+class AgentError(RuntimeError):
+    """The claude CLI failed, so there is nothing valid to grade."""
+
+    def __init__(self, message: str, transcript: str = ""):
+        super().__init__(message)
+        self.transcript = transcript
+
+
+class JudgeError(RuntimeError):
+    """The judge could not give a verdict."""
 
 
 @dataclass(frozen=True)
@@ -93,26 +107,48 @@ def discover_skills(only: Optional[str]) -> list[Path]:
     return found
 
 
+def _text_list_problem(case: dict[str, Any], key: str) -> Optional[str]:
+    """Return what is wrong with an optional list-of-strings field, if anything."""
+    if key not in case:
+        return None
+    value = case[key]
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        return f"{key} must be a list of non-empty strings"
+    return None
+
+
 def load_cases(skill: Path) -> list[dict[str, Any]]:
     """Parse and validate one dataset, erroring on anything malformed."""
     dataset = json.loads((skill / "evals" / "evals.json").read_text())
-    cases = dataset["evaluations"]
+    cases = dataset.get("evaluations") if isinstance(dataset, dict) else None
+    if not isinstance(cases, list):
+        sys.exit(f"{skill.name}: evals.json needs an 'evaluations' list")
 
     positive = 0
     negative = 0
     judged = 0
     seen: set[str] = set()
 
-    for case in cases:
+    for index, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            sys.exit(f"{skill.name}: case #{index} must be an object")
+        label = case["id"] if isinstance(case.get("id"), str) else f"case #{index}"
+
+        for key in ("id", "prompt"):
+            value = case.get(key)
+            if not isinstance(value, str) or not value.strip():
+                sys.exit(f"{skill.name}: {label} needs a non-empty string {key}")
         unknown = set(case) - KNOWN_KEYS
         if unknown:
-            sys.exit(
-                f"{skill.name}: unknown key(s) {sorted(unknown)} in {case.get('id')}"
-            )
+            sys.exit(f"{skill.name}: unknown key(s) {sorted(unknown)} in {label}")
         if not isinstance(case.get("skill_should_trigger"), bool):
-            sys.exit(
-                f"{skill.name}: {case.get('id')} needs a boolean skill_should_trigger"
-            )
+            sys.exit(f"{skill.name}: {label} needs a boolean skill_should_trigger")
+        for key in BEHAVIOURAL_KEYS:
+            problem = _text_list_problem(case, key)
+            if problem:
+                sys.exit(f"{skill.name}: {label}: {problem}")
         if case["id"] in seen:
             sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
         seen.add(case["id"])
@@ -124,9 +160,7 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
             negative += 1
             extra = set(case) - {"id", "prompt", "skill_should_trigger", "note"}
             if extra:
-                sys.exit(
-                    f"{skill.name}: {case['id']} is negative but sets {sorted(extra)}"
-                )
+                sys.exit(f"{skill.name}: {label} is negative but sets {sorted(extra)}")
 
     if positive < 3 or negative < 2:
         sys.exit(f"{skill.name}: needs at least 3 positive and 2 negative cases")
@@ -211,6 +245,7 @@ def run_agent(
     loaded: list[str] = []
     visible: set[str] = set()
     model = ""
+    error = ""
     for line in result.stdout.splitlines():
         try:
             event = json.loads(line)
@@ -223,6 +258,17 @@ def run_agent(
         if event.get("type") == "system" and event.get("subtype") == "init":
             visible.update(str(name) for name in event.get("skills", []))
             model = str(event.get("model", ""))
+        if event.get("type") == "result" and event.get("is_error"):
+            error = str(event.get("result", "")).strip()
+
+    # A failed run must not be graded: with nothing loaded, every negative case
+    # would pass. Report it as a failure with the reason instead.
+    if result.returncode != 0 or error:
+        detail = error or result.stderr.strip() or "no output"
+        raise AgentError(
+            f"claude failed (exit {result.returncode}): {detail[:300]}",
+            "\n".join(transcript),
+        )
 
     return "\n".join(transcript), loaded, visible, model
 
@@ -265,12 +311,18 @@ def personal_skills() -> set[str]:
 def grade_judged(
     claim: str, transcript: str, should_hold: bool, options: Options
 ) -> tuple[bool, str]:
-    """Ask a second agent whether a plain-language claim holds in the transcript."""
+    """Ask a second agent whether a plain-language behaviour happened.
+
+    Returns whether the outcome is the wanted one (the behaviour happened when it
+    should have, or did not when it should not) and the judge's reason. Raises
+    JudgeError when the judge could not give a verdict.
+    """
     question = (
-        "You are grading an AI agent transcript against one expectation.\n"
-        f"Expectation: {claim}\n"
-        f"The expectation should be {'met' if should_hold else 'NOT met'}.\n"
-        "Answer only with the JSON object.\n\n"
+        "You are grading an AI agent transcript.\n"
+        f"Behaviour: {claim}\n"
+        "Decide only whether this behaviour actually happened in the transcript. "
+        "Set occurred to true if the transcript shows it and to false if it does "
+        "not, and give a one-sentence reason. Answer only with the JSON object.\n\n"
         f"Transcript:\n{transcript[:200000]}"
     )
     result = subprocess.run(
@@ -292,12 +344,23 @@ def grade_judged(
     )
     try:
         payload = json.loads(result.stdout)
-        verdict = payload if "pass" in payload else json.loads(payload["result"])
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return False, "judge returned unparseable output"
+    except json.JSONDecodeError:
+        payload = None
+    if result.returncode != 0 or (isinstance(payload, dict) and payload.get("is_error")):
+        detail = ""
+        if isinstance(payload, dict):
+            detail = str(payload.get("result", "")).strip()
+        detail = detail or result.stderr.strip() or "no output"
+        raise JudgeError(f"claude failed (exit {result.returncode}): {detail[:300]}")
+    try:
+        verdict = payload if "occurred" in payload else json.loads(payload["result"])
+        occurred = verdict["occurred"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        raise JudgeError("judge returned unparseable output") from None
+    if not isinstance(occurred, bool):
+        raise JudgeError("judge returned unparseable output")
 
-    held = bool(verdict.get("pass"))
-    return held == should_hold, str(verdict.get("reason", ""))
+    return occurred == should_hold, str(verdict.get("reason", ""))
 
 
 def grade(
@@ -327,17 +390,30 @@ def grade(
         if not any(p.match(f"**/{artifact}") for p in workspace.rglob("*")):
             failures.append(f"missing artifact {artifact!r}")
 
-    for claim in case.get("expected_behavior", []):
-        ok, reason = grade_judged(claim, transcript, True, options)
+    claims = [(claim, True) for claim in case.get("expected_behavior", [])]
+    claims += [(claim, False) for claim in case.get("unexpected_behavior", [])]
+    for claim, should_hold in claims:
+        try:
+            ok, reason = grade_judged(claim, transcript, should_hold, options)
+        except JudgeError as err:
+            failures.append(f"judge failed for {claim!r}: {err}")
+            continue
         if not ok:
-            failures.append(f"expected behaviour not met: {claim} ({reason})")
-
-    for claim in case.get("unexpected_behavior", []):
-        ok, reason = grade_judged(claim, transcript, False, options)
-        if not ok:
-            failures.append(f"unexpected behaviour occurred: {claim} ({reason})")
+            label = (
+                "expected behaviour not met"
+                if should_hold
+                else ("unexpected behaviour occurred")
+            )
+            failures.append(f"{label}: {claim} ({reason})")
 
     return failures
+
+
+def save_transcript(options: Options, name: str, case_id: str, transcript: str) -> None:
+    """Keep a case's transcript when --save-transcripts was given."""
+    if options.transcripts:
+        options.transcripts.mkdir(parents=True, exist_ok=True)
+        (options.transcripts / f"{name}--{case_id}.jsonl").write_text(transcript)
 
 
 def run_case(name: str, case: dict[str, Any], tmp: Path, options: Options) -> Outcome:
@@ -350,9 +426,10 @@ def run_case(name: str, case: dict[str, Any], tmp: Path, options: Options) -> Ou
         transcript, loaded, visible, model = run_agent(case["prompt"], workspace, options)
     except subprocess.TimeoutExpired:
         return Outcome(name, case["id"], ["timed out"], set())
-    if options.transcripts:
-        options.transcripts.mkdir(parents=True, exist_ok=True)
-        (options.transcripts / f"{name}--{case['id']}.jsonl").write_text(transcript)
+    except AgentError as err:
+        save_transcript(options, name, case["id"], err.transcript)
+        return Outcome(name, case["id"], [str(err)], set())
+    save_transcript(options, name, case["id"], transcript)
     failures = grade(case, name, transcript, loaded, workspace, options)
     return Outcome(name, case["id"], failures, visible, model)
 
