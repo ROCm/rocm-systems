@@ -9,7 +9,7 @@ Full documentation for AMD Debugger API is available at
  - `gfx1170`
  - `gfx1171`
  - `gfx1172`
- - `gfx10-7-generic`
+ - `gfx11-7-generic`
 
 ## rocm-dbgapi-0.82.0
 ### Added
