@@ -1078,12 +1078,9 @@ void TileRMATester::verifyResults(uint64_t size) {
       size_t base_offset = tile_id * buffer_elements_per_thread;
       for (int row = verify_row_start; row < verify_row_start + verify_rows; row++) {
         for (int col = verify_col_start; col < verify_col_start + verify_cols; col++) {
-          int logical_row = row - verify_row_start;
-          int logical_col = col - verify_col_start;
           size_t tile_linear_idx = (size_t)(row) * (is_start_coord_test ? t1_verify : t1) + col;
           size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
           float expected = static_cast<float>(tile_linear_idx % 256);
-          (void)logical_row; (void)logical_col;
           if (dest[buffer_idx] != expected) {
             std::cerr << "Data validation error at buffer idx " << buffer_idx
                       << " (tile pos [" << row << "," << col << "], tile_id=" << tile_id << ")"
