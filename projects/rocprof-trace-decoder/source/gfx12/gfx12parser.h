@@ -61,5 +61,6 @@ public:
 private:
     bool bIsExt = false;
     TokenLookupTable lookupbits{};
+    header_type header{};
 };
 } // namespace gfx12

@@ -414,7 +414,8 @@ typedef enum aqlprofile_att_parameter_name_ext_t
      */
     AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH = 11,
     AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP,  // one of aqlprofile_att_parameter_rt_timestamp_t
-    AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS
+    AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS,
+    AQLPROFILE_ATT_PARAMETER_NAME_EXEC_MASK_TRACE
 } aqlprofile_att_parameter_name_ext_t;
 
 // Profile parameter object

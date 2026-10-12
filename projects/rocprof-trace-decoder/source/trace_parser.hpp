@@ -26,6 +26,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -212,6 +213,9 @@ struct WaveDataInternal : public rocprofiler_thread_trace_decoder_wave_t
 
     std::vector<size_t> unattrib_pcs{};
     std::vector<std::pair<size_t, pcinfo_t>> pc_infos{};
+    std::deque<rocprofiler_thread_trace_decoder_exec_popcnt_t> popcnt_va{};
+    std::deque<rocprofiler_thread_trace_decoder_exec_popcnt_t> popcnt_sa{};
+    std::vector<rocprofiler_thread_trace_decoder_exec_popcnt_t> popcnt{};
 
     void lookbackpcs(class CSRegisterHandler& reg);
 };

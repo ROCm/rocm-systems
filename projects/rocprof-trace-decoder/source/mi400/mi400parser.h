@@ -104,6 +104,7 @@ private:
     size_t byte_ptr = 0;
     bool bIsExt = false;
     TokenLookupTable lookupbits{};
+    header_type header{};
 };
 
 } // namespace mi400
