@@ -181,7 +181,11 @@ RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) con
             // which uses the VCN color conversion for every subsampling except 4:4:0.
             if (vcn_jpeg_spec.can_convert_to_rgb) {
                 decode_caps->hw_rgb_subsampling_mask = decode_caps->subsampling_mask & ~(1u << ROCJPEG_CSS_440);
-                decode_caps->hw_rgb_output_format_mask = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+                // Both masks describe the same capability, so neither is reported on its own: if 4:4:0 is the only
+                // supported subsampling, no subsampling uses the VCN color conversion and both stay zero.
+                if (decode_caps->hw_rgb_subsampling_mask != 0) {
+                    decode_caps->hw_rgb_output_format_mask = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+                }
             }
             break;
         }
