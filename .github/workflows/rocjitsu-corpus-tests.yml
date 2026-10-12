@@ -349,6 +349,9 @@ jobs:
             # ConcurrentAsyncEvents teardown race as the HIP clients above.
             "HsaDbiNopAsm.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
             "HsaDbiNopProbe.*Sim\.PatchedElfLoadsAndValidatesInHsaExecutable"
+            # The DBI runtime hook cases both load an executable and dispatch
+            # against the client's own AQL ring, so they share both reasons.
+            "HsaDbiRuntime.*Sim\..*"
           )
 
           TEST_REGEX="${{ matrix.test_regex }}"
