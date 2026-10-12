@@ -873,20 +873,16 @@ static int ginIbvMtuToInt(enum ibv_mtu mtu) {
   }
 }
 
-// Negotiates path MTU as min(local, remote), mirroring transport/net_ib/connect.cc's
-// std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller is responsible for having
-// already validated local_mtu (done once, outside the per-peer loop); only remote_mtu is
-// validated here. Returns -1 and leaves *out untouched if remote_mtu is invalid, else 0.
+// Mirrors connect.cc's std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller must have
+// already validated local_mtu.
 static int ginNegotiatePathMtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
   if (ginIbvMtuToInt(remote_mtu) == 0) return -1;
   *out = (local_mtu < remote_mtu) ? local_mtu : remote_mtu;
   return 0;
 }
 
-// Test-only wrappers over the file-static helpers above (host-only, no HW), following the
-// pattern in src/transport/net_ib_cast/connect.cc's ncclIbCastTest* forwarders. Declared in
-// gin_rocshmem_gda_inspect.h. This TU only builds under ENABLE_ROCSHMEM_GIN (see
-// src/CMakeLists.txt), so no additional guard is needed here.
+// Test-only wrappers declared in gin_rocshmem_gda_inspect.h; no extra build guard needed since
+// this TU only compiles under ENABLE_ROCSHMEM_GIN already.
 extern "C" int ginTestIbvMtuToInt(int mtu) {
   return ginIbvMtuToInt(static_cast<enum ibv_mtu>(mtu));
 }
@@ -933,13 +929,9 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
-      // Path-local if same subnet and GRH not required; else global addressing. FLID only when
-      // subnets differ. The subnet/GRH-necessity decision and remote-FLID lookup mirror
-      // transport/net_ib/connect.cc::ncclIbQpRtr(); unlike that path, the local sgid_index chosen
-      // above ("Select GID") does not prefer a routable-FLID GID index the way
-      // ncclIbGetGidIndex()/NCCL_IB_ROUTABLE_FLID_GID_INDEX does for native IB — it takes the
-      // first IBV_GID_TYPE_IB entry. Native IB remains inspection-only on every AMD cluster
-      // checked so far, so this has not been a reachable gap in practice.
+      // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr(), but doesn't prefer a routable-FLID
+      // sgid_index like ncclIbGetGidIndex() does — unreached today since native IB remains
+      // inspection-only.
       bool sameSubnet = (ginExtractLocalSubnetPrefix(set->nic.gid.global.subnet_prefix) ==
                          ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
       bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);

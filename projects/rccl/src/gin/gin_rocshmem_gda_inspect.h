@@ -11,22 +11,12 @@
 extern "C" {
 #endif
 
-/*
- * Test-only wrappers over internal static helpers in gin_rocshmem_gda_factory.cc
- * (host-only, no HW). Mirrors the pattern in
- * src/transport/net_ib_cast/net_ib_cast_inspect.h.
- *
- * MTU values are passed as plain ints holding enum ibv_mtu values
- * (IBV_MTU_256=1 .. IBV_MTU_4096=5) so this header does not need to pull in
- * <infiniband/verbs.h>.
- */
+/* Test-only wrappers over static helpers in gin_rocshmem_gda_factory.cc. Plain ints (holding
+ * enum ibv_mtu values) avoid pulling in <infiniband/verbs.h> here. */
 
-/* Returns the MTU in bytes for a valid enum ibv_mtu value, else 0. */
 int ginTestIbvMtuToInt(int mtu);
 
-/* Negotiates path MTU as min(local_mtu, remote_mtu). Returns 0 and sets
- * *out_mtu (in bytes) on success, -1 if remote_mtu is not a valid enum
- * ibv_mtu value. Caller must have already validated local_mtu. */
+/* Returns -1 without touching *out_mtu if remote_mtu is invalid. */
 int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu);
 
 #ifdef __cplusplus
