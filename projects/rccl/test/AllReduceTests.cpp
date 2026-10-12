@@ -884,9 +884,9 @@ namespace RcclUnitTesting
   }
 
   // The other collectives that read comm before ncclEnqueueCheck must reject a NULL comm the same way.
-  TEST(AllReduceWithBias, NullCommReturnsInvalidArgument)
+  TEST(AllReduce, NullCommWithBiasReturnsInvalidArgument)
   {
-    RUN_ISOLATED_TEST("AllReduceWithBias_NullCommReturnsInvalidArgument", []()
+    RUN_ISOLATED_TEST("AllReduce_NullCommWithBiasReturnsInvalidArgument", []()
     {
       float acc = 0.0f;
       EXPECT_EQ(ncclInvalidArgument,
