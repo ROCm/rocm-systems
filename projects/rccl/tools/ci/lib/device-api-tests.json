@@ -4,8 +4,10 @@
     "Add a mode by appending a suites entry. Each suite runs every bin as:",
     "  mpirun -np $NP <base_env + suite env> -x LD_LIBRARY_PATH ${RCCL_TESTS_BIN_DIR}/<bin> $bench_args <args>",
     "RCCL_TESTS_BIN_DIR is the absolute cmake build dir (.ci-out/rccl-tests-build",
-    "for this job). The non-GIN symmetric matrix is device-api-nongin-tests.json,",
-    "run against the ENABLE_DEVICE_API=1 ./install.sh build.",
+    "for this job). The symmetric suite runs the five RDC-linked binaries",
+    "(broadcast/reduce/sendrecv/scatter/gather) against that build.",
+    "LSA all_reduce_perf (-D 1/-D 2) stays in device-api-nongin-tests.json:",
+    "all_reduce_perf does not build under ENABLE_ROCSHMEM_GIN.",
     "After the matrix, run-device-api-ci.sh runs pytest test/test_AllToAllDevtime.py",
     "(GIN -D 3 device-timing smoke: -B 1/2 and -B 2 -H 1; ENABLE_DEVICE_API build).",
     "bench_args: common bench flags | base_env: -x on every run",
@@ -40,6 +42,11 @@
       "bins": ["alltoall_perf"],
       "args": "-R 2 -D 4",
       "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
+      "name": "symmetric",
+      "bins": ["broadcast_perf", "reduce_perf", "sendrecv_perf", "scatter_perf", "gather_perf"],
+      "args": "-R 2"
     }
   ]
 }

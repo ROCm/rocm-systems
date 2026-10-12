@@ -18,9 +18,10 @@
 #   3. lib/build-rocshmem.sh   build rocSHMEM -> rocshmem.env
 #   4. projects/rccl/install.sh   build RCCL (in-tree, release, --rocshmem-gin)
 #   5. rccl-tests (install.sh)    ENABLE_DEVICE_API=1, no ENABLE_ROCSHMEM_GIN
-#                                  (symmetric matrix; LSA all_reduce is not run)
+#                                  (symmetric matrix + LSA all_reduce -D 1/-D 2)
 #   6. rccl-tests (cmake)         ENABLE_DEVICE_API + ENABLE_ROCSHMEM_GIN
-#                                  (GIN -D 3/-D 4 + allgather Anvil SDMA)
+#                                  (GIN -D 3/-D 4, allgather Anvil SDMA,
+#                                   and the five symmetric binaries)
 #   7. run-device-api-ci.sh       non-GIN matrix, then GIN matrix
 #
 # Required env (from the workflow via `sbatch --export=ALL,...`):
@@ -151,8 +152,9 @@ rccl_cmake_dir="$(dirname "${rccl_cfg}")"
 echo "    in-tree RCCL cmake config: ${rccl_cmake_dir}"
 
 # 5) rccl-tests via install.sh with ENABLE_DEVICE_API only. This is the
-# device-API-without-rocSHMEM build. LSA all_reduce_perf (-D 1/-D 2) is not
-# part of this job. install.sh always writes into projects/rccl-tests/build.
+# device-API-without-rocSHMEM build. It runs the symmetric matrix and
+# LSA all_reduce_perf (-D 1/-D 2). install.sh always writes into
+# projects/rccl-tests/build.
 echo "==> [5/7] build rccl-tests (ENABLE_DEVICE_API via install.sh)"
 rccl_tests_src="${workdir}/projects/rccl-tests"
 rccl_tests_nongin_build="${rccl_tests_src}/build"
@@ -163,9 +165,9 @@ rccl_tests_nongin_build="${rccl_tests_src}/build"
        --rocm_home="${ROCM_PATH}" \
        --gpu_targets="${amdgpu_targets}"
 )
-# Symmetric suites in device-api-nongin-tests.json. all_reduce_perf is not required.
+# Symmetric + LSA suites in device-api-nongin-tests.json.
 required_nongin_bins=(
-  broadcast_perf reduce_perf sendrecv_perf scatter_perf gather_perf
+  all_reduce_perf broadcast_perf reduce_perf sendrecv_perf scatter_perf gather_perf
 )
 for perf_bin in "${required_nongin_bins[@]}"; do
   if [[ ! -x "${rccl_tests_nongin_build}/${perf_bin}" ]]; then
@@ -248,9 +250,10 @@ set +a
 nongin_rc=0
 gin_rc=0
 {
-# 7) Benchmarks: symmetric against the install.sh build, then GIN against
-# the cmake ENABLE_ROCSHMEM_GIN build. Skip the GIN AllToAllDevtime smoke on the
-# non-GIN pass; the GIN pass runs it. LSA all_reduce (-D 1/-D 2) is not run.
+# 7) Benchmarks: non-GIN matrix (symmetric + LSA -D 1/-D 2) against the
+# install.sh build, then the GIN matrix (GIN modes + the five symmetric
+# binaries) against the cmake ENABLE_ROCSHMEM_GIN build. Skip the GIN
+# AllToAllDevtime smoke on the non-GIN pass; the GIN pass runs it.
 # Capture each matrix with its own || rc=$?: set -e is ignored on the left of ||
 # inside a compound command, so a single trailing || on the brace group would
 # keep only the second matrix's status.
@@ -258,7 +261,7 @@ echo "==> [7/7] run benchmarks"
 ulimit -l unlimited 2>/dev/null || echo "WARN: could not raise RLIMIT_MEMLOCK (ulimit -l)"
 echo "==> RLIMIT_MEMLOCK (ulimit -l) = $(ulimit -l)"
 
-echo "==> non-GIN symmetric matrix (install.sh ENABLE_DEVICE_API build)"
+echo "==> non-GIN matrix (install.sh ENABLE_DEVICE_API build)"
 CONFIG="${ci_dir}/lib/device-api-nongin-tests.json" \
 RCCL_TESTS_BIN_DIR="${RCCL_TESTS_NONGIN_BIN_DIR}" \
 RCCL_CI_SKIP_DEVTIME=1 \

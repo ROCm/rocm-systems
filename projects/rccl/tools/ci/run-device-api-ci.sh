@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
 # against a freshly built rccl-tests tree. Mirrors the legacy rocJenkins
-# "device-api" testCommand. LSA all_reduce_perf (-D 1/-D 2) is not launched.
+# "device-api" testCommand. The non-GIN matrix launches LSA all_reduce_perf
+# (-D 1/-D 2). The GIN matrix does not: all_reduce_perf does not build under
+# ENABLE_ROCSHMEM_GIN.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
 # (rocshmem.env), and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR,
@@ -13,9 +15,9 @@
 #
 # device-api.sbatch invokes this twice:
 #   1. CONFIG=device-api-nongin-tests.json against the install.sh ENABLE_DEVICE_API
-#      build (symmetric only; no LSA), with RCCL_CI_SKIP_DEVTIME=1
+#      build (symmetric + LSA -D 1/-D 2), with RCCL_CI_SKIP_DEVTIME=1
 #   2. CONFIG=device-api-tests.json against the cmake ENABLE_ROCSHMEM_GIN build
-#      (GIN suites + AllToAllDevtime smoke)
+#      (GIN suites, the five symmetric binaries, and the AllToAllDevtime smoke)
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
