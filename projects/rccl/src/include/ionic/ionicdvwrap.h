@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 ncclResult_t wrap_ionicdv_symbols(void);
+bool wrap_ionicdv_has_qp_set_gda(void);
 /* NCCL wrappers of ionic direct verbs functions */
 ncclResult_t wrap_ionicdv_qp_set_gda(struct ibv_qp* ibqp, bool enable_send, bool enable_recv);
 ncclResult_t wrap_ionicdv_pd_set_udma_mask(struct ibv_pd* ibpd, uint8_t udma_mask);

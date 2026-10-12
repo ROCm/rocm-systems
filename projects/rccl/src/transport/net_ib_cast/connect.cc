@@ -518,7 +518,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   }
 
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
-  NCCLCHECK(wrap_ionicdv_qp_set_gda(qp->qp, false, true));
+  if (wrap_ionicdv_has_qp_set_gda()) NCCLCHECK(wrap_ionicdv_qp_set_gda(qp->qp, false, true));
   qp->ctsQpSlot = createQpAttrs->ctsQpSlot;
   return ncclSuccess;
 }

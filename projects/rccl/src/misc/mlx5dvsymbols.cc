@@ -38,9 +38,11 @@ ncclResult_t buildMlx5dvSymbols(struct ncclMlx5dvSymbols* mlx5dvSymbols) {
   void* tmp;
   void** cast;
 
-  mlx5dvhandle = dlopen("libmlx5.so", RTLD_NOW);
+  // libmlx5 is also a libibverbs provider: loading it registers a driver with
+  // libibverbs that can never be unregistered, so it must never be unmapped.
+  mlx5dvhandle = dlopen("libmlx5.so", RTLD_NOW | RTLD_NODELETE);
   if (!mlx5dvhandle) {
-    mlx5dvhandle = dlopen("libmlx5.so.1", RTLD_NOW);
+    mlx5dvhandle = dlopen("libmlx5.so.1", RTLD_NOW | RTLD_NODELETE);
     if (!mlx5dvhandle) {
       INFO(NCCL_INIT, "Failed to open libmlx5.so[.1]");
       goto teardown;

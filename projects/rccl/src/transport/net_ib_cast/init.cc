@@ -386,9 +386,13 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled.");
   }
   if (wrap_ionicdv_symbols() != ncclSuccess) {
-    INFO(NCCL_NET,
-         "NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
+    WARN("NET/IB-CAST : libionic is missing or lacks ionic_dv_pd_set_udma_mask; IB-CAST is disabled; RCCL tries the "
+         "remaining network plugins, if any. Upgrade libionic, or set NCCL_NET=IB.");
     return ncclInternalError;
+  }
+  if (rcclUseAinic() && !wrap_ionicdv_has_qp_set_gda()) {
+    WARN("NET/IB-CAST : libionic lacks ionic_dv_qp_set_gda; IB-CAST QPs are created without GDA receive mode. "
+         "Upgrade libionic for full IB-CAST support.");
   }
 
   // Detect IB cards

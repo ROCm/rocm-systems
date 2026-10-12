@@ -96,6 +96,7 @@ function(rccl_define_micro_source_lists)
     dev-runtime-test.cc
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
+    dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
     process-isolated-runner-test.cc
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
@@ -848,7 +849,25 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
+    IONICDV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
+    MLX5DV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
+    DV_PROVIDER_FAKE_IONIC_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-ionic>"
+    DV_PROVIDER_FAKE_IONIC_NO_GDA_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-ionic-no-gda>"
+    DV_PROVIDER_FAKE_MLX5_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-mlx5>"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
+foreach(_fake ionic ionic-no-gda mlx5)
+  string(REGEX REPLACE "-.*" "" _dv "${_fake}")
+  add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
+  target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
+  add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
+endforeach()
+target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
+target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE
+  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)

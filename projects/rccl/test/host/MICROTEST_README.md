@@ -182,6 +182,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
+  - `misc/ionicdvsymbols.cc`, `misc/mlx5dvsymbols.cc` (`IONICDV_SYMBOLS_CC_PATH`,
+    `MLX5DV_SYMBOLS_CC_PATH`, from `dv_symbols_test.cc`); suite `DvSymbolsTestIsolated.*`.
+    Checks that a provider dv library stays mapped after a missing-symbol failure,
+    and that a libionic without `ionic_dv_qp_set_gda` still builds, using
+    `fakes/dv_provider_fake.cc` built as shared objects with SONAME `libionic.so` /
+    `libmlx5.so`. Each test runs in its own process because the builders open the
+    fakes with `RTLD_NODELETE`. The tests skip when those libraries are not next to
+    the build tree (e.g. an installed binary).
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -403,6 +411,7 @@ symbol.
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
 | `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
+| ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
