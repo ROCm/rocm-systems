@@ -162,6 +162,38 @@ __global__ void kernelBackendMaskPut(ncclDevComm comm, ncclWindow_t dstWin, nccl
           args.given, args.required, args.optFlags, Segment{});
 }
 
+// ncclGinPut_v3 arguments that the template put derives from its RemoteAction, LocalAction and Segment types.
+struct CPutAction {
+  ncclGinSignalType signalType;
+  bool isStrong;
+  ncclGinSignalOp_t signalOp;
+  uint64_t signalOpArg;
+  bool isCounter;
+  ncclGinSegmentType_t segmentType;
+};
+
+// The C API reaches the same backends through ncclGinPut_C_impl, which has its own copy of the multi-segment loop.
+__global__ void kernelCPut(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin, PutArgs args, CPutAction a) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) {
+    return;
+  }
+  ncclGin_C net(comm, NCCL_GIN_BACKEND_MASK_ALL, 0);
+  ncclGinPut_v3(&net, ncclTeamWorld(comm), args.peer, dstWin, args.dstOff, srcWin, args.srcOff, args.bytes,
+                a.signalType, /*signalWin=*/nullptr, /*signalOffset=*/0, args.signalId, a.isStrong, a.signalOp,
+                a.signalOpArg, a.isCounter, args.counterId, ncclCoopThread{}, /*isDescriptor=*/false,
+                /*descriptor=*/nullptr, args.given, args.required, args.optFlags, a.segmentType);
+}
+
+constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentDevice) {
+  return ncclGinSegmentTypeDevice;
+}
+constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentMixed) {
+  return ncclGinSegmentTypeMixed;
+}
+constexpr ncclGinSegmentType_t segmentTypeOf(ncclGin_SegmentHostNuma) {
+  return ncclGinSegmentTypeHostNuma;
+}
+
 // put()'s action helpers take ncclGin (NCCL_GIN_BACKEND_MASK_ALL), so call ncclGinCall directly with a one-bit mask.
 __global__ void kernelOneBitMaskCall(PutRecord* records) {
   if (threadIdx.x != 0 || blockIdx.x != 0) {
@@ -249,32 +281,21 @@ protected:
     return d_records_.copyTo();
   }
 
+  std::vector<PutRecord> runCPut(const ncclDevComm& comm, const PutArgs& args, const CPutAction& action) {
+    d_records_.zero();
+    kernelCPut<<<1, 1>>>(comm, d_dstWin_.ptr, d_srcWin_.ptr, args, action);
+    syncAndCheck();
+    if (HasFatalFailure()) {
+      return std::vector<PutRecord>(kNumRecords);
+    }
+    return d_records_.copyTo();
+  }
+
   // Exactly one backend stub ran, calls times.
   static void expectOnlyCalled(const std::vector<PutRecord>& records, int slot, int calls = 1) {
     for (int i = 0; i < kNumSlots; ++i) {
       EXPECT_EQ(records[i].calls, i == slot ? calls : 0) << "slot " << i;
     }
-  }
-
-  // The backend saw the user's put, with only the required release scope possibly escalated.
-  static void expectForwarded(const PutRecord& rec, const PutArgs& args, ncclGinSignalOp_t signalOp,
-                              uint64_t signalOpArg, cuda::thread_scope required, bool strongSignals) {
-    EXPECT_EQ(rec.peer, args.peer);
-    EXPECT_EQ(rec.dstWin, reinterpret_cast<ncclGinWindow_t>(kDstToken));
-    EXPECT_EQ(rec.srcWin, reinterpret_cast<ncclGinWindow_t>(kSrcToken));
-    EXPECT_EQ(rec.dstOff, ginOffset(kDstOffset4K, args.dstOff));
-    EXPECT_EQ(rec.srcOff, ginOffset(kSrcOffset4K, args.srcOff));
-    EXPECT_EQ(rec.bytes, args.bytes);
-    EXPECT_EQ(rec.signalType, NCCL_GIN_SIGNAL_TYPE_INDEXED);
-    EXPECT_EQ(rec.signalId, args.signalId);
-    EXPECT_EQ(rec.isStrong, strongSignals);
-    EXPECT_EQ(rec.signalOp, signalOp);
-    EXPECT_EQ(rec.signalOpArg, signalOpArg);
-    EXPECT_TRUE(rec.hasCounter);
-    EXPECT_EQ(rec.counterId, args.counterId);
-    EXPECT_EQ(rec.required, required);
-    EXPECT_EQ(rec.given, args.given);
-    EXPECT_EQ(rec.optFlags, args.optFlags);
   }
 
   using MemType = decltype(ncclSegmentWindow::memType);
@@ -360,6 +381,35 @@ protected:
     }
   }
 
+  // One backend call carried the user's whole put, with only the required release scope possibly escalated.
+  static void expectForwarded(const std::vector<PutRecord>& records, int slot, const PutArgs& args,
+                              ncclGinSignalOp_t signalOp, uint64_t signalOpArg, cuda::thread_scope required,
+                              bool strongSignals) {
+    expectChunks(records, slot, args,
+                 {{kDstToken, ginOffset(kDstOffset4K, args.dstOff), kSrcToken, ginOffset(kSrcOffset4K, args.srcOff),
+                   args.bytes, required}},
+                 NCCL_GIN_SIGNAL_TYPE_INDEXED, signalOp, signalOpArg, strongSignals, /*lastHasCounter=*/true);
+  }
+
+  // Runs the put through ncclGin::put and ncclGinPut_v3 and expects the same chunks from both.
+  template <typename Segment, typename RemoteAction, typename LocalAction>
+  void expectPutChunks(const ncclDevComm& comm, int slot, const PutArgs& args, RemoteAction remote, LocalAction local,
+                       const std::vector<ExpectedChunk>& chunks, ncclGinSignalType lastSignalType,
+                       ncclGinSignalOp_t signalOp, uint64_t signalOpArg, bool strongSignals, bool lastHasCounter) {
+    {
+      SCOPED_TRACE("ncclGin::put");
+      expectChunks(runPut<Segment>(comm, args, remote, local), slot, args, chunks, lastSignalType, signalOp,
+                   signalOpArg, strongSignals, lastHasCounter);
+    }
+    {
+      SCOPED_TRACE("ncclGinPut_v3");
+      const CPutAction action{lastSignalType, strongSignals, signalOp,
+                              signalOpArg,    lastHasCounter, segmentTypeOf(Segment{})};
+      expectChunks(runCPut(comm, args, action), slot, args, chunks, lastSignalType, signalOp, signalOpArg,
+                   strongSignals, lastHasCounter);
+    }
+  }
+
   hipError_t setDeviceErr_ = hipSetDevice(0);  // Must precede the DeviceBuffers; they allocate on the current device.
   DeviceBuffer<PutRecord> d_records_{kNumRecords};
   DeviceBuffer<ncclWindow_vidmem> d_dstWin_{1};
@@ -420,8 +470,7 @@ TEST_F(GinBackendMaskDispatchTest, DevicePutForwardsArguments) {
         runPut<ncclGin_SegmentDevice>(makeComm(NCCL_NET_DEVICE_GIN_GPI, strongSignals), args,
                                       ncclGin_SignalAdd{args.signalId, kSignalAddValue},
                                       ncclGin_CounterInc{args.counterId});
-    expectOnlyCalled(records, kGpiSlot);
-    expectForwarded(records[kGpiSlot], args, ncclGinSignalAdd, kSignalAddValue, args.required, strongSignals);
+    expectForwarded(records, kGpiSlot, args, ncclGinSignalAdd, kSignalAddValue, args.required, strongSignals);
   }
 }
 
@@ -433,8 +482,7 @@ TEST_F(GinBackendMaskDispatchTest, MixedSingleSegmentPutEscalatesRequiredToSyste
     const std::vector<PutRecord> records =
         runPut<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), args, remoteAction,
                                      ncclGin_CounterInc{args.counterId});
-    expectOnlyCalled(records, kEfaSlot);
-    expectForwarded(records[kEfaSlot], args, signalOp, signalOpArg, cuda::thread_scope_system, /*strongSignals=*/true);
+    expectForwarded(records, kEfaSlot, args, signalOp, signalOpArg, cuda::thread_scope_system, /*strongSignals=*/true);
   };
   check(ncclGin_SignalInc{args.signalId}, ncclGinSignalInc, /*signalOpArg=*/1);
   check(ncclGin_SignalAdd{args.signalId, kSignalAddValue}, ncclGinSignalAdd, kSignalAddValue);
@@ -462,12 +510,10 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutChunksAcrossSegmentsAndEscalat
       {kD2, 0, kS2, 10, 290, cuda::thread_scope_thread},
       {kD3, 0, kS3, 0, 20, cuda::thread_scope_thread},
   };
-  const std::vector<PutRecord> records =
-      runPut<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_GPI, /*strongSignals=*/false), args,
-                                   ncclGin_SignalAdd{args.signalId, kSignalAddValue},
-                                   ncclGin_CounterInc{args.counterId});
-  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalAdd, kSignalAddValue,
-               /*strongSignals=*/false, /*lastHasCounter=*/true);
+  expectPutChunks<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_GPI, /*strongSignals=*/false), kGpiSlot, args,
+      ncclGin_SignalAdd{args.signalId, kSignalAddValue}, ncclGin_CounterInc{args.counterId}, chunks,
+      NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalAdd, kSignalAddValue, /*strongSignals=*/false,
+      /*lastHasCounter=*/true);
 }
 
 // Multi-segment src with a one-segment dst still chunks; with no HOST_NUMA src segment required is never escalated.
@@ -489,17 +535,15 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutWithoutHostNumaKeepsRequiredOn
   };
   {
     SCOPED_TRACE("SignalInc, no counter");
-    const std::vector<PutRecord> records = runPut<ncclGin_SegmentHostNuma>(
-        makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
-    expectChunks(records, kEfaSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
-                 /*strongSignals=*/true, /*lastHasCounter=*/false);
+    expectPutChunks<ncclGin_SegmentHostNuma>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), kEfaSlot, args,
+        ncclGin_SignalInc{args.signalId}, ncclGin_None{}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc,
+        /*signalOpArg=*/1, /*strongSignals=*/true, /*lastHasCounter=*/false);
   }
   {
     SCOPED_TRACE("no signal, counter");
-    const std::vector<PutRecord> records = runPut<ncclGin_SegmentHostNuma>(
-        makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), args, ncclGin_None{}, ncclGin_CounterInc{args.counterId});
-    expectChunks(records, kEfaSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_NONE, static_cast<ncclGinSignalOp_t>(0),
-                 /*signalOpArg=*/0, /*strongSignals=*/true, /*lastHasCounter=*/true);
+    expectPutChunks<ncclGin_SegmentHostNuma>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), kEfaSlot, args, ncclGin_None{},
+        ncclGin_CounterInc{args.counterId}, chunks, NCCL_GIN_SIGNAL_TYPE_NONE, static_cast<ncclGinSignalOp_t>(0),
+        /*signalOpArg=*/0, /*strongSignals=*/true, /*lastHasCounter=*/true);
   }
 }
 
@@ -519,10 +563,9 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutStartingOnSegmentBoundaries) {
       {kD1, 0, kS1, 0, 64, args.required},
       {kD1, 64, kS2, 0, 36, cuda::thread_scope_thread},
   };
-  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
-      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
-  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
-               /*strongSignals=*/true, /*lastHasCounter=*/false);
+  expectPutChunks<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_GPI), kGpiSlot, args,
+      ncclGin_SignalInc{args.signalId}, ncclGin_None{}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc,
+      /*signalOpArg=*/1, /*strongSignals=*/true, /*lastHasCounter=*/false);
 }
 
 // Segments are registered from the allocation base, but the multi-segment branch looks up the window offset alone.
@@ -540,10 +583,9 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyIgnoresWindowOffset4K
   // BUG: findSegmentFromWindow gets srcOffset, not 4096 * ginOffset4K + srcOffset, so it reads seg 0; correct is below.
   const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS0, 100, 200, args.required}};
   // const std::vector<ExpectedChunk> chunks = {{kD0, 0, kS1, 100, 200, cuda::thread_scope_system}};
-  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
-      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
-  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
-               /*strongSignals=*/true, /*lastHasCounter=*/false);
+  expectPutChunks<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_GPI), kGpiSlot, args,
+      ncclGin_SignalInc{args.signalId}, ncclGin_None{}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc,
+      /*signalOpArg=*/1, /*strongSignals=*/true, /*lastHasCounter=*/false);
 }
 
 // AMD ROCm >= 7.12 records host segments as CU_MEM_LOCATION_TYPE_HOST, but the escalation only checks HOST_NUMA.
@@ -564,10 +606,9 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutCurrentlyDoesNotEscalateOnHost
       // {kD0, 0, kS0, 32, 32, cuda::thread_scope_system},
       {kD0, 32, kS1, 0, 32, cuda::thread_scope_thread},
   };
-  const std::vector<PutRecord> records = runPut<ncclGin_SegmentMixed>(
-      makeComm(NCCL_NET_DEVICE_GIN_GPI), args, ncclGin_SignalInc{args.signalId}, ncclGin_None{});
-  expectChunks(records, kGpiSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
-               /*strongSignals=*/true, /*lastHasCounter=*/false);
+  expectPutChunks<ncclGin_SegmentMixed>(makeComm(NCCL_NET_DEVICE_GIN_GPI), kGpiSlot, args,
+      ncclGin_SignalInc{args.signalId}, ncclGin_None{}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc,
+      /*signalOpArg=*/1, /*strongSignals=*/true, /*lastHasCounter=*/false);
 }
 
 // backendIndex 1 reads windows from ginMultiSegmentWins[numSegments + seg]; sizes still come from backend 0.
@@ -591,10 +632,9 @@ TEST_F(GinBackendMaskDispatchTest, MultiSegmentPutUsesWindowsOfItsBackendIndex) 
       {kB1D0, 82, kB1S1, 0, 18, cuda::thread_scope_system},
       {kB1D1, 0, kB1S1, 18, 30, cuda::thread_scope_thread},
   };
-  const std::vector<PutRecord> records =
-      runPut<ncclGin_SegmentMixed>(comm, args, ncclGin_SignalInc{args.signalId}, ncclGin_CounterInc{args.counterId});
-  expectChunks(records, kEfaSlot, args, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
-               /*strongSignals=*/true, /*lastHasCounter=*/true);
+  expectPutChunks<ncclGin_SegmentMixed>(comm, kEfaSlot, args, ncclGin_SignalInc{args.signalId},
+      ncclGin_CounterInc{args.counterId}, chunks, NCCL_GIN_SIGNAL_TYPE_INDEXED, ncclGinSignalInc, /*signalOpArg=*/1,
+      /*strongSignals=*/true, /*lastHasCounter=*/true);
 }
 
 }  // namespace
