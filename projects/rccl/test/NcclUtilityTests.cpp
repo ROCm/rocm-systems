@@ -489,7 +489,8 @@ TEST(NcclUtilityRcp, DivModFast64EdgesAndSweep) {
 // idivFast64 returns uint32_t, so a quotient >= 2^32 silently loses its high word; imodFast64 is unaffected.
 TEST(NcclUtilityRcp, IdivFast64TruncatesWideQuotient) {
   const uint64_t x = (uint64_t{1} << 40) + 5;
-  EXPECT_EQ(nu::idivFast64(x, 1, nu::idivRcp64(1)), 5u);
+  EXPECT_EQ(nu::idivFast64(x, 1, nu::idivRcp64(1)), 5u)
+      << "idivFast64 no longer truncates the quotient: delete this pin and uncomment the check below";
   // EXPECT_EQ(nu::idivFast64(x, 1, nu::idivRcp64(1)), x);  // Correct if idivFast64 returned uint64_t.
   EXPECT_EQ(nu::idivFast64(x, 4, nu::idivRcp64(4)), static_cast<uint32_t>(x / 4));
   EXPECT_EQ(nu::imodFast64(x, 4, nu::idivRcp64(4)), x % 4);
@@ -558,8 +559,8 @@ TEST(NcclUtilityRcp, ImulRcpComposesReciprocals) {
     }
   }
   // The sweep reaches the zero case often; if it never shows up, the generator stopped covering large products.
-  EXPECT_GT(zeroCases32, 0);
-  EXPECT_GT(zeroCases64, 0);
+  EXPECT_GT(zeroCases32, 0) << "imulRcp32 no longer returns 0 when the true reciprocal is 1: delete this counter";
+  EXPECT_GT(zeroCases64, 0) << "imulRcp64 no longer returns 0 when the true reciprocal is 1: delete this counter";
 }
 
 // When the true reciprocal is 1, imulRcp returns 0 (the divide-by-1 sentinel), so idivFast returns x unchanged.
@@ -571,14 +572,15 @@ TEST(NcclUtilityRcp, ImulRcpReturnsZeroWhenTrueReciprocalIsOne) {
   const uint32_t rcp = nu::imulRcp32(x, nu::idivRcp32(x), y, nu::idivRcp32(y));
   EXPECT_EQ(rcp, 0u) << "imulRcp32 now returns the true reciprocal: delete this pin and uncomment the check below";
   // EXPECT_EQ(rcp, 1u);  // Correct with `if (rcp == 0 || x * y <= rem) rcp += 1;` in imulRcp32.
-  EXPECT_EQ(nu::idivFast32(0xFFFFFFFFu, d, rcp), 0xFFFFFFFFu);
+  EXPECT_EQ(nu::idivFast32(0xFFFFFFFFu, d, rcp), 0xFFFFFFFFu)
+      << "imulRcp32 now returns the true reciprocal: delete this pin and uncomment the check below";
   // EXPECT_EQ(nu::idivFast32(0xFFFFFFFFu, d, rcp), 1u);  // Correct once imulRcp32 returns 1 here.
   const uint64_t bigX = 3;
   const uint64_t bigY = 5560062487026735461ull;
   const uint64_t bigD = bigX * bigY;
   ASSERT_EQ(nu::idivRcp64(bigD), 1u);
   const uint64_t rcp64 = nu::imulRcp64(bigX, nu::idivRcp64(bigX), bigY, nu::idivRcp64(bigY));
-  EXPECT_EQ(rcp64, 0u);
+  EXPECT_EQ(rcp64, 0u) << "imulRcp64 now returns the true reciprocal: delete this pin and uncomment the check below";
   // EXPECT_EQ(rcp64, 1u);  // Correct with `if (rcp == 0 || x * y <= rem) rcp += 1;` in imulRcp64.
 }
 
