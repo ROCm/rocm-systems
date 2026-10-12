@@ -18,6 +18,10 @@ static constexpr CachePolicy TdmLoadPolicy = createCachePolicy(TemporalHint::NT,
 static constexpr CachePolicy TdmStoreDevPolicy = createCachePolicy(TemporalHint::RT, MemScope::DEV);
 static constexpr CachePolicy TdmStoreSysPolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
+// The window is handed to the mover as a descriptor, not as a memory operand, so the
+// compiler cannot order lane LDS traffic against it. Both legs fence explicitly;
+// __syncwarp() is empty on AMD (common.h:19) and does not stand in for it.
+
 // Set by GenericOp: the async load only helps when there is a receive to spin on.
 bool tdmLoadAllowed = false;
 // A load issued by tdmLoadBegin() and not yet consumed by tdmLoadFinish().
@@ -64,6 +68,7 @@ __device__ __forceinline__ bool tdmLoadFinish(uint64_t (&regs)[WordPerThread]) {
   constexpr int EltPer16B = 16 / sizeof(T);
   uint64_t* shm8 = shmemCvtPtr(reinterpret_cast<uint64_t*>(tdmWindow()));
   tdm::tdmWait();
+  __threadfence_block();
 #pragma unroll
   for (int g = 0; g < WordPerThread / 2; g++) {
     int ix = tdmSlotIx(g);
@@ -85,6 +90,7 @@ __device__ __forceinline__ bool tdmStoreRegs(T* dst, uint64_t (&regs)[WordPerThr
     if (!flagThread || g % 2 == 0) storeShmem128(shm8 + 2 * ix, regs[2 * g + 0], regs[2 * g + 1]);
   }
   __syncwarp();
+  __threadfence_block();
   const uint8_t* src8 = tdmWindow();
   size_t bytes = static_cast<size_t>(eltN) * sizeof(T);
   if (userBypass()) {
