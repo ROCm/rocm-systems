@@ -23,8 +23,9 @@
 # wrong label still stops before test_runner.
 #
 # Both plans use a Debug build. When plan=both, perf passes --no-build and
-# reuses the func build, and it passes --emit-results so algbw/busbw are
-# uploaded with the logs.
+# reuses the func build. algbw/busbw stay in the perf log. This job does not
+# pass --emit-results: that writes host inventory (hostname, cmdline, SBIOS,
+# firmware) which the other RCCL workflows do not publish.
 
 name: RCCL MI350P PCIe 8-GPU Runner
 
@@ -138,8 +139,8 @@ jobs:
           if [ "${rc}" -eq 0 ]; then
             case "${PLAN}" in
               perf|both)
-                perf_args=(--emit-results --results-dir "${RUNNER_TEMP}/results")
                 # func already built the shared Debug tree.
+                perf_args=()
                 if [ "${PLAN}" = "both" ]; then
                   perf_args+=(--no-build)
                 fi
@@ -158,7 +159,6 @@ jobs:
           path: |
             ${{ runner.temp }}/mi350p_func.log
             ${{ runner.temp }}/mi350p_perf.log
-            ${{ runner.temp }}/results
           if-no-files-found: warn
 
       - name: Print summary

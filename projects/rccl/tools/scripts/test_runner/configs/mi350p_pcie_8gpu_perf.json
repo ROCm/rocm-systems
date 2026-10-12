@@ -1,7 +1,7 @@
 {
   "system_configurations": {
     "name": "RCCL-MI350P-PCIe-8GPU-Perf",
-    "description": "Single-node 8x MI350P PCIe performance from the same Debug build as the func plan, so a preceding func run can be reused with --no-build. Compare later Debug runs on this host; this file does not hard-code a bandwidth golden. The workflow passes --emit-results. AllReduce, AllGather, and ReduceScatter use the same -n 20 -w 5 sample. Tree+Simple AllReduce is omitted because the single-node gfx950 tuner will not select it."
+    "description": "Single-node 8x MI350P PCIe performance from the same Debug build as the func plan, so a preceding func run can be reused with --no-build. Compare later Debug runs on this host from the uploaded log; this file does not hard-code a bandwidth golden. The workflow does not pass --emit-results. AllReduce, AllGather, and ReduceScatter use the same -n 20 -w 5 sample. Tree+Simple AllReduce is omitted because the single-node gfx950 tuner will not select it."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
