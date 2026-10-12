@@ -172,6 +172,21 @@
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
       ]
     },
+    "unit_tests_utility_host_only": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsUtilityHostOnly",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {
+          "name": "UtilityHostOnly_AllTests",
+          "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)",
+          "test_filter": "*"
+        }
+      ]
+    },
     "unit_tests_gdr": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGdr",
@@ -272,6 +287,12 @@
       "name": "RCCL Unit Tests - Fixtures",
       "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - nccl::utility plain-C++ build",
+      "description": "rccl-UnitTestsUtilityHostOnly (nccl_device/utility.h as plain C++, CPU-only)",
+      "config": "unit_tests_utility_host_only",
       "enabled": true
     },
     {

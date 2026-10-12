@@ -668,6 +668,18 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
+  # nccl_device/utility.h built as plain C++ (no GPU): its !NCCL_DEVICE_COMPILE branches, such as the
+  # volatile-load testAbort overload, never compile in a HIP TU, so they need their own non-HIP binary.
+  add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
+  set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsUtilityHostOnly PRIVATE ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsUtilityHostOnly PRIVATE __HIP_PLATFORM_AMD__)
+  target_link_libraries(rccl-UnitTestsUtilityHostOnly PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsUtilityHostOnly COMMAND rccl-UnitTestsUtilityHostOnly)
+  set_tests_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES LABELS "unit")
+
   # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
   # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
   # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
