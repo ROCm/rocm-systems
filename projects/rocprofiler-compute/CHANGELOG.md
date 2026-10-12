@@ -22,7 +22,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-* `--torch-trace` emits one-level ROCTX markers (name, location, arguments, launcher-thread correlation) instead of a stacked ancestor path. The collector ships as one generic C++17 library with no PyTorch or Python build dependencies. PyTorch 2.13 and 2.14 use native tracing on every thread, including autograd workers; other versions or an unavailable collector warn and use `TorchDispatchMode`. Profile keeps the raw marker and counter CSVs.
+* `--torch-trace` emits one-level ROCTX markers (name, location, arguments, launcher-thread correlation) instead of a stacked ancestor path. The collector ships as one generic C++17 library with no PyTorch or Python build dependencies. It no longer builds and caches a helper under `~/.cache/rocprofiler-compute/`. PyTorch 2.13 and 2.14 use native tracing on every thread, including autograd workers; other versions or an unavailable collector warn and use `TorchDispatchMode`. Profile keeps the raw marker and counter CSVs.
 
 * `--triton-trace` no longer emits `|triton` ranges for `torch.compile` / Inductor fused kernels. Inductor now launches those kernels through PyTorch's static launcher, not Triton's Python runtime. Use `--torch-trace`; the GPU kernels nest under `torch.compile.<fn>`. `--triton-trace` still marks `@triton.jit` launches.
 * Replaced `sample/torch_compile_triton.py` with `sample/torch_triton_net.py` (eager PyTorch plus a `@triton.jit` kernel in one process).
@@ -324,7 +324,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Number of kernel dispatches
     * Min/Max/Mean and Total duration of kernel dispatches
 
-* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed.
+* `--torch-trace` now captures backward-pass and nested operators that were previously missed or misattributed. The first run builds and caches a helper under `~/.cache/rocprofiler-compute/`, so it takes longer than later runs.
 
 * Profile workload output folder name for Strix Halo series (gfx1151) is changed from `strix_halo` to `rdna35_halo`
 
