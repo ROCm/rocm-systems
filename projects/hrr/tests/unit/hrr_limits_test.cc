@@ -299,12 +299,26 @@ HRR_TEST_CASE(Unit_HRR_Limits_ParseU64) {
   CHECK(v == 16);
   CHECK(hrr::parse_u64("18446744073709551615", &v));
   CHECK(v == UINT64_MAX);
-  for (const char* bad : {"", "-1", "+1", " 5", "5x", "x", "18446744073709551616", "1e3"}) {
+  for (const char* bad : {"", "-1", "+1", " 5", "\t-1", "\n-1", "\t5", "\v1", " -1", "5x", "x", "18446744073709551616", "1e3"}) {
     v = 99;
     CHECK_FALSE(hrr::parse_u64(bad, &v));
     CHECK(v == 99);
   }
   CHECK_FALSE(hrr::parse_u64(nullptr, &v));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - find_duplicate_seq reports a sequence number that occurs twice, wherever
+ *     the two events sit in the stream, and nothing for distinct numbers.
+ */
+HRR_TEST_CASE(Unit_HRR_Limits_FindDuplicateSeq) {
+  uint64_t dup = 0;
+  CHECK_FALSE(hrr::find_duplicate_seq({}, &dup));
+  CHECK_FALSE(hrr::find_duplicate_seq({0, 1, 2, 5}, &dup));
+  CHECK(hrr::find_duplicate_seq({3, 1, 4, 1, 5}, &dup));
+  CHECK(dup == 1);
 }
 
 /** @} */

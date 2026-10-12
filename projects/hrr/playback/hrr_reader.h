@@ -244,9 +244,11 @@ void set_max_file_bytes(uint64_t bytes);
 // Read a whole file into `data`, refusing one larger than max_file_bytes().
 // Returns false if the file cannot be opened or read, or is too large; *error
 // (when given) then says which, naming the path and, for a refusal, the size.
-// An empty `data` with a true return is a zero-byte file.
+// An empty `data` with a true return is a zero-byte file. *refused (when given)
+// is set when the file exists but was not read for a resource reason, the cap
+// or an allocation failure, as opposed to being missing or unreadable.
 bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
-                      std::string* error = nullptr);
+                      std::string* error = nullptr, bool* refused = nullptr);
 
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,

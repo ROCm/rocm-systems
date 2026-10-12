@@ -215,15 +215,16 @@ struct PlaybackContext {
     // check this at the top of their event loop and exit immediately.
     // The spin-wait in dispatch_event also checks it to avoid deadlock when a
     // thread that was supposed to advance next_seq has already aborted.
-    std::atomic<bool> fatal_error{false};
+    // mutable: load_blob (const) sets it when a blob is refused.
+    mutable std::atomic<bool> fatal_error{false};
 
     // Bounds on what the archive can make replay wait for (hrr_replay_limits.h).
     // dispatch_event gives up on a sequence number that never becomes current
     // after this many waits with no progress (a gap or duplicate in the
     // recorded sequence), and a hipEventQuery/hipStreamQuery replay stops
-    // retrying hipErrorNotReady after this many attempts.
+    // retrying hipErrorNotReady after this many attempts (default: no limit).
     uint64_t max_seq_waits      = hrr::kDefaultMaxSeqWaits;
-    // Threads that hold a turn and are inside their HIP call. A wait for the
+    // Threads that hold a turn (ordered events) and are inside their HIP call. A wait for the
     // next turn does not count against max_seq_waits while this is non-zero.
     std::atomic<int> turns_in_flight{0};
     uint64_t max_query_attempts = hrr::kDefaultMaxQueryAttempts;

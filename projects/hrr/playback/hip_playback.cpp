@@ -188,10 +188,12 @@ static std::string co_path(const std::string& archive_dir,
     return archive_dir + "/code_objects/" + hrr::hash_hex(hash_lo, hash_hi) + ".hsaco";
 }
 
-static std::vector<uint8_t> read_file(const std::string& path) {
+// *refused is set when the file was not read because of the file cap or an
+// allocation failure (not because it is missing): the caller ends the replay.
+static std::vector<uint8_t> read_file(const std::string& path, bool* refused = nullptr) {
     std::vector<uint8_t> buf;
     std::string err;
-    if (!hrr::read_file_capped(path, buf, &err)) {
+    if (!hrr::read_file_capped(path, buf, &err, refused)) {
         fprintf(stderr, "[HRR] %s\n", err.c_str());
         return {};
     }
@@ -262,7 +264,15 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
         }
     }
     // Not cached — read from disk, then insert under exclusive lock
-    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi));
+    bool refused = false;
+    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi), &refused);
+    if (refused) {
+        // Not a missing blob: the replay cannot continue faithfully. Flag it
+        // now, so every thread stops at its next event, rather than after the
+        // consuming handler has gone on to its HIP call.
+        fatal_error.store(true, std::memory_order_release);
+        return nullptr;
+    }
     if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
     auto it = blob_cache_.emplace(key, std::move(data)).first;
@@ -283,7 +293,12 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
             return it->second.data();
         }
     }
-    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi));
+    bool refused = false;
+    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi), &refused);
+    if (refused) {
+        fatal_error.store(true, std::memory_order_release);
+        return nullptr;
+    }
     if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
     auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
@@ -2906,6 +2921,16 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
             std::memcpy(buf, blob, sz);
         else
             std::memset(buf, 0, sz);
+        if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
+            // The blob was refused (cap or allocation), not merely absent:
+            // do not register zeros in its place.
+#ifdef _WIN32
+            _aligned_free(buf);
+#else
+            free(buf);
+#endif
+            return hipErrorUnknown;
+        }
     } else {
         std::memset(buf, 0, sz);
     }
@@ -3782,13 +3807,18 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
 // hipSuccess (see hip_capture_generated.cpp).  Replay drives the API trace
 // faster than the original CPU often did relative to GPU completion, so the
 // same call can transiently return hipErrorNotReady (600).  Spin until
-// hipSuccess to match the captured observable return, but only for
-// ctx.max_query_attempts attempts: an archive whose recorded work never
-// completes on this machine must end the replay, not spin it forever.
+// hipSuccess to match the captured observable return. That is a synchronize in
+// effect, so by default the spin has no count of its own (a kernel the
+// application polled for a long time must still replay); it ends when another
+// thread has failed, and --max-query-attempts N adds a bound.
 hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
                                              hipError_t (*once)(void*), void* arg) {
     hipError_t r = hipSuccess;
     const bool done = hrr::retry_bounded(ctx.max_query_attempts, [&] {
+        if (ctx.fatal_error.load(std::memory_order_acquire)) {
+            r = hipErrorUnknown;  // another thread failed: stop spinning
+            return true;
+        }
         r = once(arg);
         return r != hipErrorNotReady;
     });

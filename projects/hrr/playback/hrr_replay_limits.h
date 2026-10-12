@@ -12,12 +12,14 @@
 // archive turns into a hang. This header is header-only and has no HIP
 // dependency so the bounds can be unit tested without a GPU.
 
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <thread>
+#include <vector>
 
 namespace hrr {
 
@@ -26,7 +28,15 @@ namespace hrr {
 // defaults allow a few minutes of waiting with no progress, far more than a
 // recorded run needs, and still end a malformed archive.
 constexpr uint64_t kDefaultMaxSeqWaits      = 5000000;
-constexpr uint64_t kDefaultMaxQueryAttempts = 5000000;
+
+// A hipEventQuery/hipStreamQuery replay spins until the recorded work is done,
+// which is what a synchronize does and a synchronize has no count either: the
+// work being waited for is work the replay itself submitted, and capture only
+// records a query that returned hipSuccess, so a kernel the application polled
+// for longer than any fixed count must still replay. The default is therefore
+// no attempt bound; --max-query-attempts N sets one, and a hang is left to the
+// replay's wall-clock limit.
+constexpr uint64_t kDefaultMaxQueryAttempts = UINT64_MAX;
 
 // Number of yields before a wait starts sleeping.
 constexpr int kSpinYields = 1000;
@@ -36,6 +46,17 @@ enum class TurnResult {
   Fatal,    // another thread set the fatal flag
   Stalled,  // next_seq made no progress for max_waits waits
 };
+
+// The first sequence number that occurs more than once in `ids`, if any. Two
+// events with the same number would both see next_seq equal to it and both
+// take the turn, so a replay checks this before it starts any thread.
+inline bool find_duplicate_seq(std::vector<uint64_t> ids, uint64_t* dup) {
+  std::sort(ids.begin(), ids.end());
+  const auto it = std::adjacent_find(ids.begin(), ids.end());
+  if (it == ids.end()) return false;
+  if (dup) *dup = *it;
+  return true;
+}
 
 // Wait until `next_seq` equals `seq`.
 //
@@ -51,8 +72,11 @@ enum class TurnResult {
 // An ordered event keeps next_seq where it is for as long as its HIP call
 // runs, which can be minutes for a recorded synchronize or a long kernel.
 // `busy`, when given, counts the threads that hold a turn and are inside such
-// a call; no wait is counted while it is non-zero, so a slow legitimate call
-// is never mistaken for a missing event.
+// a call (ordered events only: an unordered event hands the turn on before its
+// call, so it holds nothing); no wait is counted while it is non-zero, so a
+// slow legitimate call is never mistaken for a missing event, and a blocked
+// unordered call cannot hide a gap behind it. A duplicate sequence number is
+// not detected here (the turn is not exclusive); see find_duplicate_seq.
 inline TurnResult wait_for_turn(const std::atomic<uint64_t>& next_seq,
                                 uint64_t seq,
                                 const std::atomic<bool>& fatal,
@@ -94,12 +118,14 @@ inline TurnResult wait_for_turn(const std::atomic<uint64_t>& next_seq,
   }
 }
 
-// Parse an unsigned integer option value. Rejects an empty string, a leading
-// sign or space (strtoull would accept "-1" as the largest value, silently
-// turning a cap off), trailing characters and out-of-range values. Accepts
-// decimal, and 0x hex or 0 octal as strtoull does with base 0.
+// Parse an unsigned integer option value. Requires the first character to be a
+// digit: strtoull skips leading whitespace (space, tab, newline) and accepts a
+// sign after it, so "-1" or "\t-1" would parse as the largest value and
+// silently turn a cap off. Also rejects an empty string, trailing characters
+// and out-of-range values. Accepts decimal, and 0x hex or 0 octal as strtoull
+// does with base 0.
 inline bool parse_u64(const char* text, uint64_t* out) {
-  if (!text || !*text || *text == '-' || *text == '+' || *text == ' ') return false;
+  if (!text || *text < '0' || *text > '9') return false;
   char* end = nullptr;
   errno = 0;
   const unsigned long long v = std::strtoull(text, &end, 0);
