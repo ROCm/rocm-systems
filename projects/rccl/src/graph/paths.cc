@@ -417,10 +417,13 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // platform defaults.
   NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
 
-  // Compute the PCI distance and compare with the p2pLevel.
+  // Compute the PCI distance and compare with the p2pLevel. PATH_LOC is the
+  // explicit disable sentinel, not an allowed inter-rank path. This distinction
+  // matters for partitions that share a physical GPU topology node and
+  // therefore also have a PATH_LOC path between distinct ranks.
   // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
   // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
-  if (mnnvl || path->type <= p2pLevel) *p2p = 1;
+  if (p2pLevel != PATH_LOC && (mnnvl || path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (*p2p == 1) {

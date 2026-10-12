@@ -1097,6 +1097,18 @@ TEST_F(TopoTest, CheckP2p_DisableOverridesIntelCpuDefault) {
                   ncclSuccess);
         EXPECT_EQ(p2p, 0);
 
+        // CPX partitions on one physical GPU can map distinct ranks to the
+        // same topology node, producing PATH_LOC between them. PATH_LOC is
+        // also the NCCL_P2P_DISABLE sentinel and must not enable P2P/IPC.
+        built->nodes[GPU].nodes[0].paths[GPU][1].type = PATH_LOC;
+        p2p = -1;
+        int cudaP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, &read,
+                                   &intermediateRank, &cudaP2p, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+        EXPECT_EQ(cudaP2p, 1);
+
         ncclTopoFree(built);
       },
       {{"NCCL_P2P_DISABLE", "1"}});
