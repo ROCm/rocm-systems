@@ -247,6 +247,20 @@
           "env_variables": { "NCCL_GIN_A2A_MIN_BYTES": "67108864" }
         }
       ]
+    },
+
+    "gin_mtu_negotiation": {
+      "extends": "default",
+      "description": "Host-only rocSHMEM GDA MTU conversion/negotiation unit tests, single process, no GPU.",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsFixturesDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 120,
+      "tests": [
+        { "name": "Gin_Mtu_Negotiation", "description": "ibv_mtu<->int conversion and per-peer path-MTU negotiation", "test_filter": "GinMtuNegotiation.*" }
+      ]
     }
   },
   "test_suites": [
@@ -290,6 +304,12 @@
       "name": "GIN alltoall eligibility (host-only)",
       "description": "Host-only eligibility unit tests for the GIN-SDMA alltoall path",
       "config": "gin_a2a_eligibility",
+      "enabled": true
+    },
+    {
+      "name": "GIN MTU negotiation (host-only)",
+      "description": "Host-only unit tests for rocSHMEM GDA GIN MTU conversion/negotiation",
+      "config": "gin_mtu_negotiation",
       "enabled": true
     }
   ]
