@@ -906,8 +906,8 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
 }
 
 // Each DevComm names the backend it bound to. That line is INIT-only, so
-// NCCL_DEBUG_SUBSYS must include INIT. The proxy's name comes from the RMA
-// plugin, so the line is matched on type.
+// NCCL_DEBUG_SUBSYS must include INIT. NCCL_GIN_TYPE leaves a single active
+// backend, so backends[0] is the one the line must name.
 TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
@@ -923,11 +923,10 @@ TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
   if (HasFatalFailure() || IsSkipped()) return;
 
   const std::string log = logCtx.readNcclDebugLog();
-  const size_t pos = log.find("GIN: using backend ");
-  ASSERT_NE(std::string::npos, pos) << "actual log:\n" << log;
-  const std::string line = log.substr(pos, log.find('\n', pos) - pos);
-  const std::string type = " type " + std::to_string(requestedGinType());
-  EXPECT_NE(std::string::npos, line.find(type)) << "actual log:\n" << log;
+  const ncclGinBackendState& backend = getActiveCommunicator()->sharedRes->ginState.backends[0];
+  const std::string expected = "GIN: using backend " + std::string(backend.ncclGin->name) + " type " +
+                               std::to_string(static_cast<int>(backend.ginType));
+  EXPECT_NE(std::string::npos, log.find(expected)) << "expected: " << expected << "\nactual log:\n" << log;
 }
 
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
