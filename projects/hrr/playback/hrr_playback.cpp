@@ -665,18 +665,16 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
     }
   }
 
-  // An ordered event holds the turn until its call returns. The sequence waits
-  // of the other threads do not count while it does (see hrr::wait_for_turn):
-  // a long recorded synchronize is not a missing event. An unordered event
-  // hands the turn on at once and holds nothing, so it is not counted: a call
-  // of it that never returns must not hide a later gap from --max-seq-waits.
+  // From here until this function returns the thread is inside its call. The
+  // sequence waits of the other threads do not count while it is (see
+  // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
+  // Every call counts, ordered or not: an unordered synchronize hands the turn
+  // on before it blocks, and the next event may be this thread's own.
   struct InFlight {
-    std::atomic<int>* n;
-    InFlight(std::atomic<int>& c, bool held) : n(held ? &c : nullptr) {
-      if (n) n->fetch_add(1, std::memory_order_acq_rel);
-    }
-    ~InFlight() { if (n) n->fetch_sub(1, std::memory_order_acq_rel); }
-  } in_flight{ctx.turns_in_flight, order};
+    std::atomic<int>& n;
+    explicit InFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
+    ~InFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
+  } in_flight{ctx.turns_in_flight};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
@@ -974,6 +972,18 @@ static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
   return static_cast<uint64_t>(pid);
 }
 
+// True when `p` is a symbolic link. On Windows a directory junction is a
+// reparse point that fs::is_symlink does not report, and a normal user can
+// create one, so any reparse point counts.
+static bool is_link(const fs::path& p) {
+#ifdef _WIN32
+  const DWORD attrs = GetFileAttributesW(p.c_str());
+  if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
+#endif
+  std::error_code ec;
+  return fs::is_symlink(p, ec);
+}
+
 // Write `name` inside `dir` without following a symbolic link.
 //
 // The content goes to a new, unpredictably named file made with O_EXCL and
@@ -999,7 +1009,7 @@ static bool write_file_in_dir(const fs::path& dir, const std::string& name,
     case Entry::Regular: {
       struct stat old_st;
       if (::fstatat(d.get(), name.c_str(), &old_st, AT_SYMLINK_NOFOLLOW) == 0) {
-        new_mode = old_st.st_mode & 07777;
+        new_mode = old_st.st_mode & 0777;
         have_old_mode = true;
       }
       break;
@@ -1040,8 +1050,8 @@ static bool write_file_in_dir(const fs::path& dir, const std::string& name,
   // Windows: no O_NOFOLLOW/openat. Refuse links, then write beside and replace.
   std::error_code ec;
   const fs::path target = dir / name;
-  if (fs::is_symlink(dir, ec) || fs::is_symlink(target, ec)) {
-    *err = "refusing " + target.string() + ": it is a symbolic link";
+  if (is_link(dir) || is_link(target)) {
+    *err = "refusing " + target.string() + ": it is a symbolic link or junction";
     return false;
   }
   // The temporary file has an unpredictable name and is made with CREATE_NEW,
@@ -1123,10 +1133,9 @@ static bool check_repair_targets(const fs::path& dir, std::string* err) {
   }
   return true;
 #else
-  std::error_code ec;
   for (const char* n : {"", "events.bin", "manifest.json"}) {
-    if (fs::is_symlink(dir / n, ec)) {
-      *err = "refusing " + (dir / n).string() + ": it is a symbolic link";
+    if (is_link(dir / n)) {
+      *err = "refusing " + (dir / n).string() + ": it is a symbolic link or junction";
       return false;
     }
   }
@@ -1149,9 +1158,8 @@ static bool check_root_manifest_target(const fs::path& root, std::string* err) {
   }
   return true;
 #else
-  std::error_code ec;
-  if (fs::is_symlink(root / "manifest.json", ec)) {
-    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link";
+  if (is_link(root / "manifest.json")) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link or junction";
     return false;
   }
   return true;
@@ -1263,7 +1271,7 @@ static bool write_root_manifest(const fs::path& root,
                                 std::vector<std::pair<fs::path, ProcessInfo>> processes) {
   // A pid-* entry that is a link is not listed in the index.
   processes.erase(std::remove_if(processes.begin(), processes.end(),
-                                 [](const auto& p) { return fs::is_symlink(p.first); }),
+                                 [](const auto& p) { return is_link(p.first); }),
                   processes.end());
   std::sort(processes.begin(), processes.end(),
             [](const auto& a, const auto& b) { return a.second.pid < b.second.pid; });
@@ -1346,8 +1354,8 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     printf("[HRR] --- %s ---\n", dir.filename().string().c_str());
     // A pid-* entry that is a link is the archive's doing, not a capture of
     // this process tree: it is not read, repaired or indexed.
-    if (fs::is_symlink(dir)) {
-      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link\n",
+    if (is_link(dir)) {
+      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link or junction\n",
               dir.string().c_str());
       failed++;
       continue;
@@ -1453,8 +1461,10 @@ static void print_usage(const char* argv0) {
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
     "  --max-seq-waits N     End the replay when an event's sequence number is not\n"
-    "                        reached after N waits with no progress (a gap or\n"
-    "                        duplicate in the recorded sequence). Default 5000000.\n"
+    "                        reached after N waits with no progress and no call in\n"
+    "                        flight (a backstop: a gap or duplicate in the recorded\n"
+    "                        sequence is refused before the replay starts).\n"
+    "                        Default 5000000.\n"
     "  --max-query-attempts N\n"
     "                        Stop retrying hipEventQuery/hipStreamQuery after N\n"
     "                        attempts that return hipErrorNotReady. Default: no\n"
@@ -1776,12 +1786,19 @@ int main(int argc, char** argv) {
     std::vector<uint64_t> ids;
     ids.reserve(archive.events.size());
     for (const auto& ev : archive.events) ids.push_back(ev.header().sequence_id);
-    uint64_t dup = 0;
-    if (hrr::find_duplicate_seq(std::move(ids), &dup)) {
+    uint64_t dup = 0, missing = 0;
+    if (hrr::find_duplicate_seq(ids, &dup)) {
       fprintf(stderr,
               "[HRR] Fatal: malformed event stream: sequence number %llu occurs "
               "more than once, so the replay order is not defined\n",
               (unsigned long long)dup);
+      return 1;
+    }
+    if (hrr::find_seq_gap(std::move(ids), &missing)) {
+      fprintf(stderr,
+              "[HRR] Fatal: malformed event stream: sequence number %llu is "
+              "missing, so the replay would wait for it\n",
+              (unsigned long long)missing);
       return 1;
     }
   }

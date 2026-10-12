@@ -2975,15 +2975,6 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
 // ---------------------------------------------------------------------------
 // Manual playback: hipHostRegister / hipHostUnregister
 // ---------------------------------------------------------------------------
