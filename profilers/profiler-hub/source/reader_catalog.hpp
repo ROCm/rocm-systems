@@ -74,8 +74,8 @@ struct thread_sample_stats_t : track_range_stats_t
 
 /**
  * @brief Cached, read-only trace metadata: nodes/processes/threads/agents/
- *        tracks/code objects/kernel symbols/streams/queues/pmc info, plus
- *        the lookup indices built alongside them.
+ *        tracks/stream-to-hardware links/code objects/kernel symbols/streams/
+ *        queues/pmc info, plus the lookup indices built alongside them.
  *
  * Identical for a given trace file regardless of which SQLite connection
  * queried it -- immutable once built, safe to share (via shared_ptr) across
@@ -96,8 +96,13 @@ struct reader_catalog_t
     void build_threads(data_storage::schema_v3::read_statements& stmts);
     void build_agents(data_storage::schema_v3::read_statements& stmts);
 
-    // ---- Independent of each other, once the prefix above is done. ----
+    // ---- Independent of the lists below, once the prefix above is done. ----
     void build_tracks(data_storage::schema_v3::read_statements& stmts);
+
+    // ---- Depends on tracks (build_tracks() above). ----
+    void build_stream_hardware_links(data_storage::schema_v3::read_statements& stmts);
+
+    // ---- Independent of each other and of tracks, once the prefix is done. ----
     void build_code_objects(data_storage::schema_v3::read_statements& stmts);
     void build_streams(data_storage::schema_v3::read_statements& stmts);
     void build_queues(data_storage::schema_v3::read_statements& stmts);
@@ -109,16 +114,17 @@ struct reader_catalog_t
     /** @brief Builds every category sequentially, in dependency order. */
     void build_all(data_storage::schema_v3::read_statements& stmts);
 
-    reader_types::node_info_list_t          nodes;
-    reader_types::process_info_list_t       processes;
-    reader_types::thread_info_list_t        threads;
-    reader_types::agent_info_list_t         agents;
-    reader_types::track_info_list_t         tracks;
-    reader_types::kernel_symbol_info_list_t kernel_symbols;
-    reader_types::code_object_info_list_t   code_objects;
-    reader_types::stream_info_list_t        streams;
-    reader_types::queue_info_list_t         queues;
-    reader_types::pmc_info_list_t           pmc_infos;
+    reader_types::node_info_list_t            nodes;
+    reader_types::process_info_list_t         processes;
+    reader_types::thread_info_list_t          threads;
+    reader_types::agent_info_list_t           agents;
+    reader_types::track_info_list_t           tracks;
+    reader_types::stream_hardware_link_list_t stream_hardware_links;
+    reader_types::kernel_symbol_info_list_t   kernel_symbols;
+    reader_types::code_object_info_list_t     code_objects;
+    reader_types::stream_info_list_t          streams;
+    reader_types::queue_info_list_t           queues;
+    reader_types::pmc_info_list_t             pmc_infos;
 
     std::unordered_map<size_t, std::string> strings_by_id;
 

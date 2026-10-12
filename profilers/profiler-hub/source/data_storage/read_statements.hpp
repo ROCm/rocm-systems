@@ -347,6 +347,17 @@ struct track_stream_count_result
     std::optional<size_t> max_end;
 };
 
+/** @brief One distinct (stream, agent, queue) tuple from an event table.
+ *         agent_id and queue_id are absent when the row did not record them. */
+struct stream_hardware_link_result
+{
+    size_t                nid{};
+    size_t                pid{};
+    size_t                stream_id{};
+    std::optional<size_t> agent_id;
+    std::optional<size_t> queue_id;
+};
+
 struct pmc_sample_result
 {
     size_t timestamp{};
@@ -535,6 +546,8 @@ struct read_statements
         statement_func_t<track_agent_queue_count_result>;
     using track_stream_count_statement_func_t =
         statement_func_t<track_stream_count_result>;
+    using stream_hardware_link_statement_func_t =
+        statement_func_t<stream_hardware_link_result>;
 
     struct track_category_statement_set
     {
@@ -544,6 +557,9 @@ struct read_statements
         track_stream_count_statement_func_t      kernel_dispatch_stream;
         track_stream_count_statement_func_t      memory_allocate_stream;
         track_stream_count_statement_func_t      memory_copy_stream;
+        stream_hardware_link_statement_func_t    kernel_dispatch_stream_hardware;
+        stream_hardware_link_statement_func_t    memory_allocate_stream_hardware;
+        stream_hardware_link_statement_func_t    memory_copy_stream_hardware;
     };
 
     // Bind (nid, agent_id, pmc_id).
@@ -1109,6 +1125,44 @@ private:
             make_stream_stmt("rocpd_memory_allocate");
         m_track_category_statements.memory_copy_stream =
             make_stream_stmt("rocpd_memory_copy");
+
+        auto make_stream_hardware_stmt = [&](auto build_query) {
+            return m_backend->create_read_statement_executor<stream_hardware_link_result>(
+                build_query(),
+                &stream_hardware_link_result::nid,
+                &stream_hardware_link_result::pid,
+                &stream_hardware_link_result::stream_id,
+                &stream_hardware_link_result::agent_id,
+                &stream_hardware_link_result::queue_id);
+        };
+
+        m_track_category_statements.kernel_dispatch_stream_hardware =
+            make_stream_hardware_stmt([&] {
+                return queries::select::table_select_query{}
+                    .select("nid", "pid", "stream_id", "agent_id", "queue_id")
+                    .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid))
+                    .group_by("nid", "pid", "stream_id", "agent_id", "queue_id")
+                    .get_query_string();
+            });
+        m_track_category_statements.memory_allocate_stream_hardware =
+            make_stream_hardware_stmt([&] {
+                return queries::select::table_select_query{}
+                    .select("nid", "pid", "stream_id", "agent_id", "queue_id")
+                    .from(fmt::format("rocpd_memory_allocate_{}", m_uuid))
+                    .group_by("nid", "pid", "stream_id", "agent_id", "queue_id")
+                    .get_query_string();
+            });
+        // dst_agent_id matches the agent-queue memory-copy tracks: the device
+        // that received the copy.
+        m_track_category_statements.memory_copy_stream_hardware =
+            make_stream_hardware_stmt([&] {
+                return queries::select::table_select_query{}
+                    .select(
+                        "nid", "pid", "stream_id", "dst_agent_id AS agent_id", "queue_id")
+                    .from(fmt::format("rocpd_memory_copy_{}", m_uuid))
+                    .group_by("nid", "pid", "stream_id", "dst_agent_id", "queue_id")
+                    .get_query_string();
+            });
     }
 
     void initialize_pmc_track_statement()

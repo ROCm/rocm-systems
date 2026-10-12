@@ -281,18 +281,49 @@ extern "C"
         ph_pmc_info_t* pmc_infos;
     } ph_pmc_info_list_t;
 
-    /** @brief Node info bundled with its agents, processes, threads, streams,
-     *         queues, PMC descriptions, and tracks. */
+    /**
+     * @brief One distinct relationship from a stream to the hardware queue that
+     *        ran its kernel dispatches, memory allocations, or memory copies.
+     * @note stream_track_id and hardware_track_id refer to ph_track_t::id values
+     *       in this node's track list. is_valid is 0 when that side was not
+     *       recorded. For a memory copy, agent_id is the destination agent.
+     *       pid is the process-table id stored on the event row. It matches
+     *       the id used to find the stream track, and it is not ph_track_t::pid
+     *       or ph_process_t::id, which are the OS process id.
+     */
     typedef struct
     {
-        ph_node_info_t     info;
-        ph_agent_list_t    agents;
-        ph_process_list_t  process_list;
-        ph_track_list_t    track_list;
-        ph_thread_list_t   thread_list;
-        ph_stream_list_t   stream_list;
-        ph_queue_list_t    queue_list;
-        ph_pmc_info_list_t pmc_info_list;
+        ph_track_category_t  category;
+        uint32_t             nid;
+        uint32_t             pid;
+        uint64_t             stream_id;
+        ph_optional_uint64_t agent_id;
+        ph_optional_uint64_t queue_id;
+        ph_optional_uint64_t stream_track_id;
+        ph_optional_uint64_t hardware_track_id;
+    } ph_stream_hardware_link_t;
+
+    /** @brief A list of stream-to-hardware links; same lifetime rule as
+     *         ph_track_list_t. */
+    typedef struct
+    {
+        uint32_t                   list_size;
+        ph_stream_hardware_link_t* links;
+    } ph_stream_hardware_link_list_t;
+
+    /** @brief Node info bundled with its agents, processes, threads, streams,
+     *         queues, PMC descriptions, tracks, and stream-to-hardware links. */
+    typedef struct
+    {
+        ph_node_info_t                 info;
+        ph_agent_list_t                agents;
+        ph_process_list_t              process_list;
+        ph_track_list_t                track_list;
+        ph_thread_list_t               thread_list;
+        ph_stream_list_t               stream_list;
+        ph_queue_list_t                queue_list;
+        ph_pmc_info_list_t             pmc_info_list;
+        ph_stream_hardware_link_list_t stream_hardware_links;
     } ph_node_t;
 
     /** @brief Kind of a duration event. */

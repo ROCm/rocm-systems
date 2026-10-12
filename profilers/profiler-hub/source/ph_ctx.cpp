@@ -60,6 +60,17 @@ optional_uint64(const std::optional<size_t>& value)
                                  .is_valid = 1 };
 }
 
+ph_optional_uint64_t
+optional_track_id(const profiler_hub::reader_types::track_info_ptr_t& track)
+{
+    if(!track)
+    {
+        return ph_optional_uint64_t{ .value = 0, .is_valid = 0 };
+    }
+    return ph_optional_uint64_t{ .value    = static_cast<uint64_t>(track->id),
+                                 .is_valid = 1 };
+}
+
 }  // namespace
 
 size_t
@@ -236,6 +247,8 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     initialize_node_queues();
     if(progress) progress(1.0, "Reading PMC info");
     initialize_node_pmc_infos();
+    if(progress) progress(1.0, "Reading stream hardware links");
+    initialize_stream_hardware_links();
     if(progress) progress(1.0, "Reading node info");
     initialize_node_info();
     return true;
@@ -426,6 +439,11 @@ ph_ctx::initialize_node_info()
     m_c_node->pmc_info_list =
         ph_pmc_info_list_t{ .list_size = static_cast<std::uint32_t>(m_c_pmc_infos.size()),
                             .pmc_infos = m_c_pmc_infos.data() };
+
+    m_c_node->stream_hardware_links = ph_stream_hardware_link_list_t{
+        .list_size = static_cast<std::uint32_t>(m_c_stream_hardware_links.size()),
+        .links     = m_c_stream_hardware_links.data()
+    };
 }
 
 void
@@ -549,6 +567,27 @@ ph_ctx::initialize_node_pmc_infos()
             .instance_id      = optional_uint64(pmc_info->instance_id),
             .is_constant      = optional_uint64(pmc_info->is_constant),
             .is_derived       = optional_uint64(pmc_info->is_derived),
+        });
+    }
+}
+
+void
+ph_ctx::initialize_stream_hardware_links()
+{
+    const auto& links = m_catalog->stream_hardware_links;
+    m_c_stream_hardware_links.reserve(links.size());
+
+    for(const auto& link : links)
+    {
+        m_c_stream_hardware_links.push_back(ph_stream_hardware_link_t{
+            .category          = to_c_track_category(link.category),
+            .nid               = static_cast<std::uint32_t>(link.nid),
+            .pid               = static_cast<std::uint32_t>(link.pid),
+            .stream_id         = static_cast<std::uint64_t>(link.stream_id),
+            .agent_id          = optional_uint64(link.agent_id),
+            .queue_id          = optional_uint64(link.queue_id),
+            .stream_track_id   = optional_track_id(link.stream_track),
+            .hardware_track_id = optional_track_id(link.hardware_track),
         });
     }
 }

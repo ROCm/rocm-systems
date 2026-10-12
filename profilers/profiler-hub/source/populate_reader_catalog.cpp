@@ -103,7 +103,8 @@ populate_reader_catalog(common::thread_pool&     workers,
 
     run_all_and_rethrow(workers,
                         {
-                            make_sequential_task({ category_t::tracks }),
+                            make_sequential_task({ category_t::tracks,
+                                                   category_t::stream_hardware_links }),
                             make_sequential_task(
                                 { category_t::code_objects, category_t::kernel_symbols }),
                             make_sequential_task({ category_t::streams }),

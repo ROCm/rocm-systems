@@ -99,6 +99,7 @@ private:
     void               initialize_node_streams();
     void               initialize_node_queues();
     void               initialize_node_pmc_infos();
+    void               initialize_stream_hardware_links();
 
     static size_t default_thread_pool_size();
     static size_t default_connection_count();
@@ -134,6 +135,8 @@ private:
 
     profiler_hub::reader_types::pmc_info_list_t m_pmc_infos;
     std::vector<ph_pmc_info_t>                  m_c_pmc_infos;
+
+    std::vector<ph_stream_hardware_link_t> m_c_stream_hardware_links;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;

@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 namespace profiler_hub
@@ -24,6 +25,7 @@ reader_catalog_t::build_all(data_storage::schema_v3::read_statements& stmts)
 
     build_agents(stmts);
     build_tracks(stmts);
+    build_stream_hardware_links(stmts);
     build_code_objects(stmts);
     build_kernel_symbols(stmts);
     build_streams(stmts);
@@ -416,6 +418,150 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
                          stats.has_range ? stats.min_start : 0,
                          stats.has_range ? stats.max_end : 0);
     }
+}
+
+namespace
+{
+
+struct stream_track_key_t
+{
+    size_t nid{};
+    size_t pid{};
+    size_t stream_id{};
+
+    bool operator==(const stream_track_key_t&) const = default;
+};
+
+struct stream_track_key_hash_t
+{
+    size_t operator()(const stream_track_key_t& key) const
+    {
+        size_t hash = std::hash<size_t>{}(key.nid);
+        hash ^= std::hash<size_t>{}(key.pid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.stream_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+struct agent_queue_track_key_t
+{
+    reader_types::track_kind_t category{};
+    size_t                     nid{};
+    size_t                     agent_id{};
+    size_t                     queue_id{};
+
+    bool operator==(const agent_queue_track_key_t&) const = default;
+};
+
+struct agent_queue_track_key_hash_t
+{
+    size_t operator()(const agent_queue_track_key_t& key) const
+    {
+        size_t hash = std::hash<int>{}(static_cast<int>(key.category));
+        hash ^= std::hash<size_t>{}(key.nid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.agent_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.queue_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+bool
+is_agent_queue_track(reader_types::track_kind_t category)
+{
+    using reader_types::track_kind_t;
+    switch(category)
+    {
+        case track_kind_t::kernel_dispatch_agent_queue:
+        case track_kind_t::memory_allocate_agent_queue:
+        case track_kind_t::memory_copy_agent_queue: return true;
+        case track_kind_t::thread:
+        case track_kind_t::thread_sample:
+        case track_kind_t::pmc_agent:
+        case track_kind_t::stream: break;
+    }
+    return false;
+}
+
+}  // namespace
+
+void
+reader_catalog_t::build_stream_hardware_links(
+    data_storage::schema_v3::read_statements& stmts)
+{
+    std::unordered_map<stream_track_key_t,
+                       reader_types::track_info_ptr_t,
+                       stream_track_key_hash_t>
+        stream_tracks;
+    std::unordered_map<agent_queue_track_key_t,
+                       reader_types::track_info_ptr_t,
+                       agent_queue_track_key_hash_t>
+        hardware_tracks;
+
+    for(const auto& track : tracks)
+    {
+        if(!track || !track->node_info) continue;
+
+        if(track->category == reader_types::track_kind_t::stream)
+        {
+            stream_tracks.emplace(stream_track_key_t{ track->node_info->node_id,
+                                                      track->db_pid,
+                                                      track->stream_id },
+                                  track);
+            continue;
+        }
+
+        if(is_agent_queue_track(track->category))
+        {
+            hardware_tracks.emplace(agent_queue_track_key_t{ track->category,
+                                                             track->node_info->node_id,
+                                                             track->agent_id,
+                                                             track->queue_id },
+                                    track);
+        }
+    }
+
+    const auto& category_statements = stmts.track_category_statements();
+    auto        add_links = [&](reader_types::track_kind_t kind, const auto& rows) {
+        for(const auto& row : rows)
+        {
+            reader_types::stream_hardware_link_t link;
+            link.category  = kind;
+            link.nid       = row.nid;
+            link.pid       = row.pid;
+            link.stream_id = row.stream_id;
+            link.agent_id  = row.agent_id;
+            link.queue_id  = row.queue_id;
+
+            if(const auto stream_it = stream_tracks.find(
+                   stream_track_key_t{ row.nid, row.pid, row.stream_id });
+               stream_it != stream_tracks.end())
+            {
+                link.stream_track = stream_it->second;
+            }
+
+            if(row.agent_id.has_value() && row.queue_id.has_value())
+            {
+                if(const auto hardware_it = hardware_tracks.find(agent_queue_track_key_t{
+                       kind, row.nid, row.agent_id.value(), row.queue_id.value() });
+                   hardware_it != hardware_tracks.end())
+                {
+                    link.hardware_track = hardware_it->second;
+                }
+            }
+
+            stream_hardware_links.push_back(std::move(link));
+        }
+    };
+
+    add_links(reader_types::track_kind_t::kernel_dispatch_agent_queue,
+              category_statements.kernel_dispatch_stream_hardware().to_vector());
+    add_links(reader_types::track_kind_t::memory_allocate_agent_queue,
+              category_statements.memory_allocate_stream_hardware().to_vector());
+    add_links(reader_types::track_kind_t::memory_copy_agent_queue,
+              category_statements.memory_copy_stream_hardware().to_vector());
 }
 
 std::unordered_map<topology_key_t, track_range_stats_t, topology_key_hash_t>

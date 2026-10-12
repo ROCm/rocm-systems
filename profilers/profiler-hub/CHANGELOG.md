@@ -22,6 +22,12 @@ downstream consumer of the library.
 
 ### Added
 
+- `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
+  stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
+  memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
+  relationship with the resolved track pointers. A missing agent, queue, or
+  track has `is_valid` 0 (C) or a null track pointer (C++). Memory-copy links
+  use the destination agent.
 - `ph_get_node()` also returns the trace's threads, streams, queues, and PMC
   descriptions (`ph_thread_list_t`, `ph_stream_list_t`, `ph_queue_list_t`,
   `ph_pmc_info_list_t`). Optional numeric fields use `ph_optional_uint64_t`:
