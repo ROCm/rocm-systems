@@ -1084,7 +1084,7 @@ pub(crate) unsafe extern "C" fn create(
                     device.native.register_host_with_peers(
                         peer_devices.as_slice(),
                         address,
-                        memory::HostCachePolicy::Fine,
+                        memory::HostMappingPolicy::Fine,
                         native_length,
                         alignment.max(page),
                         permissions,
@@ -1099,11 +1099,11 @@ pub(crate) unsafe extern "C" fn create(
                     permissions,
                 )
             }
-            .map_err(|e| native(&e))?;
+            .map_err(|e| device.native_error_status(&e))?;
             let addresses = native_allocation.info();
             if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
                 let dma_buf = linux_interop::export_dma_buf(&native_allocation)
-                    .map_err(|error| native(&error))?;
+                    .map_err(|error| device.native_error_status(&error))?;
                 physical_backing_id.words = dma_buf.info().physical_backing_id;
             }
             for (index, (requested, capability)) in accesses.iter().zip(&capabilities).enumerate() {
@@ -1111,7 +1111,7 @@ pub(crate) unsafe extern "C" fn create(
                 let access_device = unsafe { &*requested.device.cast::<Device>() };
                 let address = native_allocation
                     .device_address(&access_device.native)
-                    .map_err(|error| native(&error))?;
+                    .map_err(|error| access_device.native_error_status(&error))?;
                 access_records
                     .try_push(Access {
                         device: requested.device.cast(),
@@ -1406,12 +1406,18 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
                 Backing::Host(allocation) => allocation.free(),
                 Backing::Gpu(allocation) => allocation.free(),
                 Backing::Registered | Backing::Alias { .. } => Ok(()),
-            };
+            }
+            .map_err(|error| {
+                memory.access.first().map_or_else(
+                    || native(&error),
+                    |access| (&*access.device).native_error_status(&error),
+                )
+            });
             // The ABI consumes the public memory handle even when a native
             // release fails. Dropping the internal owner finishes safe cleanup
             // or lets the native owner retain uncertain state for process exit.
             drop(Owned::from_raw(pointer.cast::<Memory>()));
-            result.map_err(|error| native(&error))
+            result
         }
     })
 }
@@ -1485,7 +1491,7 @@ pub(crate) unsafe fn kernel_command(
     reset_epoch: u64,
     byte_offset: u64,
     byte_length: u64,
-) -> Result<rocddi::gpu::queue::KernelCommand, u64> {
+) -> Result<rocddi::device::gpu::queue::KernelCommand, u64> {
     if byte_length == 0 || byte_offset % 4 != 0 || byte_length % 4 != 0 {
         return Err(INVALID);
     }
@@ -1517,7 +1523,7 @@ pub(crate) unsafe fn kernel_command(
     if device_address == 0 || device_address % 4 != 0 {
         return Err(INVALID);
     }
-    Ok(rocddi::gpu::queue::KernelCommand {
+    Ok(rocddi::device::gpu::queue::KernelCommand {
         device_address,
         byte_length,
     })
@@ -1630,7 +1636,10 @@ pub(crate) unsafe extern "C" fn import(
             alignment,
             permissions,
         )
-        .map_err(|error| native(&error))?;
+        .map_err(|error| {
+            let device = &*accesses[0].device.cast::<Device>();
+            device.native_error_status(&error)
+        })?;
         let native_info = native_allocation.info();
         if has_identity(external.physical_backing_id.words)
             && external.physical_backing_id.words != native_info.physical_backing_id
@@ -1642,7 +1651,7 @@ pub(crate) unsafe extern "C" fn import(
             let device = &*requested.device.cast::<Device>();
             let address = native_allocation
                 .device_address(&device.native)
-                .map_err(|error| native(&error))?;
+                .map_err(|error| device.native_error_status(&error))?;
             access_records
                 .try_push(Access {
                     device: requested.device.cast(),
@@ -1767,7 +1776,8 @@ pub(crate) unsafe extern "C" fn export(
         let Backing::Gpu(allocation) = &memory.backing else {
             return Err(UNSUPPORTED);
         };
-        let dma_buf = linux_interop::export_dma_buf(allocation).map_err(|error| native(&error))?;
+        let dma_buf = linux_interop::export_dma_buf(allocation)
+            .map_err(|error| device.native_error_status(&error))?;
         let dma_buf_info = dma_buf.info();
         if dma_buf_info.byte_length != memory.info.native_allocation_byte_length
             || dma_buf_info.physical_backing_id != memory.info.physical_backing_id.words
