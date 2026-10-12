@@ -86,12 +86,15 @@ process_environment_info::process_environment_info()
         // Replace every occurrence of the home directory with "~" so the user name is
         // not leaked, including from free-form values. An empty home matches everywhere,
         // hence the guard in the loop condition.
-        std::string value{ entry.substr(assignment + 1) };
-        for(auto pos = value.find(home); !home.empty() && pos != std::string::npos;
-            pos      = value.find(home, pos + k_home_alias.size()))
+        std::string      value;
+        std::string_view rest = entry.substr(assignment + 1);
+        for(auto pos = home.empty() ? std::string_view::npos : rest.find(home);
+            pos != std::string_view::npos; pos = rest.find(home))
         {
-            value.replace(pos, home.size(), k_home_alias);
+            value.append(rest.substr(0, pos)).append(k_home_alias);
+            rest.remove_prefix(pos + home.size());
         }
+        value.append(rest);
         m_entries[std::string{ name }] = std::move(value);
     }
 }
