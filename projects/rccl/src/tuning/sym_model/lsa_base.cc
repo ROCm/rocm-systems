@@ -50,15 +50,18 @@ struct rcclSymkTuningModel {
   // The NaN-flag kernels: latency (us), then bandwidth (GB/s of pushes per rank, the local one
   // included) that each block adds up to a peak the blocks share, blended harmonically: a block's
   // pushes are limited by the stores it keeps in flight, and every block's by the links. The
-  // two-shot AllReduce has its own. Pushing through the Tensor Data Mover speeds up blocks that
-  // take more than an epoch, and costs a little on the rest. Only a block per CU runs at once, so
-  // a grid past the CU count adds a wave.
+  // two-shot AllReduce has its own, and a team of 4's, which its blocks bound up to one per CU,
+  // its own again. Pushing through the Tensor Data Mover speeds up blocks that take more than an
+  // epoch, and costs a little on the rest. Only a block per CU runs at once, so a grid past the
+  // CU count adds a wave.
   double nanLat;
   double nanBlockBw;
   double nanPeakBw;
   double nanTwoShotLat;
   double nanTwoShotBlockBw;
   double nanTwoShotPeakBw;
+  double nanTwoShot4BlockBw;
+  double nanTwoShot4PeakBw;
   double nanTdmBwGain;
   double nanTdmLat;
   double nanEpochLat;
@@ -86,6 +89,8 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_0 = {
   .nanTwoShotLat = 10.3,
   .nanTwoShotBlockBw = 8.0,
   .nanTwoShotPeakBw = 260.0,
+  .nanTwoShot4BlockBw = 3.3,
+  .nanTwoShot4PeakBw = 2000.0,
   .nanTdmBwGain = 1.15,
   .nanTdmLat = 0.4,
   .nanEpochLat = 8.0,
@@ -113,6 +118,8 @@ static constexpr struct rcclSymkTuningModel rcclSymkTuningModel_1 = {
   .nanTwoShotLat = 10.3,
   .nanTwoShotBlockBw = 8.0,
   .nanTwoShotPeakBw = 260.0,
+  .nanTwoShot4BlockBw = 3.3,
+  .nanTwoShot4PeakBw = 2000.0,
   .nanTdmBwGain = 1.15,
   .nanTdmLat = 0.4,
   .nanEpochLat = 8.0,
@@ -166,8 +173,8 @@ static bool rcclSymkNanModel(struct ncclComm* comm, enum ncclSymkKernelId kernel
     // Pushed with stores in either kernel.
     pushBytes = 2.0 * nBytes;
     lat = m.nanTwoShotLat;
-    blockBw = m.nanTwoShotBlockBw;
-    peakBw = m.nanTwoShotPeakBw;
+    blockBw = comm->nRanks == 4 ? m.nanTwoShot4BlockBw : m.nanTwoShotBlockBw;
+    peakBw = comm->nRanks == 4 ? m.nanTwoShot4PeakBw : m.nanTwoShotPeakBw;
     if (rcclSymkNanTdm(kernelId)) lat += m.nanTdmLat;
   } else {
     // A block takes its part per source an epoch at a time, each waiting out the last, and past
@@ -176,11 +183,15 @@ static bool rcclSymkNanModel(struct ncclComm* comm, enum ncclSymkKernelId kernel
     size_t cells = divUp(nBytes, size_t(NCCL_SYM_KERNEL_CELL_SIZE));
     double part = double(divUp(cells, size_t(nBlocks)) * NCCL_SYM_KERNEL_CELL_SIZE);
     double epochs = std::ceil(part / epochBytes);
+    const bool tdm = rcclSymkNanTdm(kernelId) && (comm->nRanks != 4 || epochs <= ncclSymkNanTdmMaxEpochs4);
     if (epochs > 1) {
+      // A team of 4 streams with a block barrier per epoch, where a CU running two blocks holds
+      // back the rest about as long as twice the epochs would.
+      if (!tdm && comm->nRanks == 4 && comm->cuCount > 0 && nBlocks > comm->cuCount) epochs *= 2;
       pushBytes *= epochs * epochBytes * nBlocks / nBytes;
       lat += (epochs - 1) * m.nanEpochLat;
     }
-    if (rcclSymkNanTdm(kernelId)) {
+    if (tdm) {
       if (epochs > 1) {
         blockBw *= m.nanTdmBwGain;
         peakBw *= m.nanTdmBwGain;

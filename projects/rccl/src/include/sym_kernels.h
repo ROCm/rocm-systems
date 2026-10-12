@@ -124,6 +124,9 @@ static_assert(ncclSymkNanHeaderBytes % 128 == 0, "the regions start on a line");
 // AllReduce calls of more bytes take the two-shot (a reduce-scatter epoch, then an all-gather
 // epoch) instead of pushing the whole buffer to every rank.
 constexpr size_t ncclSymkNanTwoShotMinBytes = size_t(128) << 10;
+// A team of 4 streams a block part of more than one epoch through the register path, except that
+// the TDM kernels keep the TDM path for parts of up to this many epochs.
+constexpr int ncclSymkNanTdmMaxEpochs4 = 4;
 
 struct ncclSymkDevComm {
   struct ncclDevComm devComm;

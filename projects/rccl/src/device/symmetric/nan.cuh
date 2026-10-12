@@ -10,19 +10,21 @@
 // back after consuming a unit, so no epoch needs a barrier across ranks.
 //
 // A block streams its part of the call through its scratch region an epoch at a time, rotating
-// through the region's three banks. Before a peer pushes a unit into a bank, this rank must have
-// restored that unit's slots there from the bank's previous use:
+// through the region's banks: ncclSymkNanBanks of them, or twice that for a team of 4, whose banks
+// hold half the slots. Before a peer pushes a unit into a bank, this rank must have restored that
+// unit's slots there from the bank's previous use:
 //  - The register path gives each unit of an epoch to the same thread in every epoch, on every
 //    rank. A thread waits for its restores to be acknowledged before its next epoch's pushes, and a
 //    peer's thread pushes into a bank only after collecting this thread's pushes of the epoch
 //    before, which come after its restores of the epoch before that.
 //  - The TDM path pushes a whole chunk per warp, so the units a warp pushes were restored by every
 //    thread of the peer's block. A block barrier after the restores' acknowledgement covers that.
+//  - A team of 4 streams a part of several epochs instead, pushing ahead (see streamBody).
 // A launch's first epoch takes the bank after its predecessor's last. Two banks would not do: a
 // peer finishes a launch once the units of its partial last epoch have landed, and a unit idle in
 // that epoch was last restored in the bank the next launch starts in, by a warp that may still be
 // at it. A third bank puts the bank's previous use two epochs back, which every unit took part in
-// (or a launch whose start already orders it, when a launch has one epoch). Both paths lay out an
+// (or a launch whose start already orders it, when a launch has one epoch). The paths lay out an
 // epoch the same way, so ranks may take different paths in one launch (each picks by its own
 // buffers' alignment).
 
@@ -101,14 +103,17 @@ __device__ __forceinline__ BytePack<16> asPack(v4u v) {
   return p;
 }
 
-// NRanks is kRanks when the team has exactly that many ranks, letting every per-rank loop run
-// without a branch (a per-peer branch makes the compiler wait out each store's acknowledgement
-// before the next), and 0 for a smaller team.
+// NRanks is the team's size when a kernel is instantiated for it (kRanks or 4), letting every
+// per-rank loop run without a branch (a per-peer branch makes the compiler wait out each store's
+// acknowledgement before the next), and 0 for any other team size.
 // Kept off the stack, which costs a launch tens of us: every member function is forceinline (an
 // outlined one takes the session's address), and the arguments are held by value (an outlined
 // one reached through a reference into them copies all 4 KiB of them to the stack).
 template <int NRanks>
 struct Session {
+  // A team of 4 packs a bank's slots into half the room, for twice the banks.
+  static constexpr int kSlots = NRanks == 4 ? 4 : kRanks;
+  static constexpr uint32_t kBanks = ncclSymkNanBanks * kRanks / kSlots;
   ncclTeam team;
   char* region; // this block's region of this rank's scratch, through the flat window
   uint32_t stride4G;
@@ -121,7 +126,7 @@ struct Session {
   // in range.
   __device__ Session(ncclSymkDevWorkArgs const* args, ncclTeam team, uint32_t hdr)
     : team(team), stride4G(args->kcomm.devComm.resourceWindow_inlined.stride4G),
-      abortFlag(args->kcomm.devComm.abortFlag), header(headerOf(args)), bank(hdr % ncclSymkNanBanks) {
+      abortFlag(args->kcomm.devComm.abortFlag), header(headerOf(args)), bank(hdr % kBanks) {
     region = (char*)ncclGetResourceBufferLocalPointer(args->kcomm.devComm, args->kcomm.nanBuf) +
              ncclSymkNanHeaderBytes + (size_t)blockIdx.x * ncclSymkNanBlockBytes;
   }
@@ -137,27 +142,29 @@ struct Session {
   }
 
   __device__ __forceinline__ bool active(int r) const {
-    return NRanks == kRanks || r < team.nRanks;
+    return NRanks != 0 ? r < NRanks : r < team.nRanks;
   }
-  // Unit u of source src's slot in team rank r's current bank.
-  __device__ __forceinline__ v4u* slot(int r, int src, int u) const {
+  // Unit u of source src's slot in team rank r's current bank, or the one `ahead` epochs on.
+  __device__ __forceinline__ v4u* slot(int r, int src, int u, uint32_t ahead = 0) const {
     char* peer = nccl::utility::add4G(region, (r - team.rank) * team.stride * (int)stride4G);
-    return (v4u*)peer + (bank * kRanks + src) * kUnits + u;
+    uint32_t b = bank + ahead;
+    b = b >= kBanks ? b - kBanks : b;
+    return (v4u*)peer + (b * kSlots + src) * kUnits + u;
   }
 
   // Waits for units u[k] (where valid[k]) of every source, then restores them. Re-polling a slot
   // that already landed is harmless: only this thread rewrites it.
-  __device__ __forceinline__ void collect(const int (&u)[kUnroll], const bool (&valid)[kUnroll],
-                                          v4u (&v)[kUnroll][kRanks]) {
+  template <int N>
+  __device__ __forceinline__ void collect(const int (&u)[N], const bool (&valid)[N], v4u (&v)[N][kRanks]) {
     using nccl::utility::testAbort;
-    v4u* mine[kUnroll];
+    v4u* mine[N];
 #pragma unroll
-    for (int k = 0; k < kUnroll; k++) mine[k] = slot(team.rank, 0, u[k]);
+    for (int k = 0; k < N; k++) mine[k] = slot(team.rank, 0, u[k]);
     uint32_t steps = 0;
     bool more;
     do {
 #pragma unroll
-      for (int k = 0; k < kUnroll; k++) {
+      for (int k = 0; k < N; k++) {
 #pragma unroll
         for (int s = 0; s < kRanks; s++) {
           if (valid[k] && active(s)) v[k][s] = poll(mine[k] + s * kUnits);
@@ -165,13 +172,13 @@ struct Session {
       }
       more = false;
 #pragma unroll
-      for (int k = 0; k < kUnroll; k++) {
+      for (int k = 0; k < N; k++) {
 #pragma unroll
         for (int s = 0; s < kRanks; s++) more |= valid[k] && active(s) && pending(v[k][s]);
       }
     } while (more && !testAbort(abortFlag, steps));
 #pragma unroll
-    for (int k = 0; k < kUnroll; k++) {
+    for (int k = 0; k < N; k++) {
 #pragma unroll
       for (int s = 0; s < kRanks; s++) {
         if (valid[k] && active(s)) restore(mine[k] + s * kUnits);
@@ -181,7 +188,7 @@ struct Session {
 
 
   __device__ __forceinline__ void nextBank() {
-    bank = bank == ncclSymkNanBanks - 1 ? 0 : bank + 1;
+    bank = bank == kBanks - 1 ? 0 : bank + 1;
   }
   __device__ __forceinline__ void endEpoch() {
     waitStores();
@@ -298,7 +305,7 @@ __device__ __forceinline__ void twoShotBody(Session<NRanks>& ses, Red red, EltTy
                                             int nElts) {
   constexpr int EltPerUnit = 16 / sizeof(EltType);
   const int rank = ses.team.rank;
-  const int nRanks = NRanks == kRanks ? kRanks : ses.team.nRanks;
+  const int nRanks = NRanks != 0 ? NRanks : ses.team.nRanks;
   const int nUnits = divUp(nElts, EltPerUnit);
   const int part = divUp(nUnits, nRanks);
   const bool split = part <= kTwoShotSplitUnits;
@@ -371,6 +378,134 @@ __device__ __forceinline__ void twoShotBody(Session<NRanks>& ses, Red red, EltTy
   }
 }
 
+// The streaming path, for a team of 4 and parts of more than one epoch. As in splitBody, even
+// warps push and odd warps collect, each thread taking units i + k * blockDim.x / 2 of an epoch;
+// the pushing warps run kAhead epochs ahead of the collecting ones, so a CU keeps writes to its
+// peers in flight while it polls, and load an epoch's inputs as soon as they have put the one
+// before, so the loads land while they wait at the barrier. Each epoch ends with the collecting
+// threads' restores acknowledged and a block barrier; pushes are never waited out. A pushing
+// thread pushes epoch e + kAhead after the barrier ending epoch e - 1, so the block has collected
+// a peer's epoch e - 1, which the peer pushed after its barrier ending epoch e - 2 - kAhead: the
+// bank's previous use, epoch e + kAhead - kBanks, is at most that far back when
+// kBanks >= 2 * kAhead + 2. A launch pushes epochs 0 to kAhead before collecting anything, into
+// the banks after its predecessor's last; a predecessor that took this path showed, by its
+// collects of its epoch two before its last, the peer's restores acknowledged up to kAhead + 2
+// epochs before its last, and one that took another path more, so kBanks >= 2 * kAhead + 3
+// suffices. Against a peer on the TDM path, which pushes an epoch after collecting the one before,
+// kBanks >= kAhead + 2 does.
+constexpr int kAhead = 1;
+
+// A block barrier without __syncthreads()'s fence, which waits out every store's acknowledgement:
+// the pushing warps' too.
+__device__ __forceinline__ void barrier() {
+  __asm__ volatile("" ::: "memory");
+  __builtin_amdgcn_s_barrier();
+  __asm__ volatile("" ::: "memory");
+}
+
+// A pushing thread's units of an epoch: one per rank for ReduceScatter, else one for every rank.
+template <Kind K>
+constexpr int kSources = K == Kind::ReduceScatter ? kRanks : 1;
+
+// Loads this thread's units u[k] (where valid[k]) of the epoch starting at unit u0, escaped.
+template <Kind K, int NRanks, int N, typename EltType>
+__device__ __forceinline__ void loadUnits(Session<NRanks> const& ses, EltType* input, int nElts, size_t nStrideElts,
+                                          int u0, const int (&u)[N], const bool (&valid)[N],
+                                          v4u (&x)[N][kSources<K>]) {
+  constexpr int EltPerUnit = 16 / sizeof(EltType);
+#pragma unroll
+  for (int k = 0; k < N; k++) {
+#pragma unroll
+    for (int r = 0; r < kSources<K>; r++) {
+      if (valid[k] && (K != Kind::ReduceScatter || ses.active(r)))
+        x[k][r] = escape(loadPack<BytePack<16>>(input + r * nStrideElts, (u0 + u[k]) * EltPerUnit, nElts).v4u);
+    }
+  }
+}
+
+// Pushes them into every rank's bank `ahead` epochs on.
+template <Kind K, int NRanks, int N>
+__device__ __forceinline__ void putUnits(Session<NRanks> const& ses, const int (&u)[N], const bool (&valid)[N],
+                                         v4u const (&x)[N][kSources<K>], uint32_t ahead) {
+#pragma unroll
+  for (int k = 0; k < N; k++) {
+#pragma unroll
+    for (int r = 0; r < kRanks; r++) {
+      if (valid[k] && ses.active(r))
+        put(ses.slot(r, ses.team.rank, u[k], ahead), x[k][K == Kind::ReduceScatter ? r : 0]);
+    }
+  }
+}
+
+template <Kind K, int NRanks, typename T, typename Red, typename EltType>
+__device__ __forceinline__ void streamBody(Session<NRanks>& ses, Red red, EltType* input, EltType* output, int nElts,
+                                           size_t nStrideElts) {
+  constexpr int EltPerUnit = 16 / sizeof(EltType);
+  constexpr int N = 2 * kUnroll;
+  static_assert(Session<NRanks>::kBanks >= 2 * kAhead + 3, "too few banks to push that far ahead");
+  const int nUnits = divUp(nElts, EltPerUnit);
+  const int half = blockDim.x / 2;
+  const int per = min(half * N, kUnits);
+  const int nEpochs = divUp(nUnits, per);
+  const int w = threadIdx.x / WARP_SIZE;
+  const bool pusher = w % 2 == 0;
+  const int i = w / 2 * WARP_SIZE + threadIdx.x % WARP_SIZE;
+  int u[N];
+#pragma unroll
+  for (int k = 0; k < N; k++) u[k] = i + k * half;
+  v4u x[N][kSources<K>];
+  bool valid[N];
+  auto validate = [&](int e) {
+#pragma unroll
+    for (int k = 0; k < N; k++) valid[k] = u[k] < min(per, nUnits - e * per);
+  };
+  if (pusher) {
+    validate(0);
+    loadUnits<K>(ses, input, nElts, nStrideElts, 0, u, valid, x);
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int e = 0; e < min(kAhead, nEpochs); e++) {
+      putUnits<K>(ses, u, valid, x, e);
+      if (e + 1 < nEpochs) {
+        validate(e + 1);
+        loadUnits<K>(ses, input, nElts, nStrideElts, (e + 1) * per, u, valid, x);
+      }
+    }
+  }
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int e = 0; e < nEpochs; e++) {
+    if (pusher) {
+      const int ep = e + kAhead;
+      if (ep < nEpochs) {
+        putUnits<K>(ses, u, valid, x, kAhead);
+        if (ep + 1 < nEpochs) {
+          validate(ep + 1);
+          loadUnits<K>(ses, input, nElts, nStrideElts, (ep + 1) * per, u, valid, x);
+        }
+      }
+    } else {
+      validate(e);
+      v4u v[N][kRanks];
+      ses.collect(u, valid, v);
+#pragma unroll
+      for (int k = 0; k < N; k++) {
+        if (!valid[k]) continue;
+        const int ix = (e * per + u[k]) * EltPerUnit;
+        if constexpr (K == Kind::AllGather) {
+#pragma unroll
+          for (int s = 0; s < kRanks; s++) {
+            if (ses.active(s)) storePack(output + s * nStrideElts, ix, nElts, asPack(v[k][s]));
+          }
+        } else {
+          storePack(output, ix, nElts, reduceRanks<NRanks, T>(ses, red, v[k]));
+        }
+      }
+      waitStores();
+    }
+    ses.nextBank();
+    barrier();
+  }
+}
+
 // The register path. EltType is BytePack<16> when the buffers and the per-rank stride are 16 B
 // aligned, else the user type (char for AllGather), which loadPack/storePack bound at nElts.
 // Units per epoch are min(blockDim.x * kUnroll, kUnits), which the host keeps at kUnits.
@@ -385,6 +520,12 @@ __device__ __forceinline__ void registerBody(Session<NRanks>& ses, Red red, EltT
   if (nUnits <= splitUnits()) {
     splitBody<K, NRanks, T>(ses, red, input, output, nElts, nStrideElts);
     return;
+  }
+  if constexpr (NRanks == 4) {
+    if (nUnits > per) {
+      streamBody<K, NRanks, T>(ses, red, input, output, nElts, nStrideElts);
+      return;
+    }
   }
   NVCC_PRAGMA_UNROLL_DISABLED
   for (int u0 = 0; u0 < nUnits; u0 += per) {
@@ -535,10 +676,11 @@ __device__ __forceinline__ void run(ncclSymkDevWorkArgs const* args, ncclTeam te
   }
 #if NCCL_SYMK_TILE_TDM
   // An epoch is a chunk for every thread to collect, which takes the full launch width. A part
-  // the split path takes gains nothing from tensor stores; every rank takes that path for it,
-  // whatever its alignment.
+  // the split path takes gains nothing from tensor stores, nor does one a team of 4 streams;
+  // every rank takes those paths for it, whatever its alignment.
   if constexpr (Tdm) {
-    if (aligned && blockDim.x * kUnroll >= kUnits && (size_t)nElts * sizeof(T) > (size_t)splitUnits() * 16) {
+    if (aligned && blockDim.x * kUnroll >= kUnits && (size_t)nElts * sizeof(T) > (size_t)splitUnits() * 16 &&
+        (NRanks != 4 || (size_t)nElts * sizeof(T) <= (size_t)ncclSymkNanTdmMaxEpochs4 * kChunkBytes)) {
       tdmBody<K, NRanks, T>(ses, red, (const char*)input, (char*)output, (size_t)nElts * sizeof(T),
                             nAllElts * sizeof(T));
       ses.close();
@@ -566,6 +708,8 @@ __device__ __forceinline__ void kernel(ncclSymkDevWorkArgs const* args, Red red)
     if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
     if (team.nRanks == kRanks) {
       run<K, Tdm, kRanks>(args, team, hdr, red, input, output, nElts, (size_t)nAllElts);
+    } else if (team.nRanks == 4) {
+      run<K, Tdm, 4>(args, team, hdr, red, input, output, nElts, (size_t)nAllElts);
     } else {
       run<K, Tdm, 0>(args, team, hdr, red, input, output, nElts, (size_t)nAllElts);
     }
