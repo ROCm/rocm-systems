@@ -169,15 +169,16 @@ protected:
 
         void* sendBuf
             = static_cast<float*>(recvBuf) + static_cast<size_t>(rank_) * count;
-        void* separateSendBuf = nullptr;
+        void*            separateSendBuf = nullptr;
+        const hipError_t sendAllocErr
+            = inPlace ? hipSuccess
+                      : hipMalloc(&separateSendBuf, count * sizeof(float));
+        DeviceBufferAutoGuard sendGuard(separateSendBuf);
+        ASSERT_EQ(0, countFailingRanks(sendAllocErr == hipSuccess));
         if(!inPlace)
         {
-            ASSERT_EQ(0, countFailingRanks(
-                             hipMalloc(&separateSendBuf, count * sizeof(float))
-                             == hipSuccess));
             sendBuf = separateSendBuf;
         }
-        DeviceBufferAutoGuard sendGuard(separateSendBuf);
         ASSERT_EQ(0, countFailingRanks(
                          initializeBufferWithPattern<float>(
                              sendBuf, count,
@@ -270,12 +271,14 @@ TEST_F(DdaMPI_AllGatherThreshold, AboveScratchFallsBack)
         GTEST_SKIP() << skip;
     }
 
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-    ncclComm* comm = getActiveCommunicator();
-    int rank = -1;
-    int nRanks = 0;
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(comm, &rank));
-    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(comm, &nRanks));
+    const ncclResult_t initRes = createTestCommunicator();
+    ASSERT_EQ(0, countFailingRanks(initRes == ncclSuccess))
+        << "Rank " << getTestMpiRank() << ": " << ncclGetErrorString(initRes);
+    ncclComm* comm   = getActiveCommunicator();
+    int       rank   = -1;
+    int       nRanks = 0;
+    ASSERT_EQ(0, countFailingRanks(ncclCommUserRank(comm, &rank) == ncclSuccess
+                                   && ncclCommCount(comm, &nRanks) == ncclSuccess));
     skip = launchOrderSkipReason();
     if(!skip.empty())
     {
@@ -287,36 +290,50 @@ TEST_F(DdaMPI_AllGatherThreshold, AboveScratchFallsBack)
     const size_t fullCount  = comm->ddaScratchBytes / (ranks * sizeof(float));
     const size_t count      = 2 * fullCount;
     const size_t totalCount = count * ranks;
-    ASSERT_MPI_TRUE(count * sizeof(float) <= comm->ddaScratchBytes);
-    ASSERT_MPI_TRUE(totalCount * sizeof(float) > comm->ddaScratchBytes);
-    ASSERT_MPI_TRUE(totalCount * sizeof(float) <= threshold);
+    const size_t totalBytes = totalCount * sizeof(float);
+    ASSERT_EQ(0, countFailingRanks(count * sizeof(float) <= comm->ddaScratchBytes
+                                   && totalBytes > comm->ddaScratchBytes
+                                   && totalBytes <= threshold))
+        << "Rank " << rank << ": scratch " << comm->ddaScratchBytes << " B, total "
+        << totalBytes << " B, threshold " << threshold << " B";
 
-    void* sendBuf = nullptr;
-    void* recvBuf = nullptr;
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, count * sizeof(float)));
+    void*            sendBuf = nullptr;
+    void*            recvBuf = nullptr;
+    const hipError_t sendErr = hipMalloc(&sendBuf, count * sizeof(float));
     DeviceBufferAutoGuard sendGuard(sendBuf);
-    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, totalCount * sizeof(float)));
+    const hipError_t recvErr = hipMalloc(&recvBuf, totalBytes);
     DeviceBufferAutoGuard recvGuard(recvBuf);
+    ASSERT_EQ(0, countFailingRanks(sendErr == hipSuccess && recvErr == hipSuccess));
 
     // Control: a total that exactly fills scratch still takes DDA IPC.
-    ASSERT_MPI_EQ(RCCL_DDA_IPC, selectedAlgo(sendBuf, recvBuf, fullCount));
-    EXPECT_NE(RCCL_DDA_IPC, selectedAlgo(sendBuf, recvBuf, count))
+    ASSERT_EQ(0, countFailingRanks(selectedAlgo(sendBuf, recvBuf, fullCount)
+                                   == RCCL_DDA_IPC))
+        << "Rank " << rank << ": DDA IPC not picked for a total that fills scratch";
+    EXPECT_EQ(0, countFailingRanks(selectedAlgo(sendBuf, recvBuf, count)
+                                   != RCCL_DDA_IPC))
         << "Rank " << rank << ": DDA IPC picked for a total above scratch";
 
-    ASSERT_MPI_EQ(hipSuccess,
-                  initializeBufferWithPattern<float>(
-                      sendBuf, count,
-                      [rank](size_t i) { return rankPattern(rank, i); }));
-    ASSERT_MPI_EQ(hipSuccess,
-                  hipMemset(recvBuf, 0, totalCount * sizeof(float)));
-    ASSERT_MPI_EQ(ncclSuccess,
-                  ncclAllGather(sendBuf, recvBuf, count, ncclFloat32, comm,
-                                getActiveStream()));
-    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-    ASSERT_MPI_TRUE(verifyBufferData<float>(
-        recvBuf, totalCount, [count](size_t j) {
-            return rankPattern(static_cast<int>(j / count), j % count);
-        }));
+    const hipError_t sendInitErr = initializeBufferWithPattern<float>(
+        sendBuf, count, [rank](size_t i) { return rankPattern(rank, i); });
+    const hipError_t recvInitErr = initializeBufferWithPattern<float>(
+        recvBuf, totalCount, [](size_t) { return kUnwritten; });
+    ASSERT_EQ(0, countFailingRanks(sendInitErr == hipSuccess
+                                   && recvInitErr == hipSuccess));
+
+    const ncclResult_t agRes
+        = ncclAllGather(sendBuf, recvBuf, count, ncclFloat32, comm, getActiveStream());
+    const hipError_t syncErr = hipStreamSynchronize(getActiveStream());
+    ASSERT_EQ(0, countFailingRanks(agRes == ncclSuccess && syncErr == hipSuccess))
+        << "Rank " << rank << ": " << ncclGetErrorString(agRes) << " / "
+        << hipGetErrorString(syncErr);
+
+    size_t     firstBad = totalCount;
+    const bool dataOk   = verifyBufferData<float>(
+        recvBuf, totalCount,
+        [count](size_t j) { return rankPattern(static_cast<int>(j / count), j % count); },
+        /*num_samples=*/0, /*tolerance=*/0.0, &firstBad);
+    ASSERT_EQ(0, countFailingRanks(dataOk))
+        << "Rank " << rank << ": first mismatch at " << firstBad << " of " << totalCount;
 }
 
 #endif // MPI_TESTS_ENABLED
