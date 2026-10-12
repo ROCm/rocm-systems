@@ -25,6 +25,8 @@ cases:
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}
   Unit_HRR_Format_UnknownEventType: {}
+  Unit_HRR_Playback_PlacementHeldRanges: {}
+  Unit_HRR_Playback_PlacementPlan: {}
   Unit_HRR_Playback_ReplayedH2DDrainGraphGuard: {}
   Unit_HRR_Playback_VersionOption: {}
   Unit_HRR_Playback_ZeroInitDrainGuard: {}
