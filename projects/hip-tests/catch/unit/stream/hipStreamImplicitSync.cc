@@ -15,7 +15,7 @@
  *
  * These tests pin down the cases where the runtime may and may not skip that
  * dependency. A runtime that is too eager to skip one -- for example, by
- * remembering that a stream has already been fenced against a queue and not
+ * remembering that a stream already waits on a queue and not
  * re-checking what has been enqueued there since -- still passes a simple
  * two-kernel test but drops ordering in the cases below.
  *
@@ -124,7 +124,7 @@ HIP_TEST_CASE(Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream) {
  * Null-stream work interleaved between launches on the same blocking stream.
  *
  * The dependency the blocking stream needs is a different command each time
- * round, so a runtime that caches "already fenced against the null stream" and
+ * round, so a runtime that caches "already waits on the null stream" and
  * skips on that basis alone will miss `doubleKernel` and produce
  * (kSeed + 1 + 1) * 2 instead of (kSeed + 1) * 2 + 1.
  */
@@ -166,8 +166,8 @@ HIP_TEST_CASE(Unit_hipStreamImplicitSync_InterleavedNullStreamWork) {
  *
  * Each stream needs its own dependency on the fill. The streams are not ordered
  * with respect to each other, so the increments are atomic and the total is the
- * only thing checked. A runtime that tracks "has been fenced" per waited queue
- * instead of per waiting stream would fence the first stream and skip the rest.
+ * only thing checked. A runtime that tracks "already waits" per waited queue
+ * instead of per waiting stream would block the first stream and skip the rest.
  */
 HIP_TEST_CASE(Unit_hipStreamImplicitSync_MultipleBlockingStreams) {
   const size_t n = elementCount();
