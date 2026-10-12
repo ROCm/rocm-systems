@@ -6,6 +6,7 @@
 
 // vecElementAdd<T> adds a[k] + b[k] per element in memory order, bit-exact with a host reference.
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -99,7 +100,7 @@ protected:
   std::vector<E> Run(const std::vector<E>& a, const std::vector<E>& b) {
     static_assert(sizeof(T) == sizeof(E), "element storage must match T");
     constexpr size_t kPerVec = sizeof(uint4) / sizeof(E);
-    const size_t nVec = (a.size() + kPerVec - 1) / kPerVec;
+    const size_t nVec = (std::max(a.size(), b.size()) + kPerVec - 1) / kPerVec;
     std::vector<uint4> ha(nVec, uint4{0, 0, 0, 0});
     std::vector<uint4> hb(nVec, uint4{0, 0, 0, 0});
     std::memcpy(ha.data(), a.data(), a.size() * sizeof(E));
@@ -157,9 +158,9 @@ TEST_F(DdaVecElementAdd, FloatMatchesHostReference) {
   for (size_t i = 0; i < a.size(); ++i) {
     const float ref = BitsToFloat(a[i]) + BitsToFloat(b[i]);
     if (std::isnan(ref)) {
-      EXPECT_TRUE(std::isnan(BitsToFloat(out[i]))) << "element " << i;
+      ASSERT_TRUE(std::isnan(BitsToFloat(out[i]))) << "element " << i;
     } else {
-      EXPECT_EQ(out[i], FloatBits(ref)) << "element " << i;
+      ASSERT_EQ(out[i], FloatBits(ref)) << "element " << i;
     }
   }
 }
@@ -187,9 +188,9 @@ TEST_F(DdaVecElementAdd, HalfMatchesHostReference) {
   for (size_t i = 0; i < a.size(); ++i) {
     const uint16_t ref = HalfAddRef(a[i], b[i]);
     if (IsHalfNan(ref)) {
-      EXPECT_TRUE(IsHalfNan(out[i])) << "element " << i;
+      ASSERT_TRUE(IsHalfNan(out[i])) << "element " << i;
     } else {
-      EXPECT_EQ(out[i], ref) << std::hex << "element " << std::dec << i << " a=0x" << std::hex << a[i] << " b=0x"
+      ASSERT_EQ(out[i], ref) << std::hex << "element " << std::dec << i << " a=0x" << std::hex << a[i] << " b=0x"
                              << b[i];
     }
   }
@@ -218,9 +219,9 @@ TEST_F(DdaVecElementAdd, Bf16MatchesHostReference) {
   for (size_t i = 0; i < a.size(); ++i) {
     const uint16_t ref = Bf16AddRef(a[i], b[i]);
     if (IsBf16Nan(ref)) {
-      EXPECT_TRUE(IsBf16Nan(out[i])) << "element " << i;
+      ASSERT_TRUE(IsBf16Nan(out[i])) << "element " << i;
     } else {
-      EXPECT_EQ(out[i], ref) << std::hex << "element " << std::dec << i << " a=0x" << std::hex << a[i] << " b=0x"
+      ASSERT_EQ(out[i], ref) << std::hex << "element " << std::dec << i << " a=0x" << std::hex << a[i] << " b=0x"
                              << b[i];
     }
   }
