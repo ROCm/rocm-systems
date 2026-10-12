@@ -73,10 +73,10 @@ parse, before the tree. Re-profile with current `--torch-trace` or
 
 ## 3. List the captured operators
 
-Always list before filtering. Operator names come from the model that ran, so
-guessing a pattern wastes a profile. Do not pass `--list-*-operators` and
-`--*-operator` on the same command; listing ignores the filter. These flags
-require `--output-format stdout` (the default):
+List when you need the operator names from this run; filtering does not
+require a prior list. Do not pass `--list-*-operators` and `--*-operator`
+on the same command; listing ignores the filter. These flags require
+`--output-format stdout` (the default):
 
 ```bash
 rocprof-compute analyze \
