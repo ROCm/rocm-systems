@@ -5,6 +5,7 @@
 
 #include "common/string_utility.hpp"
 #include "library/rocprofiler-sdk/buffered_domain.hpp"
+#include "library/rocprofiler-sdk/callback/code_object.hpp"
 #include "library/rocprofiler-sdk/callback_domain.hpp"
 #include "library/rocprofiler-sdk/domain_registry.hpp"
 #include "library/rocprofiler-sdk/domain_selection.hpp"
@@ -66,13 +67,14 @@ public:
         LOG_DEBUG("Resolved {} domain configuration(s)", m_configuration.size());
 
         m_buffered_domains.reserve(m_configuration.size());
-        m_callback_domains.reserve(m_configuration.size());
+        m_callback_domains.reserve(m_configuration.size() + k_always_on_callback_domains);
         for(const auto& config : m_configuration)
         {
             configure_domain(config);
         }
 
         configure_pending_external_correlation_id();
+        configure_code_object_domain();
     }
 
     void flush() const
@@ -129,6 +131,25 @@ private:
     std::vector<typename SdkBackend::external_correlation_request_kind_t>
                              m_correlation_domains;
     SdkBackend::context_id_t m_context{};
+    SdkBackend::context_id_t m_code_object_context{};
+
+    // The always-on code_object domain is appended after the configured callback domains.
+    static constexpr std::size_t k_always_on_callback_domains = 1;
+
+    // code_object is not in the registry, so it is never user-selectable: it always
+    // runs, on its own context, so kernel names resolve even while m_context is paused.
+    void configure_code_object_domain()
+    {
+        SdkBackend::create_context(&m_code_object_context);
+
+        m_callback_domains.emplace_back(
+            domains::callback::k_code_object<SdkBackend, Externals>,
+            m_code_object_context,
+            std::vector<typename SdkBackend::tracing_operation_t>{});
+        m_callback_domains.back().configure();
+
+        SdkBackend::start_context(m_code_object_context);
+    }
 
     [[nodiscard]] std::vector<domains::domain_configuration> resolve_configuration(
         std::span<const domain_selection> selections) const

@@ -121,7 +121,7 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 1;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
@@ -3445,6 +3445,14 @@ const _: () = {
 };
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNpmBalancingModeT {
+    AmdsmiNpmBalancingModeInvalid = 0,
+    AmdsmiNpmBalancingModePowerBalancing = 1,
+    AmdsmiNpmBalancingModeFrequencyBalancing = 2,
+    AmdsmiNpmBalancingModeMax = 3,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum AmdsmiComputeTrayTypeT {
     AmdsmiComputeTrayTypeUnknown = 0,
     AmdsmiComputeTrayTypeHeliosP = 1,
@@ -5156,6 +5164,24 @@ extern "C" {
     pub fn amdsmi_get_npm_info(
         node_handle: AmdsmiNodeHandle,
         info: *mut AmdsmiNpmInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_npm_balancing_mode(
+        node_handle: AmdsmiNodeHandle,
+        mode: *mut AmdsmiNpmBalancingModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_npm_balancing_mode(
+        node_handle: AmdsmiNodeHandle,
+        mode: AmdsmiNpmBalancingModeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_npm_supported_balancing_modes(
+        node_handle: AmdsmiNodeHandle,
+        supported_modes: *mut AmdsmiBitFieldT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
