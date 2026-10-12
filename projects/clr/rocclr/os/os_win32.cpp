@@ -650,16 +650,21 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   return true;
 }
 
-bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size) {
+bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                bool exclusive) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  HANDLE map_handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname);
+  HANDLE map_handle = exclusive ? nullptr : OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, fname);
 
   if (map_handle == nullptr) {
     map_handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, mmap_size, fname);
     if (map_handle == nullptr) {
+      return false;
+    }
+    if (exclusive && GetLastError() == ERROR_ALREADY_EXISTS) {
+      CloseHandle(map_handle);
       return false;
     }
   }

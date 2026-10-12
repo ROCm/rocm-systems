@@ -973,18 +973,20 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   return true;
 }
 
-bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size) {
+bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                bool exclusive) {
   if (mmap_ptr == nullptr) {
     return false;
   }
 
-  struct stat stat_buf;
-  int fd = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+  int fd = exclusive ? shm_open(fname, O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR)
+                     : shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
   if (fd < 0) {
     return false;
   }
 
   if (ftruncate(fd, mmap_size) != 0) {
+    close(fd);
     return false;
   }
   *mmap_ptr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);

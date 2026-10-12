@@ -7,7 +7,9 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_event.hpp"
+#include <cstring>
 #if !defined(_MSC_VER)
+#include <sys/mman.h>
 #include <unistd.h>
 #else
 #include <io.h>
@@ -31,6 +33,9 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
 #if !defined(_MSC_VER)
   static std::atomic<int> counter{0};
   ipc_evt_.ipc_name_ = "/hip_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
+  // A leftover can only come from a dead process with the same pid; another user's object
+  // can't be removed here (sticky /dev/shm), and the exclusive create below then fails.
+  shm_unlink(ipc_evt_.ipc_name_.c_str());
 #else
   char name_template[] = "/hip_XXXXXX";
   _mktemp_s(name_template, sizeof(name_template));
@@ -38,11 +43,13 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   ipc_evt_.ipc_name_.replace(0, 5, "/hip_");
 #endif
 
-  // Create memory-mapped file for shared memory
+  // Create memory-mapped file for shared memory; never reuse an existing object
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
   if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
                                        const_cast<const void**>(shmem_ptr),
-                                       sizeof(hip::ihipIpcEventShmem_t))) {
+                                       sizeof(hip::ihipIpcEventShmem_t), true)) {
+    ipc_evt_.ipc_shmem_ = nullptr;
+    ipc_evt_.ipc_name_.clear();
     return false;
   }
 
@@ -59,12 +66,18 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
   return status == hipSuccess;
 }
 
+// Indices live in shared memory and start at -1; % keeps the sign, so map into [0, N).
+static inline int ihipSignalSlot(int idx) {
+  const int slot = idx % IPC_SIGNALS_PER_EVENT;
+  return slot < 0 ? slot + IPC_SIGNALS_PER_EVENT : slot;
+}
+
 // ================================================================================================
 hipError_t IPCEventEmulated::query() {
   std::scoped_lock lock(lock_);
   if (ipc_evt_.ipc_shmem_) {
     const int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
-    const int offset = prev_read_idx % IPC_SIGNALS_PER_EVENT;
+    const int offset = ihipSignalSlot(prev_read_idx);
 
     if (ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT &&
         ipc_evt_.ipc_shmem_->signal[offset] != 0) {
@@ -80,7 +93,7 @@ hipError_t IPCEventEmulated::synchronize() {
   if (ipc_evt_.ipc_shmem_) {
     int prev_read_idx = ipc_evt_.ipc_shmem_->read_index;
     if (prev_read_idx >= 0) {
-      int offset = (prev_read_idx % IPC_SIGNALS_PER_EVENT);
+      int offset = ihipSignalSlot(prev_read_idx);
       while ((ipc_evt_.ipc_shmem_->read_index < prev_read_idx + IPC_SIGNALS_PER_EVENT) &&
              (ipc_evt_.ipc_shmem_->signal[offset] != 0)) {
         amd::Os::sleep(1);
@@ -93,7 +106,7 @@ hipError_t IPCEventEmulated::synchronize() {
 // ================================================================================================
 hipError_t IPCEventEmulated::streamWait(hip::Stream* stream, uint flags) {
   std::scoped_lock lock(lock_);
-  const int offset = ipc_evt_.ipc_shmem_->read_index % IPC_SIGNALS_PER_EVENT;
+  const int offset = ihipSignalSlot(ipc_evt_.ipc_shmem_->read_index);
   return ihipStreamOperation(
       reinterpret_cast<hipStream_t>(stream),
       ROCCLR_COMMAND_STREAM_WAIT_VALUE,
@@ -121,7 +134,7 @@ hipError_t IPCEventEmulated::enqueueRecordCommand(hip::Stream* stream, amd::Comm
   // Allocate signal slot for this event
   auto* const shmem = ipc_evt_.ipc_shmem_;
   const int write_index = shmem->write_index++;
-  const int offset = write_index % IPC_SIGNALS_PER_EVENT;
+  const int offset = ihipSignalSlot(write_index);
   auto& signal = shmem->signal[offset];
 
   // Wait for signal slot to become available
@@ -175,7 +188,13 @@ hipError_t IPCEventEmulated::GetHandle(ihipIpcEventHandle_t* handle) {
 // ================================================================================================
 hipError_t IPCEventEmulated::OpenHandle(ihipIpcEventHandle_t* handle) {
   std::scoped_lock lock(lock_);
-  ipc_evt_.ipc_name_ = handle->shmem_name;
+  // shmem_name comes from the peer and may not be NUL-terminated.
+  const size_t name_len = strnlen(handle->shmem_name, IHIP_IPC_EVENT_HANDLE_SIZE);
+  if (name_len == IHIP_IPC_EVENT_HANDLE_SIZE ||
+      std::strncmp(handle->shmem_name, "/hip_", 5) != 0) {
+    return hipErrorInvalidValue;
+  }
+  ipc_evt_.ipc_name_.assign(handle->shmem_name, name_len);
 
   // Map shared memory from IPC handle
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);

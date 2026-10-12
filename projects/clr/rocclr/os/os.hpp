@@ -64,8 +64,10 @@ class Os : AllStatic {
   // Given a valid file name, returns mmapped memory with the mapped size.
   static bool MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_size);
 
-  // Given a valid file name amd mapped size, returns ftruncated mmaped memory
-  static bool MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size);
+  // Given a valid file name amd mapped size, returns ftruncated mmaped memory.
+  // With exclusive, fails if the object already exists and creates it owner-only.
+  static bool MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t mmap_size,
+                                     bool exclusive = false);
 
   // Given a valid mmaped ptr with correct size, unmaps the ptr from memory
   static bool MemoryUnmapFile(const void* mmap_ptr, size_t mmap_size);
