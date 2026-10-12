@@ -4516,6 +4516,9 @@
       "binary": "rccl-UnitTestsMPI",
       "num_nodes": 1,
       "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
       "tests": [
         {
           "name": "DDA_Fabric_ReduceScatter_LL",
@@ -4529,12 +4532,12 @@
         },
         {
           "name": "DDA_Fabric_ReduceScatter_Interleaved",
-          "description": "DDA fabric ReduceScatter LL and LL128 alternated back to back on one communicator: shared epoch cells and scratch with different line layouts",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator: same-tier calls back to back, a stream drain and a global MPI barrier at each tier switch (LL and LL128 scratch banks overlap)",
           "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
         },
         {
           "name": "DDA_Fabric_ReduceScatter_GridStride",
-          "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride",
+          "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
           "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
         }
       ]
@@ -4560,6 +4563,9 @@
       "binary": "rccl-UnitTestsMPI",
       "num_nodes": 1,
       "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
       "tests": [
         {
           "name": "DDA_Fabric_AllReduce_LL_OneShot",
