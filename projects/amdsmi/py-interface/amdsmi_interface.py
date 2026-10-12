@@ -6811,20 +6811,28 @@ def amdsmi_get_gpu_compute_process_gpus(pid: int) -> List[int]:
     if not isinstance(pid, int):
         raise AmdSmiParameterException(pid, int)
 
-    num_devices = ctypes.c_uint32(0)
     nullptr = POINTER(ctypes.c_uint32)()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_compute_process_gpus(pid, nullptr, ctypes.byref(num_devices))
-    )
-
-    dv_indices = (ctypes.c_uint32 * num_devices.value)()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_compute_process_gpus(
+    # As in amdsmi_get_gpu_compute_process_info(), count again when the process
+    # starts using another GPU between the count and the read.
+    count_attempts = 3
+    for _ in range(count_attempts):
+        num_devices = ctypes.c_uint32(0)
+        _check_res(
+            amdsmi_wrapper.amdsmi_get_gpu_compute_process_gpus(
+                pid, nullptr, ctypes.byref(num_devices)
+            )
+        )
+        dv_indices = (ctypes.c_uint32 * num_devices.value)()
+        ret = amdsmi_wrapper.amdsmi_get_gpu_compute_process_gpus(
             pid, dv_indices, ctypes.byref(num_devices)
         )
-    )
+        if ret != amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE:
+            break
+    _check_res(ret)
 
-    return [dv_index.value for dv_index in dv_indices]
+    # The read lowers num_devices when the process stopped using a GPU after the
+    # count.
+    return list(dv_indices[: num_devices.value])
 
 
 def amdsmi_gpu_xgmi_error_status(processor_handle: processor_handle_t) -> AmdSmiXgmiStatus:

@@ -6632,14 +6632,14 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a process id @p pid, a non-NULL pointer to an array of
- *  uint32_t's @p processor_handleices of length *@p num_devices, this function will
- *  write up to @p num_devices device indices to the memory pointed to by
- *  @p processor_handleices. If @p processor_handleices is not NULL, @p num_devices will be
+ *  uint32_t's @p dv_indices of length *@p num_devices, this function will
+ *  write up to *@p num_devices device indices to the memory pointed to by
+ *  @p dv_indices. If @p dv_indices is not NULL, @p num_devices will be
  *  updated with the number of gpu's currently being used by process @p pid.
- *  If @p processor_handleices is NULL, @p processor_handleices will be updated with the number of
+ *  If @p dv_indices is NULL, @p num_devices will be updated with the number of
  *  gpus currently being used by @p pid. Calling this function with @p
  *  dv_indices being NULL is a way to determine how much memory is required
- *  for when @p processor_handleices is not NULL.
+ *  for when @p dv_indices is not NULL.
  *
  *  @param[in] pid The process id of the process for which the number of gpus
  *  currently being used is requested
@@ -6651,11 +6651,19 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *
  *  @param[in,out] num_devices A pointer to a uint32_t, which on input, should
  *  contain the amount of memory in uint32_t's which have been provided by the
- *  @p processor_handleices argument. On output, if @p processor_handleices is non-NULL, this will
- *  be updated with the number uint32_t's actually written. If @p processor_handleices is
+ *  @p dv_indices argument. On output, if @p dv_indices is non-NULL, this will
+ *  be updated with the number uint32_t's actually written. If @p dv_indices is
  *  NULL, this argument will be updated with the number devices being used.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_INSUFFICIENT_SIZE if the process uses more GPUs
+ *                              than *@p num_devices; the call fills @p dv_indices and leaves
+ *                              *@p num_devices unchanged. Count again and repeat the call,
+ *                            | ::AMDSMI_STATUS_INVAL if @p num_devices is NULL, non-zero on
+ *                              other failures. A @p pid without a KFD process uses no GPUs.
+ *                              When the library detects that it runs in a container's PID
+ *                              namespace, it does not look @p pid up and reports the GPUs of
+ *                              the first KFD process found.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_indices,
                                                     uint32_t* num_devices);

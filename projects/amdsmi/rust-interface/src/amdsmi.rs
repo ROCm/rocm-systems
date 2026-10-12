@@ -4094,7 +4094,7 @@ pub fn amdsmi_get_gpu_compute_process_info_by_pid(pid: u32) -> AmdsmiResult<Amds
 ///
 /// # Example
 ///
-/// ```rust,should_panic
+/// ```rust
 /// # use amdsmi::*;
 /// #
 /// # fn main() {

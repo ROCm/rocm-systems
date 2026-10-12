@@ -4426,7 +4426,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
                                                     uint32_t* num_devices) {
   AMDSMI_CHECK_INIT();
 
-  if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
+  if (num_devices == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
   if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
