@@ -20,6 +20,7 @@
 #include "hip_dispatch_load.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -62,6 +63,17 @@ void reader() {
   }
 }
 
+// Waits until a reader has made a call counted by `calls`. The load is relaxed, so the wait
+// gives ThreadSanitizer no happens-before edge between the writer and the readers.
+bool wait_for_call(const std::atomic<long>& calls) {
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+  while (calls.load(std::memory_order_relaxed) == 0) {
+    if (std::chrono::steady_clock::now() > deadline) return false;
+    std::this_thread::yield();
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
@@ -71,22 +83,26 @@ int main() {
   std::vector<std::thread> readers;
   for (int i = 0; i < kReaders; ++i) readers.emplace_back(reader);
 
-  // Like hip_capture_init: snapshot the real table first, then install.
+  // Like hip_capture_init: snapshot the real table first, then install. A reader has to
+  // call the real function before the install and the shim after it, so the race is
+  // exercised on any schedule.
+  bool exercised = wait_for_call(g_real_calls);
   g_real = real_get_device_count;
-  for (int i = 0; i < kCycles; ++i) {
-    store_slot(&g_table.hipGetDeviceCount_fn, shim_get_device_count);
-    std::this_thread::yield();
+  store_slot(&g_table.hipGetDeviceCount_fn, shim_get_device_count);
+  exercised = exercised && wait_for_call(g_shim_calls);
+  for (int i = 0; exercised && i < kCycles; ++i) {
     store_slot(&g_table.hipGetDeviceCount_fn, real_get_device_count);
+    std::this_thread::yield();
+    store_slot(&g_table.hipGetDeviceCount_fn, shim_get_device_count);
     std::this_thread::yield();
   }
   g_done.store(true, std::memory_order_release);
   for (auto& t : readers) t.join();
 
-  long real_calls = g_real_calls.load();
-  long shim_calls = g_shim_calls.load();
-  std::printf("calls: %ld through the shim, %ld in total\n", shim_calls, real_calls);
-  if (shim_calls == 0 || shim_calls == real_calls) {
-    std::fprintf(stderr, "readers never saw both slot values; the race was not exercised\n");
+  std::printf("calls: %ld through the shim, %ld in total\n", g_shim_calls.load(),
+              g_real_calls.load());
+  if (!exercised) {
+    std::fprintf(stderr, "no reader called through the slot in 60 s; race not exercised\n");
     return 1;
   }
   return 0;
