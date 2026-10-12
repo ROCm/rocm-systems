@@ -94,8 +94,10 @@ rename on-disk `Correlation_Id` to `Correlation_ID` and join each pass on
 that column, parse Function, then nest marker intervals per `Thread_Id`.
 `Correlation_ID` is the in-memory per-pass join key after that rename.
 
-Those flags print warnings after the call tree. Plain analyze without
-those flags does not join and does not report those warnings.
+Coverage issues warn during join and attach, before the call tree is
+printed. Integrity failures abort analyze, so no tree is printed. Plain
+analyze without those flags does not join and does not report those
+warnings.
 
 Collapsed GPU time and kernel lists come from pass 0 (collapse, not fold).
 Printed identical sibling fold is display-only and does not mutate the forest.
