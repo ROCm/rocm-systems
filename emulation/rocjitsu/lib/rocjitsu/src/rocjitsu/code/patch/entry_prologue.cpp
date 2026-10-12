@@ -190,9 +190,9 @@ std::optional<DbiEntryProloguePlan> plan_dbi_entry_prologue(KernelBlockScope blo
                                                             const RegisterSet &reserved,
                                                             std::string *error_out) {
   // A kernel compiled with kernarg preloading has two hardware entries 256 bytes
-  // apart. A prologue reached through only one of them leaves the storage
-  // uninitialized on the other path, and nothing here can patch a firmware entry
-  // that the descriptor does not name.
+  // apart. Redirecting the descriptor to the prologue's stub would put the
+  // firmware entry 256 bytes past the stub, inside the cave; covering it needs a
+  // second stub.
   if (const uint32_t preload = kernarg_preload_length(desc); preload != 0) {
     if (error_out != nullptr) {
       *error_out = "kernel preloads " + std::to_string(preload) +
