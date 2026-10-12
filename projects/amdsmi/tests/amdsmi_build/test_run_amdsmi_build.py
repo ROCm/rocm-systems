@@ -13,10 +13,13 @@ Run with:  python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build
 from __future__ import annotations
 
 import importlib.util
+import io
+import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -183,6 +186,86 @@ class SummarizeTests(unittest.TestCase):
             (results / "install_result.txt").write_text("INSTALL PASSED\n")
             n = rab.summarize_results(results, "TestOS", None)
         self.assertEqual(n, 0)
+
+    def test_pcie_only_failure_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "build_result.txt").write_text("BUILD PASSED\n")
+            (results / "install_result.txt").write_text("INSTALL PASSED\n")
+            (results / "amdsmi_tests.log").write_text("[  PASSED  ] 157 tests.\n")
+            failure = "[  FAILED  ] GpuUnit.PcieLegacyUnknownSpeedKeepsStaticInfo\n"
+            (results / "pcie_unit_tests.log").write_text(failure)
+            summary = results / "summary.md"
+            output = io.StringIO()
+            with redirect_stdout(output):
+                count = rab.summarize_results(results, "TestOS", summary)
+            self.assertEqual(count, 1)
+            for text in (output.getvalue(), summary.read_text()):
+                self.assertIn("CI Failed", text)
+                self.assertIn("PCIe Unit Tests", text)
+                self.assertIn(failure, text)
+                self.assertNotIn("CI Passed", text)
+                self.assertNotIn("All stages and tests passed successfully", text)
+
+    def test_pcie_success_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td)
+            (results / "amdsmi_tests.log").write_text("[  PASSED  ] 157 tests.\n")
+            (results / "pcie_unit_tests.log").write_text("[  PASSED  ] 29 tests.\n")
+            summary = results / "summary.md"
+            output = io.StringIO()
+            with redirect_stdout(output):
+                count = rab.summarize_results(results, "TestOS", summary)
+            self.assertEqual(count, 0)
+            for text in (output.getvalue(), summary.read_text()):
+                self.assertIn("CI Passed", text)
+                self.assertNotIn("CI Failed", text)
+
+    def test_cpp_suites_report_failures_independently(self) -> None:
+        for pcie_fails in (False, True):
+            with self.subTest(pcie_fails=pcie_fails):
+                with tempfile.TemporaryDirectory() as td:
+                    results = Path(td)
+                    (results / "amdsmi_tests.log").write_text("[  FAILED  ] MainCase\n")
+                    pcie = "[  FAILED  ] PcieCase\n" if pcie_fails else "[  PASSED  ] 29 tests.\n"
+                    (results / "pcie_unit_tests.log").write_text(pcie)
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        count = rab.summarize_results(results, "TestOS", None)
+                    self.assertEqual(count, 2 if pcie_fails else 1)
+                    self.assertIn("AMDSMI Tests (1)", output.getvalue())
+                    self.assertEqual("PCIe Unit Tests (1)" in output.getvalue(), pcie_fails)
+                    self.assertNotIn("CI Passed", output.getvalue())
+
+    def test_summarize_command_reports_pcie_result(self) -> None:
+        for marker, expected_exit in (("FAILED", 1), ("PASSED", 0)):
+            with self.subTest(marker=marker):
+                with tempfile.TemporaryDirectory() as td:
+                    results = Path(td)
+                    (results / "pcie_unit_tests.log").write_text(f"[  {marker}  ] PcieCase\n")
+                    summary = results / "summary.md"
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-B",
+                            rab.__file__,
+                            "summarize",
+                            "--results-dir",
+                            td,
+                            "--os-label",
+                            "TestOS",
+                            "--summary-file",
+                            str(summary),
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertEqual(
+                        result.returncode, expected_exit, result.stdout + result.stderr
+                    )
+                    heading = "CI Failed" if expected_exit else "CI Passed"
+                    self.assertIn(heading, result.stdout)
+                    self.assertIn(heading, summary.read_text())
 
     def test_fail_case_counts(self):
         with tempfile.TemporaryDirectory() as td:

@@ -295,7 +295,18 @@ jobs:
           name: amdsmi-command-tests-${{ matrix.os }}
           path: /tmp/test-results-${{ matrix.os }}
 
+      - name: Run PCIe Unit Tests
+        id: pcie_unit_tests
+        run: |
+          set -euo pipefail
+          RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
+          mkdir -p "$RESULTS_DIR"
+          /opt/rocm/share/amd_smi/tests/amdsmi_pcie_metrics_test \
+            --gtest_output="xml:$RESULTS_DIR/pcie_unit_tests.xml" \
+            > "$RESULTS_DIR/pcie_unit_tests.log" 2>&1
+
       - name: Run AMDSMI, Python, and Example Tests
+        if: ${{ !cancelled() && (success() || steps.pcie_unit_tests.outcome == 'failure') }}
         run: |
           set -euo pipefail
           RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
@@ -327,6 +338,21 @@ jobs:
       - name: AMDSMI Test Results
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log || echo "No AMDSMI test results"
+
+      - name: PCIe Unit Test Results
+        if: always()
+        run: cat /tmp/test-results-${{ matrix.os }}/pcie_unit_tests.log || echo "No PCIe unit test results"
+
+      - name: Upload PCIe Unit Test Results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: amdsmi-pcie-unit-tests-${{ matrix.os }}
+          path: |
+            /tmp/test-results-${{ matrix.os }}/pcie_unit_tests.log
+            /tmp/test-results-${{ matrix.os }}/pcie_unit_tests.xml
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Integration Test Results
         if: always()

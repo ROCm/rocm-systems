@@ -6207,6 +6207,51 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
   // metrics
   amdsmi_gpu_metrics_t metric_info = {};
   status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);
+  if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
+    // PCI core link attributes remain available without the optional GPU metrics table.
+    info->pcie_metric.pcie_width = UINT16_MAX;
+    info->pcie_metric.pcie_speed = UINT32_MAX;
+    info->pcie_metric.pcie_bandwidth = UINT32_MAX;
+    info->pcie_metric.pcie_replay_count = UINT64_MAX;
+    info->pcie_metric.pcie_l0_to_recovery_count = UINT64_MAX;
+    info->pcie_metric.pcie_replay_roll_over_count = UINT64_MAX;
+    info->pcie_metric.pcie_nak_sent_count = UINT64_MAX;
+    info->pcie_metric.pcie_nak_received_count = UINT64_MAX;
+    info->pcie_metric.pcie_lc_perf_other_end_recovery_count = UINT32_MAX;
+
+    std::string path_cur_link_width =
+        "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_width";
+    fp = fopen(path_cur_link_width.c_str(), "r");
+    if (fp) {
+      char extra;
+      // Bound the scan before narrowing; zero lanes means the link is unavailable.
+      if (fscanf(fp, "%5u %c", &pcie_width, &extra) == 1 && !ferror(fp) && pcie_width > 0 &&
+          pcie_width < UINT16_MAX) {
+        info->pcie_metric.pcie_width = static_cast<uint16_t>(pcie_width);
+      }
+      fclose(fp);
+    }
+
+    std::string path_cur_link_speed =
+        "/sys/class/drm/" + gpu_device->get_gpu_path() + "/device/current_link_speed";
+    fp = fopen(path_cur_link_speed.c_str(), "r");
+    if (fp) {
+      char speed[16], unit[5], suffix[5], extra;
+      const int fields = fscanf(fp, " %15[0123456789.] %4s %4s %c", speed, unit, suffix, &extra);
+      // Older kernels omit the PCIe suffix; unknown speed text remains unavailable.
+      if ((fields == 2 || (fields == 3 && strcmp(suffix, "PCIe") == 0)) && !ferror(fp) &&
+          strcmp(unit, "GT/s") == 0) {
+        char* end;
+        pcie_speed = std::strtod(speed, &end) * 1000;
+        if (*end == '\0' && pcie_speed > 0 && pcie_speed < UINT32_MAX) {
+          const auto rate = static_cast<uint32_t>(pcie_speed);
+          if (pcie_speed == rate) info->pcie_metric.pcie_speed = rate;
+        }
+      }
+      fclose(fp);
+    }
+    return AMDSMI_STATUS_SUCCESS;
+  }
   if (status != AMDSMI_STATUS_SUCCESS) return status;
 
   info->pcie_metric.pcie_width = metric_info.pcie_link_width;

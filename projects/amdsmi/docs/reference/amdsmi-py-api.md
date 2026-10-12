@@ -1504,6 +1504,10 @@ finally:
 Description: Returns the pcie metric and static information for the given GPU. For accurate PCIe Bandwidth measurements it is recommended to use this function once per 1000ms
 It is not supported on virtual machine guest
 
+On Linux with amdgpu, unsupported GPU metrics fall back to sysfs link data. Current link
+attributes that are missing, unreadable or invalid do not discard static information; they stay
+`"N/A"`. Link speed and width do not imply support for bandwidth or error counters.
+
 Input parameters:
 
 * `processor_handle` device which to query
