@@ -469,7 +469,7 @@ HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
 }
 
 // A kernel launch event with no arguments and one pinned host snapshot record,
-// cut `cut` bytes short of a whole record (v8 layout, as capture writes it).
+// cut `cut` bytes short of a whole record (v9 layout, as capture writes it).
 static std::vector<uint8_t> make_launch_with_snapshot(uint64_t seq,
                                                       const std::vector<uint8_t>& rec,
                                                       size_t cut = 0) {

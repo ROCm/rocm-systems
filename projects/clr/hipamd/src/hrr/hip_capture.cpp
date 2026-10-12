@@ -322,7 +322,7 @@ static hipFunction_t pinned_stub_fn(const void* stub) {
 //       u16   n_ptrs
 //       u16[] ptr_offset (n_ptrs entries: byte offset of each 8-byte gpu ptr,
 //             or pointer into a pinned allocation in t_snaps)
-//   for each snapshot (v8):
+//   for each snapshot (v9):
 //     u64  ptr_handle (capture-time base of the pinned allocation)
 //     u64  offset (0), u64 length (the allocation size)
 //     u64  hash_lo, u64 hash_hi (blob with the bytes before the launch)

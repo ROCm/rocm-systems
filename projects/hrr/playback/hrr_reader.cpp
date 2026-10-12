@@ -229,7 +229,7 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   [+28..29] num_args (uint16_t)
 //   [+30..31] num_snapshots (uint16_t)
 //   per arg: u8 value_kind, u16 size, <size> bytes data
-//   per snapshot (v8, 41 bytes): see BufferSnapshot; the attribute tail follows
+//   per snapshot (v9, 41 bytes): see BufferSnapshot; the attribute tail follows
 // ---------------------------------------------------------------------------
 
 static bool parse_kernel_launch(const uint8_t* data, size_t len,
