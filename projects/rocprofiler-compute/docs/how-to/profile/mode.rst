@@ -1012,10 +1012,6 @@ Each Function cell is one ROCTX range:
 ``Backend`` is the trailing ``|torch`` or ``|triton`` on Function, or ``user``
 when that suffix is absent (user-defined ROCTX ranges).
 
-The on-disk per-pass join column is ``Correlation_Id``. Analyze canonicalizes
-it to ``Correlation_ID`` and joins a marker range to kernel dispatches on
-``Correlation_ID`` and ``GUID``.
-
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
 Analyze no longer writes ``ml_api_trace/consolidated.csv``.
@@ -1080,7 +1076,8 @@ path is not a filesystem path.
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    aten::relu
 
-The analyze call tree shows the full operator hierarchy on each node.
+The analyze call tree shows each call as a node; the reconstructed path
+uses ``/`` in the operator summary.
 
 This hierarchical information enables:
 
