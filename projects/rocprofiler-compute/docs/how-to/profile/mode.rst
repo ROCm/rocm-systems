@@ -1046,7 +1046,7 @@ The Torch trace feature currently has the following limitations:
 
 * Legacy stacked Function labels (``:#`` or ``#n@file:line``) make
   analyze exit during parse, before the tree. Re-profile with current
-  ``--torch-trace``.
+  ``--torch-trace`` or ``--triton-trace``.
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
