@@ -170,10 +170,7 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-register
-      # Some runners set vm.mmap_rnd_bits=32, which the gcc-12 TSan and LSan
-      # runtimes cannot handle: TSan aborts with "unexpected memory mapping"
-      # and LSan segfaults. setarch -R disables ASLR for the CI processes only,
-      # so the host setting stays untouched.
+      # gcc-12 TSan and LSan fail on hosts with vm.mmap_rnd_bits=32
       run:
         setarch $(uname -m) -R python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
