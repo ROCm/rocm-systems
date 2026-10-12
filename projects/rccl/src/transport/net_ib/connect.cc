@@ -32,6 +32,11 @@ struct ncclIbDevExtraProps {
 };
 
 extern int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering();
+
+// The flush scratchpad is registered on every accept; report the outcome once per IB device.
+static std::once_flag gpuFlushRegLogOnce[MAX_IB_DEVS];
+static std::once_flag gpuFlushRegWarnOnce[MAX_IB_DEVS];
+
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
   ncclIbCommStateConnect = 1,
@@ -1852,10 +1857,18 @@ ib_recv:
                                 IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
                 ncclSuccess) {
               gpuFlushRegistered = true;
-              static std::once_flag logOnce;
-              std::call_once(logOnce,
-                             [] { INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem"); });
+              std::call_once(gpuFlushRegLogOnce[rCommDev->base.ibDevN], [&] {
+                INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem on device %d (%s)",
+                     rCommDev->base.ibDevN, ibDev->devName);
+              });
             }
+          }
+          if (!gpuFlushRegistered) {
+            std::call_once(gpuFlushRegWarnOnce[rCommDev->base.ibDevN], [&] {
+              WARN("NET/IB: GDR flush scratchpad registration failed on device %d (%s); flush falls back to "
+                   "reading the receive buffer, which does not fence relaxed-ordering writes",
+                   rCommDev->base.ibDevN, ibDev->devName);
+            });
           }
         }
 #endif
