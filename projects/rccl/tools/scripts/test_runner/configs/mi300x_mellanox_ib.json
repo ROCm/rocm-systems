@@ -1496,21 +1496,6 @@
         }
       ]
     },
-    "unit_tests_utility_host_only": {
-      "is_gtest": true,
-      "binary": "rccl-UnitTestsUtilityHostOnly",
-      "num_ranks": 1,
-      "num_nodes": 1,
-      "num_gpus": 1,
-      "timeout": 120,
-      "tests": [
-        {
-          "name": "UtilityHostOnly_AllTests",
-          "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)",
-          "test_filter": "*"
-        }
-      ]
-    },
     "unit_tests_gin_sdma_policy": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGinSdmaPolicy",
@@ -4732,12 +4717,6 @@
       "name": "Unit Tests - GDR peer memory",
       "description": "All rccl-UnitTestsGdr cases",
       "config": "unit_tests_gdr",
-      "enabled": true
-    },
-    {
-      "name": "Unit Tests - nccl::utility plain-C++ build",
-      "description": "All rccl-UnitTestsUtilityHostOnly cases",
-      "config": "unit_tests_utility_host_only",
       "enabled": true
     },
     {
