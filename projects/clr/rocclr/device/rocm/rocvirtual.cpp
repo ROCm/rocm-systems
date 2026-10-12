@@ -3766,8 +3766,6 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   bool result = true;
 
-  // HIP has no cache coherency layer (see amd::Memory::signalWrite()), so the caches need no sync
-  // and the destinations need no writer. copyBufferBatch finds the device memories itself.
   if (!amd::IS_HIP) {
     device::Memory::SyncFlags syncFlags;
     syncFlags.skipEntire_ = false;
