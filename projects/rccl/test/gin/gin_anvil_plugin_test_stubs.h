@@ -41,4 +41,13 @@ const std::vector<int>& GetLastIntraNodeBarrierRanks();
 int GetLastIntraNodeBarrierRank();
 int GetLastIntraNodeBarrierTag();
 
+// hipMalloc / hipExtMallocWithFlags / hipFree are interposed and forwarded to the
+// HIP runtime. Pointer attribute queries cannot detect a free because the HIP
+// allocator keeps freed blocks mapped, so cleanup is checked against this ledger.
+// Reset() clears it, so allocations from earlier tests are not tracked.
+bool IsLiveHipAllocation(const void* ptr);
+int GetLiveHipAllocationCount();
+// Fail the next hipExtMallocWithFlags call once with hipErrorOutOfMemory.
+void SetFailNextExtMalloc(bool fail);
+
 }  // namespace GinAnvilPluginStubs
