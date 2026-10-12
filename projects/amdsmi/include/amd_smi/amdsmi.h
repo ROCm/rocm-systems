@@ -2654,14 +2654,15 @@ typedef struct {
 /**
  * @brief This structure contains information specific to a process.
  * Sum of the process memory is not expected to be the total memory usage.
+ * A value with all bits set is not available.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   uint32_t process_id;    //!< Process ID
-  uint64_t vram_usage;    //!< VRAM usage in MB
+  uint64_t vram_usage;    //!< VRAM usage in bytes
   uint64_t sdma_usage;    //!< SDMA usage in microseconds
-  uint32_t cu_occupancy;  //!< Compute Unit usage in percent
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
   uint32_t evicted_time;  //!< Time that queues are evicted on a GPU in milliseconds
 } amdsmi_process_info_t;
 
@@ -6596,7 +6597,16 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
  *  written. If @p procs is NULL, this argument will be updated with the number
  *  processes for which there is information.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_INSUFFICIENT_SIZE if more processes run than
+ *                              *@p num_items holds, for example because processes started
+ *                              after the count. @p procs then holds process IDs only; count
+ *                              again and repeat the call,
+ *                            | ::AMDSMI_STATUS_INVAL if @p num_items is NULL, non-zero on
+ *                              other failures. A process that exits during the read keeps
+ *                              its process_id with zero usage and an all-ones (not
+ *                              available) cu_occupancy. A process whose statistics cannot
+ *                              be read has them all-ones.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs,
                                                     uint32_t* num_items);
@@ -6619,7 +6629,12 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
  *  @param[in,out] proc a pointer to a ::amdsmi_process_info_t to which
  *  process information for @p pid will be written if it is found.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *                            | ::AMDSMI_STATUS_NOT_FOUND if @p pid has no KFD process or it
+ *                              exited during the read, non-zero on other failures. When the
+ *                              library detects that it runs in a container's PID namespace,
+ *                              it does not look @p pid up and returns all-ones statistics
+ *                              (not available).
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
                                                            amdsmi_process_info_t* proc);
@@ -8140,6 +8155,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * (including ::AMDSMI_STATUS_INVAL), and the list is not filled. Without KFD the list is empty. A
  * process whose KFD statistics cannot be read is still listed, with cu_occupancy, evicted_time and
  * sdma_usage all-ones (not available) and memory sizes from its fdinfo only (0 if unreadable).
+ * A running process whose GPUs cannot be read from KFD makes the listing fail.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);
