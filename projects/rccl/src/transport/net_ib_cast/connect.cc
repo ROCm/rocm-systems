@@ -183,10 +183,9 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
   ncclIbDev* ibDev = IbCastDevs + ibDevN;
   {
     std::lock_guard<std::mutex> lock(ibDev->mutex);
-    if (ibDev->pdRefs == 0) {
+    if (0 == ibDev->pdRefs++) {
       NCCLCHECK(wrap_ibv_alloc_pd(&ibDev->pd, ibDev->context));
     }
-    ibDev->pdRefs++;
     base->pd = ibDev->pd;
   }
 
@@ -204,18 +203,12 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
 }
 
 ncclResult_t IbCastDestroyBase(struct ncclIbNetCommDevBase* base) {
-  if (base->cq != NULL) {
-    NCCLCHECK(wrap_ibv_destroy_cq(base->cq));
-    base->cq = NULL;
-  }
-  if (base->pd == NULL) return ncclSuccess;
+  NCCLCHECK(wrap_ibv_destroy_cq(base->cq));
 
   std::lock_guard<std::mutex> lock(IbCastDevs[base->ibDevN].mutex);
   if (0 == --IbCastDevs[base->ibDevN].pdRefs) {
     NCCLCHECK(wrap_ibv_dealloc_pd(IbCastDevs[base->ibDevN].pd));
-    IbCastDevs[base->ibDevN].pd = NULL;
   }
-  base->pd = NULL;
   return ncclSuccess;
 }
 
@@ -2280,16 +2273,16 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
   NCCLCHECKGOTO(IbCastRecvCommInit(rComm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&rComm->base.stats), ret, fail);
-  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   stage->comm = rComm;
   stage->state = ncclIbCommStateAccept;
+  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketAccept(&rComm->base.sock, &lComm->sock), ret, fail);
 
   // Alloc stage->buffer here to be used for all following steps
   struct ncclIbConnectionMetadata remMeta;
   struct ncclIbDevExtraProps exProps;
   stage->offset = 0;
-  NCCLCHECKGOTO(ncclIbMalloc((void**)&stage->buffer, sizeof(remMeta)), ret, fail);
+  NCCLCHECK(ncclIbMalloc((void**)&stage->buffer, sizeof(remMeta)));
 
 ib_accept_check:
   NCCLCHECKGOTO(ncclSocketReady(&rComm->base.sock, &ready), ret, fail);
@@ -2299,16 +2292,14 @@ ib_accept_check:
 
 // In the case of mismatched nDevs, we will make sure that both sides of a logical connection have the same number of RC qps
 ib_recv_dev_list:
-  NCCLCHECKGOTO(ncclSocketProgress(NCCL_SOCKET_RECV, &rComm->base.sock, stage->buffer,
-                                   sizeof(ncclNetVDeviceProps_t) + sizeof(struct ncclIbDevExtraProps), &stage->offset),
-                ret, fail);
+  NCCLCHECK(ncclSocketProgress(NCCL_SOCKET_RECV, &rComm->base.sock, stage->buffer,
+                               sizeof(ncclNetVDeviceProps_t) + sizeof(struct ncclIbDevExtraProps), &stage->offset));
   if (stage->offset != (sizeof(ncclNetVDeviceProps_t) + sizeof(struct ncclIbDevExtraProps))) return ncclSuccess;
   ncclNetVDeviceProps_t remoteVProps;
   memcpy(&remoteVProps, stage->buffer, sizeof(ncclNetVDeviceProps_t));
   if (lComm->dev >= IbCastNMergedDevs) {
     WARN("NET/IB : Trying to use non-existent virtual device %d", lComm->dev);
-    ret = ncclInternalError;
-    goto fail;
+    return ncclInternalError;
   }
 
   memcpy(&exProps, (char*)stage->buffer + sizeof(ncclNetVDeviceProps_t), sizeof(exProps));
@@ -2318,12 +2309,11 @@ ib_recv_dev_list:
   // Reduce the physical device list and store in the connection base
   struct ncclIbMergedDev* mergedDev;
   mergedDev = IbCastMergedDevs + lComm->dev;
-  NCCLCHECKGOTO(IbCastCheckVProps(&mergedDev->vProps, &remoteVProps), ret, fail);
+  NCCLCHECK(IbCastCheckVProps(&mergedDev->vProps, &remoteVProps));
   rComm->base.vProps = mergedDev->vProps;
   memcpy(stage->buffer, &rComm->base.vProps, sizeof(ncclNetVDeviceProps_t));
   if (rComm->base.resiliency) {
-    NCCLCHECKGOTO(IbCastResiliencyDeviceNumSet(rComm->base.resiliency, rComm->base.vProps.ndevs, remoteVProps.ndevs),
-                  ret, fail);
+    NCCLCHECK(IbCastResiliencyDeviceNumSet(rComm->base.resiliency, rComm->base.vProps.ndevs, remoteVProps.ndevs));
   }
 
   stage->offset = 0;
@@ -2443,8 +2433,7 @@ ib_recv:
            "only one link type using NCCL_IB_HCA",
            ibDevN, ibDev->devName, ibDev->portNum, NCCL_IB_LLSTR(ibDev->portAttr.link_layer), ibDev0,
            IbCastDevs[ibDev0].devName, IbCastDevs[ibDev0].portNum, NCCL_IB_LLSTR(link_layer));
-      ret = ncclInternalError;
-      goto fail;
+      return ncclInternalError;
     }
   }
 
@@ -2457,8 +2446,7 @@ ib_recv:
            "type using NCCL_IB_HCA",
            NCCL_IB_LLSTR(remMeta.devs[i].link_layer), ibDev0, IbCastDevs[ibDev0].devName, IbCastDevs[ibDev0].portNum,
            NCCL_IB_LLSTR(link_layer));
-      ret = ncclInternalError;
-      goto fail;
+      return ncclInternalError;
     }
   }
 
@@ -2543,8 +2531,7 @@ ib_recv:
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
     if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
       NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
-                                    sizeof(rComm->remSegLayout.elems),
-                                    IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
+                                    sizeof(rComm->remSegLayout.elems), IBV_ACCESS_LOCAL_WRITE),
                     ret, fail);
     }
 
@@ -2693,12 +2680,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
-  if (stage->comm == rComm) {
-    (void)IbCastCloseRecv(rComm);
-    stage->comm = NULL;
-  } else {
-    free(rComm);
-  }
+  free(rComm);
   goto exit;
 }
 

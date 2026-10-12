@@ -123,7 +123,7 @@ struct ncclIbConnectionMetadata {
   int isP2p;
   bool isRMA;
 
-  // QP Sharing metadata (develop already grew the CAST connect wire past isRMA).
+  // QP Sharing metadata
   int      sharedGroupIdx;      // QP sharing group index (-1 = not shared)
   uint16_t commId;              // QP sharing comm ID (0 = not shared)
   int      senderIbDevIdx;      // sender's IB device index
