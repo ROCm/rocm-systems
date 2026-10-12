@@ -731,15 +731,11 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
   ncclResult_t ret = ncclSuccess;
   ncclNetCommConfig_t* netCommConfig = nullptr;
   // Telemetry is initialized and reported by IbCastInitDevices below.
-  // IbCastInitDevices() increments netRefCount before it can fail, so any step below that fails
-  // must unwind what already succeeded itself: init()/finalize() is a strict pair in the net
-  // plugin contract, and finalize() is only ever called after a successful init().
+  // init()/finalize() is a strict pair in the net plugin contract, so any step below that fails
+  // must unwind itself via IbCastFinalizeDevices() rather than rely on a caller's finalize().
   NCCLCHECK(IbCastInitDevices(logFunction, profFunction));
-  // After IbCastInitDevices: the probe QPs must use the final IbCastUseInline, like the resiliency QPs.
-  // IbCastCapProbeDevices() always returns ncclSuccess today (probe failures are cached per-device and
-  // WARN-logged, not propagated) and each probe fully tears down its own QP/MR/CQ/PD in its own cleanup
-  // path before returning, so finalize here never has to unwind a half-built per-port resource. This
-  // check is defensive: it stays correct if the probe ever gains a real failure path.
+  // Probe QPs must use the final IbCastUseInline, like the resiliency QPs. Each probe self-cleans its
+  // own QP/MR/CQ/PD on failure, so finalize here is defensive, not unwinding a half-built device.
   if ((ret = IbCastCapProbeDevices()) != ncclSuccess) {
     IbCastFinalizeDevices();
     return ret;
