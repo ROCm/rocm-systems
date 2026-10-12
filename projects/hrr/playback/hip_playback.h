@@ -679,13 +679,9 @@ struct PlaybackContext {
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
-        // A host allocation recorded again under the same address (a second
-        // pass replays the same events) gives the old entry's charge back.
-        auto old = alloc_map.find(rec);
-        if (old != alloc_map.end() &&
-            (old->second.kind == AllocKind::HostMalloc ||
-             old->second.kind == AllocKind::HostRegister))
-            host_budget.release(old->second.size);
+        // A host entry still under this address is not given back here: its
+        // buffer is still live, so its charge stays with it. The host-allocating
+        // playback functions free a replaced entry first (free_replaced_host_alloc).
         alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
