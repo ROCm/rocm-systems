@@ -4,18 +4,12 @@
 # configs/mi350p_pcie_8gpu_perf.json. test_runner.py is run from
 # projects/rccl/tools/scripts/test_runner so its `from lib...` imports resolve.
 #
-# This job is not a required merge check. It does not run on an ordinary PR.
-# It runs when one of these is true:
-#   - workflow_dispatch: manual, plan selected in the Actions UI (func, perf, or both)
-#   - pull_request: the PR is from this repo and carries the "mi350p-test" label
-#     (labeled, and later pushes while the label stays on). A labeled PR runs
-#     the func plan at --scope smoke (channels 1, 4, 32 plus spot checks).
-#     Manual func/both runs every enabled suite.
+# This job is not a required merge check. It does not run on pull requests.
+# The only trigger is workflow_dispatch: an authorized user starts it from the
+# Actions UI and picks func, perf, or both. Every run uses --scope all.
+# Do not add a pull_request trigger. Fork PRs execute the workflow file from
+# the PR, so a same-repo if: cannot keep untrusted code off this host.
 # Do not add this workflow name to branch protection.
-#
-# There is no paths filter. A paths filter suppresses the labeled event,
-# because adding a label does not change files. The mi350p-test label is the
-# gate. A later push on a labeled PR reruns the smoke plan.
 #
 # The runner must be the 8-GPU MI350P itself, registered with the label
 # mi350p-pcie-8gpu. The job refuses to start the suites unless lspci shows
@@ -51,19 +45,12 @@ on:
         required: false
         default: ''
         type: string
-  pull_request:
-    types: [labeled, synchronize]
 
 permissions:
   contents: read
 
 jobs:
   mi350p-test-runner:
-    # Same-repo only. A labeled fork PR must not execute fork code on this host.
-    if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       contains(github.event.pull_request.labels.*.name, 'mi350p-test'))
     concurrency:
       group: mi350p-pcie-8gpu
       cancel-in-progress: false
@@ -99,20 +86,13 @@ jobs:
         env:
           ROCM_PATH: ${{ github.event.inputs.rocm_path || '/opt/rocm' }}
           MPI_PATH: ${{ github.event.inputs.mpi_path || '/opt/ompi' }}
-          # A labeled PR runs correctness only. Manual uses the input.
-          PLAN: ${{ github.event_name == 'pull_request' && 'func' || github.event.inputs.plan || 'both' }}
+          PLAN: ${{ github.event.inputs.plan || 'both' }}
         run: |
           set -o pipefail
           cd "${GITHUB_WORKSPACE}/projects/rccl/tools/scripts/test_runner"
           export WORKDIR="${GITHUB_WORKSPACE}/projects/rccl"
           export RCCL_TESTS_DIR="${GITHUB_WORKSPACE}/projects/rccl-tests"
           export ROCM_PATH MPI_PATH
-
-          # Labeled PRs run the short channel set. Manual runs every suite.
-          SCOPE=all
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            SCOPE=smoke
-          fi
 
           run_config() {
             local config="$1"
@@ -127,7 +107,7 @@ jobs:
           rc=0
           case "${PLAN}" in
             func|both)
-              run_config mi350p_pcie_8gpu_func.json "${RUNNER_TEMP}/mi350p_func.log" --scope "${SCOPE}" || rc=$?
+              run_config mi350p_pcie_8gpu_func.json "${RUNNER_TEMP}/mi350p_func.log" --scope all || rc=$?
               ;;
             perf)
               ;;
@@ -148,7 +128,7 @@ jobs:
                 ;;
             esac
           fi
-          echo "plan=${PLAN} scope=${SCOPE} exit code: ${rc}"
+          echo "plan=${PLAN} scope=all exit code: ${rc}"
           exit "${rc}"
 
       - name: Upload logs
