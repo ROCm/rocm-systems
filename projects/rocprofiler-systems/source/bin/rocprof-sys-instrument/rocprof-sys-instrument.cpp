@@ -13,6 +13,7 @@
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
+#include "posix_backend.hpp"
 
 #include <fmt/ranges.h>
 
@@ -2759,8 +2760,8 @@ main(int argc, char** argv)
             verbprintf(0, "Getting linked libraries for %s... ", cmdv0.c_str());
 
             constexpr auto k_dep_read_timeout = std::chrono::milliseconds{ 3000 };
-            const auto linked_libs = rocprofsys::instrument::read_dynamic_dependencies(
-                cmdv0, k_dep_read_timeout);
+            const auto linked_libs = rocprofsys::instrument::read_dynamic_dependencies<
+                rocprofsys::instrument::posix_backend>(cmdv0, k_dep_read_timeout);
             if(!linked_libs)
             {
                 verbprintf_bare(0, "Error\n");

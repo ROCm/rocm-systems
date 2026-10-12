@@ -8,20 +8,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <exception>
 #include <memory>
 #include <optional>
-#include <signal.h>
 #include <string>
 #include <string_view>
-#include <sys/poll.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
 
 namespace
@@ -33,7 +27,6 @@ using ::testing::AllOf;
 using ::testing::DoAll;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
-using ::testing::Field;
 using ::testing::Gt;
 using ::testing::InSequence;
 using ::testing::IsEmpty;
@@ -41,22 +34,22 @@ using ::testing::IsNull;
 using ::testing::Le;
 using ::testing::NotNull;
 using ::testing::Optional;
-using ::testing::Pointee;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::SetArrayArgument;
-using ::testing::SetErrnoAndReturn;
 using ::testing::StrEq;
 using ::testing::StrictMock;
 using ::testing::Truly;
 
-constexpr int   k_read_fd  = 3;
-constexpr int   k_write_fd = 4;
-constexpr auto  k_pipe_fds = std::array<int, 2>{ k_read_fd, k_write_fd };
-constexpr auto  k_pipe = detail::pipe_fds{ .read_fd = k_read_fd, .write_fd = k_write_fd };
-constexpr auto  k_exe_path  = std::string_view{ "/path/to/app" };
-constexpr auto  k_timeout   = std::chrono::milliseconds{ 1000 };
-constexpr pid_t k_child_pid = 1234;
+constexpr int  k_read_fd  = 3;
+constexpr int  k_write_fd = 4;
+constexpr auto k_pipe_fds = std::array<int, 2>{ k_read_fd, k_write_fd };
+constexpr auto k_pipe = detail::pipe_fds{ .read_fd = k_read_fd, .write_fd = k_write_fd };
+constexpr auto k_exe_path  = std::string_view{ "/path/to/app" };
+constexpr auto k_timeout   = std::chrono::milliseconds{ 1000 };
+constexpr int  k_child_pid = 1234;
+// Opaque to the code under test: only passed from wait_for_exit to exited_successfully
+constexpr int k_child_status = 42;
 
 // What the loader prints for LD_TRACE_LOADED_OBJECTS=1, and the paths parsed from it
 constexpr auto k_loader_output =
@@ -71,15 +64,18 @@ constexpr auto k_loader_paths =
 struct gmock_posix
 {
     MOCK_METHOD(int, pipe, (int* fds));
-    MOCK_METHOD(pid_t, fork, ());
+    MOCK_METHOD(int, fork, ());
     MOCK_METHOD(int, close, (int descriptor));
-    MOCK_METHOD(int, dup2, (int old_fd, int new_fd));
+    MOCK_METHOD(int, redirect_stdout, (int descriptor));
     MOCK_METHOD(int, execve, (const char* path, char* const* argv, char* const* envp));
     MOCK_METHOD(void, exit_immediately, (int status));
-    MOCK_METHOD(int, poll, (pollfd * fds, nfds_t nfds, int timeout_ms));
-    MOCK_METHOD(ssize_t, read, (int descriptor, void* buf, size_t count));
-    MOCK_METHOD(int, kill, (pid_t pid, int sig));
-    MOCK_METHOD(pid_t, waitpid, (pid_t pid, int* status, int options));
+    MOCK_METHOD(int, wait_readable, (int descriptor, std::chrono::milliseconds timeout));
+    MOCK_METHOD(std::ptrdiff_t, read, (int descriptor, void* buf, std::size_t count));
+    MOCK_METHOD(int, force_kill, (int pid));
+    MOCK_METHOD(int, wait_for_exit, (int pid, int* status));
+    MOCK_METHOD(bool, exited_successfully, (int status));
+    MOCK_METHOD(bool, last_call_interrupted, ());
+    MOCK_METHOD(char* const*, environ, ());
 };
 
 std::unique_ptr<StrictMock<gmock_posix>> g_mock;
@@ -91,11 +87,16 @@ struct child_exited : std::exception
 /// posix_backend stand-in: every call forwards to g_mock.
 struct mock_posix_backend
 {
-    static int   pipe(int* fds) { return g_mock->pipe(fds); }
-    static pid_t fork() { return g_mock->fork(); }
-    static int   close(int descriptor) { return g_mock->close(descriptor); }
-    static int   dup2(int old_fd, int new_fd) { return g_mock->dup2(old_fd, new_fd); }
-    static int   execve(const char* path, char* const* argv, char* const* envp)
+    using pid_type = int;
+
+    static int      pipe(int* fds) { return g_mock->pipe(fds); }
+    static pid_type fork() { return g_mock->fork(); }
+    static int      close(int descriptor) { return g_mock->close(descriptor); }
+    static int      redirect_stdout(int descriptor)
+    {
+        return g_mock->redirect_stdout(descriptor);
+    }
+    static int execve(const char* path, char* const* argv, char* const* envp)
     {
         return g_mock->execve(path, argv, envp);
     }
@@ -106,39 +107,25 @@ struct mock_posix_backend
         g_mock->exit_immediately(status);
         throw child_exited{};
     }
-    static int poll(pollfd* fds, nfds_t nfds, int timeout_ms)
+    static int wait_readable(int descriptor, std::chrono::milliseconds timeout)
     {
-        return g_mock->poll(fds, nfds, timeout_ms);
+        return g_mock->wait_readable(descriptor, timeout);
     }
-    static ssize_t read(int descriptor, void* buf, size_t count)
+    static std::ptrdiff_t read(int descriptor, void* buf, std::size_t count)
     {
         return g_mock->read(descriptor, buf, count);
     }
-    static int   kill(pid_t pid, int sig) { return g_mock->kill(pid, sig); }
-    static pid_t waitpid(pid_t pid, int* status, int options)
+    static int      force_kill(pid_type pid) { return g_mock->force_kill(pid); }
+    static pid_type wait_for_exit(pid_type pid, int* status)
     {
-        return g_mock->waitpid(pid, status, options);
+        return g_mock->wait_for_exit(pid, status);
     }
-};
-
-/// Points ::environ at a test-owned array and restores the real one on scope exit.
-class environ_guard
-{
-public:
-    explicit environ_guard(char** replacement)
-    : m_saved{ ::environ }
+    static bool exited_successfully(int status)
     {
-        ::environ = replacement;
+        return g_mock->exited_successfully(status);
     }
-    ~environ_guard() { ::environ = m_saved; }
-
-    environ_guard(const environ_guard&)            = delete;
-    environ_guard& operator=(const environ_guard&) = delete;
-    environ_guard(environ_guard&&)                 = delete;
-    environ_guard& operator=(environ_guard&&)      = delete;
-
-private:
-    char** m_saved;
+    static bool last_call_interrupted() { return g_mock->last_call_interrupted(); }
+    static char* const* environ() { return g_mock->environ(); }
 };
 
 /// Action for read(): copies data into the caller's buffer and returns its size.
@@ -147,10 +134,10 @@ private:
 auto
 read_returns(std::string_view data)
 {
-    return [data](int /*descriptor*/, void* buf, size_t count) -> ssize_t {
+    return [data](int /*descriptor*/, void* buf, std::size_t count) -> std::ptrdiff_t {
         const auto size = std::min(data.size(), count);
         std::memcpy(buf, data.data(), size);
-        return static_cast<ssize_t>(size);
+        return static_cast<std::ptrdiff_t>(size);
     };
 }
 
@@ -166,13 +153,16 @@ run_read_pipe_until_eof(std::chrono::milliseconds timeout = k_timeout)
     return out;
 }
 
-/// Expects pipe() to succeed with k_pipe_fds, then fork() to return pid.
+/// Expects pipe() to succeed with k_pipe_fds, then the environment to be read, then
+/// fork() to return pid.
 void
-expect_pipe_and_fork(pid_t pid)
+expect_pipe_and_fork(int pid)
 {
     EXPECT_CALL(*g_mock, pipe(NotNull()))
         .WillOnce(
             DoAll(SetArrayArgument<0>(k_pipe_fds.begin(), k_pipe_fds.end()), Return(0)));
+    // Environment contents are covered by the create_dependency_listing_envp tests
+    EXPECT_CALL(*g_mock, environ()).WillOnce(Return(nullptr));
     EXPECT_CALL(*g_mock, fork()).WillOnce(Return(pid));
 }
 
@@ -181,18 +171,28 @@ void
 expect_parent_reads(std::string_view output)
 {
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(read_returns(output));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 }
 
-/// Action for waitpid(): reports status through the out-parameter and returns the child.
+/// Action for wait_for_exit(): reports k_child_status through the out-parameter and
+/// returns the child.
 auto
-waitpid_reports(int status)
+wait_for_exit_reports_status()
 {
-    return DoAll(SetArgPointee<1>(status), Return(k_child_pid));
+    return DoAll(SetArgPointee<1>(k_child_status), Return(k_child_pid));
+}
+
+/// Expects the child to be reaped, and the backend to judge its status as success.
+void
+expect_child_reaped(bool success)
+{
+    EXPECT_CALL(*g_mock, wait_for_exit(k_child_pid, NotNull()))
+        .WillOnce(wait_for_exit_reports_status());
+    EXPECT_CALL(*g_mock, exited_successfully(k_child_status)).WillOnce(Return(success));
 }
 
 std::optional<std::vector<std::string>>
@@ -234,31 +234,31 @@ TEST_F(dynamic_dependency_listing_test, envp_is_environment_plus_listing_var_and
 {
     auto       var_a    = std::string{ "ROCPROFSYS_TEST_A=1" };
     auto       var_b    = std::string{ "ROCPROFSYS_TEST_B=2" };
-    auto       test_env = std::array<char*, 3>{ var_a.data(), var_b.data(), nullptr };
-    const auto guard    = environ_guard{ test_env.data() };
+    const auto test_env = std::array<char*, 3>{ var_a.data(), var_b.data(), nullptr };
+    EXPECT_CALL(*g_mock, environ()).WillOnce(Return(test_env.data()));
 
-    const auto envp = detail::create_dependency_listing_envp();
+    const auto envp = detail::create_dependency_listing_envp<mock_posix_backend>();
 
     // Environment entries are the same pointers, not copies of the strings
     EXPECT_THAT(envp, ElementsAre(var_a.data(), var_b.data(),
                                   StrEq("LD_TRACE_LOADED_OBJECTS=1"), IsNull()));
 }
 
-TEST_F(dynamic_dependency_listing_test, envp_handles_null_environ)
+TEST_F(dynamic_dependency_listing_test, envp_handles_null_environment)
 {
-    const auto guard = environ_guard{ nullptr };
+    EXPECT_CALL(*g_mock, environ()).WillOnce(Return(nullptr));
 
-    const auto envp = detail::create_dependency_listing_envp();
+    const auto envp = detail::create_dependency_listing_envp<mock_posix_backend>();
 
     EXPECT_THAT(envp, ElementsAre(StrEq("LD_TRACE_LOADED_OBJECTS=1"), IsNull()));
 }
 
-TEST_F(dynamic_dependency_listing_test, envp_handles_empty_environ)
+TEST_F(dynamic_dependency_listing_test, envp_handles_empty_environment)
 {
-    auto       test_env = std::array<char*, 1>{ nullptr };
-    const auto guard    = environ_guard{ test_env.data() };
+    const auto test_env = std::array<char*, 1>{ nullptr };
+    EXPECT_CALL(*g_mock, environ()).WillOnce(Return(test_env.data()));
 
-    const auto envp = detail::create_dependency_listing_envp();
+    const auto envp = detail::create_dependency_listing_envp<mock_posix_backend>();
 
     EXPECT_THAT(envp, ElementsAre(StrEq("LD_TRACE_LOADED_OBJECTS=1"), IsNull()));
 }
@@ -275,7 +275,7 @@ TEST_F(dynamic_dependency_listing_test, exec_redirects_stdout_then_execs_target)
 
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_read_fd));
-    EXPECT_CALL(*g_mock, dup2(k_write_fd, STDOUT_FILENO)).WillOnce(Return(STDOUT_FILENO));
+    EXPECT_CALL(*g_mock, redirect_stdout(k_write_fd)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_write_fd));
     EXPECT_CALL(*g_mock, execve(StrEq(k_exe_path), is_exe_argv, envp.data()))
         .WillOnce(Return(-1));
@@ -286,13 +286,13 @@ TEST_F(dynamic_dependency_listing_test, exec_redirects_stdout_then_execs_target)
                  child_exited);
 }
 
-TEST_F(dynamic_dependency_listing_test, exec_exits_127_without_exec_when_dup2_fails)
+TEST_F(dynamic_dependency_listing_test, exec_exits_127_without_exec_when_redirect_fails)
 {
     const auto envp = std::vector<char*>{ nullptr };
 
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_read_fd));
-    EXPECT_CALL(*g_mock, dup2(k_write_fd, STDOUT_FILENO)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, redirect_stdout(k_write_fd)).WillOnce(Return(-1));
     EXPECT_CALL(*g_mock, exit_immediately(detail::k_exec_failure_status));
 
     EXPECT_THROW(detail::exec_with_stdout_to_pipe<mock_posix_backend>(
@@ -303,11 +303,11 @@ TEST_F(dynamic_dependency_listing_test, read_pipe_concatenates_chunks_until_eof)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(read_returns("abc"));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(read_returns("def"));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
@@ -318,22 +318,21 @@ TEST_F(dynamic_dependency_listing_test, read_pipe_returns_empty_string_on_immedi
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
     EXPECT_EQ(run_read_pipe_until_eof(), "");
 }
 
-TEST_F(dynamic_dependency_listing_test, read_pipe_polls_read_fd_with_bounded_timeout)
+TEST_F(dynamic_dependency_listing_test, read_pipe_waits_on_read_fd_with_bounded_timeout)
 {
-    const auto is_read_fd_for_input =
-        Pointee(AllOf(Field(&pollfd::fd, k_read_fd), Field(&pollfd::events, POLLIN)));
+    const auto is_bounded_timeout =
+        AllOf(Gt(std::chrono::milliseconds{ 0 }), Le(k_timeout));
 
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock,
-                poll(is_read_fd_for_input, 1, AllOf(Gt(0), Le(k_timeout.count()))))
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, is_bounded_timeout))
         .WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
@@ -341,49 +340,52 @@ TEST_F(dynamic_dependency_listing_test, read_pipe_polls_read_fd_with_bounded_tim
     EXPECT_EQ(run_read_pipe_until_eof(), "");
 }
 
-TEST_F(dynamic_dependency_listing_test, read_pipe_returns_nullopt_on_poll_timeout)
+TEST_F(dynamic_dependency_listing_test, read_pipe_returns_nullopt_on_wait_timeout)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(0));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
     EXPECT_EQ(run_read_pipe_until_eof(), std::nullopt);
 }
 
-TEST_F(dynamic_dependency_listing_test, read_pipe_retries_poll_after_eintr)
+TEST_F(dynamic_dependency_listing_test, read_pipe_retries_wait_when_interrupted)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(SetErrnoAndReturn(EINTR, -1));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, last_call_interrupted()).WillOnce(Return(true));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(read_returns("abc"));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
     EXPECT_EQ(run_read_pipe_until_eof(), "abc");
 }
 
-TEST_F(dynamic_dependency_listing_test, read_pipe_returns_nullopt_on_poll_error)
+TEST_F(dynamic_dependency_listing_test, read_pipe_returns_nullopt_on_wait_error)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(SetErrnoAndReturn(EBADF, -1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, last_call_interrupted()).WillOnce(Return(false));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
     EXPECT_EQ(run_read_pipe_until_eof(), std::nullopt);
 }
 
-TEST_F(dynamic_dependency_listing_test, read_pipe_retries_read_after_eintr)
+TEST_F(dynamic_dependency_listing_test, read_pipe_retries_read_when_interrupted)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
-    EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(SetErrnoAndReturn(EINTR, -1));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, last_call_interrupted()).WillOnce(Return(true));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(read_returns("abc"));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
     EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
@@ -394,15 +396,16 @@ TEST_F(dynamic_dependency_listing_test, read_pipe_returns_nullopt_on_read_error)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(1));
-    EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(SetErrnoAndReturn(EIO, -1));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(1));
+    EXPECT_CALL(*g_mock, read(k_read_fd, _, _)).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, last_call_interrupted()).WillOnce(Return(false));
     EXPECT_CALL(*g_mock, close(k_read_fd));
 
     EXPECT_EQ(run_read_pipe_until_eof(), std::nullopt);
 }
 
 TEST_F(dynamic_dependency_listing_test,
-       read_pipe_returns_nullopt_without_polling_when_timeout_is_zero)
+       read_pipe_returns_nullopt_without_waiting_when_timeout_is_zero)
 {
     const InSequence seq;
     EXPECT_CALL(*g_mock, close(k_write_fd));
@@ -433,8 +436,7 @@ TEST_F(dynamic_dependency_listing_test,
     const InSequence seq;
     expect_pipe_and_fork(k_child_pid);
     expect_parent_reads(k_loader_output);
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(waitpid_reports(W_EXITCODE(0, 0)));
+    expect_child_reaped(true);
 
     EXPECT_THAT(run_read_dynamic_dependencies(),
                 Optional(ElementsAreArray(k_loader_paths)));
@@ -446,8 +448,7 @@ TEST_F(dynamic_dependency_listing_test,
     const InSequence seq;
     expect_pipe_and_fork(k_child_pid);
     expect_parent_reads("\tlinux-vdso.so.1 (0x00007ffd)\n");
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(waitpid_reports(W_EXITCODE(0, 0)));
+    expect_child_reaped(true);
 
     EXPECT_THAT(run_read_dynamic_dependencies(), Optional(IsEmpty()));
 }
@@ -458,47 +459,35 @@ TEST_F(dynamic_dependency_listing_test,
     const InSequence seq;
     expect_pipe_and_fork(k_child_pid);
     EXPECT_CALL(*g_mock, close(k_write_fd));
-    EXPECT_CALL(*g_mock, poll(_, 1, _)).WillOnce(Return(0));
+    EXPECT_CALL(*g_mock, wait_readable(k_read_fd, _)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_read_fd));
-    EXPECT_CALL(*g_mock, kill(k_child_pid, SIGKILL));
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(waitpid_reports(W_EXITCODE(0, SIGKILL)));
+    EXPECT_CALL(*g_mock, force_kill(k_child_pid));
+    // No exited_successfully call: the missing output alone decides the result
+    EXPECT_CALL(*g_mock, wait_for_exit(k_child_pid, NotNull()))
+        .WillOnce(wait_for_exit_reports_status());
 
     EXPECT_EQ(run_read_dynamic_dependencies(), std::nullopt);
 }
 
 TEST_F(dynamic_dependency_listing_test,
-       read_deps_returns_nullopt_when_child_exits_nonzero)
+       read_deps_returns_nullopt_when_child_not_successful)
 {
     const InSequence seq;
     expect_pipe_and_fork(k_child_pid);
     expect_parent_reads(k_loader_output);
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(waitpid_reports(W_EXITCODE(1, 0)));
+    expect_child_reaped(false);
 
     EXPECT_EQ(run_read_dynamic_dependencies(), std::nullopt);
 }
 
-TEST_F(dynamic_dependency_listing_test,
-       read_deps_returns_nullopt_when_child_killed_by_signal)
+TEST_F(dynamic_dependency_listing_test, read_deps_retries_wait_for_exit_when_interrupted)
 {
     const InSequence seq;
     expect_pipe_and_fork(k_child_pid);
     expect_parent_reads(k_loader_output);
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(waitpid_reports(W_EXITCODE(0, SIGSEGV)));
-
-    EXPECT_EQ(run_read_dynamic_dependencies(), std::nullopt);
-}
-
-TEST_F(dynamic_dependency_listing_test, read_deps_retries_waitpid_after_eintr)
-{
-    const InSequence seq;
-    expect_pipe_and_fork(k_child_pid);
-    expect_parent_reads(k_loader_output);
-    EXPECT_CALL(*g_mock, waitpid(k_child_pid, NotNull(), 0))
-        .WillOnce(SetErrnoAndReturn(EINTR, -1))
-        .WillOnce(waitpid_reports(W_EXITCODE(0, 0)));
+    EXPECT_CALL(*g_mock, wait_for_exit(k_child_pid, NotNull())).WillOnce(Return(-1));
+    EXPECT_CALL(*g_mock, last_call_interrupted()).WillOnce(Return(true));
+    expect_child_reaped(true);
 
     EXPECT_THAT(run_read_dynamic_dependencies(),
                 Optional(ElementsAreArray(k_loader_paths)));
@@ -519,7 +508,7 @@ TEST_F(dynamic_dependency_listing_test, read_deps_child_execs_target_with_listin
     const InSequence seq;
     expect_pipe_and_fork(0);
     EXPECT_CALL(*g_mock, close(k_read_fd));
-    EXPECT_CALL(*g_mock, dup2(k_write_fd, STDOUT_FILENO)).WillOnce(Return(STDOUT_FILENO));
+    EXPECT_CALL(*g_mock, redirect_stdout(k_write_fd)).WillOnce(Return(0));
     EXPECT_CALL(*g_mock, close(k_write_fd));
     EXPECT_CALL(*g_mock, execve(StrEq(k_exe_path), _, has_listing_var))
         .WillOnce(Return(-1));

@@ -6,50 +6,15 @@
 #include "common/delimit.hpp"
 
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <optional>
-#include <signal.h>
 #include <string>
-#include <sys/poll.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
 namespace rocprofsys::instrument
 {
-/// Backend for read_dynamic_dependencies that makes the real system calls
-struct posix_backend
-{
-    static int   pipe(int* fds) { return ::pipe(fds); }
-    static pid_t fork() { return ::fork(); }
-    static int   close(int descriptor) { return ::close(descriptor); }
-    static int   dup2(int old_fd, int new_fd) { return ::dup2(old_fd, new_fd); }
-    static int   execve(const char* path, char* const* argv, char* const* envp)
-    {
-        return ::execve(path, argv, envp);
-    }
-    // Must stay ::_exit, not std::exit: the forked child must not run the parent's
-    // atexit handlers or flush its stdio buffers
-    [[noreturn]] static void exit_immediately(int status) { ::_exit(status); }
-    static int               poll(pollfd* fds, nfds_t nfds, int timeout_ms)
-    {
-        return ::poll(fds, nfds, timeout_ms);
-    }
-    static ssize_t read(int descriptor, void* buf, size_t count)
-    {
-        return ::read(descriptor, buf, count);
-    }
-    static int   kill(pid_t pid, int sig) { return ::kill(pid, sig); }
-    static pid_t waitpid(pid_t pid, int* status, int options)
-    {
-        return ::waitpid(pid, status, options);
-    }
-};
-
 namespace detail
 {
 inline constexpr int k_invalid_fd          = -1;
@@ -75,14 +40,16 @@ create_pipe()
 }
 
 /// The current environment plus LD_TRACE_LOADED_OBJECTS, NULL-terminated.
-/// The result points into environ - only valid while the environment is left untouched.
-[[nodiscard]] inline std::vector<char*>
+/// The result points into Backend::environ() - only valid while the environment is
+/// left untouched.
+template <typename Backend>
+[[nodiscard]] std::vector<char*>
 create_dependency_listing_envp()
 {
     auto envp = std::vector<char*>{};
 
     // Copy ptrs to existing environment until nullptr terminator is reached
-    for(char* const* var = ::environ; var != nullptr && *var != nullptr; ++var)
+    for(char* const* var = Backend::environ(); var != nullptr && *var != nullptr; ++var)
     {
         envp.emplace_back(*var);
     }
@@ -103,7 +70,7 @@ exec_with_stdout_to_pipe(const std::string& exe_path, pipe_fds fds,
                          const std::vector<char*>& envp)
 {
     Backend::close(fds.read_fd);
-    if(Backend::dup2(fds.write_fd, STDOUT_FILENO) < 0)
+    if(Backend::redirect_stdout(fds.write_fd) < 0)
     {
         Backend::exit_immediately(k_exec_failure_status);
     }
@@ -145,18 +112,17 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
 
         // Wait until the pipe is readable (data or EOF) or the deadline passes, so read()
         // below never blocks
-        auto      pfd   = pollfd{ .fd = fds.read_fd, .events = POLLIN, .revents = 0 };
-        const int ready = Backend::poll(&pfd, 1, static_cast<int>(remaining.count()));
-        if(ready < 0 && errno == EINTR)
+        const int ready = Backend::wait_readable(fds.read_fd, remaining);
+        if(ready < 0 && Backend::last_call_interrupted())
         {
             continue;  // interrupted: retry with the time left
         }
         if(ready <= 0)
         {
-            break;  // timed out or poll error
+            break;  // timed out or wait error
         }
 
-        // poll said readable, so read() should return at once: >0 data, 0 EOF, <0 error
+        // Pipe is readable, so read() should return at once: >0 data, 0 EOF, <0 error
         const auto bytes_read = Backend::read(fds.read_fd, buf.data(), buf.size());
         if(bytes_read > 0)
         {
@@ -166,7 +132,7 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
         {
             eof = true;
         }
-        else if(errno != EINTR)  // EINTR: retry with time left
+        else if(!Backend::last_call_interrupted())  // interrupted: retry with time left
         {
             break;  // read error
         }
@@ -185,7 +151,7 @@ read_pipe_until_eof(pipe_fds& fds, std::chrono::milliseconds timeout)
 /// LD_TRACE_LOADED_OBJECTS=1, which makes the dynamic loader print every resolved
 /// dependency and exit before main(). A static executable has no loader to intercept it,
 /// so it would run for real instead.
-template <typename Backend = posix_backend>
+template <typename Backend>
 [[nodiscard]] std::optional<std::vector<std::string>>
 read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds timeout)
 {
@@ -199,7 +165,7 @@ read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds
     // current env, so the later-listed lib paths will match what a real run would load.
     // Built before forking: between fork and exec the child must not allocate or modify
     // the environment.
-    const auto listing_envp = detail::create_dependency_listing_envp();
+    const auto listing_envp = detail::create_dependency_listing_envp<Backend>();
 
     const auto pid = Backend::fork();
     if(pid < 0)
@@ -219,22 +185,18 @@ read_dynamic_dependencies(const std::string& exe_path, std::chrono::milliseconds
     const auto loader_output = detail::read_pipe_until_eof<Backend>(*fds, timeout);
     if(!loader_output)
     {
-        // Timeout or read error: the child may still be running. Kill it so the waitpid
+        // Timeout or read error: the child may still be running. Kill it so wait_for_exit
         // below returns.
-        Backend::kill(pid, SIGKILL);
+        Backend::force_kill(pid);
     }
 
     // Reap the child
     auto status = 0;
-    while(Backend::waitpid(pid, &status, 0) < 0 && errno == EINTR)
+    while(Backend::wait_for_exit(pid, &status) < 0 && Backend::last_call_interrupted())
     {
         // Retry if interrupted by a signal
     }
-    // Included <sys/wait.h> is correct for W* macros, but <stdlib.h> arrives earlier
-    // through the standard library headers, so glibc defines the W* macros there,
-    // <sys/wait.h> skips them, and clang-tidy reports no direct include.
-    // NOLINTNEXTLINE(misc-include-cleaner)
-    if(!loader_output || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    if(!loader_output || !Backend::exited_successfully(status))
     {
         return std::nullopt;
     }
