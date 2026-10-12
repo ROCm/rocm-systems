@@ -1,0 +1,13 @@
+# Copyright (c) 2026 Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Test-only DBI runtime hook: the production exports plus the rj_test_dbi_*
+# entry points compiled in under RJ_DBI_RUNTIME_TEST_HOOKS.
+{
+  global:
+    OnLoad;
+    OnUnload;
+    rj_test_dbi_*;
+  local:
+    *;
+};
