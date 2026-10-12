@@ -183,11 +183,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
   - `misc/ionicdvsymbols.cc`, `misc/mlx5dvsymbols.cc` (`IONICDV_SYMBOLS_CC_PATH`,
-    `MLX5DV_SYMBOLS_CC_PATH`, from `dv_symbols_test.cc`), and `gin_dv_dlopen` from
-    `include/gin/gin_dv_dlopen.h`; suite `DvSymbolsTestIsolated.*`.
-    Checks that a provider dv library stays mapped after a missing-symbol failure
-    (including the GIN loader, which `dlclose`s on a missing symbol), and that a
-    libionic without `ionic_dv_qp_set_gda` still builds, using
+    `MLX5DV_SYMBOLS_CC_PATH`, from `dv_symbols_test.cc`); suite `DvSymbolsTestIsolated.*`.
+    Checks that a provider dv library stays mapped after a missing-symbol failure,
+    and that a libionic without `ionic_dv_qp_set_gda` still builds, using
     `fakes/dv_provider_fake.cc` built as shared objects with SONAME `libionic.so` /
     `libmlx5.so`. Each test runs in its own process because the builders open the
     fakes with `RTLD_NODELETE`. The tests skip when those libraries are not next to
