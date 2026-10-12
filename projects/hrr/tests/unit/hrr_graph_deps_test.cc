@@ -66,6 +66,44 @@ TEST_CASE("Unit_HRR_GraphDeps_InlineCapacity", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - A node recorded with more dependencies than the record stores (capture
+ *     keeps 16 and records the caller's count too) is refused, not replayed
+ *     with the missing ordering edges: the graph is marked incomplete and the
+ *     message gives both counts. The two symbol-copy handlers do the same.
+ */
+TEST_CASE("Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused", "[hrr]") {
+  CHECK(hrr::deps_complete(0, 0));
+  CHECK(hrr::deps_complete(16, 16));
+  CHECK_FALSE(hrr::deps_complete(20, 16));
+
+  PlaybackContext ctx;
+  ctx.record_graph(kGraph, reinterpret_cast<hipGraph_t>(0x1));
+
+  ExactRecord<hrr_args_hipGraphAddMemAllocNode> rec;
+  auto* a = rec.get();
+  a->graph = kGraph;
+  a->pNodeParams_present = 1;
+  a->pDependencies_present = 1;
+  a->pDependencies_n = 16;
+  a->numDependencies = 20;
+  std::memset(a->pDependencies_bytes, 0, sizeof(a->pDependencies_bytes));
+
+  hrr_dispatch_index = 7;
+  hipError_t r = hipErrorUnknown;
+  const std::string err = capture_stderr(
+      [&] { r = playback_hipGraphAddMemAllocNode(ctx, rec.bytes()); });
+
+  INFO("stderr: " << err);
+  CHECK(r == hipSuccess);
+  CHECK(ctx.graph_is_incomplete(kGraph));
+  CHECK(err.find("hipGraphAddMemAllocNode") != std::string::npos);
+  CHECK(err.find("20 dependencies") != std::string::npos);
+  CHECK(err.find("holds 16") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - hipGraphAddMemAllocNode with a dependency count of 17, 1000 and
  *     UINT32_MAX against a 16-slot field is refused: it returns without a HIP
  *     call, the graph is marked incomplete, and the message names the API and

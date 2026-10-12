@@ -31,4 +31,12 @@ constexpr bool inline_count_fits(uint64_t count, size_t field_bytes, size_t elem
   return count <= inline_capacity(field_bytes, elem_size);
 }
 
+// True if the dependency list stored in a graph-node record holds every
+// dependency the call was made with. Capture keeps at most what the inline
+// field holds and records the caller's count separately, so a stored count below
+// it means ordering edges were dropped.
+constexpr bool deps_complete(uint64_t recorded, uint64_t stored) {
+  return stored >= recorded;
+}
+
 }  // namespace hrr
