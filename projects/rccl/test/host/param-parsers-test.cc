@@ -117,6 +117,13 @@ TEST(ParamParsersMicrotest, Integer_RejectsNullEmptyAndTrailingGarbage) {
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("", out));
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("12abc", out));
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("abc", out));
+  // The signed and unsigned arms duplicate this guard (parser_default.h:99,102)
+  // but every other unsigned resolve() case here ("42", the ERANGE overflow,
+  // and "-1") takes a path that never reaches it, so the unsigned arm's own
+  // copy needs its own garbage cases.
+  uint32_t unsignedOut = 0;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("12abc", unsignedOut));
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("abc", unsignedOut));
 }
 
 TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
