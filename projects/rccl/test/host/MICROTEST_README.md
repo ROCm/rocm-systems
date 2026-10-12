@@ -248,6 +248,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroNcclDeviceCore`**: `src/nccl_device/core.cc` (via
+  `CORE_CC_PATH`, from `nccl-core-test.cc`); suite `NcclCoreMicrotest.*`. Its
+  own binary because `rccl-UnitTestsMicro`'s `fakes/dev_runtime_micro_fakes.cc`
+  (`ncclTeamWorld`/`ncclTeamRail`/`ncclTeamCft`/`ncclTeamCftMultimem`),
+  `fakes/devcomm_fakes.cc` (`ncclTeamLsa`), and `gin-host-test.cc`
+  (`ncclTeamRankToWorld`) between them fake 6 of this file's 7 functions.
+  Links the lightweight `fakes/dev_runtime_fakes.cc` (hookable
+  `ncclDevrInitOnce`, default `ncclSuccess`) rather than the real
+  `dev_runtime.cc` -- core.cc only calls `ncclDevrInitOnce` itself, so the full
+  production file and its much larger fake surface aren't needed.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
