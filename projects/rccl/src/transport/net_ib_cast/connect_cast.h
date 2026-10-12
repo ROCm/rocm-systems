@@ -55,7 +55,7 @@ struct ncclIbQpCreateAttr {
   bool isCtsEnabled;
   int8_t ctsQpSlot;
   int channelId;
-  // Index of this QP among QPs on the same device. Policy 3 alternates uDMA on it.
+  // Per-device QP ordinal for policy 3. Unlike qpIdx, IbCastQpCreateAttrInitSharing does not reset it.
   int qpIndexInDev;
   int ibDevN;
   bool useIonic;

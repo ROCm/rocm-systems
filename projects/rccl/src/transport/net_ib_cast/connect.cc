@@ -53,7 +53,6 @@ static int IbCastCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
   return maxNqps;
 }
 
-
 #define NCCL_CTS_QP_SLOT_INVALID 0xFF
 enum ncclIbChannelType {
   ncclIbChannelTypeCts = 0,
@@ -67,7 +66,6 @@ struct ncclChannelToUd {
   bool udAllocated;
 };
 
-
 // Controls AINIC QP-to-UDMA assignment:
 //  - 0 pins every QP of a channel to one pipeline, chosen as channels are first seen
 //  - 1 round-robins P2P QPs in creation order and keeps collective channel affinity
@@ -79,25 +77,25 @@ static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChann
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 static std::atomic<unsigned int> nccl_p2p_udma_idx[MAX_IB_DEVS] = {};
 
-constexpr int8_t ncclIbCastUBMANone = (int8_t)-1;
-constexpr int8_t ncclIbCastUBMALow = (int8_t) IONIC_UDMA_MASK_LOW;
-constexpr int8_t ncclIbCastUBMALow = (int8_t) IONIC_UDMA_MASK_HIGH;
+constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
+constexpr int8_t ncclIbCastUDMALow = (int8_t)IONIC_UDMA_MASK_LOW;
+constexpr int8_t ncclIbCastUDMAHigh = (int8_t)IONIC_UDMA_MASK_HIGH;
 
-static ncclIbCastUBMA ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttrs) {
+static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttrs) {
   if (rcclParamIbCastUDMAPolicy() == 2) {
-    return ncclIbCastUBMANone;
+    return ncclIbCastUDMANone;
   }
 
   if (rcclParamIbCastUDMAPolicy() == 3) {
     const bool highUd = __builtin_parity(static_cast<unsigned>(createQpAttrs->channelId)) ^
                         (createQpAttrs->qpIndexInDev & 1);
-    return highUd ? ncclIbCastUBMAHigh : ncclIbCastUBMALow;
+    return highUd ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
   }
 
   if ((rcclParamIbCastUDMAPolicy() == 1) && createQpAttrs->isP2p) {
     unsigned int udmaIdx = nccl_p2p_udma_idx[createQpAttrs->ibDevN].fetch_add(1, std::memory_order_relaxed);
     bool useHighUdma = (udmaIdx & 1) != 0;
-    return useHighUdma ? ncclIbCastUBMAHigh : ncclIbCastUBMALow;
+    return useHighUdma ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
   }
 
   if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
@@ -107,9 +105,9 @@ static ncclIbCastUBMA ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* crea
     int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
                         ? createQpAttrs->qpIdx
                         : createQpAttrs->qpSharingGroupIdx;
-    return (udmaSelector % 2 == 0) ? ncclIbCastUBMALow : ncclIbCastUBMAHigh;
+    return (udmaSelector % 2 == 0) ? ncclIbCastUDMALow : ncclIbCastUDMAHigh;
   }
-  
+
   enum ncclIbChannelType channelType =
     createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts;
   ncclChannelToUd* channelToUd =
@@ -120,7 +118,7 @@ static ncclIbCastUBMA ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* crea
     channelToUd->udAllocated = true;
     nccl_channel_last_ud[createQpAttrs->ibDevN][channelType] = !lastUd;
   }
-  return channelToUd->udId ? ncclIbCastUBMAHigh : ncclIbCastUBMALow;
+  return channelToUd->udId ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
 }
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
@@ -555,7 +553,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   std::lock_guard<std::mutex> lock(IbCastDevs[createQpAttrs->ibDevN].mutex);
 
   int8_t udma_id = ncclIbCastSelectUDMA(createQpAttrs);
-  if (udma_id != ncclIbCastUBMANone) {
+  if (udma_id != ncclIbCastUDMANone) {
     wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, (uint8_t)udma_id);
   }
 
@@ -575,7 +573,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
 // channelId and isDataQp from the saved ncclIbQp fields — these control
 // AINIC driver behavior (UDMA load balancing and sq_sig_all feature flags)
 // and differ between sender QPs (isDataQp=true) and receiver QPs (isDataQp=false).
-// UDMA policy 3 also requires qpIndexInDev (qpIndex / ndevs).
+// UDMA policy 3 also requires qpIndexInDev (qpIndex / ndevs); flush QPs leave it 0.
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
   memset(out, 0, sizeof(*out));
   out->type = IBV_QPT_RC;

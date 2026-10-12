@@ -26,6 +26,7 @@ bool IbCastAinicCtsInlineData = 0;
 int IbCastGdrFlushDisable = 0;
 extern int64_t rcclParamAinicRoce();
 extern int64_t ncclParamIbCastUseInline();
+extern int64_t rcclParamIbCastUDMAPolicy();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
@@ -660,6 +661,11 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            "IB Use Inline: %s; GDR Flush: %s",
            IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
+
+      if (rcclParamIbCastUDMAPolicy() < 0 || rcclParamIbCastUDMAPolicy() > 3) {
+        WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be 0-3). Using RCCL_IB_UDMA_POLICY=0.",
+             rcclParamIbCastUDMAPolicy());
+      }
     }
   }
 exit:
