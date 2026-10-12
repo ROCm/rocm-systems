@@ -175,6 +175,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed AMD AI NIC ports reporting the wrong network interface index when the index is above 255**.  
   - The interface index in NIC port information is now 32 bits wide, so programs that read NIC port information must be rebuilt. An unknown index is now `UINT32_MAX` (was 255) and shows as `N/A` in the Python interface and `amd-smi`.
 
+- **Fixed AMD SMI crashing when an AMD AI NIC reports text where a number is expected**.  
+  - `amdsmi_init()` and `amd-smi` ended the process on a value such as `Unknown`. The value now reads as unknown, shown as `N/A` in `amd-smi`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

@@ -277,4 +277,14 @@ TEST_F(NicUnit, PortIfindexWithoutFileIsUnknown) {
   EXPECT_EQ(port.ifindex(), std::nullopt);
 }
 
+// Text with no number has no value; std::stoul throws on it.
+TEST_F(NicUnit, PortIfindexThatIsNotANumberIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", "Unknown\n"));
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), std::nullopt);
+}
+
 }  // namespace
