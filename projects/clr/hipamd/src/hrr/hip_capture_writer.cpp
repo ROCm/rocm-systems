@@ -349,7 +349,8 @@ static bool note_events_io_locked() {
 // means it claims nothing: the reader takes a file that ends in a trailer for
 // a whole capture, whatever the manifest says. Cut it off, or if that fails,
 // overwrite its magic so it no longer reads as a trailer. False if neither
-// worked. Caller holds g_file_mu.
+// worked. Caller holds g_file_mu, or g_buf_busy in the crash callback: only
+// async-signal-safe calls.
 static bool drop_trailer_locked(int fd, std::int64_t trailer_at) {
   int rc;
   do {
@@ -1698,27 +1699,45 @@ void emergency_finalize(bool clean_shutdown) {
     flush_buffer_locked();
     // Clean shutdowns append the fixed-size trailer so the reader does not treat
     // the archive as crash-truncated. The CLR crash callback passes
-    // clean_shutdown=false; normal shutdown uses flush().
+    // clean_shutdown=false; normal shutdown uses flush(). As in flush(), there
+    // is no trailer for a capture known incomplete, after a failure of
+    // events.bin, or where its end cannot be found; one that cannot be written
+    // or synced is taken back. Only atomic stores here, no mark_incomplete().
     if (clean_shutdown && !g_events_finalized) {
-      hrr_eof_record rec = hrr_make_eof_record(
-          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-      write_all_fd(g_events_fd, &rec, sizeof(rec));
+      std::int64_t trailer_at = -1;
+      if (!g_capture_incomplete.load(std::memory_order_relaxed) &&
+          !g_events_io_failed.load(std::memory_order_relaxed)) {
+        trailer_at = hrr_seek_end(g_events_fd);
+        if (trailer_at < 0) g_capture_incomplete.store(true, std::memory_order_relaxed);
+      }
+      if (trailer_at >= 0) {
+        hrr_eof_record rec = hrr_make_eof_record(
+            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+        if (!write_all_fd(g_events_fd, &rec, sizeof(rec)) || HRR_FSYNC(g_events_fd) != 0) {
+          g_events_io_failed.store(true, std::memory_order_relaxed);
+          (void)drop_trailer_locked(g_events_fd, trailer_at);
+        }
+      }
       g_events_finalized = true;
     }
     g_buf_busy.clear(std::memory_order_release);
   }
   // After a space stop there is no descriptor, and on Windows _commit(-1) calls
   // the CRT invalid parameter handler, which ends the process by default.
-  if (g_events_fd >= 0) HRR_FSYNC(g_events_fd);
+  if (g_events_fd >= 0 && HRR_FSYNC(g_events_fd) != 0)
+    g_events_io_failed.store(true, std::memory_order_relaxed);
 
   // Best-effort manifest via raw open/write only. A clean shutdown writes
-  // complete:true (the trailer is present); a crash writes complete:false — its
-  // absence-of-trailer is how the reader detects truncation.
+  // complete:true (the trailer is present) unless the capture is incomplete or
+  // events.bin failed; a crash writes complete:false — its absence-of-trailer
+  // is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
   // Concurrent crash callbacks must not share the emergency buffer. A second
   // entrant skips the manifest.
   if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
-  bool complete = clean_shutdown && locked;
+  bool complete = clean_shutdown && locked &&
+                  !g_events_io_failed.load(std::memory_order_relaxed) &&
+                  !g_capture_incomplete.load(std::memory_order_relaxed);
   int mfd = HRR_OPEN(g_manifest_path);
   if (mfd < 0) {
     g_emergency_manifest_busy.clear(std::memory_order_release);
