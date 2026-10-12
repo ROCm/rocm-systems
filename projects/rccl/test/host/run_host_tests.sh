@@ -22,9 +22,9 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          device-table unittest and kernel-count pytest plus
-#                   src/include/test_poison_hip_atomics.py and the
-#                   tools/RcclReplayer host checks (make test)
+#   guards          device-table unittest, kernel-count pytest, ll-cache-bits
+#                   detector pytest, src/include/test_poison_hip_atomics.py
+#                   and the tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
@@ -257,15 +257,32 @@ do_replayer_guards() {
   make -C "$RCCL_ROOT/tools/RcclReplayer" test
 }
 
+# Run the ll-cache-bits detector tests (test/ll-cache-bits, marker `detector`).
+# The ISA guard itself needs a built librccl.so; it runs in the TheRock RCCL
+# build job instead.
+do_ll_cache_bits_guards() {
+  echo "==> LL cache-bit detector (pytest: test/ll-cache-bits)"
+  local gd="$RCCL_ROOT/test/ll-cache-bits"
+  local venv="$gd/venv"
+  if [ ! -x "$venv/bin/pytest" ]; then
+    python3 -m venv "$venv" \
+      && "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt" \
+      || { echo "ERROR: could not provision $venv" >&2; return 1; }
+  fi
+  "$venv/bin/python" -m pytest "$gd/tests" -m detector -v
+}
+
 # All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
-# the __hip_atomic_* poison compile probe, then the RcclReplayer host checks. Collected with `|| rc=1` rather
-# than run back to back so that under `set -e` (line 53) an early failure still
-# leaves the later guards running and reported, instead of aborting the phase at
-# the first one. Same idiom as do_host_tests above.
+# the ll-cache-bits detector tests, the __hip_atomic_* poison compile probe,
+# then the RcclReplayer host checks. Collected with `|| rc=1` rather than run
+# back to back so that under `set -e` (line 54) an early failure still leaves
+# the later guards running and reported, instead of aborting the phase at the
+# first one. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
+  do_ll_cache_bits_guards || rc=1
   do_poison_hip_atomics || rc=1
   do_replayer_guards || rc=1
   return "$rc"
