@@ -886,6 +886,18 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
+    * - | ``RCCL_FORCE_CE``
+        | Forces the Copy Engine scratch path (CE-Scratch) for unregistered
+          AllGather, AlltoAll, Gather and Scatter whenever the received data fits
+          the DDA scratch buffer. When ``-1`` (auto), it is forced on every
+          architecture except gfx1250, where it is forced only under
+          ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) because the kernel paths are
+          faster at these sizes.
+      - | ``-1``: Auto — forced, except on gfx1250 outside ``CTA_POLICY_ZERO``
+          (default).
+        | ``0``: Never forced.
+        | ``1``: Always forced (the default before ROCm 10.2).
+
     * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
