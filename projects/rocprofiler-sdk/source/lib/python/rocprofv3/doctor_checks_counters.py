@@ -31,6 +31,7 @@ from __future__ import absolute_import
 
 import re
 
+from rocprofv3.doctor_checks_driver import uses_dxg
 from rocprofv3.doctor_checks_tools import resolve_tool, tool_command
 from rocprofv3.doctor_diagnose import explain_failure
 from rocprofv3.doctor_env import CAP_PERFMON_BIT, CAP_SYS_ADMIN_BIT, RUN_TIMEOUT
@@ -38,6 +39,7 @@ from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
     make_fail,
     make_pass,
+    make_skip,
     make_warn,
     DOCTOR_COMMAND,
     DOCTOR_FLAG,
@@ -79,8 +81,17 @@ _PROFILER_MARKERS = (
     order=41,
 )
 def check_cap_perfmon(accessor):
-    cap_eff = accessor.get_cap_eff()
     data = {}
+    if uses_dxg(accessor):
+        # WSL2 arms counters through the DXG vendor-packet path; there is no
+        # KFD profiler lock for the capability to gate
+        return make_skip(
+            "not applicable on WSL2: counters are armed through /dev/dxg, which "
+            "has no KFD profiler lock",
+            "",
+            data,
+        )
+    cap_eff = accessor.get_cap_eff()
     if cap_eff is None:
         return make_warn(
             "could not read the effective capability mask from /proc/self/status",

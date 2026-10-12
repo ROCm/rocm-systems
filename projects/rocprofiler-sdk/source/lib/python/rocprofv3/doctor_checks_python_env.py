@@ -30,6 +30,7 @@ from rocprofv3.doctor_result import (
     make_fail,
     make_pass,
     make_warn,
+    PROBE_PROCESS,
     SEV_ERROR,
     SEV_INFO,
     SEV_WARNING,
@@ -84,6 +85,7 @@ def check_python_version(accessor):
     title="sqlite3 module usable",
     severity=SEV_ERROR,
     order=71,
+    probe=PROBE_PROCESS,
 )
 def check_sqlite3(accessor):
     ok, detail = accessor.can_import("sqlite3")
@@ -96,9 +98,11 @@ def check_sqlite3(accessor):
             "Python:\n  sudo apt install python3 libsqlite3-0",
             data,
         )
-    if not accessor.sqlite_usable():
+    usable, why = accessor.sqlite_usable()
+    if not usable:
+        data["error"] = why
         return make_fail(
-            "sqlite3 imports but cannot open an in-memory database",
+            "sqlite3 imports but cannot open an in-memory database ({})".format(why),
             "This Python was built against a broken or missing SQLite library. "
             "Install a complete Python:\n  sudo apt install python3 libsqlite3-0",
             data,
@@ -112,6 +116,7 @@ def check_sqlite3(accessor):
     title="ctypes module importable",
     severity=SEV_ERROR,
     order=72,
+    probe=PROBE_PROCESS,
 )
 def check_ctypes(accessor):
     return _module_check(
@@ -130,6 +135,7 @@ def check_ctypes(accessor):
     title="importlib module importable",
     severity=SEV_ERROR,
     order=73,
+    probe=PROBE_PROCESS,
 )
 def check_importlib(accessor):
     return _module_check(
@@ -147,6 +153,7 @@ def check_importlib(accessor):
     title="pyyaml importable (YAML input files)",
     severity=SEV_WARNING,
     order=74,
+    probe=PROBE_PROCESS,
 )
 def check_pyyaml(accessor):
     return _module_check(
@@ -165,6 +172,7 @@ def check_pyyaml(accessor):
     title="pandas importable (rocpd CSV conversion)",
     severity=SEV_INFO,
     order=75,
+    probe=PROBE_PROCESS,
 )
 def check_pandas(accessor):
     return _module_check(
@@ -182,6 +190,7 @@ def check_pandas(accessor):
     title="otf2 importable (OTF2 output format)",
     severity=SEV_INFO,
     order=76,
+    probe=PROBE_PROCESS,
 )
 def check_otf2(accessor):
     return _module_check(
@@ -200,6 +209,7 @@ def check_otf2(accessor):
     title="rocprofv3 Python package importable",
     severity=SEV_ERROR,
     order=77,
+    probe=PROBE_PROCESS,
 )
 def check_rocprofv3_package(accessor):
     ok, detail = accessor.can_import("rocprofv3")

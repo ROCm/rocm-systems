@@ -159,8 +159,10 @@ def check_ld_preload_conflict(accessor):
             data,
         )
     return make_pass(
-        "LD_PRELOAD is set ({} entr(y|ies)) but none conflicts with "
-        "rocprofiler-sdk".format(len(entries)),
+        "LD_PRELOAD is set ({} {}) but none conflicts with "
+        "rocprofiler-sdk".format(
+            len(entries), "entry" if len(entries) == 1 else "entries"
+        ),
         "",
         data,
     )
@@ -192,8 +194,10 @@ def check_hsa_tools_lib(accessor):
 
     if foreign:
         return make_warn(
-            "HSA_TOOLS_LIB loads non-SDK tool librar(y|ies): {}. These may "
-            "conflict with rocprofv3.".format(", ".join(foreign)),
+            "HSA_TOOLS_LIB loads non-SDK tool {}: {}. These may conflict with "
+            "rocprofv3.".format(
+                "library" if len(foreign) == 1 else "libraries", ", ".join(foreign)
+            ),
             "unset HSA_TOOLS_LIB",
             data,
         )
@@ -251,25 +255,28 @@ def check_gpu_visibility(accessor):
             continue
         data[name] = value
         set_vars.append("{}={!r}".format(name, value))
-        if value.strip() == "":
-            hiding.append(name)
+        # an empty value and -1 hide every GPU (same rule as doctor_diagnose)
+        if value.strip() in ("", "-1"):
+            hiding.append("{}={!r}".format(name, value))
 
     if not set_vars:
         return make_pass("no GPU visibility variables are set", "", data)
 
+    # unset every variable that is set: any one of them alone can restrict
+    # (or hide) the devices, so leaving one in place would keep the finding
+    remediation = "unset {}".format(" ".join(sorted(data)))
+
     if hiding:
         return make_warn(
-            "{} set to an empty string, which hides every GPU".format(
-                " and ".join(hiding)
-            ),
-            "unset {}".format(" ".join(hiding)),
+            "{} hides every GPU".format(" and ".join(hiding)),
+            remediation,
             data,
         )
 
     return make_warn(
         "GPU visibility is restricted: {}. This is often intentional, but it "
         "limits which agents rocprofv3 can profile.".format(", ".join(set_vars)),
-        "unset ROCR_VISIBLE_DEVICES HIP_VISIBLE_DEVICES",
+        remediation,
         data,
     )
 

@@ -26,6 +26,7 @@ from __future__ import absolute_import
 
 import re
 
+from rocprofv3.doctor_env import newest_soversion
 from rocprofv3.doctor_layout import (
     install_kind,
     INSTALL_KIND_TITLES,
@@ -71,21 +72,10 @@ def _newest_versioned(accessor, candidate):
 
     Used for libraries whose soversion is unrelated to the SDK version (HSA,
     HIP, ...) and for SDK libraries when the tool version is unknown. A plain
-    lexicographic sort is wrong here: it ranks ".so.9" above ".so.10".
+    lexicographic sort is wrong here: it ranks ".so.9" above ".so.10". A
+    non-numeric suffix (a .so.debug sidecar) is never chosen.
     """
-    best = None
-    best_key = None
-    for path in accessor.glob(candidate + ".*"):
-        suffix = path[len(candidate) + 1 :]
-        try:
-            key = tuple(int(part) for part in suffix.split("."))
-        except ValueError:
-            # not a pure numeric soversion (e.g. a .so.debug sidecar); rank last
-            key = (-1,)
-        if best_key is None or key > best_key:
-            best = path
-            best_key = key
-    return best
+    return newest_soversion(candidate, accessor.glob(candidate + ".*"))
 
 
 def resolve_library(
@@ -125,10 +115,18 @@ def resolve_library(
         if newest is not None:
             return (newest, searched)
 
-    # fall back to the loader's own search path
-    found, extra = accessor.find_library(name)
-    searched.extend(extra)
-    return (found, searched)
+    # fall back to the loader's own search path (LD_LIBRARY_PATH, the ldconfig
+    # cache). Distro packages often expose only the SONAME there, so ask for
+    # every name tried above; an SDK library of a known version still accepts
+    # only that version, a third-party one the newest numeric soversion.
+    for suffix in suffixes:
+        found, extra = accessor.find_library(
+            name + suffix, versioned=not exact_version_only
+        )
+        searched.extend(entry for entry in extra if entry not in searched)
+        if found:
+            return (found, searched)
+    return (None, searched)
 
 
 def other_soversions(accessor, name, subdirs):
@@ -303,17 +301,22 @@ def check_avail_library(accessor):
     id="install.kokkosp-library",
     group="install",
     title="librocprofiler-sdk-tool-kokkosp.so present",
-    severity=SEV_WARNING,
+    severity=SEV_ERROR,
     depends=["install.rocm-root"],
     order=15,
 )
 def check_kokkosp_library(accessor):
+    # SYNC: source/bin/rocprofv3.py resolves ROCPROF_KOKKOSP_LIBRARY with
+    # resolve_library_path(..., required=True) on *every* launch, not only for
+    # --kokkos-trace, and calls fatal_error() when it is missing. A missing
+    # kokkosp library therefore breaks every rocprofv3 run.
     return _library_check(
         accessor,
         "librocprofiler-sdk-tool-kokkosp.so",
         ("lib/rocprofiler-sdk", "lib64/rocprofiler-sdk"),
-        "Only needed for `rocprofv3 --kokkos-trace`; safe to ignore otherwise.",
-        make_warn,
+        "rocprofv3 resolves this library at every launch and aborts when it is\n"
+        "missing, whatever options are given.\n" + reinstall_hint(accessor),
+        make_fail,
     )
 
 
@@ -501,44 +504,79 @@ def check_no_mixed_rocm(accessor):
     return make_pass("environment consistently points at {}".format(root_real), "", data)
 
 
+def _install_metrics_dir(accessor):
+    """The directory the SDK falls back to: <libdir>/../share/rocprofiler-sdk,
+    relative to the *real* path of librocprofiler-sdk.so, as findViaInstallPath()
+    in counters/metrics.cpp computes it."""
+    path, _ = resolve_library(accessor, "librocprofiler-sdk.so", ("lib", "lib64"))
+    if path is not None:
+        lib_dir = accessor.dirname(accessor.realpath(path))
+        return accessor.join(accessor.dirname(lib_dir), "share/rocprofiler-sdk")
+    return accessor.join(accessor.rocm_root, "share/rocprofiler-sdk")
+
+
+# SYNC: source/lib/rocprofiler-sdk/counters/metrics.cpp locateMetricsFile() and
+# loadMetrics(). The SDK loads config.yaml (not the *.xml files that ship beside
+# it): it splits ROCPROFILER_METRICS_PATH on ':' and takes the first entry that
+# holds config.yaml, then falls back to the install path, and aborts with
+# ROCP_FATAL when neither has it.
+METRICS_FILE = "config.yaml"
+
+
 @register(
     id="install.metrics-path",
     group="install",
-    title="Counter metrics database accessible",
+    title="Counter metrics database (config.yaml) accessible",
     severity=SEV_WARNING,
     depends=["install.rocm-root"],
     order=19,
 )
 def check_metrics_path(accessor):
-    metrics_dir = accessor.join(accessor.rocm_root, "share/rocprofiler-sdk")
-    data = {"metrics_path": metrics_dir}
+    install_dir = _install_metrics_dir(accessor)
+    install_file = accessor.join(install_dir, METRICS_FILE)
+    data = {"metrics_file": METRICS_FILE, "install_path": install_file}
 
+    searched = []
     override = accessor.getenv("ROCPROFILER_METRICS_PATH")
     if override:
         data["ROCPROFILER_METRICS_PATH"] = override
-        metrics_dir = override
+        for entry in override.split(":"):
+            if not entry:
+                continue
+            candidate = accessor.join(entry, METRICS_FILE)
+            searched.append(candidate)
+            if accessor.path_exists(candidate):
+                data["searched"] = searched
+                data["resolved_path"] = candidate
+                return make_pass(
+                    "{} found via ROCPROFILER_METRICS_PATH at {}".format(
+                        METRICS_FILE, candidate
+                    ),
+                    "",
+                    data,
+                )
 
-    if not accessor.path_exists(metrics_dir):
-        return make_warn(
-            "metrics directory {} does not exist".format(metrics_dir),
-            reinstall_hint(accessor),
-            data,
-        )
+    searched.append(install_file)
+    data["searched"] = searched
+    if accessor.path_exists(install_file):
+        data["resolved_path"] = install_file
+        detail = "{} found at {}".format(METRICS_FILE, install_file)
+        if override:
+            # the SDK falls back silently (at INFO level), so a mistyped
+            # override goes unnoticed unless something points it out
+            return make_warn(
+                "ROCPROFILER_METRICS_PATH={} has no {} in any entry; the SDK "
+                "falls back to {}".format(override, METRICS_FILE, install_file),
+                "Fix or unset ROCPROFILER_METRICS_PATH if a custom metrics file "
+                "was intended:\n  unset ROCPROFILER_METRICS_PATH",
+                data,
+            )
+        return make_pass(detail, "", data)
 
-    # SYNC: the counter definitions shipped into share/rocprofiler-sdk are
-    # basic_counters.xml / derived_counters.xml (see
-    # source/lib/rocprofiler-sdk/counters/CMakeLists.txt). If the metrics
-    # database ever moves to a different format, this glob must follow it.
-    xml_files = accessor.glob(accessor.join(metrics_dir, "*.xml"))
-    data["counter_files"] = xml_files
-    if not xml_files:
-        return make_warn(
-            "no counter definition files found in {}".format(metrics_dir),
-            reinstall_hint(accessor),
-            data,
-        )
-    return make_pass(
-        "{} counter definition file(s) in {}".format(len(xml_files), metrics_dir),
-        "",
+    return make_warn(
+        "{} not found in {}; counter collection will abort".format(
+            METRICS_FILE, ", ".join(searched)
+        ),
+        reinstall_hint(accessor),
         data,
     )

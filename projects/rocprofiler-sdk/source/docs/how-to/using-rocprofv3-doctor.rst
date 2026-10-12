@@ -53,8 +53,9 @@ Every check declares a probe category, shown by ``--list-checks`` and in JSON ou
        immediately delete one exclusively-created temporary file.
      - Every run
    * - ``process``
-     - Starts ROCm code in a child process: loads the ROCm libraries
-       (``runtime.libraries-load``), imports optional Python packages, and runs
+     - Runs code in a child process: loads the ROCm libraries
+       (``runtime.libraries-load``), imports Python modules and opens an in-memory
+       ``sqlite3`` database (the ``python.*`` checks), and runs
        ``rocprofv3-avail --help``. A crash or hang in the child costs one check, never
        the report.
      - Every run
@@ -128,12 +129,12 @@ short title:
      ============
      [ PASS ]  install.rocm-root                   ROCm root directory found
      [ PASS ]  install.sdk-library                 librocprofiler-sdk.so present
-     [ WARN ]  install.kokkosp-library             librocprofiler-sdk-tool-kokkosp.so present
+     [ PASS ]  install.kokkosp-library             librocprofiler-sdk-tool-kokkosp.so present
 
      Driver / Device
      ===============
-     [ PASS ]  driver.kfd-device                   /dev/kfd device node exists
-     [ FAIL ]  driver.kfd-readable                 /dev/kfd readable and writable by the current user
+     [ PASS ]  driver.kfd-device                   GPU device node exists (/dev/kfd, or /dev/dxg on WSL2)
+     [ FAIL ]  driver.kfd-readable                 GPU device node readable and writable by the current user
 
      Summary: 41 passed, 6 warning(s), 2 failed, 3 skipped (52 total)
 
@@ -333,7 +334,8 @@ treated as evidence, not as a conclusion: where one message has several possible
 the tool checks facts on the machine before naming one, and labels the cause ``likely``
 only when those facts support it, ``possible`` otherwise. For example, ROCr reports
 ``HSA_STATUS_ERROR_OUT_OF_RESOURCES`` both when ``/dev/kfd`` cannot be opened and for
-genuine allocation failures, so the tool looks at ``/dev/kfd`` first:
+genuine allocation failures, so the tool looks at ``/dev/kfd`` (``/dev/dxg`` under WSL2)
+first:
 
 .. code-block:: shell
 
@@ -368,11 +370,13 @@ reading alongside it. The recognised messages are:
    * - ``wrong ELF class``, ``invalid ELF header``
      - A 32-bit library shadows a 64-bit one, or a library file is corrupt.
    * - ``HSA_STATUS_ERROR_OUT_OF_RESOURCES``
-     - If ``/dev/kfd`` is missing or not accessible, the GPU could not be opened.
-       Otherwise, possibly a genuine resource limit such as exhausted GPU memory.
+     - If ``/dev/kfd`` (``/dev/dxg`` under WSL2) is missing or not accessible, the GPU
+       could not be opened. Otherwise, possibly a genuine resource limit such as
+       exhausted GPU memory, or under WSL2 a runtime that does not take the DXG path.
    * - ``no ROCm-capable device is detected``
-     - No GPU is visible to HIP. ``likely`` caused by a ``*_VISIBLE_DEVICES`` mask when
-       one is set.
+     - No GPU is visible to HIP. ``likely`` caused by a ``*_VISIBLE_DEVICES`` mask that
+       hides every GPU (an empty value or ``-1``); any other mask is only a ``possible``
+       cause, since it may select a GPU that exists.
    * - ``could not be locked for profiling due to lack of permissions``,
        ``Required permission (CAP_PERFMON) is not set``
      - The GPU could not be locked for exclusive profiling without ``CAP_PERFMON``.
@@ -434,11 +438,13 @@ Common findings
    * - Check
      - What it means
    * - ``driver.kfd-device``
-     - ``/dev/kfd`` does not exist, so the amdgpu/KFD driver is not loaded or no AMD GPU
-       is present. Every GPU-dependent check downstream reports ``SKIP``.
+     - Neither ``/dev/kfd`` nor, under WSL2, ``/dev/dxg`` exists, so the amdgpu/KFD
+       driver is not loaded or no AMD GPU is present. Every GPU-dependent check
+       downstream reports ``SKIP``.
    * - ``driver.kfd-readable``
      - The device node exists but your account cannot open it. Add yourself to the
-       ``render`` and ``video`` groups and start a new login session.
+       ``render`` and ``video`` groups and start a new login session. Under WSL2,
+       ``/dev/dxg`` is normally world-accessible; check its mode instead.
    * - ``driver.render-group``
      - When your account is already listed in the group but the session is not, the
        remediation is to re-login or run ``newgrp render`` -- not to run ``usermod``
@@ -446,9 +452,14 @@ Common findings
    * - ``runtime.libraries-load``
      - A ROCm library is present but cannot be loaded. The detail names the cause --
        usually a missing dependency or libraries mixed from two ROCm installations.
-   * - ``runtime.aqlprofile-library``
-     - ``libhsa-amd-aqlprofile64.so`` is missing. Counter collection with ``--pmc`` fails
-       at runtime without it.
+   * - ``install.kokkosp-library``
+     - ``librocprofiler-sdk-tool-kokkosp.so`` is missing. ``rocprofv3`` resolves it on
+       every launch, not only with ``--kokkos-trace``, so every run fails.
+   * - ``install.metrics-path``
+     - The counter database ``config.yaml`` is not where the SDK looks. Each
+       ``:``-separated entry of ``ROCPROFILER_METRICS_PATH`` is searched first, then the
+       installed copy; when the variable names no usable entry, the SDK falls back to
+       the installed copy and the check warns.
    * - ``counters.cap-perfmon``
      - Informational. Without ``CAP_PERFMON``, dispatch counter collection works, but the
        GPU cannot be locked for exclusive profiling and device-wide counter collection is
@@ -458,6 +469,15 @@ Common findings
      - Passes whenever ``/sys/module/amdgpu`` exists. The driver version is shown only
        when the driver publishes one -- the DKMS driver does, the in-tree driver of a
        distribution kernel does not.
+   * - ``driver.gpu-topology`` (WSL2)
+     - Under WSL2 there is no KFD topology. The check instead locates ``libdxcore.so``
+       (provided by WSL under ``/usr/lib/wsl/lib``) and ``librocdxg.so``, and fails when
+       ``HSA_ENABLE_DXG_DETECTION=0``. ``driver.dri-devices``, ``driver.amdgpu-module``,
+       and the group checks report ``SKIP``: they do not apply there.
+   * - ``environ.gpu-visibility``
+     - A ``*_VISIBLE_DEVICES`` variable restricts the GPUs ``rocprofv3`` sees; an empty
+       value or ``-1`` hides all of them. The remediation unsets every such variable
+       that is set.
    * - ``environ.run-as-user``
      - The tool runs as root on behalf of another account (through ``sudo``, ``su``, or
        similar), so its results describe root rather than the user who profiles.

@@ -30,7 +30,7 @@ matching signature in doctor_diagnose.py has to follow it.
 
 import pytest
 
-from conftest import FakeAccessor, make_healthy_accessor
+from conftest import FakeAccessor, make_healthy_accessor, make_wsl_accessor
 
 SDK = "/fake/rocm/lib/librocprofiler-sdk.so"
 HIP = "/fake/rocm/lib/libamdhip64.so"
@@ -238,7 +238,8 @@ def test_doctor_diagnose_out_of_resources_without_kfd(diag):
     accessor = make_healthy_accessor(files=[], dirs=["/fake/rocm"])
     (match,) = diag.diagnose(accessor, "HSA_STATUS_ERROR_OUT_OF_RESOURCES")
     assert match["confidence"] == "high"
-    assert "/dev/kfd does not exist" in match["cause"]
+    # WSL2 exposes the GPU as /dev/dxg, so only the absence of both is decisive
+    assert "neither /dev/kfd nor /dev/dxg exists" in match["cause"]
 
 
 def test_doctor_diagnose_device_lock_permission_is_scoped(diag):
@@ -280,6 +281,28 @@ def test_doctor_diagnose_no_device_names_the_mask(diag):
     assert "unset HIP_VISIBLE_DEVICES" in match["remediation"]
 
 
+def test_doctor_diagnose_no_device_partial_mask_is_only_possible(diag):
+    """A mask that selects a device is not evidence it caused the failure."""
+    accessor = make_healthy_accessor(env={"HIP_VISIBLE_DEVICES": "0"})
+    (match,) = diag.diagnose(accessor, "hipErrorNoDevice")
+    assert match["confidence"] == "possible"
+    assert "HIP_VISIBLE_DEVICES=0" in match["cause"]
+    assert "rocm_agent_enumerator" in match["remediation"]
+
+
+def test_doctor_diagnose_out_of_resources_on_wsl(diag):
+    """Under WSL2 /dev/kfd's absence means nothing; /dev/dxg is checked."""
+    (match,) = diag.diagnose(make_wsl_accessor(), "HSA_STATUS_ERROR_OUT_OF_RESOURCES")
+    assert match["confidence"] == "possible"
+    assert "HSA_ENABLE_DXG_DETECTION" in match["remediation"]
+    assert "usermod" not in match["remediation"]
+
+    accessor = make_wsl_accessor(cannot_write=["/dev/dxg"])
+    (match,) = diag.diagnose(accessor, "HSA_STATUS_ERROR_OUT_OF_RESOURCES")
+    assert "/dev/dxg" in match["cause"]
+    assert "ls -l /dev/dxg" in match["remediation"]
+
+
 def test_doctor_diagnose_context_conflict_names_injected_tool(diag):
     accessor = make_healthy_accessor(env={"HSA_TOOLS_LIB": "/x/libother.so"})
     (match,) = diag.diagnose(accessor, "Context has a conflict with another context")
@@ -307,7 +330,9 @@ def test_doctor_load_healthy_passes(checks):
     accessor = make_healthy_accessor()
     result = checks["runtime"].check_libraries_load(accessor)
     assert result.status == checks["status"].STATUS_PASS, result.detail
-    assert "6 libraries load" in result.detail
+    # sdk, sdk-tool, hsa-runtime64, amdhip64, roctx (AQLProfile is linked
+    # statically into librocprofiler-sdk.so, so it is not loaded on its own)
+    assert "5 libraries load" in result.detail
 
 
 def test_doctor_load_runs_isolated_and_side_effect_free(checks):

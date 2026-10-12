@@ -54,6 +54,9 @@ HIGH = "high"
 POSSIBLE = "possible"
 
 KFD_DEVICE = "/dev/kfd"
+# WSL2's GPU device node; kept local, as KFD_DEVICE is, so this module does not
+# import a check module. SYNC: doctor_checks_driver.DXG_DEVICE
+DXG_DEVICE = "/dev/dxg"
 
 # ROCm's own libraries, as opposed to system dependencies such as libdrm or
 # libnuma: a missing one means a broken ROCm install rather than a missing
@@ -189,23 +192,50 @@ def _bad_file(accessor, match, text):
 
 
 def _out_of_resources(accessor, match, text):
-    # ROCr returns this status both when /dev/kfd cannot be opened and for
-    # genuine allocation failures (e.g. PM4 buffers in amd_aql_queue.cpp), so
-    # look at /dev/kfd before naming a cause.
+    # ROCr returns this status both when the GPU device cannot be opened and
+    # for genuine allocation failures (e.g. PM4 buffers in amd_aql_queue.cpp),
+    # so look at the device node before naming a cause. Under WSL2 that node
+    # is /dev/dxg; /dev/kfd does not exist there and its absence means nothing.
     observation = "the HSA runtime reported HSA_STATUS_ERROR_OUT_OF_RESOURCES"
-    if not accessor.path_exists(KFD_DEVICE):
+    wsl = not accessor.path_exists(KFD_DEVICE) and accessor.path_exists(DXG_DEVICE)
+    device = DXG_DEVICE if wsl else KFD_DEVICE
+    if not accessor.path_exists(device):
         return _finding(
             observation,
             "Load the amdgpu driver, or in a container pass the devices through:\n"
-            "  docker run --device=/dev/kfd --device=/dev/dri --group-add video ...",
-            cause="/dev/kfd does not exist, so no GPU can be opened",
+            "  docker run --device=/dev/kfd --device=/dev/dri --group-add video ...\n"
+            "Under WSL2, pass /dev/dxg instead:\n"
+            "  docker run --device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl ...",
+            cause="neither {} nor {} exists, so no GPU can be opened".format(
+                KFD_DEVICE, DXG_DEVICE
+            ),
         )
-    if not (accessor.path_readable(KFD_DEVICE) and accessor.path_writable(KFD_DEVICE)):
+    if not (accessor.path_readable(device) and accessor.path_writable(device)):
+        if wsl:
+            remediation = (
+                "/dev/dxg is normally crw-rw-rw- under WSL2; check its mode:\n"
+                "  ls -l /dev/dxg"
+            )
+        else:
+            remediation = (
+                "Add the current user to the groups that own the GPU device nodes:\n"
+                "  sudo usermod -a -G render,video $USER   # then log in again"
+            )
         return _finding(
             observation,
-            "Add the current user to the groups that own the GPU device nodes:\n"
-            "  sudo usermod -a -G render,video $USER   # then log in again",
-            cause="the current user cannot open /dev/kfd read-write",
+            remediation,
+            cause="the current user cannot open {} read-write".format(device),
+        )
+    if wsl:
+        return _finding(
+            observation,
+            "/dev/dxg is accessible, so this is not a permission problem. On WSL2\n"
+            "this status also comes from an HSA runtime that does not take the\n"
+            "DXG path; make sure HSA_ENABLE_DXG_DETECTION is not 0 (stock ROCm\n"
+            "7.2.x needs it set to 1) and that librocdxg.so matches the runtime.\n"
+            "Otherwise check GPU memory use from Windows (Task Manager).",
+            cause="the DXG path is disabled or mismatched, or GPU memory is exhausted",
+            confidence=POSSIBLE,
         )
     return _finding(
         observation,
@@ -227,11 +257,30 @@ def _no_device(accessor, match, text):
         if accessor.getenv(var) is not None
     ]
     if masks:
+        # Only an empty value or -1 is known to hide every GPU. Any other mask
+        # selects some devices, and whether those exist cannot be told without
+        # enumerating them, so it is a candidate cause rather than a finding.
+        hides_all = [
+            mask for mask in masks if mask.split("=", 1)[1].strip() in ("", "-1")
+        ]
+        unset = "Unset or correct the mask:\n  unset " + " ".join(
+            mask.split("=", 1)[0] for mask in masks
+        )
+        if hides_all:
+            return _finding(
+                observation,
+                unset,
+                cause="a device visibility mask hides every GPU ({})".format(
+                    "; ".join(hides_all)
+                ),
+            )
         return _finding(
             observation,
-            "Unset or correct the mask:\n  unset "
-            + " ".join(mask.split("=", 1)[0] for mask in masks),
-            cause="a device visibility mask is set ({})".format("; ".join(masks)),
+            unset + "\nthen confirm the driver enumerates the GPUs it names:\n"
+            "  rocm_agent_enumerator",
+            cause="a device visibility mask is set ({}) and may name no existing "
+            "GPU".format("; ".join(masks)),
+            confidence=POSSIBLE,
         )
     return _finding(
         observation,

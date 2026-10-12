@@ -256,8 +256,8 @@ def test_doctor_layout_reinstall_hints_match_layout(layout):
 
 def test_doctor_layout_reinstall_hint_names_component(layout):
     for factory in (legacy_accessor, therock_package_accessor, wheel_accessor):
-        hint = layout.reinstall_hint(factory(), "aqlprofile")
-        assert "aqlprofile" in hint, factory.__name__
+        hint = layout.reinstall_hint(factory(), "rocprofiler-register")
+        assert "rocprofiler-register" in hint, factory.__name__
 
 
 def test_doctor_layout_rocm_root_failure_is_layout_neutral(checks):

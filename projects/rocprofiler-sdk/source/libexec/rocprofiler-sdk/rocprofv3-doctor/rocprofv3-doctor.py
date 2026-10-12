@@ -46,9 +46,45 @@ CONST_VERSION_INFO = {
 }
 
 
+# library directory the rocprofv3 package is installed under, substituted by
+# configure_file. SYNC: source/lib/python/utilities.cmake installs the package
+# to ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3.
+INSTALL_LIBDIR = "@CMAKE_INSTALL_LIBDIR@"
+
+
 def _substituted(value):
     """False when configure_file has not replaced an @VAR@ placeholder."""
     return bool(value) and not (value.startswith("@") and value.endswith("@"))
+
+
+def _library_dirs():
+    """Library directories to search, the configured one first.
+
+    CMAKE_INSTALL_LIBDIR is ``lib64`` on RPM-based distributions and may be
+    ``lib/<multiarch>`` elsewhere, so a hard-coded ``lib`` misses those
+    installs. ``lib64`` and ``lib`` are kept as fallbacks for an unconfigured
+    (source tree) copy of this script.
+    """
+    dirs = []
+    for libdir in (
+        INSTALL_LIBDIR if _substituted(INSTALL_LIBDIR) else None,
+        "lib64",
+        "lib",
+    ):
+        if libdir and libdir not in dirs:
+            dirs.append(libdir)
+    return dirs
+
+
+def _site_packages_candidates(prefix):
+    """Every ``<prefix>/<libdir>/python*/site-packages`` the package may be in."""
+    candidates = []
+    for libdir in _library_dirs():
+        for python_dir in ("python3", "python{}".format(sys.version_info[0])):
+            path = os.path.join(prefix, libdir, python_dir, "site-packages")
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
 
 
 def _script_prefix():
@@ -94,12 +130,7 @@ def _bootstrap_package(rocm_root_override):
 
     candidates = []
     for prefix in prefixes:
-        candidates.append(os.path.join(prefix, "lib", "python3", "site-packages"))
-        candidates.append(
-            os.path.join(
-                prefix, "lib", "python{}".format(sys.version_info[0]), "site-packages"
-            )
-        )
+        candidates.extend(_site_packages_candidates(prefix))
     # running straight out of a source checkout
     source_dir = _source_package_dir()
     if source_dir:
@@ -254,12 +285,19 @@ def main(argv=None):
     try:
         doctor = _bootstrap_package(args.rocm_root)
     except ImportError as exc:
+        prefix = _script_prefix()
+        existing = [
+            path for path in _site_packages_candidates(prefix) if os.path.isdir(path)
+        ]
+        hint_path = (
+            existing[0]
+            if existing
+            else os.path.join(prefix, _library_dirs()[0], "python3", "site-packages")
+        )
         sys.stderr.write(
             COMMAND + ": cannot import the rocprofv3 Python package "
             "({}).\n"
-            "Try: export PYTHONPATH={}/lib/python3/site-packages:$PYTHONPATH\n".format(
-                exc, _script_prefix()
-            )
+            "Try: export PYTHONPATH={}:$PYTHONPATH\n".format(exc, hint_path)
         )
         return 2
 

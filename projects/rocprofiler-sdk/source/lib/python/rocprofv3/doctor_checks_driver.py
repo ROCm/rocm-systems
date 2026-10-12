@@ -20,7 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Driver and device checks: /dev/kfd, amdgpu, KFD topology, group membership."""
+"""Driver and device checks: /dev/kfd, amdgpu, KFD topology, group membership.
+
+Under WSL2 there is no /dev/kfd: the GPU is reached through the DirectX
+paravirtual driver (/dev/dxg) and the DXCore user-mode library, which the SDK
+supports. The checks below follow the path the SDK itself would take, so a
+healthy WSL2 system is not reported as missing its driver.
+
+# SYNC: source/lib/rocprofiler-sdk/platform/wsl/agent.cpp (probe_libdxcore,
+# open_libdxcore) and docs/how-to/using-rocprofv3-on-wsl.rst.
+"""
 
 from __future__ import absolute_import
 
@@ -28,6 +37,7 @@ from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
     make_fail,
     make_pass,
+    make_skip,
     make_warn,
     SEV_ERROR,
     SEV_WARNING,
@@ -38,11 +48,39 @@ KFD_TOPOLOGY_NODES = "/sys/class/kfd/kfd/topology/nodes"
 AMDGPU_MODULE_DIR = "/sys/module/amdgpu"
 AMDGPU_VERSION = AMDGPU_MODULE_DIR + "/version"
 
+# WSL2: the DirectX paravirtual GPU device, and the two libraries the SDK needs
+# to enumerate agents on it -- DXCore for the adapters, the DXG thunk for the
+# node topology. libdxcore.so is tried by soname first, then at the path WSL
+# installs it to, exactly as open_libdxcore() does.
+DXG_DEVICE = "/dev/dxg"
+LIBDXCORE = "libdxcore.so"
+LIBDXCORE_WSL_PATH = "/usr/lib/wsl/lib/libdxcore.so"
+LIBROCDXG = "librocdxg.so"
+
 DRIVER_INSTALL_HINT = (
     "Install the amdgpu kernel driver:\n"
     "  sudo amdgpu-install --usecase=rocm\n"
     "then reboot."
 )
+
+WSL_NOT_APPLICABLE = (
+    "not applicable on WSL2: the GPU is reached through {} rather than the amdgpu "
+    "kernel driver".format(DXG_DEVICE)
+)
+
+
+def uses_dxg(accessor):
+    """True on WSL2, where the GPU is reached through /dev/dxg, not /dev/kfd.
+
+    A machine with /dev/kfd takes the KFD path even if /dev/dxg also exists,
+    matching the SDK's platform selection, which prefers KFD when present.
+    """
+    return not accessor.path_exists(KFD_DEVICE) and accessor.path_exists(DXG_DEVICE)
+
+
+def gpu_device_node(accessor):
+    """The device node GPU access goes through on this machine."""
+    return DXG_DEVICE if uses_dxg(accessor) else KFD_DEVICE
 
 
 def parse_topology_node(accessor, node_dir):
@@ -80,10 +118,91 @@ def gpu_nodes(accessor):
     return found
 
 
+def find_libdxcore(accessor):
+    """Path of libdxcore.so, or None -- soname first, then the WSL location."""
+    path, _ = accessor.find_library(LIBDXCORE)
+    if path:
+        return path
+    if accessor.path_exists(LIBDXCORE_WSL_PATH):
+        return LIBDXCORE_WSL_PATH
+    return None
+
+
+def _wsl_topology(accessor):
+    """driver.gpu-topology on WSL2: the inputs agent enumeration needs.
+
+    KFD sysfs does not exist under WSL2. The SDK enumerates adapters through
+    DXCore and reads the node topology through librocdxg, and publishes no GPU
+    agent when either is missing, so both are verified here. The check stays
+    passive -- it locates the libraries but does not load them.
+    """
+    dxg_detection = accessor.getenv("HSA_ENABLE_DXG_DETECTION")
+    libdxcore = find_libdxcore(accessor)
+    librocdxg, searched = accessor.find_library(LIBROCDXG)
+    data = {
+        "platform": "wsl",
+        "HSA_ENABLE_DXG_DETECTION": dxg_detection,
+        "libdxcore": libdxcore,
+        "librocdxg": librocdxg,
+    }
+
+    if dxg_detection is not None and dxg_detection.strip() == "0":
+        return make_fail(
+            "HSA_ENABLE_DXG_DETECTION=0 disables the DXG path, so the HSA runtime "
+            "will report no GPU on WSL2",
+            "unset HSA_ENABLE_DXG_DETECTION\n"
+            "# or, required with stock ROCm 7.2.x packages:\n"
+            "export HSA_ENABLE_DXG_DETECTION=1",
+            data,
+        )
+    if libdxcore is None:
+        return make_fail(
+            "{} not found (searched the library path and {}): GPU adapters cannot "
+            "be enumerated".format(LIBDXCORE, LIBDXCORE_WSL_PATH),
+            "libdxcore.so is provided by WSL itself under /usr/lib/wsl/lib. Update "
+            "WSL from Windows with:\n"
+            "  wsl --update\n"
+            "In a container, mount it in:\n"
+            "  docker run --device /dev/dxg -v /usr/lib/wsl:/usr/lib/wsl ...",
+            data,
+        )
+    if librocdxg is None:
+        data["searched"] = searched
+        return make_fail(
+            "{} (the DXG thunk) not found: no GPU agent can be published on "
+            "WSL2".format(LIBROCDXG),
+            "Install the ROCm WSL runtime package that provides librocdxg.so, built "
+            "from the same sources as libhsa-runtime64.so, or put the directory "
+            "holding it on LD_LIBRARY_PATH.\n"
+            "See: Using rocprofv3 on WSL2 in the ROCprofiler-SDK documentation.",
+            data,
+        )
+
+    message = "WSL2: adapters via {}, node topology via {}".format(libdxcore, librocdxg)
+    if dxg_detection is None:
+        # current runtimes default to on; stock 7.2.x packages need it set
+        message += (
+            " (HSA_ENABLE_DXG_DETECTION unset: fine on current builds, but stock "
+            "ROCm 7.2.x needs it set to 1)"
+        )
+    return make_pass(message, "", data)
+
+
 def _group_check(accessor, group_name):
     """Shared implementation for the render/video group membership checks."""
+    if uses_dxg(accessor):
+        # /dev/dxg is world-accessible under WSL2; render/video membership
+        # gates /dev/kfd and /dev/dri, neither of which exists there
+        return make_skip(WSL_NOT_APPLICABLE, "", {"group": group_name})
+
     gid = accessor.get_group_gid(group_name)
-    groups = accessor.getgroups()
+    # getgroups() is not guaranteed to include the primary group (POSIX leaves
+    # it unspecified), so a user whose primary group is render would otherwise
+    # be reported as missing it
+    groups = list(accessor.getgroups())
+    primary_gid = accessor.getgid()
+    if primary_gid is not None and primary_gid not in groups:
+        groups.append(primary_gid)
     data = {"group": group_name, "gid": gid, "effective_gids": groups}
 
     if accessor.getuid() == 0:
@@ -134,7 +253,7 @@ def _group_check(accessor, group_name):
 @register(
     id="driver.kfd-device",
     group="driver",
-    title="/dev/kfd device node exists",
+    title="GPU device node exists (/dev/kfd, or /dev/dxg on WSL2)",
     severity=SEV_ERROR,
     depends=["install.rocm-root"],
     order=20,
@@ -142,11 +261,24 @@ def _group_check(accessor, group_name):
 def check_kfd_device(accessor):
     data = {"path": KFD_DEVICE}
     if accessor.path_exists(KFD_DEVICE):
+        data["platform"] = "kfd"
         return make_pass("{} exists".format(KFD_DEVICE), "", data)
+    if accessor.path_exists(DXG_DEVICE):
+        data["path"] = DXG_DEVICE
+        data["platform"] = "wsl"
+        return make_pass(
+            "{} exists ({} absent): WSL2, GPU reached through the DirectX "
+            "paravirtual driver".format(DXG_DEVICE, KFD_DEVICE),
+            "",
+            data,
+        )
     return make_fail(
-        "{} does not exist -- the amdgpu/KFD driver is not loaded or no AMD GPU "
-        "is present".format(KFD_DEVICE),
-        DRIVER_INSTALL_HINT,
+        "neither {} nor {} exists -- the amdgpu/KFD driver is not loaded, no AMD "
+        "GPU is present, or (in a container) the device was not passed "
+        "through".format(KFD_DEVICE, DXG_DEVICE),
+        DRIVER_INSTALL_HINT + "\n"
+        "Under WSL2, install the AMD Windows driver with WSL support instead; "
+        "/dev/dxg should then exist.",
         data,
     )
 
@@ -154,17 +286,31 @@ def check_kfd_device(accessor):
 @register(
     id="driver.kfd-readable",
     group="driver",
-    title="/dev/kfd readable and writable by the current user",
+    title="GPU device node readable and writable by the current user",
     severity=SEV_ERROR,
     depends=["driver.kfd-device"],
     order=21,
 )
 def check_kfd_readable(accessor):
-    readable = accessor.path_readable(KFD_DEVICE)
-    writable = accessor.path_writable(KFD_DEVICE)
-    data = {"path": KFD_DEVICE, "readable": readable, "writable": writable}
+    node = gpu_device_node(accessor)
+    readable = accessor.path_readable(node)
+    writable = accessor.path_writable(node)
+    data = {"path": node, "readable": readable, "writable": writable}
     if readable and writable:
-        return make_pass("{} is readable and writable".format(KFD_DEVICE), "", data)
+        return make_pass("{} is readable and writable".format(node), "", data)
+    if node == DXG_DEVICE:
+        # WSL creates /dev/dxg mode 0666; anything else was changed locally or
+        # by the container runtime, and the render/video groups play no part
+        return make_fail(
+            "{} is not {} by the current user".format(
+                node, "readable" if not readable else "writable"
+            ),
+            "Under WSL2, /dev/dxg is normally crw-rw-rw-. Check its mode with:\n"
+            "  ls -l /dev/dxg\n"
+            "In a container, pass the device and the WSL libraries through:\n"
+            "  docker run --device /dev/dxg -v /usr/lib/wsl:/usr/lib/wsl ...",
+            data,
+        )
     if accessor.getuid() == 0:
         # root without access means a user namespace (rootless container) that
         # does not map the device's owner -- group membership cannot fix that
@@ -198,6 +344,8 @@ def check_kfd_readable(accessor):
     order=22,
 )
 def check_dri_devices(accessor):
+    if uses_dxg(accessor):
+        return make_skip(WSL_NOT_APPLICABLE, "", {})
     nodes = accessor.glob("/dev/dri/renderD*")
     data = {"render_nodes": nodes}
     if not nodes:
@@ -261,6 +409,10 @@ def check_amdgpu_module(accessor):
     # has none. Treat the version as optional metadata, never as evidence
     # that the driver is missing.
     data = {"path": AMDGPU_MODULE_DIR}
+    if uses_dxg(accessor):
+        # the WSL2 kernel has no amdgpu module; the driver lives on the
+        # Windows host
+        return make_skip(WSL_NOT_APPLICABLE, "", data)
     if not accessor.path_is_dir(AMDGPU_MODULE_DIR):
         return make_fail(
             "{} does not exist -- the amdgpu driver is not loaded".format(
@@ -286,12 +438,15 @@ def check_amdgpu_module(accessor):
 @register(
     id="driver.gpu-topology",
     group="driver",
-    title="KFD topology enumerates at least one GPU",
+    title="GPU topology available (KFD sysfs, or DXCore + librocdxg on WSL2)",
     severity=SEV_ERROR,
     depends=["driver.kfd-device"],
     order=26,
 )
 def check_gpu_topology(accessor):
+    if uses_dxg(accessor):
+        return _wsl_topology(accessor)
+
     node_dirs = accessor.glob(accessor.join(KFD_TOPOLOGY_NODES, "*"))
     data = {"topology_nodes": node_dirs}
 

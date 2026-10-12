@@ -90,7 +90,6 @@ _DISTRO_PACKAGE_RE = re.compile(r"^/usr(/|$)")
 # Package names in the legacy ROCm repositories, by component.
 _SYSTEM_PACKAGE_NAMES = {
     "rocprofiler-sdk": "rocprofiler-sdk",
-    "aqlprofile": "hsa-amd-aqlprofile",
     "hip-runtime": "rocm-hip-runtime",
     "rocprofiler-register": "rocprofiler-register",
 }

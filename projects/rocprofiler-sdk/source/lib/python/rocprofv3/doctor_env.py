@@ -71,6 +71,13 @@ _IMPORT_SCRIPT = (
     "    info = {'ok': False, 'error': '{}: {}'.format(type(exc).__name__, exc)}\n"
     "sys.stdout.write('\\n' + sys.argv[2] + json.dumps(info))\n"
 )
+# Opens an in-memory database; an uncaught error exits 1 with a traceback.
+_SQLITE_SCRIPT = (
+    "import json, sys\n"
+    "sys.path[:] = json.loads(sys.argv[1])\n"
+    "import sqlite3\n"
+    "sqlite3.connect(':memory:').close()\n"
+)
 
 
 def signal_name(returncode):
@@ -97,6 +104,30 @@ def describe_returncode(returncode):
     if name:
         return "crashed ({})".format(name)
     return "exited {}".format(returncode)
+
+
+def newest_soversion(base, candidates):
+    """The entry of ``candidates`` that is ``base.<N[.N...]>`` with the highest
+    numeric soversion, or None.
+
+    Compared numerically: a plain sort ranks ".so.9" above ".so.10". Entries
+    that are not ``base`` plus a purely numeric suffix (``.so.debug``, or a
+    different library sharing the prefix) are ignored.
+    """
+    best = None
+    best_key = None
+    prefix = base + "."
+    for candidate in candidates:
+        if not candidate.startswith(prefix):
+            continue
+        try:
+            key = tuple(int(part) for part in candidate[len(prefix) :].split("."))
+        except ValueError:
+            continue
+        if best_key is None or key > best_key:
+            best = candidate
+            best_key = key
+    return best
 
 
 # Well-known capability bit positions in the /proc/self/status CapEff mask.
@@ -469,19 +500,26 @@ class SystemAccessor(object):
         return list(spec.submodule_search_locations)[0]
 
     def sqlite_usable(self):
-        """True when sqlite3 imports *and* can open an in-memory database.
+        """Whether sqlite3 imports *and* can open an in-memory database.
 
+        Returns ``(ok, detail)``; ``detail`` says how the probe failed.
         Minimal container images ship a Python built without SQLite support;
-        the import succeeds there but connecting does not.
+        the import succeeds there but connecting does not. Like can_import,
+        this runs in a child interpreter: ``_sqlite3`` is a native extension,
+        and a broken one must fail this check, not crash or hang the doctor.
         """
-        try:
-            import sqlite3
-
-            conn = sqlite3.connect(":memory:")
-            conn.close()
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+        search_path = json.dumps([entry for entry in sys.path if entry])
+        returncode, _, stderr = self.run(
+            [sys.executable, "-I", "-c", _SQLITE_SCRIPT, search_path],
+            timeout=IMPORT_TIMEOUT,
+        )
+        if returncode == 0:
+            return (True, "")
+        tail = stderr.strip().splitlines()[-1:]
+        detail = describe_returncode(returncode)
+        if tail:
+            detail = "{}: {}".format(detail, tail[0])
+        return (False, detail)
 
     # ------------------------------------------------------------------
     # library resolution
@@ -537,12 +575,19 @@ class SystemAccessor(object):
                 dirs.append(candidate)
         return dirs
 
-    def find_library(self, name):
+    def find_library(self, name, versioned=True):
         """Locate shared library ``name``; return ``(path_or_None, searched)``.
 
         Search order is LD_LIBRARY_PATH, then the ROCm tree, then the ldconfig
         cache -- matching how the dynamic loader would resolve it for a
         rocprofv3 run.
+
+        Runtime packages commonly ship only the versioned SONAME
+        (``libamdhip64.so.7``); the unversioned ``libamdhip64.so`` symlink
+        belongs to the -dev package, and ``ldconfig -p`` lists sonames, not
+        link names. So when ``versioned`` is true and the exact name is absent,
+        the newest ``name.<N>`` in the same place is accepted. Pass
+        ``versioned=False`` when only one specific soversion is acceptable.
         """
         searched = []
         for directory in self.library_search_dirs():
@@ -550,9 +595,19 @@ class SystemAccessor(object):
             candidate = os.path.join(directory, name)
             if self.path_exists(candidate):
                 return (candidate, searched)
+            if versioned:
+                newest = newest_soversion(candidate, self.glob(candidate + ".*"))
+                if newest is not None:
+                    return (newest, searched)
 
         searched.append("ldconfig cache")
-        cached = self.ldconfig_entries().get(name)
+        entries = self.ldconfig_entries()
+        cached = entries.get(name)
         if cached and self.path_exists(cached):
             return (cached, searched)
+        if versioned:
+            soname = newest_soversion(name, [key for key in entries if key != name])
+            cached = entries.get(soname) if soname else None
+            if cached and self.path_exists(cached):
+                return (cached, searched)
         return (None, searched)

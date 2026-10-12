@@ -633,6 +633,10 @@ def test_doctor_framework_every_check_declares_a_probe(framework):
     assert probes["runtime.libraries-load"] == doctor_result.PROBE_PROCESS
     assert probes["counters.avail-enumeration"] == doctor_result.PROBE_GPU
     assert probes["install.rocm-root"] == doctor_result.PROBE_PASSIVE
+    # every Python check but the version imports a module in a child process
+    for check_id, probe in probes.items():
+        if check_id.startswith("python.") and check_id != "python.version":
+            assert probe == doctor_result.PROBE_PROCESS, check_id
 
 
 def test_doctor_framework_json_reports_probe_and_errors(healthy_report):
@@ -719,3 +723,103 @@ def test_doctor_framework_rocprofv3_doctor_reports_missing_script(
     monkeypatch.setattr(launcher, "find_doctor_script", lambda: None)
     assert launcher.main(["--doctor"]) == 2
     assert "not installed" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------------
+# bootstrap: finding the rocprofv3 package from an install tree
+# ----------------------------------------------------------------------
+def _install_doctor(doctor_path, package_dirs, prefix, script_libdir, package_libdir):
+    """Lay out ``prefix`` like an installed tree and return the script path.
+
+    The script goes to ``libexec/rocprofiler-sdk/rocprofv3-doctor`` with its
+    INSTALL_LIBDIR set to ``script_libdir`` (None leaves the @VAR@ placeholder,
+    as in an unconfigured source copy); the package goes under
+    ``<package_libdir>/python3/site-packages``.
+    """
+    import os
+    import re
+    import shutil
+
+    package = [
+        os.path.join(path, "rocprofv3")
+        for path in package_dirs
+        if os.path.isdir(os.path.join(path, "rocprofv3"))
+    ][0]
+    site = os.path.join(prefix, package_libdir, "python3", "site-packages")
+    os.makedirs(site)
+    shutil.copytree(
+        package,
+        os.path.join(site, "rocprofv3"),
+        ignore=shutil.ignore_patterns("__pycache__", "CMakeLists.txt"),
+    )
+
+    with open(doctor_path, "r") as handle:
+        text = handle.read()
+    libdir = script_libdir if script_libdir else "@CMAKE_INSTALL_LIBDIR@"
+    text, count = re.subn(
+        r'^INSTALL_LIBDIR = ".*"$',
+        'INSTALL_LIBDIR = "{}"'.format(libdir),
+        text,
+        flags=re.MULTILINE,
+    )
+    assert count == 1
+    script_dir = os.path.join(prefix, "libexec", "rocprofiler-sdk")
+    os.makedirs(script_dir)
+    script = os.path.join(script_dir, "rocprofv3-doctor")
+    with open(script, "w") as handle:
+        handle.write(text)
+    return script
+
+
+def _run_isolated(script, cwd):
+    """Run ``script`` so that only its own bootstrap can find the package."""
+    import os
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    return subprocess.run(
+        [sys.executable, "-s", script, "--list-checks"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        cwd=cwd,
+        env=env,
+        timeout=60,
+    )
+
+
+@pytest.mark.parametrize(
+    "script_libdir,package_libdir",
+    [
+        ("lib64", "lib64"),  # RPM-style CMAKE_INSTALL_LIBDIR
+        ("lib/x86_64-linux-gnu", "lib/x86_64-linux-gnu"),  # multiarch libdir
+        (None, "lib64"),  # unconfigured copy still tries lib64
+        (None, "lib"),
+    ],
+)
+def test_doctor_framework_bootstrap_honors_install_libdir(
+    doctor_path, rocprofv3_package, tmp_path, script_libdir, package_libdir
+):
+    """Review #16: the package lives under CMAKE_INSTALL_LIBDIR, not always lib."""
+    prefix = str(tmp_path / "prefix")
+    script = _install_doctor(
+        doctor_path, rocprofv3_package, prefix, script_libdir, package_libdir
+    )
+    result = _run_isolated(script, str(tmp_path))
+    assert result.returncode == 0, result.stderr
+    assert "install.rocm-root" in result.stdout
+
+
+def test_doctor_framework_bootstrap_hint_names_configured_libdir(
+    doctor_path, rocprofv3_package, tmp_path
+):
+    """When the package cannot be found, the PYTHONPATH hint uses the configured
+    libdir rather than a hard-coded lib/."""
+    prefix = str(tmp_path / "prefix")
+    script = _install_doctor(doctor_path, rocprofv3_package, prefix, "lib64", "elsewhere")
+    result = _run_isolated(script, str(tmp_path))
+    assert result.returncode == 2
+    assert "cannot import the rocprofv3 Python package" in result.stderr
+    assert "{}/lib64/python3/site-packages".format(prefix) in result.stderr

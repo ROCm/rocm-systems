@@ -140,6 +140,7 @@ class FakeAccessor(object):
         group_members=None,
         username="tester",
         uid=1000,
+        gid=1000,
         cap_eff=0,
         free_bytes=100 * 1024 * 1024 * 1024,
         writable_dirs=None,
@@ -152,6 +153,7 @@ class FakeAccessor(object):
         links=None,
         module_dirs=None,
         rocm_root_source=None,
+        ldconfig=None,
     ):
         self._pid = pid
         self.rocm_root = rocm_root
@@ -164,6 +166,8 @@ class FakeAccessor(object):
         self._links = dict(links or {})
         # find_module_dir answers, as {module name: package directory}
         self._module_dirs = dict(module_dirs or {})
+        # the loader cache, as {soname or link name: path}
+        self._ldconfig = dict(ldconfig or {})
         self.tool_version = tool_version
         self._files = set(files or [])
         self._dirs = set(dirs or [])
@@ -175,6 +179,7 @@ class FakeAccessor(object):
         self._group_members = dict(group_members or {})
         self._username = username
         self._uid = uid
+        self._gid = gid
         self._cap_eff = cap_eff
         self._free_bytes = free_bytes
         self._writable_dirs = writable_dirs
@@ -315,7 +320,7 @@ class FakeAccessor(object):
         return self._uid
 
     def getgid(self):
-        return self._uid
+        return self._gid
 
     def getgroups(self):
         return list(self._groups)
@@ -357,11 +362,13 @@ class FakeAccessor(object):
         return self._module_dirs.get(module_name)
 
     def sqlite_usable(self):
-        return self._sqlite_ok
+        if self._sqlite_ok:
+            return (True, "")
+        return (False, "exited 1: sqlite3.OperationalError: unable to open database")
 
     # -- library resolution -------------------------------------------
     def ldconfig_entries(self):
-        return {}
+        return dict(self._ldconfig)
 
     def which(self, name):
         searched = []
@@ -383,13 +390,30 @@ class FakeAccessor(object):
             dirs.append(os.path.join(self.rocm_root, suffix))
         return dirs
 
-    def find_library(self, name):
+    def find_library(self, name, versioned=True):
+        from rocprofv3.doctor_env import newest_soversion
+
         searched = []
         for directory in self.library_search_dirs():
             searched.append(directory)
             candidate = os.path.join(directory, name)
             if self.path_exists(candidate):
                 return (candidate, searched)
+            if versioned:
+                newest = newest_soversion(candidate, self.glob(candidate + ".*"))
+                if newest is not None:
+                    return (newest, searched)
+
+        searched.append("ldconfig cache")
+        entries = self.ldconfig_entries()
+        cached = entries.get(name)
+        if cached and self.path_exists(cached):
+            return (cached, searched)
+        if versioned:
+            soname = newest_soversion(name, [key for key in entries if key != name])
+            cached = entries.get(soname) if soname else None
+            if cached and self.path_exists(cached):
+                return (cached, searched)
         return (None, searched)
 
 
@@ -401,7 +425,6 @@ def make_healthy_accessor(**overrides):
         root + "/lib/librocprofiler-sdk-roctx.so",
         root + "/lib/libhsa-runtime64.so",
         root + "/lib/libamdhip64.so",
-        root + "/lib/libhsa-amd-aqlprofile64.so",
         root + "/lib/librocprofiler-register.so",
         root + "/lib/librocprofiler-sdk-rocattach.so",
         root + "/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
@@ -409,6 +432,7 @@ def make_healthy_accessor(**overrides):
         root + "/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so",
         root + "/lib/rocprofiler-sdk/librocprof-trace-decoder.so",
         root + "/share/rocprofiler-sdk/basic_counters.xml",
+        root + "/share/rocprofiler-sdk/config.yaml",
         root + "/bin/rocprofv3",
         root + "/bin/rocprofv3-avail",
         root + "/bin/rocprof-attach",
@@ -464,3 +488,23 @@ def make_healthy_accessor(**overrides):
     kwargs["runs"] = runs
     kwargs.update(overrides)
     return FakeAccessor(**kwargs)
+
+
+def make_wsl_accessor(**overrides):
+    """A FakeAccessor describing a working WSL2 machine.
+
+    The GPU is reached through /dev/dxg, DXCore, and librocdxg: there is no
+    /dev/kfd, /dev/dri, KFD topology, or amdgpu module.
+    """
+    healthy = make_healthy_accessor()
+    kfd_only = ("/dev/kfd", "/dev/dri/", "/sys/class/kfd/", "/sys/module/amdgpu")
+    files = [path for path in sorted(healthy._files) if not path.startswith(kfd_only)]
+    files += [
+        "/dev/dxg",
+        "/usr/lib/wsl/lib/libdxcore.so",
+        healthy.rocm_root + "/lib/librocdxg.so",
+    ]
+    dirs = [path for path in sorted(healthy._dirs) if not path.startswith(kfd_only)]
+    kwargs = dict(files=files, dirs=dirs, file_contents={})
+    kwargs.update(overrides)
+    return make_healthy_accessor(**kwargs)

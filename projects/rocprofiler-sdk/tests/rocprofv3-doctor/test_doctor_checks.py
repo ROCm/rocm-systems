@@ -31,7 +31,7 @@ host (no GPU, a wedged driver, a hostile environment) are all reachable.
 
 import pytest
 
-from conftest import FakeAccessor, make_healthy_accessor
+from conftest import FakeAccessor, make_healthy_accessor, make_wsl_accessor
 
 RUN_TIMEOUT = -1001  # rocprofv3.doctor_env.RUN_TIMEOUT
 
@@ -109,11 +109,84 @@ def test_doctor_checks_sdk_library_versioned_soname_only(checks):
     assert result.status == checks["status"].STATUS_PASS
 
 
-def test_doctor_checks_kokkosp_missing_is_only_a_warning(checks):
-    """Optional libraries must never fail the run."""
+def test_doctor_checks_kokkosp_missing_fails(checks):
+    """PR review: rocprofv3 resolves the kokkosp library with required=True on
+    every launch and aborts when it is missing, so its absence is an error."""
     accessor = make_healthy_accessor(files=[], dirs=["/fake/rocm"])
     result = checks["install"].check_kokkosp_library(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "every launch" in result.remediation
+
+    from rocprofv3 import doctor
+
+    check = [c for c in doctor.get_checks() if c.id == "install.kokkosp-library"][0]
+    assert check.severity == checks["status"].SEV_ERROR
+
+
+def test_doctor_checks_metrics_path_default_install(checks):
+    result = checks["install"].check_metrics_path(make_healthy_accessor())
+    assert result.status == checks["status"].STATUS_PASS
+    assert result.data["resolved_path"] == "/fake/rocm/share/rocprofiler-sdk/config.yaml"
+
+
+def test_doctor_checks_metrics_path_requires_config_yaml(checks):
+    """PR review: the SDK loads config.yaml; the *.xml files beside it are not
+    what locateMetricsFile() looks for."""
+    files = [
+        path
+        for path in make_healthy_accessor()._files
+        if not path.endswith("/config.yaml")
+    ]
+    result = checks["install"].check_metrics_path(make_healthy_accessor(files=files))
     assert result.status == checks["status"].STATUS_WARN
+    assert "config.yaml not found" in result.detail
+
+
+def test_doctor_checks_metrics_path_is_a_colon_separated_list(checks):
+    """PR review: ROCPROFILER_METRICS_PATH is split on ':' and the first entry
+    holding config.yaml wins."""
+    accessor = make_healthy_accessor(
+        files=list(make_healthy_accessor()._files) + ["/custom/b/config.yaml"],
+        env={"ROCPROFILER_METRICS_PATH": "/custom/a:/custom/b"},
+    )
+    result = checks["install"].check_metrics_path(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+    assert result.data["resolved_path"] == "/custom/b/config.yaml"
+    assert result.data["searched"] == [
+        "/custom/a/config.yaml",
+        "/custom/b/config.yaml",
+    ]
+
+
+def test_doctor_checks_metrics_path_override_miss_falls_back_with_warning(checks):
+    """The SDK silently falls back to the install path when no override entry
+    has config.yaml; the doctor surfaces that, since it was likely a typo."""
+    accessor = make_healthy_accessor(env={"ROCPROFILER_METRICS_PATH": "/nope:/also-no"})
+    result = checks["install"].check_metrics_path(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert "falls back to /fake/rocm/share/rocprofiler-sdk/config.yaml" in result.detail
+    assert result.data["resolved_path"].endswith(
+        "/fake/rocm/share/rocprofiler-sdk/config.yaml"
+    )
+
+
+def test_doctor_checks_metrics_path_follows_real_library_location(checks):
+    """findViaInstallPath() resolves symlinks on librocprofiler-sdk.so, so the
+    install fallback is beside the real library, not under the given root."""
+    accessor = make_healthy_accessor(
+        rocm_root="/opt/rocm",
+        files=[
+            "/opt/rocm-7.0.0/lib/librocprofiler-sdk.so",
+            "/opt/rocm-7.0.0/share/rocprofiler-sdk/config.yaml",
+        ],
+        dirs=["/opt/rocm-7.0.0"],
+        links={"/opt/rocm": "/opt/rocm-7.0.0"},
+    )
+    result = checks["install"].check_metrics_path(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+    assert result.data["install_path"] == (
+        "/opt/rocm-7.0.0/share/rocprofiler-sdk/config.yaml"
+    )
 
 
 def test_doctor_checks_version_consistency_match(checks):
@@ -231,6 +304,102 @@ def test_doctor_checks_missing_group_is_a_warning(checks):
     assert result.status == checks["status"].STATUS_WARN
 
 
+def test_doctor_checks_render_group_counts_the_primary_group(checks):
+    """getgroups() may omit the primary GID; a user whose primary group is
+    render is still a member."""
+    accessor = make_healthy_accessor(groups=[44], gid=109)
+    result = checks["driver"].check_render_group(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+
+
+# ----------------------------------------------------------------------
+# driver on WSL2 (/dev/dxg instead of /dev/kfd)
+# ----------------------------------------------------------------------
+def test_doctor_checks_wsl_kfd_device_accepts_dxg(checks):
+    result = checks["driver"].check_kfd_device(make_wsl_accessor())
+    assert result.status == checks["status"].STATUS_PASS
+    assert result.data["platform"] == "wsl"
+    assert result.data["path"] == "/dev/dxg"
+
+
+def test_doctor_checks_kfd_device_neither_node_fails(checks):
+    accessor = make_wsl_accessor(files=[])
+    result = checks["driver"].check_kfd_device(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "/dev/dxg" in result.detail
+
+
+def test_doctor_checks_kfd_wins_when_both_nodes_exist(checks):
+    """The SDK prefers KFD when present, so the KFD-only checks still run."""
+    healthy = make_healthy_accessor()
+    accessor = make_healthy_accessor(files=sorted(healthy._files) + ["/dev/dxg"])
+    assert checks["driver"].uses_dxg(accessor) is False
+    result = checks["driver"].check_dri_devices(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+
+
+def test_doctor_checks_wsl_dxg_not_writable_fails(checks):
+    accessor = make_wsl_accessor(cannot_write=["/dev/dxg"])
+    result = checks["driver"].check_kfd_readable(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert result.data["path"] == "/dev/dxg"
+    assert "ls -l /dev/dxg" in result.remediation
+    assert "usermod" not in result.remediation
+
+
+@pytest.mark.parametrize(
+    "check_name", ["check_render_group", "check_dri_devices", "check_amdgpu_module"]
+)
+def test_doctor_checks_wsl_skips_kfd_only_checks(checks, check_name):
+    """render/video groups, /dev/dri, and the amdgpu module do not exist on
+    WSL2; their absence must not be reported as a failure."""
+    result = getattr(checks["driver"], check_name)(make_wsl_accessor())
+    assert result.status == checks["status"].STATUS_SKIP
+
+
+def test_doctor_checks_wsl_topology_pass(checks):
+    result = checks["driver"].check_gpu_topology(make_wsl_accessor())
+    assert result.status == checks["status"].STATUS_PASS
+    assert result.data["libdxcore"] == "/usr/lib/wsl/lib/libdxcore.so"
+    assert result.data["librocdxg"] == "/fake/rocm/lib/librocdxg.so"
+
+
+def test_doctor_checks_wsl_topology_without_librocdxg_fails(checks):
+    files = sorted(make_wsl_accessor()._files)
+    files.remove("/fake/rocm/lib/librocdxg.so")
+    result = checks["driver"].check_gpu_topology(make_wsl_accessor(files=files))
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "librocdxg.so" in result.detail
+
+
+def test_doctor_checks_wsl_topology_without_libdxcore_fails(checks):
+    files = sorted(make_wsl_accessor()._files)
+    files.remove("/usr/lib/wsl/lib/libdxcore.so")
+    result = checks["driver"].check_gpu_topology(make_wsl_accessor(files=files))
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "wsl --update" in result.remediation
+
+
+def test_doctor_checks_wsl_topology_dxg_detection_disabled_fails(checks):
+    accessor = make_wsl_accessor(env={"HSA_ENABLE_DXG_DETECTION": "0"})
+    result = checks["driver"].check_gpu_topology(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "HSA_ENABLE_DXG_DETECTION" in result.remediation
+
+
+def test_doctor_checks_wsl_container_passthrough(checks):
+    """A container on a WSL2 host needs /dev/dxg and /usr/lib/wsl, not /dev/kfd."""
+    files = sorted(make_wsl_accessor()._files) + ["/.dockerenv"]
+    result = checks["container"].check_device_passthrough(make_wsl_accessor(files=files))
+    assert result.status == checks["status"].STATUS_PASS
+
+    files.remove("/usr/lib/wsl/lib/libdxcore.so")
+    result = checks["container"].check_device_passthrough(make_wsl_accessor(files=files))
+    assert result.status == checks["status"].STATUS_WARN
+    assert "/usr/lib/wsl/lib/libdxcore.so" in result.detail
+    assert "--device=/dev/dxg" in result.remediation
+
+
 def test_doctor_checks_amdgpu_module_pass(checks):
     result = checks["driver"].check_amdgpu_module(make_healthy_accessor())
     assert result.status == checks["status"].STATUS_PASS
@@ -283,11 +452,15 @@ def test_doctor_checks_gpu_topology_cpu_only_fails(checks):
 # ----------------------------------------------------------------------
 # runtime
 # ----------------------------------------------------------------------
-def test_doctor_checks_aqlprofile_missing_fails(checks):
-    accessor = make_healthy_accessor(files=[], dirs=["/fake/rocm"])
-    result = checks["runtime"].check_aqlprofile_library(accessor)
-    assert result.status == checks["status"].STATUS_FAIL
-    assert "aqlprofile" in result.remediation
+def test_doctor_checks_no_standalone_aqlprofile_check(checks):
+    """PR review: AQLProfile is linked statically into librocprofiler-sdk.so by
+    default, so a missing standalone library is not a defect."""
+    from rocprofv3 import doctor
+
+    ids = [check.id for check in doctor.get_checks()]
+    assert "runtime.aqlprofile-library" not in ids
+    loaded = [entry[0] for entry in checks["runtime"].LOAD_TARGETS]
+    assert "libhsa-amd-aqlprofile64.so" not in loaded
 
 
 def test_doctor_checks_hsa_library_outside_rocm_root_warns(checks):
@@ -411,6 +584,41 @@ def test_doctor_checks_gpu_visibility_restricted_warns(checks):
     assert result.status == checks["status"].STATUS_WARN
 
 
+def test_doctor_checks_gpu_visibility_minus_one_hides_every_gpu(checks):
+    """HIP_VISIBLE_DEVICES=-1 hides every GPU, like an empty value."""
+    accessor = make_healthy_accessor(env={"HIP_VISIBLE_DEVICES": "-1"})
+    result = checks["environ"].check_gpu_visibility(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert "hides every GPU" in result.detail
+    assert result.remediation == "unset HIP_VISIBLE_DEVICES"
+
+
+def test_doctor_checks_gpu_visibility_remediation_unsets_every_variable(checks):
+    """Following the fix must clear the finding, whichever variable is set."""
+    accessor = make_healthy_accessor(env={"CUDA_VISIBLE_DEVICES": "1"})
+    result = checks["environ"].check_gpu_visibility(accessor)
+    assert result.status == checks["status"].STATUS_WARN
+    assert result.remediation == "unset CUDA_VISIBLE_DEVICES"
+
+    accessor = make_healthy_accessor(
+        env={"ROCR_VISIBLE_DEVICES": "0", "CUDA_VISIBLE_DEVICES": "1"}
+    )
+    result = checks["environ"].check_gpu_visibility(accessor)
+    assert result.remediation == "unset CUDA_VISIBLE_DEVICES ROCR_VISIBLE_DEVICES"
+
+
+def test_doctor_checks_ld_preload_entry_count_is_plain_english(checks):
+    """The entry count reads 'entry'/'entries', never regex notation."""
+    one = make_healthy_accessor(env={"LD_PRELOAD": "/usr/lib/libjemalloc.so"})
+    result = checks["environ"].check_ld_preload_conflict(one)
+    assert "(1 entry)" in result.detail
+
+    two = make_healthy_accessor(env={"LD_PRELOAD": "/usr/lib/liba.so:/usr/lib/libb.so"})
+    result = checks["environ"].check_ld_preload_conflict(two)
+    assert "(2 entries)" in result.detail
+    assert "(y|ies)" not in result.detail
+
+
 def test_doctor_checks_rocprof_vars_dump_collects_everything(checks):
     env = {
         "ROCPROF_OUTPUT_PATH": "/tmp/out",
@@ -430,6 +638,7 @@ def test_doctor_checks_hsa_tools_lib_foreign_warns(checks):
     accessor = make_healthy_accessor(env={"HSA_TOOLS_LIB": "/opt/other/libfoo.so"})
     result = checks["environ"].check_hsa_tools_lib(accessor)
     assert result.status == checks["status"].STATUS_WARN
+    assert "non-SDK tool library: /opt/other/libfoo.so" in result.detail
 
 
 # ----------------------------------------------------------------------
@@ -481,6 +690,7 @@ def test_doctor_checks_sqlite_importable_but_broken_fails(checks):
     accessor = make_healthy_accessor(sqlite_ok=False)
     result = checks["python"].check_sqlite3(accessor)
     assert result.status == checks["status"].STATUS_FAIL
+    assert "unable to open database" in result.data["error"]
 
 
 def test_doctor_checks_sqlite_ok(checks):
@@ -680,6 +890,57 @@ def test_doctor_checks_soversion_ladder_tolerates_non_numeric_suffix(checks):
     )
     path, _ = checks["install"].resolve_library(accessor, "libfoo.so", ("lib",))
     assert path == "/fake/rocm/lib/libfoo.so.2"
+
+
+def test_doctor_checks_soversion_from_ldconfig_cache(checks):
+    """A distro install may expose only the SONAME, and only via ldconfig.
+
+    With no file under the ROCm root, the loader-cache fallback must ask for
+    the known SDK soversions too, not just the unversioned devel name.
+    """
+    soname = "/usr/lib/x86_64-linux-gnu/librocprofiler-sdk.so.1"
+    accessor = make_healthy_accessor(
+        files=[soname],
+        dirs=["/fake/rocm"],
+        tool_version="1.4.0",
+        ldconfig={"librocprofiler-sdk.so.1": soname},
+    )
+    path, _ = checks["install"].resolve_library(
+        accessor, "librocprofiler-sdk.so", ("lib",)
+    )
+    assert path == soname
+
+
+def test_doctor_checks_soversion_from_ldconfig_cache_exact_for_sdk(checks):
+    """The loader-cache fallback keeps the SDK's exact-version rule."""
+    other = "/usr/lib/x86_64-linux-gnu/librocprofiler-sdk.so.9"
+    accessor = make_healthy_accessor(
+        files=[other],
+        dirs=["/fake/rocm"],
+        tool_version="1.4.0",
+        ldconfig={"librocprofiler-sdk.so.9": other},
+    )
+    path, _ = checks["install"].resolve_library(
+        accessor, "librocprofiler-sdk.so", ("lib",)
+    )
+    assert path is None, "a .so.9 is another release, not the 1.x library"
+
+
+def test_doctor_checks_third_party_soversion_from_ldconfig_cache(checks):
+    """Third-party sonames in the loader cache: the newest numeric one wins."""
+    multiarch = "/usr/lib/x86_64-linux-gnu"
+    accessor = make_healthy_accessor(
+        files=[multiarch + "/libamdhip64.so.6", multiarch + "/libamdhip64.so.7"],
+        dirs=["/fake/rocm"],
+        ldconfig={
+            "libamdhip64.so.6": multiarch + "/libamdhip64.so.6",
+            "libamdhip64.so.7": multiarch + "/libamdhip64.so.7",
+        },
+    )
+    path, _ = checks["install"].resolve_library(
+        accessor, "libamdhip64.so", ("lib",), sdk_owned=False
+    )
+    assert path == multiarch + "/libamdhip64.so.7"
 
 
 def test_doctor_checks_attach_library_is_distinct_from_tool_library(checks):
@@ -922,6 +1183,17 @@ def test_doctor_checks_virt_gpu_no_false_sriov_on_ordinary_gpu(checks, capabilit
     result = checks["container"].check_virt_gpu(accessor)
     assert result.status == checks["status"].STATUS_PASS
     assert "SR-IOV" not in result.detail
+
+
+def test_doctor_checks_virt_gpu_hypervisor_does_not_claim_passthrough(checks):
+    """Hypervisor evidence cannot tell passthrough from SR-IOV; say so."""
+    accessor = make_healthy_accessor(
+        file_contents={"/proc/cpuinfo": "flags\t: fpu hypervisor\n"}
+    )
+    result = checks["container"].check_virt_gpu(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+    assert "cannot be determined" in result.detail
+    assert "appears to be passed through" not in result.detail
 
 
 def test_doctor_checks_path_containment_is_separator_anchored(rocprofv3_package):

@@ -24,7 +24,13 @@
 
 from __future__ import absolute_import
 
-from rocprofv3.doctor_checks_driver import KFD_DEVICE
+from rocprofv3.doctor_checks_driver import (
+    DXG_DEVICE,
+    KFD_DEVICE,
+    LIBDXCORE_WSL_PATH,
+    find_libdxcore,
+    uses_dxg,
+)
 from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
     make_pass,
@@ -38,6 +44,11 @@ DOCKER_RUN_HINT = (
     "  docker run --device=/dev/kfd --device=/dev/dri \\\n"
     "    --group-add video --security-opt seccomp=unconfined \\\n"
     "    --cap-add=SYS_PTRACE <image>"
+)
+
+DOCKER_RUN_HINT_WSL = (
+    "Pass the WSL2 GPU device and its user-mode libraries into the container:\n"
+    "  docker run --device=/dev/dxg -v /usr/lib/wsl:/usr/lib/wsl <image>"
 )
 
 
@@ -108,13 +119,22 @@ def check_device_passthrough(accessor):
             "not containerized; device passthrough is not applicable", "", data
         )
 
-    missing = []
-    if not accessor.path_exists(KFD_DEVICE):
-        missing.append(KFD_DEVICE)
-    elif not (accessor.path_readable(KFD_DEVICE) and accessor.path_writable(KFD_DEVICE)):
-        missing.append("{} (present but not accessible)".format(KFD_DEVICE))
+    # A container on a WSL2 host gets /dev/dxg (plus the /usr/lib/wsl
+    # libraries) instead of /dev/kfd and /dev/dri.
+    wsl = uses_dxg(accessor)
+    device = DXG_DEVICE if wsl else KFD_DEVICE
+    data["platform"] = "wsl" if wsl else "kfd"
 
-    if not accessor.glob("/dev/dri/renderD*"):
+    missing = []
+    if not accessor.path_exists(device):
+        missing.append(device)
+    elif not (accessor.path_readable(device) and accessor.path_writable(device)):
+        missing.append("{} (present but not accessible)".format(device))
+
+    if wsl:
+        if find_libdxcore(accessor) is None:
+            missing.append(LIBDXCORE_WSL_PATH)
+    elif not accessor.glob("/dev/dri/renderD*"):
         missing.append("/dev/dri/renderD*")
     data["missing"] = missing
 
@@ -123,7 +143,7 @@ def check_device_passthrough(accessor):
             "GPU device node(s) not usable inside this {} container: {}".format(
                 runtime, ", ".join(missing)
             ),
-            DOCKER_RUN_HINT,
+            DOCKER_RUN_HINT_WSL if wsl else DOCKER_RUN_HINT,
             data,
         )
     return make_pass("GPU device nodes are present and accessible", "", data)
@@ -167,10 +187,15 @@ def check_virt_gpu(accessor):
     data["hypervisor_evidence"] = hypervisors
 
     if hypervisors:
+        # The hypervisor evidence says nothing about how the GPU reaches the
+        # guest: passthrough and SR-IOV look the same from here.
         return make_pass(
-            "running under a hypervisor ({}); GPU appears to be passed through "
-            "rather than virtualized".format("; ".join(hypervisors)),
-            "",
+            "running under a hypervisor ({}); whether the GPU is passed through "
+            "or virtualized (SR-IOV) cannot be determined from inside the "
+            "guest".format("; ".join(hypervisors)),
+            "If hardware counters are unavailable, ask the host administrator "
+            "whether the GPU is an SR-IOV virtual function: the host usually "
+            "keeps the performance-monitoring resources of a VF.",
             data,
         )
     return make_pass("no GPU virtualization detected", "", data)

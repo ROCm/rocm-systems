@@ -56,7 +56,9 @@ SEVERITY_VALUES = (SEV_ERROR, SEV_WARNING, SEV_INFO)
 # probe categories -- what running a check does to the machine, declared at
 # registration so the cost and effects of a run can be published
 PROBE_PASSIVE = "passive"  # reads files and the environment; read-only queries
-PROBE_PROCESS = "process"  # starts ROCm code (loads libraries, runs tools)
+PROBE_PROCESS = (
+    "process"  # runs code in a child (loads libraries, imports modules, runs tools)
+)
 PROBE_GPU = "gpu"  # initializes the GPU runtime or runs GPU work
 
 PROBE_VALUES = (PROBE_PASSIVE, PROBE_PROCESS, PROBE_GPU)

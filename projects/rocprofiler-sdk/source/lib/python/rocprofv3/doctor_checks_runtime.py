@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""Runtime stack checks: HSA, HIP, AQLProfile, and the ATT trace decoder.
+"""Runtime stack checks: HSA, HIP, rocprofiler-register, and the ATT decoder.
 
 Note: the plan's ``runtime.kfd-ioctl-version`` check is intentionally absent.
 There is no sysfs file exposing the KFD interface version (verified:
@@ -121,24 +121,10 @@ def check_hip_library(accessor):
     )
 
 
-@register(
-    id="runtime.aqlprofile-library",
-    group="runtime",
-    title="libhsa-amd-aqlprofile64.so findable",
-    severity=SEV_ERROR,
-    depends=["install.sdk-library"],
-    order=32,
-)
-def check_aqlprofile_library(accessor):
-    # error severity: without AQLProfile, --pmc counter collection aborts at
-    # runtime rather than degrading, which is a confusing first-contact failure
-    return _runtime_library(
-        accessor,
-        "libhsa-amd-aqlprofile64.so",
-        reinstall_hint(accessor, "aqlprofile"),
-        make_fail,
-        "required for --pmc counter collection",
-    )
+# NOTE: there is deliberately no check for libhsa-amd-aqlprofile64.so. By
+# default AQLProfile is linked statically into librocprofiler-sdk.so, so a
+# missing standalone library is not a defect; a broken SDK build surfaces in
+# runtime.libraries-load instead.
 
 
 @register(
@@ -237,7 +223,6 @@ LOAD_TARGETS = (
         True,
     ),
     ("libhsa-runtime64.so", ("lib", "lib64"), True, False),
-    ("libhsa-amd-aqlprofile64.so", ("lib", "lib64"), True, False),
     ("libamdhip64.so", ("lib", "lib64"), False, False),
     ("librocprofiler-sdk-roctx.so", ("lib", "lib64"), False, True),
 )

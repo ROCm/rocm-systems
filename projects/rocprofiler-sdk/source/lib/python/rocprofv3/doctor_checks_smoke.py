@@ -35,7 +35,7 @@ it says nothing about kernel execution, callback delivery, or trace output.
 
 from __future__ import absolute_import
 
-from rocprofv3.doctor_checks_driver import gpu_nodes
+from rocprofv3.doctor_checks_driver import gpu_nodes, uses_dxg
 from rocprofv3.doctor_checks_tools import resolve_tool, tool_command
 from rocprofv3.doctor_diagnose import explain_failure
 from rocprofv3.doctor_env import RUN_TIMEOUT
@@ -157,7 +157,8 @@ def check_rocprofv3_launcher(accessor):
 
     # Without a usable GPU a non-zero exit is expected rather than a defect,
     # so degrade to warn rather than reporting a failure the user cannot fix.
-    has_gpu = bool(gpu_nodes(accessor))
+    # WSL2 exposes no KFD topology to count, so /dev/dxg stands in for it
+    has_gpu = bool(gpu_nodes(accessor)) or uses_dxg(accessor)
     data["gpu_detected"] = has_gpu
     if not has_gpu:
         accessor.remove_tree(output_dir)

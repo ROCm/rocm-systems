@@ -181,6 +181,28 @@ def test_doctor_system_import_output_noise_is_tolerated(accessor, module_dir):
     assert accessor.can_import("doctor_test_chatty")[0] is True
 
 
+def test_doctor_system_sqlite_probe_works(accessor):
+    assert accessor.sqlite_usable() == (True, "")
+
+
+def test_doctor_system_sqlite_probe_crash_does_not_kill_the_doctor(accessor, module_dir):
+    """Review: the sqlite probe ran in-process, so a broken native _sqlite3
+    could take the doctor down. A crash is now one failed check."""
+    (module_dir / "sqlite3.py").write_text("import os\nos.abort()\n")
+    ok, detail = accessor.sqlite_usable()
+    assert ok is False
+    assert "SIGABRT" in detail
+
+
+def test_doctor_system_sqlite_probe_reports_the_exception(accessor, module_dir):
+    (module_dir / "sqlite3.py").write_text(
+        "def connect(name):\n    raise RuntimeError('no sqlite here')\n"
+    )
+    ok, detail = accessor.sqlite_usable()
+    assert ok is False
+    assert "RuntimeError: no sqlite here" in detail
+
+
 # ----------------------------------------------------------------------
 # temporary directories
 # ----------------------------------------------------------------------
