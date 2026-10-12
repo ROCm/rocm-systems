@@ -131,14 +131,24 @@ struct formatter<hsa_access_permission_t>
     auto format(hsa_access_permission_t v, Ctx& ctx) const
     {
         auto label = [v]() -> std::string_view {
-            switch(v)
+            // Switched on the integer value: newer ROCr adds HSA_ACCESS_PERMISSION_EX as a separate
+            // bit that combines with read and write, and the SDK also builds against HSA headers
+            // that predate it, so the bit cannot be named here.
+            constexpr uint32_t execute = 1U << 2;
+
+            switch(static_cast<uint32_t>(v))
             {
                 case HSA_ACCESS_PERMISSION_NONE: return "NONE";
                 case HSA_ACCESS_PERMISSION_RO: return "READ_ONLY";
                 case HSA_ACCESS_PERMISSION_WO: return "WRITE_ONLY";
                 case HSA_ACCESS_PERMISSION_RW: return "READ_WRITE";
+                case execute: return "EXECUTE";
+                case HSA_ACCESS_PERMISSION_RO | execute: return "READ_EXECUTE";
+                case HSA_ACCESS_PERMISSION_WO | execute: return "WRITE_EXECUTE";
+                case HSA_ACCESS_PERMISSION_RW | execute: return "READ_WRITE_EXECUTE";
+                default: break;
             }
-            return "NONE";
+            return "UNKNOWN";
         }();
         return fmt::format_to(ctx.out(), "{}", label);
     }
