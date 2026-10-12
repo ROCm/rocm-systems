@@ -294,6 +294,8 @@ release(bool, DEBUG_CLR_ENABLE_KDQ, true,                                     \
         "Kernel dispatch metadata (prefetch) queue, 0 = disable")             \
 release(bool, DEBUG_CLR_GRAPH_DEV_SIGNALS, true,                              \
         "Place graph signals in device memory (large BAR only)")              \
+release(bool, DEBUG_CLR_PERF_HINTS, false,                                    \
+        "Hint AQL completion signal handles so the CP can skip work")         \
 
 namespace amd {
 
