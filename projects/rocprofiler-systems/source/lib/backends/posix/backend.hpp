@@ -12,11 +12,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-namespace rocprofsys::instrument
+namespace rocprofsys::backends::posix
 {
 /// Backend for read_dynamic_dependencies that makes the real system calls. Every POSIX
 /// type, constant and macro the listing needs stays behind this struct.
-struct posix_backend
+struct backend
 {
     // Define pid_type as pid_t; "pid_type = pid_t" triggers clang-tidy
     using pid_type = decltype(::fork());
@@ -68,4 +68,4 @@ struct posix_backend
     /// The process environment: NULL-terminated, may itself be NULL
     static char* const* environ() { return ::environ; }
 };
-}  // namespace rocprofsys::instrument
+}  // namespace rocprofsys::backends::posix

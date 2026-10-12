@@ -26,7 +26,6 @@ target_sources(
         ${CMAKE_CURRENT_LIST_DIR}/log.hpp
         ${CMAKE_CURRENT_LIST_DIR}/module_function.cpp
         ${CMAKE_CURRENT_LIST_DIR}/module_function.hpp
-        ${CMAKE_CURRENT_LIST_DIR}/posix_backend.hpp
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument.cpp
         ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument.hpp
 )
@@ -40,6 +39,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-compile-definitions
         rocprofiler-systems::rocprofiler-systems-sanitizer
         rocprofiler-systems::rocprofiler-systems-common-library
+        rocprofiler-systems::rocprofiler-systems-posix-backend
         timemory::timemory-headers
         timemory::timemory-extensions
         timemory::timemory-core

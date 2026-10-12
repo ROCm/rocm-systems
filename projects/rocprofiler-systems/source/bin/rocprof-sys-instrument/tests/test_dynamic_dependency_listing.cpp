@@ -84,7 +84,7 @@ std::unique_ptr<StrictMock<gmock_posix>> g_mock;
 struct child_exited : std::exception
 {};
 
-/// posix_backend stand-in: every call forwards to g_mock.
+/// backends::posix::backend stand-in: every call forwards to g_mock.
 struct mock_posix_backend
 {
     using pid_type = int;
