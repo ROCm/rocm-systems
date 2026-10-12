@@ -829,7 +829,7 @@ Operator analyze warns during the join and continues when:
 
 A Function whose first token is the legacy stacked shape (``:#`` or
 ``#n@file:line``) makes analyze exit during parse, before the tree.
-Re-profile with current ``--torch-trace``.
+Re-profile with current ``--torch-trace`` or ``--triton-trace``.
 
 The forest is keyed by CSV ``Thread_Id``. Attach uses Function ``ltid=``
 against that ``Thread_Id``. Stitch uses ``tid=`` and ``ftid=`` on the
