@@ -302,14 +302,14 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
    */
   auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
     // Get all devices running this process into list_device_ptr
-    auto status_result(true);
     std::unique_ptr<uint32_t[]> list_device_ptr = std::make_unique<uint32_t[]>(num_running_devices);
     list_device_allocation_size = num_running_devices;
-    auto status_code = rsmi_compute_process_gpus_get(
+    const auto gpus_status = rsmi_compute_process_gpus_get(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      status_result = false;
-      return status_result;
+    if (gpus_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      // Only a process that exited after the listing may be left out.
+      return KfdProcessExists(rsmi_proc_info.process_id) ? gpus_status
+                                                         : rsmi_status_t::RSMI_STATUS_SUCCESS;
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
@@ -319,9 +319,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
         std::unordered_set<uint64_t> gpu_set{kfd_gpu_id};
         if (GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set) != 0) {
           // Its KFD entry is gone: the process exited after the listing.
-          const std::string kfd_proc_path =
-              "/sys/class/kfd/kfd/proc/" + std::to_string(rsmi_proc_info.process_id);
-          if (!FileExists(kfd_proc_path.c_str())) {
+          if (!KfdProcessExists(rsmi_proc_info.process_id)) {
             break;
           }
           // Still running but unreadable: list it with each KFD stat unknown.
@@ -337,14 +335,17 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
       }
     }
 
-    return status_result;
+    return rsmi_status_t::RSMI_STATUS_SUCCESS;
   };
 
   /**
    *  Transfer/Save the ones linked to this device.
    */
   for (const auto& rsmi_proc_info : procs) {
-    update_list_by_running_device(rsmi_proc_info);
+    const auto process_status = update_list_by_running_device(rsmi_proc_info);
+    if (process_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+      return static_cast<int32_t>(process_status);
+    }
   }
   cache_ptr->list = compute_process_list;
   cache_ptr->updated = std::chrono::steady_clock::now();
