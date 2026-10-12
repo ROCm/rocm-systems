@@ -58,6 +58,23 @@ inline bool find_duplicate_seq(std::vector<uint64_t> ids, uint64_t* dup) {
   return true;
 }
 
+// The first sequence number missing from `ids` between its smallest and
+// largest value, if any. Capture hands out a number only to an event it
+// writes, so a recorded stream is contiguous and a gap is a property of the
+// archive, like a duplicate: a replay checks it before it starts any thread
+// and need not guess, while it waits, whether a number is merely late.
+// Duplicates are not a gap; see find_duplicate_seq.
+inline bool find_seq_gap(std::vector<uint64_t> ids, uint64_t* missing) {
+  std::sort(ids.begin(), ids.end());
+  for (size_t i = 1; i < ids.size(); ++i) {
+    if (ids[i] > ids[i - 1] + 1) {
+      if (missing) *missing = ids[i - 1] + 1;
+      return true;
+    }
+  }
+  return false;
+}
+
 // Wait until `next_seq` equals `seq`.
 //
 // A recorded stream hands the turn from one event to the next by writing
@@ -71,12 +88,11 @@ inline bool find_duplicate_seq(std::vector<uint64_t> ids, uint64_t* dup) {
 //
 // An ordered event keeps next_seq where it is for as long as its HIP call
 // runs, which can be minutes for a recorded synchronize or a long kernel.
-// `busy`, when given, counts the threads that hold a turn and are inside such
-// a call (ordered events only: an unordered event hands the turn on before its
-// call, so it holds nothing); no wait is counted while it is non-zero, so a
-// slow legitimate call is never mistaken for a missing event, and a blocked
-// unordered call cannot hide a gap behind it. A duplicate sequence number is
-// not detected here (the turn is not exclusive); see find_duplicate_seq.
+// `busy`, when given, counts the threads that are inside a HIP call; no wait
+// is counted while it is non-zero, so a slow legitimate call is never mistaken
+// for a missing event. This is only a backstop: a replay rejects a gap or a
+// duplicate in the recorded numbers before it starts (find_seq_gap,
+// find_duplicate_seq), because the wait cannot tell either from a slow call.
 inline TurnResult wait_for_turn(const std::atomic<uint64_t>& next_seq,
                                 uint64_t seq,
                                 const std::atomic<bool>& fatal,
