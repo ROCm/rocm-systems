@@ -478,6 +478,7 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
     case TilePutWGRowMajorStartCoordTestType:
     case TileGetWGRowMajorStartCoordTestType:
       start_coord_offset = DEFAULT_START_COORD_OFFSET;
+      this->args.min_msg_size = tile_size_bytes;
       break;
     default:
       start_coord_offset = 0;
