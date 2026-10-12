@@ -33,11 +33,17 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
-static amd::rdc::RdcLibraryLoader rdc_lib_loader;
+// One loader per library, so that rdc_connect() never unloads the library behind an embedded
+// handle and rdc_start_embedded() never unloads the client library.
+static amd::rdc::RdcLibraryLoader rdc_client_loader;
+static amd::rdc::RdcLibraryLoader rdc_embedded_loader;
 
 rdc_status_t rdc_init(uint64_t) { return RDC_ST_OK; }
 
-rdc_status_t rdc_shutdown() { return rdc_lib_loader.unload(); }
+rdc_status_t rdc_shutdown() {
+  rdc_client_loader.unload();
+  return rdc_embedded_loader.unload();
+}
 
 rdc_status_t rdc_connect(const char* ipAddress, rdc_handle_t* p_rdc_handle, const char* root_ca,
                          const char* client_cert, const char* client_key) {
@@ -48,7 +54,7 @@ rdc_status_t rdc_connect(const char* ipAddress, rdc_handle_t* p_rdc_handle, cons
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  rdc_status_t status = rdc_lib_loader.load("librdc_client.so", &func_make_handler);
+  rdc_status_t status = rdc_client_loader.load("librdc_client.so", &func_make_handler);
   if (status != RDC_ST_OK) {
     *p_rdc_handle = nullptr;
     return status;
@@ -74,7 +80,7 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rd
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  rdc_status_t status = rdc_lib_loader.load("librdc.so", &func_make_handler);
+  rdc_status_t status = rdc_embedded_loader.load("librdc.so", &func_make_handler);
   if (status != RDC_ST_OK) {
     *p_rdc_handle = nullptr;
     return status;

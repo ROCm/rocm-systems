@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <dlfcn.h>
 
 #include <mutex>  //  NOLINT(build/c++11)
+#include <string>
 
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
@@ -31,6 +32,8 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+// Loads one library and keeps it until unload(). Loading it again returns the library already
+// loaded, because handlers and modules created from it may still be in use.
 class RdcLibraryLoader {
  public:
   RdcLibraryLoader();
@@ -50,21 +53,21 @@ class RdcLibraryLoader {
 
  private:
   void* libHandler_;
+  std::string filename_;
   std::mutex library_mutex_;
 };
 
 template <typename T>
 rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_name) {
-  if (!libHandler_) {
-    RDC_LOG(RDC_ERROR, "Must load the library before loading the symbol");
-    return RDC_ST_FAIL_LOAD_MODULE;
-  }
-
   if (!func_handler || !func_name) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
   std::lock_guard<std::mutex> guard(library_mutex_);
+  if (!libHandler_) {
+    RDC_LOG(RDC_ERROR, "Must load the library before loading the symbol");
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
 
   *reinterpret_cast<void**>(func_handler) = dlsym(libHandler_, func_name);
   if (*func_handler == nullptr) {
