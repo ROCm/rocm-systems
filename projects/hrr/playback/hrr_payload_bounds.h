@@ -45,4 +45,12 @@ inline std::string bounded_cstr(const uint8_t* field, size_t field_bytes) {
   return std::string(reinterpret_cast<const char*>(field), n);
 }
 
+// True if the dependency list stored in a graph-node record holds every
+// dependency the call was made with. Capture keeps at most what the inline
+// field holds and records the caller's count separately, so a stored count below
+// it means ordering edges were dropped.
+constexpr bool deps_complete(uint64_t recorded, uint64_t stored) {
+  return stored >= recorded;
+}
+
 }  // namespace hrr
