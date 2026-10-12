@@ -103,15 +103,19 @@ transpose_a(int* in, int* out, int M, int N)
 
 namespace
 {
-size_t            nthreads = 2;
-size_t            nitr     = 500;  // 0 means run until signaled (infinite mode)
-size_t            nsync    = 10;
-std::atomic<bool> stop_requested{ false };
+constexpr size_t k_default_nitr  = 500;
+constexpr size_t k_default_nsync = 10;
+constexpr float  k_bytes_per_gb  = 1073741824.0F;
+
+size_t            g_nthreads = 2;
+size_t            g_nitr  = k_default_nitr;  // 0 means run until signaled (infinite mode)
+size_t            g_nsync = k_default_nsync;
+std::atomic<bool> g_stop_requested{ false };
 
 void
 handle_stop_signal(int /*signum*/) noexcept
 {
-    stop_requested.store(true, std::memory_order_relaxed);
+    g_stop_requested.store(true, std::memory_order_relaxed);
 }
 }  // namespace
 
@@ -157,28 +161,36 @@ run(int rank, int tid, int devid, hipStream_t stream, int argc, char** argv)
     dim3 grid(M / 32, N / 32, 1);
     dim3 block(32, 32, 1);  // transpose_a
 
-    size_t completed_itr = 0;
-    auto   t1            = std::chrono::high_resolution_clock::now();
-    for(size_t i = 0; i < nitr; ++i)
+    size_t     completed_itr = 0;
+    const auto start_time    = std::chrono::high_resolution_clock::now();
+    for(size_t i = 0; i < g_nitr; ++i)
     {
-        if(stop_requested.load(std::memory_order_relaxed)) break;
+        if(g_stop_requested.load(std::memory_order_relaxed))
+        {
+            break;
+        }
         transpose_a<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
-        if(i % nsync == (nsync - 1)) HIP_API_CALL(hipStreamSynchronize(stream));
+        if(i % g_nsync == (g_nsync - 1))
+        {
+            HIP_API_CALL(hipStreamSynchronize(stream));
+        }
         ++completed_itr;
     }
-    auto t2 = std::chrono::high_resolution_clock::now();
+    const auto end_time = std::chrono::high_resolution_clock::now();
     HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipMemcpyAsync(out_matrix, out, size, hipMemcpyDeviceToHost, stream));
     double time =
-        std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
-    float GB = static_cast<float>(size) * completed_itr * 2 / (1 << 30);
+        std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time)
+            .count();
+    const float gigabytes = static_cast<float>(size) * static_cast<float>(completed_itr) *
+                            2.0F / k_bytes_per_gb;
 
     print_lock.lock();
     std::cout << "[" << rank << "][" << tid << "] Runtime of transpose is " << time
               << " sec\n"
-              << "The average performance of transpose is " << GB / time << " GBytes/sec"
-              << std::endl;
+              << "The average performance of transpose is " << gigabytes / time
+              << " GBytes/sec" << std::endl;
     print_lock.unlock();
 
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -229,28 +241,44 @@ main(int argc, char** argv)
                     "  NUM_ITERATION = 0 enables infinite-workload mode: each round\n"
                     "  runs the default 500 iterations end-to-end (alloc, kernel\n"
                     "  loop, verify, free) and rounds repeat until SIGTERM/SIGINT.\n",
-                    nthreads, nitr, nsync);
+                    g_nthreads, g_nitr, g_nsync);
             exit(EXIT_SUCCESS);
         }
     }
-    if(argc > 1) nthreads = atoll(argv[1]);
-    if(argc > 2) nitr = atoll(argv[2]);
-    if(argc > 3) nsync = atoll(argv[3]);
+    if(argc > 1)
+    {
+        g_nthreads = atoll(argv[1]);
+    }
+    if(argc > 2)
+    {
+        g_nitr = atoll(argv[2]);
+    }
+    if(argc > 3)
+    {
+        g_nsync = atoll(argv[3]);
+    }
 
-    const bool infinite_workload = (nitr == 0);
-    if(infinite_workload) nitr = 500;
+    const bool infinite_workload = (g_nitr == 0);
+    if(infinite_workload)
+    {
+        g_nitr = k_default_nitr;
+    }
 
     std::signal(SIGTERM, handle_stop_signal);
     std::signal(SIGINT, handle_stop_signal);
 
-    printf("[transpose] Number of threads: %zu\n", nthreads);
+    printf("[transpose] Number of threads: %zu\n", g_nthreads);
     if(infinite_workload)
+    {
         printf("[transpose] Number of iterations per round: %zu (infinite "
                "rounds until SIGTERM/SIGINT)\n",
-               nitr);
+               g_nitr);
+    }
     else
-        printf("[transpose] Number of iterations: %zu\n", nitr);
-    printf("[transpose] Syncing every %zu iterations\n", nsync);
+    {
+        printf("[transpose] Number of iterations: %zu\n", g_nitr);
+    }
+    printf("[transpose] Syncing every %zu iterations\n", g_nsync);
 
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
@@ -283,18 +311,26 @@ main(int argc, char** argv)
                 std::cout << "[transpose] Starting round " << round++ << std::endl;
                 print_lock.unlock();
             }
-            std::vector<std::thread> _threads{};
-            std::vector<hipStream_t> _streams(nthreads);
-            for(size_t i = 0; i < nthreads; ++i)
-                HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
-            for(size_t i = 1; i < nthreads; ++i)
-                _threads.emplace_back(run, rank, i, devid, _streams.at(i), argc, argv);
-            run(rank, 0, devid, _streams.at(0), argc, argv);
-            for(auto& itr : _threads)
+            std::vector<std::thread> threads{};
+            std::vector<hipStream_t> streams(g_nthreads);
+            for(size_t i = 0; i < g_nthreads; ++i)
+            {
+                HIP_API_CALL(hipStreamCreate(&streams.at(i)));
+            }
+            for(size_t i = 1; i < g_nthreads; ++i)
+            {
+                threads.emplace_back(run, rank, i, devid, streams.at(i), argc, argv);
+            }
+            run(rank, 0, devid, streams.at(0), argc, argv);
+            for(auto& itr : threads)
+            {
                 itr.join();
-            for(size_t i = 0; i < nthreads; ++i)
-                HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
-        } while(infinite_workload && !stop_requested.load(std::memory_order_relaxed));
+            }
+            for(size_t i = 0; i < g_nthreads; ++i)
+            {
+                HIP_API_CALL(hipStreamDestroy(streams.at(i)));
+            }
+        } while(infinite_workload && !g_stop_requested.load(std::memory_order_relaxed));
     }
     HIP_API_CALL(hipDeviceSynchronize());
     HIP_API_CALL(hipDeviceReset());
