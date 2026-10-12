@@ -1,11 +1,11 @@
 ---
 p2p:
   Unit_hipDeviceGetP2PAttribute_Basic:
-    <<: *level_2
+    <<: *level_default
     tags: [multigpu]
   Unit_hipDeviceGetP2PAttribute_Negative:
-    <<: *level_2
+    <<: *level_default
     tags: [multigpu]
   Unit_hipP2pLinkTypeAndHopFunc:
-    <<: *level_2
+    <<: *level_default
     tags: [multigpu]

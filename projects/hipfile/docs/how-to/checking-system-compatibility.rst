@@ -51,7 +51,10 @@ For example, this table indicates that ``/``, ``/home``, and ``/data`` are eligi
 
    For ``lvm`` backing, ``ais-check`` follows the device-mapper stack and reports
    the volume as capable only when every layer is an LVM target and all of the
-   underlying physical volumes are local NVMe.
+   underlying physical volumes are local NVMe. RAID logical volumes are
+   reported as capable on this basis, because LVM builds each RAID member as an
+   LVM sub-volume. ``md`` backing is MD software RAID, a different block layer,
+   and is always reported as not capable.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or

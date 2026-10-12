@@ -23,7 +23,8 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   guards          device-table unittest and kernel-count pytest plus
-#                   src/include/test_poison_hip_atomics.py
+#                   src/include/test_poison_hip_atomics.py and the
+#                   tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
 #                   <BUILD_DIR>/coverage (requires the host tests to be built
@@ -163,6 +164,8 @@ do_host_tests() {
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
+    "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
+    "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
@@ -248,8 +251,14 @@ do_kernel_count_guards() {
   "$venv/bin/python" -m pytest "$gd/tests" -v
 }
 
+# Run the RcclReplayer host checks (g++ only, no MPI or HIP); nothing else builds tools/.
+do_replayer_guards() {
+  echo "==> RcclReplayer host checks (make -C tools/RcclReplayer test)"
+  make -C "$RCCL_ROOT/tools/RcclReplayer" test
+}
+
 # All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
-# then the __hip_atomic_* poison compile probe. Collected with `|| rc=1` rather
+# the __hip_atomic_* poison compile probe, then the RcclReplayer host checks. Collected with `|| rc=1` rather
 # than run back to back so that under `set -e` (line 53) an early failure still
 # leaves the later guards running and reported, instead of aborting the phase at
 # the first one. Same idiom as do_host_tests above.
@@ -258,6 +267,7 @@ do_guards() {
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_poison_hip_atomics || rc=1
+  do_replayer_guards || rc=1
   return "$rc"
 }
 
