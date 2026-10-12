@@ -480,6 +480,8 @@ Prefer running a check to asserting it.
   git worktree add --detach "${TMPDIR:-/tmp}/amdsmi-agent-mutation" <head-sha>
   cd "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
   git diff origin/develop...<head-sha> -- projects/amdsmi ':!projects/amdsmi/tests' | git apply -R
+  # after both runs:
+  git worktree remove --force "${TMPDIR:-/tmp}/amdsmi-agent-mutation"
   ```
 
 - **Overlap (BR4)** — List every open PR that touches `projects/amdsmi` (no
@@ -556,8 +558,9 @@ any that would be empty:
 9. **Follow-ups to File** — one line each (PR2)
 10. **Checked clean** — the same line as in subagent mode
 11. **Verdict** — ✅ READY FOR REVIEW or ⚠️ FIX FIRST (N items)
-12. **Next step** — one line: run the full review (`/amdsmi-review-pr <N>`)
-    for style, security and performance
+12. **Next step** — one line: run the full review (`/amdsmi-review-pr <N>`,
+    or `/amdsmi-review-branch` for a local branch) for style, security and
+    performance
 
 The verdict is ✅ only when no ❌ or ⚠️ finding remains; 💡 nits are listed but
 do not block.
