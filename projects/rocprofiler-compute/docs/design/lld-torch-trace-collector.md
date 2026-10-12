@@ -154,8 +154,8 @@ key and function_ordinal.
 2. Rename on-disk `Correlation_Id` to `Correlation_ID`, then full-outer-join
    unique dispatches to markers on `Correlation_ID` (plus `GUID` when both
    files have that column).
-3. Record `UnaccountedKernelError` when a kernel's `Correlation_ID` is not
-   in the marker CSV (warns during join). Plain analyze without
+3. Record `UnaccountedKernelError` when a dispatch does not join to a
+   marker on those keys (warns during join). Plain analyze without
    those flags does not join and does not report that error.
 4. Consolidate matching operator calls across passes on the stitch key plus
    `function_ordinal`. Record `PassMarkerMismatchError` when operator calls
