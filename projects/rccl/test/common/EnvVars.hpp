@@ -36,6 +36,7 @@ namespace RcclUnitTesting
     bool isGfx94;        // Detects if architecture is gfx94
     bool isGfx95;        // Detects if architecture is gfx95
     bool isGfx12;        // Detects if architecture is gfx12
+    bool isGfx1250;      // Detects if architecture is exactly gfx1250
     bool isGfx90;        // Detects if architecture is gfx90
 
     // Constructor that parses and collects environment variables
@@ -49,6 +50,7 @@ namespace RcclUnitTesting
     std::vector<int>            const& GetGpuPriorityOrder();   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
     // Detected device count (computed HIP-clean via a forked probe)
     int GetNumDetectedGpus() const { return numDetectedGpus; }
+    int GetHipRuntimeVersion() const { return hipRuntimeVersion; }
     void ShowConfig();
 
   protected:
@@ -57,6 +59,7 @@ namespace RcclUnitTesting
     std::vector<int>            numGpusList;        // List of # Gpus to use   [UT_MIN_GPUS/UT_MAX_GPUS/UT_POW2_GPUS]
     std::vector<int>            isMultiProcessList; // Single or multi process [UT_PROCESS_MASK]
     int                         numDetectedGpus;
+    int                         hipRuntimeVersion;
     std::vector<int>            gpuPriorityOrder;   // Orders the gpus based on the associativity of them with OAM with higher gpus linked.
 
     // Helper functions to parse environment variables
@@ -67,7 +70,8 @@ namespace RcclUnitTesting
     // rocprofv3 --hip-trace (rocprofiler-sdk) cannot trace HIP across a bare
     // fork(): a forked child that calls HIP deadlocks. DetectGpuInfo() therefore
     // runs the HIP probes (count/arch/CPX/priority) in a fork()+execv()'d fresh
-    // process image and reads the results back over a pipe.
+    // process image and reads the results back over a pipe. This also captures
+    // the HIP runtime version without initializing HIP in the test parent.
     // RunGpuProbeChildIfRequested() is that image's entrypoint, keyed off the
     // RCCL_UT_GPU_PROBE_FD environment variable; it is a no-op in every other
     // process.

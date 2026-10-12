@@ -3,6 +3,7 @@
 /.github/                                                             @ROCm/rocm-systems-reviewers
 /.github/workflows/hipfile-*.yml                                      @ROCm/hipfile-reviewers
 /.github/workflows/rocjitsu-*.yml                                     @ROCm/rocjitsu-core-team
+/.github/**/*rccl*                                                    @ROCm/rccl-ci
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers

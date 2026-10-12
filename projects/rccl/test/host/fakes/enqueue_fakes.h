@@ -34,8 +34,8 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, i
 extern std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel;
 
 // enqueue.cc's ncclAddWorkBatchToPlan: default is a no-op observer.
-extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int,
-                          int, bool)>
+extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t,
+                          int, int, bool)>
     g_addWorkBatchToPlan;
 
 // enqueue.cc's ncclAddProxyOpIfNeeded: default accepts every proxy op.
@@ -48,6 +48,9 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, stru
 // enqueue.cc's ncclGetCollNetSupport/ncclGetRegBuff: default reports neither is available.
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getCollNetSupport;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)> g_getRegBuff;
+
+// enqueue.cc's rcclEffectiveP2pBatchEnable: default 0 is batching off, the single-node answer.
+extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
 
 void ResetEnqueueFakes();
 

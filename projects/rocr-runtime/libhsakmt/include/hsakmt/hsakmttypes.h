@@ -455,6 +455,7 @@ typedef struct _HaCacheProperties
     HSAuint32    CacheLatency;     // Cache latency in ns
     HsaCacheType CacheType;
     HSAuint32    SiblingMap[HSA_CPU_SIBLINGS];
+    HSAuint32    PersistingCacheSizeMax; //Maximum persisting cache size in L2 Cache topology.
 } HsaCacheProperties;
 
 
@@ -1532,12 +1533,14 @@ typedef enum _HsaAisFlags {
 /* memory object handle used for translating drm BO object*/
 typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
 
-/* Access Permissions for memory mapping */
+/* Access Permissions for memory mapping.
+ * Read, write, and execute are independent bits and may be combined. */
 typedef enum _HsaMemoryMapFlags {
     HSA_MEMORY_ACCESS_NONE = 0,
-    HSA_MEMORY_ACCESS_RO   = 1,
-    HSA_MEMORY_ACCESS_WO   = 2,
-    HSA_MEMORY_ACCESS_RW   = 3
+    HSA_MEMORY_ACCESS_RO   = 1 << 0,
+    HSA_MEMORY_ACCESS_WO   = 1 << 1,
+    HSA_MEMORY_ACCESS_RW   = (1 << 0) | (1 << 1),
+    HSA_MEMORY_ACCESS_EX   = 1 << 2
 } HsaMemoryMapFlags;
 
 /* Handle type for import */
@@ -1575,6 +1578,12 @@ typedef struct _HsaHandleImportFlags {
         unsigned int Reserved       : 29;
     } ui32;
 } HsaHandleImportFlags;
+
+typedef struct _HsaDmaBufInfo {
+    HSAuint64 Size;             // allocation size in bytes
+    HSAuint32 GpuId;            // KFD id of the node owning the buffer object
+    HSAuint32 IsDeviceMemory;   // non-zero when device-local (VRAM), zero for host (GTT/USERPTR)
+} HsaDmaBufInfo;
 
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow

@@ -65,6 +65,17 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     )
 endif()
 
+# The hooks contain their own VM objects. Keep their C++ symbols, including
+# observer RTTI, local so they cannot collide with another core in the process.
+# Loadable observers obtain those exports from librocjitsu, not the HSA hooks.
+function(rj_set_hooks_exports target export_map)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(_map ${CMAKE_CURRENT_SOURCE_DIR}/${export_map})
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS ${_map})
+        target_link_options(${target} PRIVATE "LINKER:--version-script=${_map}")
+    endif()
+endfunction()
+
 # Production hook: exports the HSA tool entry points only.
 add_library(rocjitsu_hooks SHARED)
 set_target_properties(rocjitsu_hooks PROPERTIES OUTPUT_NAME rocjitsu_hooks)
@@ -72,6 +83,7 @@ target_link_libraries(
     rocjitsu_hooks
     PRIVATE rocjitsu_hooks_objects ${RJ_HOOKS_LINK_LIBS}
 )
+rj_set_hooks_exports(rocjitsu_hooks rocjitsu_hooks.map)
 
 if(BUILD_TESTING)
     # Test-only hook: the same objects plus the exported test seams. Never
@@ -89,6 +101,7 @@ if(BUILD_TESTING)
         rocjitsu_hooks_testing
         PRIVATE rocjitsu_hooks_objects ${RJ_HOOKS_LINK_LIBS}
     )
+    rj_set_hooks_exports(rocjitsu_hooks_testing rocjitsu_hooks_testing.map)
 
     if(MSVC)
         target_compile_options(rocjitsu_hooks_testing PRIVATE /W4 /WX)

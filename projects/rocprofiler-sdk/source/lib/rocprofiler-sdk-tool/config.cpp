@@ -245,6 +245,17 @@ config::config()
 
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 
+    const std::unordered_map<std::string_view, rocprofiler_thread_trace_resource_mode_t>
+        att_resource_modes = {
+            {"default", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT},
+            {"hsa", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA},
+            {"code-object", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT}};
+    auto resource_mode = att_resource_modes.find(att_resource_mode);
+    ROCP_FATAL_IF(resource_mode == att_resource_modes.end())
+        << "Invalid value for ROCPROF_ATT_PARAM_RESOURCE_MODE: " << att_resource_mode
+        << ". Valid choices are: default, hsa, code-object";
+    att_resource_mode_value = resource_mode->second;
+
     std::unordered_map<std::string_view, rocprofiler_pc_sampling_unit_t> pc_sampling_unit_map = {
         {"none", ROCPROFILER_PC_SAMPLING_UNIT_NONE},
         {"instructions", ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS},

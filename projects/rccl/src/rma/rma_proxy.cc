@@ -410,6 +410,7 @@ ncclResult_t ncclRmaProxyRegister(struct ncclComm* comm, void* address, size_t s
 ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* rmaHostWins[NCCL_RMA_MAX_CONNECTIONS]) {
   struct ncclRmaProxyState* rmaProxyState = &comm->rmaState.rmaProxyState;
   for (int n = 0; n < rmaProxyState->rmaCommCount; n++) {
+    if (rmaHostWins[n] == nullptr) continue;
     NCCLCHECK(rmaProxyState->ncclRma->deregMrSym(rmaProxyState->rmaComms[n], rmaHostWins[n]));
   }
   return ncclSuccess;
@@ -558,7 +559,7 @@ ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) {
   // Start / wake up the progress thread.
   rmaProxyState->rmaProgress = 1;
   rmaProxyState->thread = std::thread(ncclRmaProxyProgressThread, rmaProxyState);
-  ncclSetThreadName(rmaProxyState->thread, "NCCL RMA Proxy Progress%2d", comm->cudaDev);
+  ncclSetThreadName(rmaProxyState->thread, "NCCL RMA PPrg%2d", comm->cudaDev);
 
   INFO(NCCL_INIT, "Rank %d ncclRmaProxyConnectOnce: rmaCommCount %d rmaProxyCtxCount:%d", comm->rank, rmaCommCount,
        rmaProxyState->rmaProxyCtxCount);

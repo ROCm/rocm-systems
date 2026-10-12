@@ -522,6 +522,13 @@ protected:
     };
   }
 
+  // What every teardown leaves behind, whatever it reported on the way out.
+  void ExpectTornDown() {
+    EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxCount, 0);
+    EXPECT_EQ(comm_->rmaState.rmaCeState.rmaCeCtxs, nullptr);
+  }
+
 };
 
 // The whole point: after teardown the comm reports no CE state, so a later
@@ -587,7 +594,9 @@ TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
   ScopedHook destroy(g_hipStreamDestroy, [](hipStream_t) { return hipErrorInvalidValue; });
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclSuccess);
-  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(destroy.calls, 1);
+  EXPECT_EQ(comm_->rmaState.rmaCeState.ceStream, nullptr);
+  ExpectTornDown();
 }
 
 // A device buffer that will not release surfaces as the return value, but
@@ -598,7 +607,10 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+  // The deregister runs after two of the failing frees, so seeing it proves the
+  // loop carried on instead of abandoning the context at the first one.
+  EXPECT_EQ(deregistered_.size(), 1u);
+  ExpectTornDown();
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it
@@ -629,11 +641,19 @@ TEST_F(RmaCeFinalizeTest, Finalize_PendingInitTasks_DrainsTheQueue) {
 // best-effort: it keeps releasing the remaining resources and finishes with the
 // state cleared rather than stopping at the failure.
 TEST_F(RmaCeFinalizeTest, Finalize_DeregisterFails_Propagates) {
+  comm_->config.numRmaCtx = 3;   // so "kept going" is observed, not inferred
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
-  g_devrNcclCommWindowDeregister = [](ncclComm_t, ncclWindow_t) { return ncclInternalError; };
+  // Distinct codes after the first, so the returned one pins NCCLCHECKIGNORE's
+  // first-wins rule (checks.h:171) rather than merely "some error surfaced".
+  int seen = 0;
+  ScopedHook dereg(g_devrNcclCommWindowDeregister,
+                   [&seen](ncclComm_t, ncclWindow_t) {
+                     return ++seen == 1 ? ncclInternalError : ncclSystemError;
+                   });
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclInternalError);
-  EXPECT_FALSE(comm_->rmaState.rmaCeState.initialized);
+  EXPECT_EQ(dereg.calls, 3);   // attempted for every context, not just the first
+  ExpectTornDown();
 }
 
 // ---------------------------------------------------------------------------
@@ -883,11 +903,14 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
 
   ASSERT_EQ(ncclRmaCePutLaunchUut(comm_.get(), plan_.get(), nullptr), ncclSuccess);
 
+  // NCCL 2.32 orders peers LSA-cyclically from lsaSelf+1 (not in enqueue order) to
+  // avoid destination incast. With kLsaSelf=3 and kLsaWorld={4,3,1,0,2} the walk
+  // visits world ranks 2,4,3,1, so peer 3 precedes peer 1.
   auto batches = Batches();
   ASSERT_EQ(batches.size(), 2u);
   ASSERT_EQ(batches[0].size(), 2u);
-  EXPECT_EQ(batches[0][0].dst, PeerData(1));
-  EXPECT_EQ(batches[0][1].dst, PeerData(3));
+  EXPECT_EQ(batches[0][0].dst, PeerData(3));
+  EXPECT_EQ(batches[0][1].dst, PeerData(1));
 
   // Both peers signal in the same round, so each takes its own staging slot --
   // sharing one would make the second overwrite the first. Pinned on the staging
@@ -899,8 +922,8 @@ TEST_F(RmaCeNonPersistTest, NonPersist_TasksForDifferentPeers_BatchedIntoOneRoun
   ASSERT_EQ(batches[1].size(), 2u);
   EXPECT_EQ(batches[1][0].src, &ceCtx->signalOpSeqsDev[0]);
   EXPECT_EQ(batches[1][1].src, &ceCtx->signalOpSeqsDev[1]);
-  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(1, ceCtx->signalOffset));
-  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][0].dst, SelfSlotIn(3, ceCtx->signalOffset));
+  EXPECT_EQ(batches[1][1].dst, SelfSlotIn(1, ceCtx->signalOffset));
 }
 
 // Two tasks for the same peer cannot share a batch, because a batched copy does

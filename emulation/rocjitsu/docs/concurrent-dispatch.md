@@ -14,8 +14,10 @@ drain its CUs without holding that mutex. Pending submissions rotate when a
 worker takes an assignment. An assigned worker finishes its current submission;
 this is not preemptive scheduling.
 
-Each caller executes only its own submission and cancels unused assignments
-when its task index is exhausted. It joins only workers holding that submission.
+Each caller executes only its own submission. The first caller or worker to
+finish draining the task index cancels unused assignments under the queue mutex,
+so workers do not keep claiming empty assignments while other CUs are still
+running. The caller joins all workers holding that submission.
 The last worker notifies before dropping the mutex, protecting the stack-owned
 submission's lifetime. There is no per-submission queue allocation.
 
@@ -36,15 +38,19 @@ other runtime service threads are outside this allocation.
 pairs. `resolve_execution_threads()` is a pure function: apply explicit overrides
 and topology clamps, calculate each entry's total retained thread count, and
 choose the largest fitting entry. Later entries break ties. It does not fill
-unused budget between entries. The default budget is CPU affinity capped at 32;
-`cpu_thread_budget` overrides that default. A larger budget can select larger
-entries from a custom table. Explicit knob settings take priority over a budget.
+unused budget between entries. The default budget is CPU affinity and the
+target table sets the allocation ceiling. `cpu_thread_budget` overrides the
+budget; explicit knob settings take priority.
 
-The synchronous granules measured below stop at 32. The eight-XCD tables include a 24-thread entry;
-otherwise their granules are powers of two. At 32 with async helpers disabled, gfx950 and gfx1250 select
-8 engine threads and inclusive dispatch width 25. The [async MMA extension](async-instructions.md)
-adds helper allocations and uses E + sum(D - 1) + H for the total budget. Desktop presets select one
-engine and dispatch width 32. See [the allocation table](configuration.md#thread-accounting-and-preferred-allocations).
+Desktop, MI210 and CDNA3 tables stop at an engine/dispatch cost of 24.
+gfx950 adds eight MMA helpers for 32 total threads; gfx1250 uses up to 40
+engine/dispatch threads and eight helpers for 48 total. See
+[the allocation table](configuration.md#thread-accounting-and-preferred-allocations)
+and [async MMA policy](async-instructions.md#thread-policy).
+
+The historical study below includes wider synchronous allocations. Subsequent
+IREE, Gluon and Tensile measurements favor lower defaults to limit CPU use;
+custom tables and explicit overrides remain available for wider workloads.
 
 The initial entries were screened in the previous study, then checked on this
 standalone branch with the synchronous kernels. The final tables below report
@@ -73,8 +79,11 @@ below. Multi-GPU presets default to E=1/D=1 for RCCL. Explicit D=0 opts into
 granules that divide each budget's remaining slots among the per-GPU pools;
 positive D overrides also remain available. Mirage uses the same defaults and
 derives the multi-GPU granules from single-GPU tables embedded in the RocJITsu
-backend. The hardware agent model contains no host tuning. The ceiling remains 32, with
-larger custom entries and explicit knob overrides available.
+backend. Those derived granules convert helper slots to dispatch workers, so
+gfx950 derives from a total budget of 32 and gfx1250 from 48, while desktop
+and CDNA3 use 24. The hardware agent model contains no host tuning. Clocked
+engines and legacy table-free dispatch overrides retain their automatic
+32-thread cap. Explicit overrides remain available.
 
 ### Synchronous server kernels
 
@@ -155,6 +164,7 @@ Inspect a preset's effective allocations without constructing the simulated GPU:
 
 ```sh
 build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi355x.json --thread-budget-table
+build/tools/rocjitsu/rocjitsu --config configs/gfx950_mi355x.json --cpu-thread-budget 64 --thread-budget-table
 ```
 
 The [configuration reference](configuration.md#thread-accounting-and-preferred-allocations)

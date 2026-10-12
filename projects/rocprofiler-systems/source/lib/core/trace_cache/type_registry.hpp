@@ -25,7 +25,7 @@ public:
 
     std::optional<variant_t> get_type(TypeIdentifierEnum id, std::uint8_t*& data)
     {
-        auto it = deserializers.find(id);
+        auto const it = deserializers.find(id);
         if(it != deserializers.end())
         {
             return it->second(data);

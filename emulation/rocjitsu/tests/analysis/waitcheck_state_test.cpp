@@ -498,8 +498,8 @@ TEST(WaitcheckState, InstructionWaitsRespectSentinelsAndArchitecture) {
 }
 
 TEST(WaitcheckState, UnsupportedArchitectureFailsWithoutChangingState) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                              ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
     PendingState state;
     state.pending[kLoad] = {load(0, 3)};
     state.va_vdst_hazards.hazards[0] = {2, false, {}};

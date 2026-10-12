@@ -39,7 +39,10 @@ vaapi_gotcha::configure()
         for(size_t i = 0; i < vaapi_gotcha_t::capacity(); ++i)
         {
             auto* itr = vaapi_gotcha_t::at(i);
-            if(itr) itr->verbose = -1;
+            if(itr)
+            {
+                itr->verbose = -1;
+            }
         }
     }
 
@@ -236,29 +239,45 @@ vaapi_gotcha::audit(const gotcha_data& _data, audit::incoming, VADisplay dpy,
                     VAContextID context)
 {
     if(_data.tool_id == "vaDestroyBuffer")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "buffer_id", context);
+    }
     else if(_data.tool_id == "vaDestroyConfig")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "config_id", context);
+    }
     else if(_data.tool_id == "vaDestroyContext")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "context", context);
+    }
     else if(_data.tool_id == "vaEndPicture")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "context", context);
+    }
     else if(_data.tool_id == "vaSyncSurface")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "render_target", context);
+    }
     else if(_data.tool_id == "vaDestroyImage")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "image_id", context);
+    }
     else if(_data.tool_id == "vaUnmapBuffer" || _data.tool_id == "vaReleaseBufferHandle")
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "buffer_id", context);
+    }
     else
+    {
         category_region<category::vaapi>::start(std::string_view{ _data.tool_id }, "dpy",
                                                 dpy, "id", context);
+    }
 }
 
 // vaDestroySurfaces

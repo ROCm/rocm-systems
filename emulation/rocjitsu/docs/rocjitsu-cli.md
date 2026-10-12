@@ -172,6 +172,7 @@ data. This is the standard Unix mechanism for cross-process file descriptor
 sharing (same pattern as QEMU vhost-user and CRIU).
 
 Two RPC operations carry memfds:
+
 - `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing memfd
 - `RPC_MMAP` (response) --- doorbell and event page memfds
 
@@ -253,6 +254,7 @@ public:
 
 `UnixTransport` wraps a Unix domain socket with SCM_RIGHTS for handle passing.
 Static factory methods:
+
 - `UnixTransport::listen(endpoint)` --- create a listening socket
 - `UnixTransport::connect(endpoint)` --- connect to a daemon
 - `transport->accept()` --- accept a client connection
@@ -262,6 +264,7 @@ The endpoint is `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock` by default.
 ### Platform Portability
 
 The transport abstraction enables future Windows support:
+
 - Unix: Unix domain socket + SCM_RIGHTS
 - Windows: Named pipe + DuplicateHandle
 

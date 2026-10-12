@@ -213,6 +213,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 void DiscoverAie(uint32_t node_id, HsaNodeProperties& node_prop) {
 #if defined(__linux__)
   AieAgent* aie = new AieAgent(node_id, node_prop);
+  aie->Enable();
   core::Runtime::runtime_singleton_->RegisterAgent(aie, true);
 #endif
 }
@@ -317,7 +318,7 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
         core::g_use_interrupt_wait = false;
 
       if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        bool disable_image = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
+        bool disable_image = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
         core::Runtime::runtime_singleton_->flag().disable_image(disable_image);
 
         if (node_prop.Capability2.ui32.AqlEmulationPm4_)

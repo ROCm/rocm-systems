@@ -8,7 +8,8 @@
 #include "core/output_file_registry.hpp"
 #include "core/perfetto/fwd.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
-#include "core/trace_cache/sample_processor.hpp"
+#include "core/trace_cache/sample_processor_interface.hpp"
+#include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
 #include "core/perfetto/category_registry.hpp"
@@ -33,7 +34,7 @@ struct pmc_track_info
     std::function<void(std::uint64_t, std::uint64_t, std::uint64_t, double)>   trace_fn;
 };
 
-class perfetto_processor_t : public processor_t<perfetto_processor_t>
+class perfetto_processor_t : public sample_processor_interface
 {
 public:
     perfetto_processor_t(const std::shared_ptr<metadata_registry>& metadata,
@@ -41,24 +42,25 @@ public:
                          int ppid, output_file_registry& output_registry,
                          rocprofsys::track_registry& tracks);
 
-    void prepare_for_processing();
+    void prepare_for_processing() override;
     // Cached-mode drain runs at cache_manager scope (engine.stop());
     // per-pid finalize has nothing to do.
-    void finalize_processing() {}
+    void finalize_processing() override {}
 
-    void handle(const kernel_dispatch_sample& sample);
-    void handle(const scratch_memory_sample& sample);
-    void handle(const memory_copy_sample& sample);
-    void handle(const memory_allocate_sample& sample);
-    void handle(const region_sample& sample);
-    void handle(const in_time_sample& sample);
-    void handle(const pmc_event_with_sample& sample);
-    void handle(const gpu_pmc_sample& sample);
-    void handle(const ainic_pmc_sample& sample);
-    void handle(const cpu_pmc_sample& sample);
-    void handle(const gpu_perf_counter_sample& sample);
-    void handle(const backtrace_region_sample& sample);
-    void handle(const kfd_sample& sample);
+    void handle(const kernel_dispatch_sample& sample) override;
+    void handle(const scratch_memory_sample& sample) override;
+    void handle(const memory_copy_sample& sample) override;
+    void handle(const memory_allocate_sample& sample) override;
+    void handle(const region_sample& sample) override;
+    void handle(const in_time_sample& sample) override;
+    void handle(const pmc_event_with_sample& sample) override;
+    void handle(const gpu_pmc_sample& sample) override;
+    void handle(const ainic_pmc_sample& sample) override;
+    void handle(const cpu_pmc_sample& sample) override;
+    void handle(const gpu_perf_counter_sample& sample) override;
+    void handle(const hipfile_pmc_sample& sample) override;
+    void handle(const backtrace_region_sample& sample) override;
+    void handle(const kfd_sample& sample) override;
 
 private:
     // Returns a cached ::perfetto::Track for the given (category, args...) key,
@@ -96,7 +98,7 @@ private:
     std::unordered_map<std::uint32_t, std::uint32_t> m_kfd_node_to_gpu_index_cache;
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
-    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id{};
+    std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

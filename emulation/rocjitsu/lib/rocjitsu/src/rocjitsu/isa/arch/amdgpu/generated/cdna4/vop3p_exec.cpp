@@ -133,7 +133,8 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       third_lo ^= 0x8000u;
     const uint16_t rlo = amdgpu::fp_mode::packed_select3_f16(
         amdgpu::fp_mode::PackedBinaryOp::MINIMUM, first_lo, second_lo, third_lo,
-        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
     uint16_t first_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     if (inst_.neg_hi & 1u)
       first_hi ^= 0x8000u;
@@ -145,7 +146,8 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       third_hi ^= 0x8000u;
     const uint16_t rhi = amdgpu::fp_mode::packed_select3_f16(
         amdgpu::fp_mode::PackedBinaryOp::MINIMUM, first_hi, second_hi, third_hi,
-        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }
@@ -182,7 +184,8 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       third_lo ^= 0x8000u;
     const uint16_t rlo = amdgpu::fp_mode::packed_select3_f16(
         amdgpu::fp_mode::PackedBinaryOp::MAXIMUM, first_lo, second_lo, third_lo,
-        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
     uint16_t first_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     if (inst_.neg_hi & 1u)
       first_hi ^= 0x8000u;
@@ -194,7 +197,8 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       third_hi ^= 0x8000u;
     const uint16_t rhi = amdgpu::fp_mode::packed_select3_f16(
         amdgpu::fp_mode::PackedBinaryOp::MAXIMUM, first_hi, second_hi, third_hi,
-        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf));
+        wf.fp_denorm_mode_f16_f64(), inst_.clamp, amdgpu::floating_clamp_nan_to_zero(wf),
+        wf.cu().arch(), wf.ieee_mode());
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
         *this, wf, vdst, lane, rlo | (static_cast<uint32_t>(rhi) << 16));
   }

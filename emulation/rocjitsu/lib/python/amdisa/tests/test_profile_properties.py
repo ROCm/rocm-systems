@@ -137,6 +137,26 @@ def test_descriptor_sgpr_count_encoded(profile, expected):
 
 
 @pytest.mark.parametrize(
+    ('profile', 'vmcnt_capacity', 'lgkmcnt_capacity'),
+    [
+        (Cdna1Profile(), 63, 15),
+        (Cdna2Profile(), 63, 15),
+        (CdnaProfile(), 63, 15),
+        (Cdna4Profile(), 63, 15),
+        (Rdna1Profile(), 63, 63),
+        (Rdna2Profile(), 63, 63),
+        (Rdna3Profile(), 63, 63),
+        (Rdna3_5Profile(), 63, 63),
+        (Rdna4Profile(), 0, 0),
+        (Cdna5Profile(), 0, 0),
+    ],
+)
+def test_wait_counter_capacities(profile, vmcnt_capacity, lgkmcnt_capacity):
+    assert profile.vmcnt_capacity == vmcnt_capacity
+    assert profile.lgkmcnt_capacity == lgkmcnt_capacity
+
+
+@pytest.mark.parametrize(
     ('profile', 'expected'),
     [
         (CdnaProfile(), 256),
@@ -459,7 +479,7 @@ def test_non_split_generation_leaves_exec_named_sources_untouched(tmp_path):
     ('profile', 'enc_name', 'expected'),
     [
         (CdnaProfile(), 'ENC_FLAT', '0x7F'),
-        (Rdna3Profile(), 'ENC_FLAT', '0x7F'),
+        (Rdna3Profile(), 'ENC_FLAT', '0x7C'),
         (Rdna4Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
         (Rdna4Profile(), 'ENC_VGLOBAL', 'OPR_SREG_NULL'),
         (Cdna5Profile(), 'ENC_VFLAT', 'OPR_SREG_NULL'),
@@ -511,6 +531,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
     assert 'uint32_t compute_tmpring_wavesize_bits = 0;' in output
     assert 'uint32_t wave_size = 0;' in output
     assert 'uint32_t wave_size_max = 0;' in output
+    assert 'uint8_t vmcnt_capacity = 0;' in output
+    assert 'uint8_t lgkmcnt_capacity = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave32 = 0;' in output
     assert 'uint32_t descriptor_vgpr_count_granule_wave64 = 0;' in output
     assert 'MAX_SUPPORTED_ADDRESSABLE_VGPRS_PER_WF = 1024;' in output
@@ -528,6 +550,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 13,\n'
         '        .wave_size = 64,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 63,\n'
+        '        .lgkmcnt_capacity = 15,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 0,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 8,\n'
@@ -547,6 +571,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 64,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 256,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 8,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 4,\n'
@@ -566,6 +592,8 @@ def test_isa_properties_codegen_uses_profile_values(tmp_path):
         '        .compute_tmpring_wavesize_bits = 18,\n'
         '        .wave_size = 32,\n'
         '        .wave_size_max = 32,\n'
+        '        .vmcnt_capacity = 0,\n'
+        '        .lgkmcnt_capacity = 0,\n'
         '        .max_addressable_vgprs_per_wf = 1024,\n'
         '        .descriptor_vgpr_count_granule_wave32 = 16,\n'
         '        .descriptor_vgpr_count_granule_wave64 = 0,\n'
@@ -1412,3 +1440,46 @@ class TestMemoryCoherencyModelEnum:
     def test_values_are_distinct(self):
         vals = [m.value for m in MemoryCoherencyModel]
         assert len(vals) == len(set(vals))
+
+
+@pytest.mark.parametrize(
+    ('profile', 'supported'),
+    [
+        (Cdna1Profile(), True),
+        (Cdna2Profile(), True),
+        (CdnaProfile(), True),
+        (Cdna4Profile(), True),
+        (Rdna1Profile(), False),
+        (Rdna2Profile(), False),
+        (Rdna3Profile(), False),
+        (Rdna3_5Profile(), False),
+        (Rdna4Profile(), False),
+        (Cdna5Profile(), False),
+    ],
+)
+@pytest.mark.parametrize(
+    'encoding',
+    [
+        'ENC_VOP1',
+        'ENC_VOP2',
+        'ENC_VOP3',
+        'ENC_VOPC',
+        'ENC_VOP3P',
+        'VOP3_SDST_ENC',
+        'VOP3P_MFMA',
+        'ENC_MUBUF',
+        'ENC_MTBUF',
+        'ENC_MIMG',
+        'ENC_DS',
+        'ENC_FLAT',
+        'ENC_EXP',
+        'ENC_VINTRP',
+    ],
+)
+def test_vskip_vector_encodings(profile, supported, encoding):
+    assert profile.vskip_affected_encoding(encoding) is supported
+
+
+@pytest.mark.parametrize('encoding', ['ENC_SOP1', 'ENC_SOPC', 'ENC_SOPP', 'ENC_SMEM'])
+def test_vskip_does_not_suppress_scalar_encodings(encoding):
+    assert not CdnaProfile().vskip_affected_encoding(encoding)

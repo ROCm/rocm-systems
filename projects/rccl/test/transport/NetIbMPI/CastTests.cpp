@@ -6,7 +6,13 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "multiplane.h"
 #include <initializer_list>
+
+// ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
+// but the scheduler then returns before split selection and token accounting, so the
+// threaded branches skip rather than assert.
+static constexpr int kThreadedNqpsSingleQp = 1;
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -586,6 +592,65 @@ TEST_F(NetIbMPITest, CastSplitDataThresholdBoundary) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads. Scheduler state is per send
+    // communicator, so every worker arms and audits its own tokens while N
+    // schedulers run the boundary decision concurrently.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks: on a merged device the plugin creates
+        // the requested QPs per member, so an environment-derived threshold is wrong.
+        int nqps = 0;
+        // The helper reports failures itself; both ranks exit together. One queue pair
+        // is not a failure but bypasses split selection and token accounting.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        // WorkerCastPrepareTokens warms up with 64 bytes, which a small threshold would
+        // otherwise put past the allocation.
+        const size_t bufSize = std::max<size_t>(64, threshold);
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSplitDataThresholdBoundary",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 1599);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1599, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // At the threshold the split path must leave WRR tokens alone.
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, threshold, 1600,
+                                                        mhandle, seed + 1, /*tokens=*/0,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // One byte below it, WRR must consume exactly one token.
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, threshold - 1, 1601,
+                                                        mhandle, seed + 2, /*tokens=*/1,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1021,6 +1086,83 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: N schedulers sweep both sides of
+    // the WRR/split boundary at once, each auditing its own token ledger.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        if (splitDataMin == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        // Floored at the 64 bytes the token warm-up transfers, for the same reason.
+        const size_t bufSize = std::max<size_t>(64, threshold * 2);
+
+        std::vector<size_t> wrrSizes;
+        for (size_t size : std::initializer_list<size_t>{512, 4096, splitDataMin, threshold - 1})
+            if (size > 0 && size < threshold) wrrSizes.push_back(size);
+        // Sorted first: std::unique only collapses *adjacent* equals, and this list is
+        // built in a fixed order, not a sorted one. splitDataMin can equal 512 or 4096
+        // without being next to it, so the duplicate survived and that size ran twice.
+        std::sort(wrrSizes.begin(), wrrSizes.end());
+        wrrSizes.erase(std::unique(wrrSizes.begin(), wrrSizes.end()), wrrSizes.end());
+        const std::vector<size_t> splitSizes = {threshold, threshold * 2};
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvMultipleSizes",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seedBase = WorkerSeed(threadIdx, 1999);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 1999,
+                                                 seedBase, /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                int tag = 2000;
+                for (size_t size : wrrSizes) {
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
+                                                            /*tokens=*/1, kLargeTransferTimeoutMs,
+                                                            &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                for (size_t size : splitSizes) {
+                    const int stepTag = tag++;
+                    result = WorkerCastTransferExpectTokens(rank, pair, buffer, size, stepTag,
+                                                            mhandle, seedBase + stepTag,
+                                                            /*tokens=*/0, kLargeTransferTimeoutMs,
+                                                            &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1061,7 +1203,9 @@ TEST_F(NetIbMPITest, CastSendRecvMultipleSizes) {
         if (sz > 0 && sz < kThreshold && sz <= kBufSz)
             kWrrSizes.push_back(sz);
     }
-    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1).
+    // Deduplicate (kSplitDataMin or 512 might equal kThreshold-1). Sorted first because
+    // std::unique only collapses adjacent equals and this list is built in a fixed order.
+    std::sort(kWrrSizes.begin(), kWrrSizes.end());
     kWrrSizes.erase(std::unique(kWrrSizes.begin(), kWrrSizes.end()), kWrrSizes.end());
     // Sizes at/above threshold → split path (0 tokens consumed).
     const std::vector<size_t> kSplitSizes = {kThreshold, kThreshold * 2};
@@ -1131,6 +1275,51 @@ TEST_F(NetIbMPITest, CastLargeTransfer) {
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
 
+    // Parameterized by MPIEnvironment::nThreads: concurrent 16 MB split-path
+    // transfers, each worker confirming its own scheduler stayed untouched.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastLargeTransfer",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, kLargeBufferSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 2099);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2099, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, kLargeBufferSize,
+                                                        2100, mhandle, seed + 1, /*tokens=*/0,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
+
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
     void* recvComm   = nullptr;
@@ -1195,6 +1384,52 @@ TEST_F(NetIbMPITest, CastSendRecvZeroSize) {
     CAST_ENV_CHECK_OR_SKIP();
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+
+    // Parameterized by MPIEnvironment::nThreads: a zero-byte send must still take
+    // the WRR path on every worker's own scheduler.
+    if (MPIEnvironment::nThreads > 1) {
+        // Token-delta assertions need the RTT-driven update suspended: with
+        // several workers the wall-clock gap between the before and after
+        // snapshots is wide enough for the timer to rewrite the ledger.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastSendRecvZeroSize",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                const size_t regSize = 64;
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, regSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int seed = WorkerSeed(threadIdx, 2199);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, 2199, seed,
+                                                 /*totTokens=*/100, &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                result = WorkerCastTransferExpectTokens(rank, pair, buffer, 0, 2200, mhandle,
+                                                        seed + 1, /*tokens=*/1,
+                                                        kLargeTransferTimeoutMs, &outstanding);
+                if (!result.ok && outstanding) return WorkerRetainHostBuffer(result, host);
+                return result;
+            });
+        return;
+    }
 
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
@@ -1268,6 +1503,146 @@ TEST_F(NetIbMPITest, CastStressMultiRoundTwoConns) {
     CAST_ENV_CHECK_OR_SKIP();
     net_ = &netIbCast;
     AssertInitAndGetDevices(nullptr);
+
+    // Parameterized by MPIEnvironment::nThreads. The single-threaded body already
+    // drives many connections, but strictly one after another; here every worker
+    // owns a connection so the schedulers advance simultaneously. Each worker
+    // audits its own ledger: tokens are per send communicator.
+    if (MPIEnvironment::nThreads > 1) {
+        if (GetSplitDataMin() == 0)
+            GTEST_SKIP() << "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN=0: no WRR/split boundary exists";
+        // As the other four threaded branches do: a short update interval refills
+        // tokens mid-phase, and the audit below then reads a ledger the sends did
+        // not produce.
+        //
+        // The cost is that it suspends IbCastQpSchedUpdateTx outright, so the RTT
+        // assertions the serial body makes below -- initQpTokens no longer holding the
+        // seeded 70/30, i.e. "the RTT timer fired" -- have no counterpart here, and the
+        // scheduler weights stay 0 for the whole run. That path has no threaded coverage
+        // today; restoring it needs a separate short-interval threaded suite, which
+        // cannot reuse these token audits. See WorkerCastPrepareTokens for the full
+        // scope note.
+        CAST_REQUIRE_UPDATE_INTERVAL_OR_SKIP(10000000);
+
+        // The live count, agreed across ranks, not the environment's request: on a
+        // merged device the plugin creates that many QPs per member, so a threshold
+        // derived from the environment sits on the wrong side of the split boundary.
+        int nqps = 0;
+        // The helper reports a failure itself; both ranks take this exit together. A
+        // single queue pair is not a failure but is not testable here either: the
+        // scheduler returns before split selection and token accounting, so the token
+        // deltas these branches expect never appear.
+        const int nqpsStatus = ThreadedCastAgreedNqps(/*dev=*/0, &nqps);
+        if (nqpsStatus == kThreadedNqpsSingleQp)
+            GTEST_SKIP() << "the connection uses a single queue pair, which bypasses WRR and "
+                            "split selection; CastSingleQPBypassesWrr covers that case";
+        if (nqpsStatus != 0) return;
+        const size_t splitDataMin = GetSplitDataMin();
+        // Split is taken when size / liveNqps >= splitDataMin, so the boundary scales
+        // with the live count; a ramp built from splitDataMin alone never crosses it.
+        const size_t threshold = splitDataMin * static_cast<size_t>(nqps);
+        if (threshold < 2)
+            GTEST_SKIP() << "live split threshold is " << threshold
+                         << " bytes: there is no WRR band below it to stress";
+        // One byte under the threshold and not floored: a 64-byte floor would push it
+        // past the threshold when the threshold is small. Only the buffer is floored.
+        const size_t msgSize = threshold - 1;
+        const std::vector<size_t> rampSizes = {threshold / 4, threshold / 2,
+                                               threshold, threshold * 2};
+        const size_t bufSize = std::max<size_t>(64, std::max(msgSize, threshold * 2));
+        static constexpr int kThreadedMsgs = 100;
+        static constexpr int kThreadedRampRounds = 5;
+
+        RunThreadedBody(
+            0, MPIEnvironment::nThreads, "threaded CastStressMultiRoundTwoConns",
+            [&](int threadIdx, ConnectionPair& pair) -> ThreadResult {
+                WorkerHostBuffer host = WorkerSetupHostBuffer(rank, pair, bufSize);
+                if (!host.result.ok) return host.result;
+                void* buffer = host.buffer;
+                void* mhandle = host.mhandle;
+                ThreadResult result;
+
+                bool outstanding = false;
+                const int tagBase = 10000 + threadIdx * 200;
+                const int seedBase = WorkerSeed(threadIdx, 3999);
+                result = WorkerCastPrepareTokens(rank, pair, buffer, mhandle, nqps, tagBase,
+                                                 seedBase, /*totTokens=*/kThreadedMsgs,
+                                                 &outstanding);
+                if (!result.ok)
+                    return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+
+                // Phase 1: small messages, all on the WRR path. One pattern for the
+                // whole phase rather than seedBase + i: makeBytePattern keeps the seed
+                // modulo 256, and the worker stride is 161 there, so a per-message seed
+                // collides across workers -- worker t at message 0 and worker t+1 at
+                // message 95 produce the same byte. Every worker sends the same msgSize,
+                // so the size check cannot separate the pair either, and a payload
+                // delivered on the wrong connection would verify clean. Freshness per
+                // message survives because the receiver is cleared before each transfer.
+                for (int i = 0; i < kThreadedMsgs; i++) {
+                    result = WorkerSendRecvPattern(rank, pair, buffer, msgSize, tagBase + 1 + i,
+                                                   mhandle, seedBase, kDefaultTimeoutMs,
+                                                   &outstanding);
+                    if (!result.ok)
+                        return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                }
+
+                if (rank == 1) {
+                    struct ncclIbCastSchedState state = {};
+                    result = WorkerCastGetSchedState(pair.sendComm, &state);
+                    if (!result.ok) return result;
+                    if (!state.schedInit) {
+                        result.ok = false;
+                        result.msg = "scheduler never initialized after the WRR phase";
+                        return result;
+                    }
+                    int sum = 0;
+                    for (int qp = 0; qp < state.nqps; qp++) sum += state.activeQpTokens[qp];
+                    if (sum != state.activeTotTokens) {
+                        result.ok = false;
+                        result.msg = "per-QP tokens do not sum to activeTotTokens";
+                        return result;
+                    }
+                    if (state.activeTotTokens < 0
+                        || state.activeTotTokens > state.initTotTokens) {
+                        result.ok = false;
+                        result.msg = "activeTotTokens left the [0, initTotTokens] range";
+                        return result;
+                    }
+                    // Exact, because everything above holds whether or not WRR ran:
+                    // schedInit is set unconditionally, and the sum and the range hold
+                    // both at 0 and at an untouched full ledger. This phase arms
+                    // exactly kThreadedMsgs tokens against exactly that many
+                    // sub-threshold sends and the refill only fires on the next one, so
+                    // a WRR path that ran leaves none and one that did not leaves all.
+                    if (state.activeTotTokens != 0) {
+                        result.ok = false;
+                        result.msg = "the WRR phase left "
+                                     + std::to_string(state.activeTotTokens) + " of "
+                                     + std::to_string(state.initTotTokens)
+                                     + " tokens unspent, so the sends did not take the "
+                                       "WRR path";
+                        return result;
+                    }
+                }
+
+                // Phase 2: ramp across the WRR/split boundary.
+                int tag = tagBase + 1 + kThreadedMsgs;
+                for (int round = 0; round < kThreadedRampRounds; round++) {
+                    for (size_t size : rampSizes) {
+                        if (size == 0 || size > bufSize) continue;
+                        const int stepTag = tag++;
+                        result = WorkerSendRecvPattern(rank, pair, buffer, size, stepTag, mhandle,
+                                                       seedBase + stepTag,
+                                                       kLargeTransferTimeoutMs, &outstanding);
+                        if (!result.ok)
+                            return outstanding ? WorkerRetainHostBuffer(result, host) : result;
+                    }
+                }
+                return result;
+            });
+        return;
+    }
 
     constexpr int kNConns = 100;
     std::vector<void*> listenComms(kNConns, nullptr);
@@ -1595,6 +1970,185 @@ TEST_F(NetIbMPITest, CastSubnetAwareRoutingSameSubnet) {
     CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 901, mhandle);
     if (rank == 0)
         EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneConnectionSmoke
+//
+// Smoke test for AINIC multiplane PUEC route programming.
+// When RCCL_MULTIPLANE_MAP_FILE is set, the QP RTR path in connect.cc
+// resolves each VIP to its PIP GIDs and programs per-plane PUEC routes
+// via ionic_dv_qp_set_puec_plane_route().
+//
+// This test establishes a CAST connection, performs a data-integrity
+// transfer, and verifies no crash or error occurs with multiplane
+// enabled.  The PUEC route programming is validated implicitly: if the
+// routes were wrong (e.g. source==destination for same-host peers),
+// the transfer would fail or time out.
+//
+// Requires: AINIC NIC + RCCL_MULTIPLANE_MAP_FILE pointing to a valid
+// VIP-to-PIP XML.  Skips cleanly when multiplane is not enabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneConnectionSmoke) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // Two-step gate: multiplane must be configured AND the NIC must advertise
+    // PUEC support via sysfs puec_nports.  Use MPI_Allreduce so all ranks
+    // agree on skip/run — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support "
+                        "(puec_nports > 0)";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    // Data integrity: fill with a known pattern, verify after transfer.
+    constexpr size_t kMsgSize = 4096;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 13 + 7) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 950, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0) << "multiplane data mismatch";
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneMultiSizeTransfer
+//
+// Exercises the multiplane PUEC path with multiple message sizes (64B to 4MB)
+// to cover both small-message and large-message code paths.  Each size
+// performs a full send/recv cycle with data-integrity verification.
+//
+// Requires: multiplane enabled (AINIC + RCCL_MULTIPLANE_MAP_FILE).  Skips otherwise.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneMultiSizeTransfer) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = (!multiplaneOn || !AnyDeviceHasPuecSupport()) ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane not available: "
+                        "requires RCCL_MULTIPLANE_MAP_FILE + NIC PUEC support";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMaxSize = 4 * 1024 * 1024;  // 4 MB
+    std::vector<char> sendBuf(kMaxSize);
+    std::vector<char> recvBuf(kMaxSize);
+    for (size_t i = 0; i < kMaxSize; i++)
+        sendBuf[i] = static_cast<char>((i * 17 + 3) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? recvBuf.data() : sendBuf.data();
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMaxSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    // Test several sizes: 64B, 1KB, 64KB, 1MB, 4MB
+    const size_t sizes[] = {64, 1024, 64 * 1024, 1024 * 1024, kMaxSize};
+    int tag = 960;
+    for (size_t sz : sizes) {
+        memset(recvBuf.data(), 0, sz);
+        CastDoSendRecv(rank, sendComm, recvComm, buf, sz, tag++, mhandle);
+        if (rank == 0) {
+            EXPECT_EQ(memcmp(sendBuf.data(), recvBuf.data(), sz), 0)
+                << "multiplane data mismatch at size " << sz;
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    TeardownConnection(recvComm, listenComm, sendComm, mhandle);
+}
+
+// =============================================================================
+// Test: CastMultiplaneDisabledNoRegression
+//
+// Verifies that when multiplane is not enabled, the connection setup and
+// data transfer work identically to the non-multiplane path.  This is a
+// backward-compatibility guard: the multiplane code in connect.cc must be
+// completely inert when multiplane is disabled.
+// =============================================================================
+TEST_F(NetIbMPITest, CastMultiplaneDisabledNoRegression) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
+
+    const int rank = MPIEnvironment::world_rank;
+
+    net_ = &netIbCast;
+    AssertInitAndGetDevices(nullptr);
+
+    // This test validates the disabled (no-multiplane) path.  Use MPI_Allreduce
+    // so all ranks agree — a unilateral GTEST_SKIP desynchronises TearDown's
+    // MPI_Barrier and causes a false FAIL.
+    bool multiplaneOn = false;
+    ASSERT_EQ(IbCastMultiplaneEnabled(&multiplaneOn), ncclSuccess);
+    int localSkip = multiplaneOn ? 1 : 0;
+    int globalSkip = 0;
+    MPI_Allreduce(&localSkip, &globalSkip, 1, MPI_INT, MPI_LOR, MPI_COMM_WORLD);
+    if (globalSkip) {
+        GTEST_SKIP() << "Multiplane is enabled; this test validates "
+                        "the disabled (no-multiplane) path";
+    }
+
+    void* listenComm = nullptr;
+    void* sendComm   = nullptr;
+    void* recvComm   = nullptr;
+    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+
+    constexpr size_t kMsgSize = 2048;
+    char sendBuf[kMsgSize] = {}, recvBuf[kMsgSize] = {};
+    for (size_t i = 0; i < kMsgSize; i++)
+        sendBuf[i] = static_cast<char>((i * 23) & 0xFF);
+
+    void* comm    = (rank == 0) ? recvComm : sendComm;
+    void* buf     = (rank == 0) ? static_cast<void*>(recvBuf) : static_cast<void*>(sendBuf);
+    void* mhandle = nullptr;
+    ASSERT_EQ(RegisterMemory(comm, buf, kMsgSize, NCCL_PTR_HOST, &mhandle), ncclSuccess);
+
+    CastDoSendRecv(rank, sendComm, recvComm, buf, kMsgSize, 970, mhandle);
+    if (rank == 0)
+        EXPECT_EQ(memcmp(sendBuf, recvBuf, kMsgSize), 0)
+            << "data mismatch with multiplane disabled";
 
     MPI_Barrier(MPI_COMM_WORLD);
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);

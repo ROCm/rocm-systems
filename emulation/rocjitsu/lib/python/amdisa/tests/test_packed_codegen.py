@@ -69,7 +69,8 @@ def test_pk_fmac_vop2_reads_old_destination_and_fuses_both_halves():
     assert 'sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>' in cpp
     assert (
         cpp.count(
-            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf))'
+            ', omod, false, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
         )
         == 2
     )
@@ -102,7 +103,8 @@ def test_pk_fma_f16_uses_mode_helper_and_clamp_for_both_halves():
     assert 'wf.fp_round_mode_f16_f64()' in cpp
     assert 'wf.fp_denorm_mode_f16_f64()' in cpp
     assert (
-        ', 0, inst_.clamp, wf.fp16_ovfl(), ' 'amdgpu::floating_clamp_nan_to_zero(wf))'
+        ', 0, inst_.clamp, wf.fp16_ovfl(), amdgpu::floating_clamp_nan_to_zero(wf), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
     ) in cpp
 
 
@@ -535,10 +537,11 @@ def test_gfx1250_mad_mix_f32_uses_helper_and_fma():
         op_sel_hi_2_expr='inst_.pad_14',
         opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
         use_cdna5_helpers=True,
+        fused_result=True,
     )
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
-    assert 'std::fma(a, b, c)' in cpp
+    assert 'arithmetic<amdgpu::fp_mode::Arithmetic::FMA>' in cpp
     assert 'a * b + c' not in cpp
 
 
@@ -570,7 +573,8 @@ def test_gfx1250_mad_mixlo_f16_uses_helper_and_fma():
 
     assert 'read_fma_mix_source_f32(src0, wf, lane' in cpp
     assert 'std::fma(a, b, c)' in cpp
-    assert 'util::f32_to_f16_mode(result, wf.fp16_ovfl())' in cpp
+    assert 'amdgpu::pseudo_scalar::round_f16_result(' in cpp
+    assert 'result, wf.fp_round_mode_f16_f64(), 0, false, wf.fp16_ovfl(), false' in cpp
 
 
 def test_mad_mixhi_f16_uses_true16_high_write():

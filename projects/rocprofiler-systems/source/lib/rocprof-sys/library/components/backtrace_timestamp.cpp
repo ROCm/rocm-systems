@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_timestamp.hpp"
+#include "core/control/clocks/timeline.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
-
-#include <timemory/components/timing/backends.hpp>
 
 namespace rocprofsys::component
 {
@@ -19,14 +18,14 @@ bool
 backtrace_timestamp::is_valid() const
 {
     const auto& _info = thread_info::get(m_tid, SequentTID);
-    return (_info) ? _info->is_valid_time(m_real) : false;
+    return _info ? _info->is_valid_time(m_real) : false;
 }
 
 void
 backtrace_timestamp::sample(int)
 {
     m_tid  = tim::threading::get_id();
-    m_real = tim::get_clock_real_now<std::uint64_t, std::nano>();
+    m_real = control::clocks::timeline_ns();
 }
 }  // namespace rocprofsys::component
 

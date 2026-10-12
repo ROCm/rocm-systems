@@ -963,6 +963,39 @@ public:
   }
   explicit RegisterAccess(const Wavefront &wf) : RegisterAccess(wf.cu()) { wf_ = &wf; }
 
+  /// @brief Resolve a destination without reading its value or notifying observers.
+  /// @details Use the execution resolver for dynamic VGPR indexing.
+  [[nodiscard]] std::optional<RegisterRef> destination_register(const Operand &op) const {
+    auto reg = op.to_register_ref();
+    if (!reg) {
+      if (auto special = op.to_special_reg_class())
+        return RegisterRef{*special, 0, static_cast<uint8_t>(std::max(1, op.size_bits() / 32))};
+      return std::nullopt;
+    }
+    if (reg->cls == RegClass::VGPR || reg->cls == RegClass::ACC_VGPR) {
+      auto &wf = mutable_wavefront();
+      auto base = op.simd_vgpr_base_mut(wf);
+      if (!base || !cu_->owns_vgpr_range(wf, *base, reg->width))
+        return std::nullopt;
+      reg->cls = RegClass::VGPR;
+      reg->index = static_cast<uint16_t>(*base - wf.vgpr_alloc().base);
+    }
+    return reg;
+  }
+
+  /// @brief Resolve a source using the execution bank and scalar selector.
+  /// @param wordwise Preserve the backed prefix for emitters that validate each dword.
+  [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
+                                                           bool wordwise = false) const;
+
+  /// @brief Resolve consumed buffer descriptor words without reading their values.
+  /// @details Vector descriptors require complete backing. Scalar loads validate
+  /// the base pair first, then read word 2 (and word 3 on CDNA5) independently.
+  /// Scalar stores currently consume only the base pair.
+  /// Preserve backed inputs even if a later scalar word has no backing.
+  [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
+  buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
+
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
   // ISA-specific resolver/backend.
@@ -1485,6 +1518,12 @@ public:
   }
 
 private:
+  friend class MemoryWaitScoreboard;
+  /// Read an encoding-selected control word while planning an instruction's
+  /// accesses. This does not constitute an executed register access.
+  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
+  std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
+
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {
     if (wf_)
       return wf_->wf_size();
@@ -1528,6 +1567,8 @@ private:
 
   void observe_sgpr_region(const Wavefront &owner, uint32_t physical_base,
                            uint32_t reg_count) const {
+    if (!cu_->observes_register_access())
+      return;
     assert(reg_count <= std::numeric_limits<uint8_t>::max());
     cu_->notify_scalar_register_read(
         owner,
@@ -1537,12 +1578,16 @@ private:
 
   void observe_vgpr_region(const Wavefront &owner, uint32_t physical_base, uint32_t reg_count,
                            uint64_t lane_mask, uint8_t byte_mask) const {
+    if (!cu_->observes_register_access())
+      return;
     for (uint32_t reg = 0; reg < reg_count; ++reg)
       cu_->notify_vgpr_read(&owner, physical_base + reg, lane_mask, byte_mask);
   }
 
   void observe_vgpr_write_region(const Wavefront &owner, uint32_t physical_base, uint32_t reg_count,
                                  uint64_t lane_mask, uint8_t byte_mask) const {
+    if (!cu_->observes_register_access())
+      return;
     for (uint32_t reg = 0; reg < reg_count; ++reg)
       cu_->notify_vgpr_write(&owner, physical_base + reg, lane_mask, byte_mask);
   }

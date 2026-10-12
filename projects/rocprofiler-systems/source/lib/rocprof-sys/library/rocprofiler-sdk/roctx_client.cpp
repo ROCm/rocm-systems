@@ -4,6 +4,8 @@
 #include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/rocprofiler-sdk/marker_writer.hpp"
 
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "core/common_types.hpp"
 #include "core/control/triggers/roctx.hpp"
 #include "core/demangler.hpp"
@@ -32,6 +34,9 @@
 namespace rocprofsys::rocprofiler_sdk
 {
 
+using sdk_backend_t =
+    backends::rocprofiler_sdk::backend<rocprofsys::rocprofiler_sdk::wrapper>;
+
 namespace
 {
 
@@ -49,9 +54,11 @@ iterate_args_callback(rocprofiler_callback_tracing_kind_t, std::int32_t,
     auto* args = static_cast<function_args_t*>(data);
     if(arg_type && arg_name && arg_value_str)
     {
-        args->emplace_back(argument_info{ arg_number,
-                                          rocprofsys::utility::demangle(arg_type),
-                                          arg_name, arg_value_str });
+        args->emplace_back(
+            argument_info{ .arg_number = arg_number,
+                           .arg_type   = rocprofsys::utility::demangle(arg_type),
+                           .arg_name   = arg_name,
+                           .arg_value  = arg_value_str });
     }
     return 0;
 }
@@ -64,7 +71,7 @@ configure_callback_tracing(rocprofiler_context_id_t               context_id,
                            rocprofiler_callback_tracing_cb_t      callback,
                            void*                                  callback_args)
 {
-    auto status = rocprofiler_configure_callback_tracing_service(
+    auto const status = rocprofiler_configure_callback_tracing_service(
         context_id, kind, operations, operations_count, callback, callback_args);
     if(status != ROCPROFILER_STATUS_SUCCESS)
     {
@@ -111,7 +118,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
     rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
     rocprofiler_timestamp_t ts)
 {
-    auto* data =
+    auto const* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
 
     switch(record.operation)
@@ -160,9 +167,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_enter(
         {
             if(should_write())
             {
-                const auto& name =
-                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                const auto& name = sdk_backend_t::get_callback_tracing_names().at(
+                    record.kind, record.operation);
                 m_writer.write_begin(name);
             }
             break;
@@ -178,13 +184,13 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
     rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* user_data,
     rocprofiler_timestamp_t ts)
 {
-    auto* data =
+    auto const* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
     const std::uint64_t begin_ts = user_data->value;
     const auto          args_str = collect_args(record);
 
-    auto pop_and_write = [&](marker_range_stack_t& stack) {
-        auto        range = stack.back();
+    auto const pop_and_write = [&](marker_range_stack_t& stack) {
+        auto const  range = stack.back();
         const char* name  = nullptr;
         stack.pop_back();
         tim::get_hash_identifier_fast(range.hash, name);
@@ -239,7 +245,7 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA:
         {
             const char* name     = data->args.roctxRangeStartA.message;
-            auto        range_id = data->retval.roctx_range_id_t_retval;
+            auto const  range_id = data->retval.roctx_range_id_t_retval;
 
             m_trigger->on_range_start(range_id, name);
 
@@ -256,9 +262,8 @@ roctx_client<MarkerWriterPolicy>::handle_marker_core_exit(
         {
             if(should_write())
             {
-                const auto& name =
-                    trace_cache::get_metadata_registry().get_callback_tracing_info().at(
-                        record.kind, record.operation);
+                const auto& name = sdk_backend_t::get_callback_tracing_names().at(
+                    record.kind, record.operation);
                 m_writer.write_end(name, begin_ts, ts, args_str, record);
             }
             break;

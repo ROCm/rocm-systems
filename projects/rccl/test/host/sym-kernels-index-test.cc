@@ -49,6 +49,70 @@ TEST_P(SymKernelIndexValidTest, MapsToExactExpectedKernel) {
   EXPECT_EQ(ncclSymkKernelListProfile[index], c.expectedProfileKernel);
 }
 
+// generate.py emits these only when gfx1250 is in GPU_TARGETS, so read the answer off the generated
+// switch rather than repeating its target test. CoversEveryGeneratedKernel pins the row count
+// independently, so a wrong answer here cannot pass silently.
+bool TmaKernelsEmitted() {
+  return ncclSymkGetKernelIndex(ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32) >= 0;
+}
+
+// Appended to ValidCases() on a build that emitted them. AllGather_TmaSTMC needs multimem, so ROCm
+// never emits it and it stays invalid unconditionally.
+const std::vector<ExpectedKernelCase>& TmaValidCases() {
+  static const std::vector<ExpectedKernelCase> kCases = {
+      {"AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllGather_TmaST, (void*)ncclSymkDevKernel_AllGather_TmaST_profile},
+
+      {"AllReduce_RSxTmaLD_AGxTmaST_sum_f32", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f32_profile},
+      {"AllReduce_RSxTmaLD_AGxTmaST_sum_f16", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum, ncclFloat16,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f16,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f16_profile},
+      {"AllReduce_RSxTmaLD_AGxTmaST_sum_bf16", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum, ncclBfloat16,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_bf16,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_bf16_profile},
+      {"AllReduce_RSxTmaLD_AGxTmaST_sum_f8e4m3", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum,
+       ncclFloat8e4m3, (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e4m3,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e4m3_profile},
+      {"AllReduce_RSxTmaLD_AGxTmaST_sum_f8e5m2", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum,
+       ncclFloat8e5m2, (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e5m2,
+       (void*)ncclSymkDevKernel_AllReduce_RSxTmaLD_AGxTmaST_sum_f8e5m2_profile},
+
+      {"ReduceScatter_TmaLD_sum_f32", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f32,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f32_profile},
+      {"ReduceScatter_TmaLD_sum_f16", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclFloat16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f16_profile},
+      {"ReduceScatter_TmaLD_sum_bf16", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclBfloat16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_bf16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_bf16_profile},
+      {"ReduceScatter_TmaLD_sum_f8e4m3", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclFloat8e4m3,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e4m3,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e4m3_profile},
+      {"ReduceScatter_TmaLD_sum_f8e5m2", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclFloat8e5m2,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e5m2,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_sum_f8e5m2_profile},
+      {"ReduceScatter_TmaLD_avg_f32", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclFloat32,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f32,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f32_profile},
+      {"ReduceScatter_TmaLD_avg_f16", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclFloat16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f16_profile},
+      {"ReduceScatter_TmaLD_avg_bf16", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclBfloat16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_bf16,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_bf16_profile},
+      {"ReduceScatter_TmaLD_avg_f8e4m3", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclFloat8e4m3,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e4m3,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e4m3_profile},
+      {"ReduceScatter_TmaLD_avg_f8e5m2", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSumPostDiv, ncclFloat8e5m2,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2,
+       (void*)ncclSymkDevKernel_ReduceScatter_TmaLD_avg_f8e5m2_profile},
+  };
+  return kCases;
+}
+
 // Both cases lists are read off generate.py's own kernel_list, the same list that produces the switch
 // below: this suite proves the switch routes that list correctly, not that enumerate_kernels() chose it.
 const std::vector<ExpectedKernelCase>& ValidCases() {
@@ -169,7 +233,12 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
        ncclFloat8e5m2, (void*)ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2,
        (void*)ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2_profile},
   };
-  return kCases;
+  static const std::vector<ExpectedKernelCase> kAll = [] {
+    std::vector<ExpectedKernelCase> all = kCases;
+    if (TmaKernelsEmitted()) all.insert(all.end(), TmaValidCases().begin(), TmaValidCases().end());
+    return all;
+  }();
+  return kAll;
 }
 
 INSTANTIATE_TEST_SUITE_P(SymAllEmittedCombinations, SymKernelIndexValidTest, ::testing::ValuesIn(ValidCases()),
@@ -222,17 +291,13 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
   static const std::vector<InvalidKernelCase> kCases = {
       // Outer switch(id) default: every real enumerator generate.py never emits a case for.
       {"UnimplementedId_AllReduce_AGxLLMC_R", ncclSymkKernelId_AllReduce_AGxLLMC_R, ncclDevSum, ncclFloat32},
-      {"UnimplementedId_AllReduce_RSxTmaLD_AGxTmaST", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclDevSum,
-       ncclFloat32},
       {"UnimplementedId_AllReduce_RSxLDMC_AGxSTMC", ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC, ncclDevSum,
        ncclFloat32},
       {"UnimplementedId_AllGather_LLMC", ncclSymkKernelId_AllGather_LLMC, ncclDevSum, ncclFloat32},
-      {"UnimplementedId_AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32},
       {"UnimplementedId_AllGather_TmaSTMC", ncclSymkKernelId_AllGather_TmaSTMC, ncclDevSum, ncclFloat32},
       {"UnimplementedId_AllGather_STMC", ncclSymkKernelId_AllGather_STMC, ncclDevSum, ncclFloat32},
       {"UnimplementedId_AllGather_RailRing_LsaSTMC", ncclSymkKernelId_AllGather_RailRing_LsaSTMC, ncclDevSum,
        ncclFloat32},
-      {"UnimplementedId_ReduceScatter_TmaLD", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum, ncclFloat32},
       {"UnimplementedId_ReduceScatter_LDMC", ncclSymkKernelId_ReduceScatter_LDMC, ncclDevSum, ncclFloat32},
       {"UnimplementedId_ReduceScatter_RailA2A_LsaLDMC", ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC, ncclDevSum,
        ncclFloat32},
@@ -254,7 +319,28 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       {"ReduceScatter_RailA2A_LsaLD_UnknownType_Float64", ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD,
        ncclDevSumPostDiv, ncclFloat64},
   };
-  return kCases;
+  // The three DMA-staged ids swap sides with the build: unimplemented where generate.py emitted no
+  // case, and otherwise carrying their own switch arms whose defaults are worth pinning.
+  static const std::vector<InvalidKernelCase> kAll = [] {
+    std::vector<InvalidKernelCase> all = kCases;
+    if (TmaKernelsEmitted()) {
+      // switch(red): AllReduce is sum-only on the Tma arm too. switch(ty): float types only.
+      all.push_back({"AllReduce_RSxTmaLD_AGxTmaST_UnsupportedRed_Avg", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
+                     ncclDevSumPostDiv, ncclFloat32});
+      all.push_back({"AllReduce_RSxTmaLD_AGxTmaST_UnknownType_Int32", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
+                     ncclDevSum, ncclInt32});
+      all.push_back({"ReduceScatter_TmaLD_UnknownType_Int64", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,
+                     ncclInt64});
+    } else {
+      all.push_back({"UnimplementedId_AllGather_TmaST", ncclSymkKernelId_AllGather_TmaST, ncclDevSum, ncclFloat32});
+      all.push_back({"UnimplementedId_AllReduce_RSxTmaLD_AGxTmaST", ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST,
+                     ncclDevSum, ncclFloat32});
+      all.push_back({"UnimplementedId_ReduceScatter_TmaLD", ncclSymkKernelId_ReduceScatter_TmaLD, ncclDevSum,
+                     ncclFloat32});
+    }
+    return all;
+  }();
+  return kAll;
 }
 
 INSTANTIATE_TEST_SUITE_P(SymUnhandledCombinations, SymKernelIndexInvalidTest, ::testing::ValuesIn(InvalidCases()),

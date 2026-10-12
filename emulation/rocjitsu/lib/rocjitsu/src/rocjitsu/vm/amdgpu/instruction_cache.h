@@ -98,6 +98,10 @@ public:
     synchronize_coherence_epoch();
     uint32_t copied = 0;
     while (copied < kFetchBytes) {
+      // A translated hit otherwise bypasses GpuVmAccess entirely and could
+      // continue executing cached code after its snapshot was revoked.
+      if (access.revoked())
+        return VmAccessOutcome::Revoked;
       const uint64_t address = pc + copied;
       const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
       const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
@@ -138,8 +142,11 @@ public:
   /// @brief Discard every cached line (s_icache_inv).
   void invalidate_all() {
     ++epoch_;
-    for (Line &line : lines_)
-      line.valid = false;
+    if (has_cached_lines_) {
+      for (Line &line : lines_)
+        line.valid = false;
+      has_cached_lines_ = false;
+    }
     coherence_epoch_ = coherence_->current_instruction_epoch();
   }
 
@@ -185,6 +192,7 @@ private:
     line.cache_namespace = {};
     line.translated = false;
     line.valid = true;
+    has_cached_lines_ = true;
     return line.data;
   }
 
@@ -211,6 +219,7 @@ private:
     line.cache_namespace = cache_namespace;
     line.translated = true;
     line.valid = true;
+    has_cached_lines_ = true;
     data = line.data;
     return VmAccessOutcome::Complete;
   }
@@ -219,6 +228,9 @@ private:
   uint64_t epoch_ = 0;
   std::shared_ptr<DeviceCacheCoherence> coherence_;
   uint64_t coherence_epoch_ = 0;
+  // Only successful fills make a line valid. Repeated maintenance still
+  // advances the public epoch, but need not revisit already invalid lines.
+  bool has_cached_lines_ = false;
 };
 
 } // namespace amdgpu

@@ -9,7 +9,12 @@ target_link_libraries(
 target_include_directories(rocjitsu_dbt_config PRIVATE ${GENERATED_DIR})
 add_dependencies(rocjitsu_dbt_config flatbuffers_schemas)
 
-rj_add_object_library(rocjitsu_config config_loader.cpp checkpoint.cpp)
+rj_add_object_library(
+    rocjitsu_config
+    config_loader.cpp
+    checkpoint.cpp
+    effective_config.cpp
+)
 
 # Config loader depends on FlatBuffers library (for runtime JSON parsing)
 # and on the generated schema headers.

@@ -225,7 +225,7 @@ TEST_F(storage_parser_test, load_empty_file)
     std::ofstream ofs(test_file_path, std::ios::binary);
     ofs.close();
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -247,7 +247,7 @@ TEST_F(storage_parser_test, load_single_sample_type_1)
 
     create_test_file_with_samples(samples_1, {}, {});
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -272,7 +272,7 @@ TEST_F(storage_parser_test, load_multiple_sample_types)
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
     processor->set_expected_samples_3(samples_3);
@@ -299,7 +299,7 @@ TEST_F(storage_parser_test, load_unsupported_sample_type)
 
     create_test_file_with_samples(samples_1, samples_2, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
 
@@ -342,7 +342,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1({ valid_sample });
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -357,7 +357,7 @@ TEST_F(storage_parser_test, load_file_with_zero_sized_samples)
 
 TEST_F(storage_parser_test, load_nonexisting_file)
 {
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -375,7 +375,7 @@ TEST_F(storage_parser_test, load_large_sample_data)
 
     create_test_file_with_samples({}, {}, samples_3);
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_3(samples_3);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -400,14 +400,14 @@ TEST_F(storage_parser_test, load_many_small_samples)
 
     for(int i = 0; i < num_of_elements; ++i)
     {
-        auto x = "sample_" + std::to_string(i);
+        auto const x = "sample_" + std::to_string(i);
         strings.push_back(x);
         many_samples.push_back({ 0, strings[i] });
     }
 
     create_test_file_with_samples(many_samples, {}, {});
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(many_samples);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
@@ -435,7 +435,7 @@ TEST_F(storage_parser_test, write_less_than_expected)
 
     ofs.close();
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,
                                             test_sample_2, test_sample_3, test_sample_4>
@@ -479,7 +479,7 @@ TEST_F(storage_parser_test, read_fragmented_space)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_1(samples_1);
     processor->set_expected_samples_2(samples_2);
     processor->set_expected_samples_3(samples_3);
@@ -510,7 +510,7 @@ TEST_F(storage_parser_test, load_sample_type_5_optional)
         ofs.close();
     }
 
-    auto processor = std::make_shared<sample_processor_t>();
+    auto const processor = std::make_shared<sample_processor_t>();
     processor->set_expected_samples_5(samples_5);
 
     rocprofsys::trace_cache::storage_parser<test_type_identifier_t, test_sample_1,

@@ -94,11 +94,16 @@ class DynCO : public CodeObject {
   std::recursive_mutex dclock_;
 
  public:
-  DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
+  explicit DynCO(int device_id = ihipGetDevice())
+      : device_id_(device_id), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  // LoadsCodeObject and its data
-  hipError_t loadCodeObject(const char* fname, const void* image = nullptr);
+  // Primary device loads code object and initialize global and managed variables. In case we need
+  // to set attribute for a device that's not current, we need to load the code object for it, but
+  // don't need to initialize global/managed-variable state.
+  hipError_t loadCodeObject(const char* fname, const void* image = nullptr,
+                            bool init_global_vars = true,
+                            std::vector<char>* image_storage = nullptr);
   hipModule_t getModule() const { return module_; };
 
   // Device the code object was loaded for at construction. Callers that key
@@ -192,6 +197,12 @@ class StatCO : public CodeObject {
 
   // Iterate all registered fat binary data pointers — for HRR capture post-registration sweep.
   void ForEachFatBinaryBlob(void (*cb)(const void*)) const;
+
+  // Iterate all registered __device__ globals as (host shadow address, symbol
+  // name, size, device address) — the same post-registration sweep for HRR,
+  // which otherwise never sees __hipRegisterVar because it fires at
+  // static-init time. The device address is null if it cannot be resolved yet.
+  void ForEachGlobalVar(void (*cb)(const void*, const char*, size_t, const void*));
 
  private:
   mutable std::recursive_mutex sclock_;    //!< Guards Static Code object

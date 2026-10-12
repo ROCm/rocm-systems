@@ -124,6 +124,7 @@ def test_save_csv(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.misc
 def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_compute):
     """
     --pc-sampling must be rejected at argparse time when --experimental is

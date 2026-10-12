@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_cdna3_virtual_lds.h"
 
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/dbt/semantic/cdna3_lds.h"
@@ -569,43 +570,12 @@ reserve_cdna3_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBloc
   if (!arch_is_cdna_4_or_lower(arch))
     return std::nullopt;
 
-  auto note_sgpr_ref = [](uint32_t &count, RegisterRef ref) {
-    if (ref.cls != RegClass::SGPR)
-      return;
-    // Implicit operands include architectural special registers such as EXEC
-    // and VCC. Those live in the descriptor tail and must not make virtual-LDS
-    // scratch selection think every ordinary SGPR is already occupied.
-    if (ref.index >= kCdnaOrdinarySgprLimit)
-      return;
-    count = std::max<uint32_t>(count, static_cast<uint32_t>(ref.index) + ref.width);
-  };
-
-  uint32_t ordinary_floor = 0;
-  for (BasicBlock *block : blocks) {
-    if (block == nullptr)
-      continue;
-    for (const Instruction &inst : block->instructions()) {
-      for (int i = 0; i < inst.num_src_operands(); ++i) {
-        if (const Operand *operand = inst.src_operand(i)) {
-          if (auto ref = operand->to_register_ref())
-            note_sgpr_ref(ordinary_floor, *ref);
-        }
-      }
-      for (int i = 0; i < inst.num_dst_operands(); ++i) {
-        if (const Operand *operand = inst.dst_operand(i)) {
-          if (auto ref = operand->to_register_ref())
-            note_sgpr_ref(ordinary_floor, *ref);
-        }
-      }
-
-      // Do not fold implicit uses/defs into the ordinary SGPR floor. They can
-      // describe architectural state such as EXEC/VCC/SCC rather than guest
-      // ordinary scalar registers, and counting them here forces small kernels
-      // into descriptor-full virtual-LDS spill mode. Explicit operands plus the
-      // descriptor ABI SGPR fields below are the values that matter for choosing
-      // a non-conflicting backing-pointer pair.
-    }
-  }
+  // The rest of this function bounds against kCdnaOrdinarySgprLimit; the shared
+  // scan excludes operands using its own constant.
+  static_assert(kCdnaOrdinarySgprLimit == REGISTER_SET_ALLOCATABLE_SGPRS,
+                "virtual-LDS reservation and the shared SGPR scan must agree on "
+                "where ordinary SGPRs end");
+  uint32_t ordinary_floor = explicit_ordinary_sgpr_bound(blocks);
 
   ordinary_floor = std::max<uint32_t>(ordinary_floor, translation.target_user_sgpr_count);
   auto include_sgpr = [&](int16_t sgpr, uint32_t width) {
