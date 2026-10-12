@@ -5554,6 +5554,7 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
+  std::unique_ptr<ncclSharedResources> sharedResStorage;
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
@@ -5570,9 +5571,23 @@ protected:
     ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
 
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    sharedResStorage = std::make_unique<ncclSharedResources>();
     comm = commStorage.get();
+    comm->sharedRes = sharedResStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    comm->devrState.cftSize = 1;
+    comm->devrState.cftMcSize = 1;
+    comm->devrState.granularity = 1;
+  }
+
+  void TearDown() override {
+    while (comm->devrState.teamHead != nullptr) {
+      ncclDevrTeam* next = comm->devrState.teamHead->next;
+      free(comm->devrState.teamHead);
+      comm->devrState.teamHead = next;
+    }
+    NcclVersionCompatTest::TearDown();
   }
 
   ncclResult_t Create() {
@@ -5620,6 +5635,32 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Integration point: the resource-window allocation must use the rounded
+// context count, not merely the helper's result in isolation. Stop at
+// cuMemCreate after recording its requested size to avoid constructing the
+// unrelated symmetric-memory window.
+TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCount) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  reqs.ginSignalCount = 1;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->sharedRes->ginState.numActiveBackends = 2;
+  comm->sharedRes->ginState.backends[0].ginCommCount = 3;
+  comm->sharedRes->ginState.backends[1].ginCommCount = 4;
+
+  size_t allocationSize = 0;
+  ScopedHook create(g_hipMemCreate,
+                    [&](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
+                        unsigned long long) {
+                      allocationSize = size;
+                      return hipErrorInvalidValue;
+                    });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(create.calls, 1);
+  // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
+  EXPECT_EQ(allocationSize, 96u);
 }
 
 
