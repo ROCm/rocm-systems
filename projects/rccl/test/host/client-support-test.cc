@@ -1916,6 +1916,10 @@ TEST_F(RasClientSupportMicrotest, EventLoop_ControlProfilerMask_Valid_Broadcasts
   int allMask = 0;
   ASSERT_TRUE(rasParseProfilerMask("all", &allMask));
   EXPECT_EQ(g_lastCollReq.profilerMask.eventMask, allMask);
+  // client_support.cc:587 copies client->timeout into every broadcast; MakeClient
+  // sets it to RAS_COLLECTIVE_LEG_TIMEOUT, so dropping that copy would ship a
+  // zero timeout with every assertion above still green.
+  EXPECT_EQ(g_lastCollReq.timeout, client->timeout);
   FreeClient(client);
 }
 
