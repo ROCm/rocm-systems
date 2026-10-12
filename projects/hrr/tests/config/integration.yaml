@@ -63,6 +63,7 @@ cases:
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
+  Unit_HRR_CaptureResumeCountsOnlyWholeRecords: {}
   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
