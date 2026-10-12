@@ -77,10 +77,11 @@ hand before a release:
 ./skills/run_evals.py --save-transcripts /tmp/transcripts   # keep transcripts to debug
 ```
 
-It needs Python 3.9 or newer and the `claude` CLI, and it also runs from the installed
-`skills/` folder because the datasets are installed with the skills. It exits 0 when
-every case passes, 1 on a failure, and 77 when `claude` is not installed, so a caller
-can treat that as skipped rather than failed. `--list` needs no CLI.
+It needs Python 3.9 or newer and the `claude` CLI, and it runs from the source tree
+only: the runner, its tests and the datasets are for local testing and are not installed.
+It exits 0 when every case passes, 1 on a failure, and 77 when `claude` is not
+installed, so a caller can treat that as skipped rather than failed. `--list` needs no
+CLI.
 
 Routing mode denies the agent its tools and only checks which skill it chose, so it is
 quick (about a minute for all cases). Behavioural mode lets the agent work and grades
