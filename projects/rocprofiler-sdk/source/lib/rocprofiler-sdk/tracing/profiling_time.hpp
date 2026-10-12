@@ -81,6 +81,10 @@ adjust_profiling_time(std::string_view _label,
     static auto normalize_env   = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
     static auto strict_ts_env   = common::get_env(
         "ROCPROFILER_CI_STRICT_TIMESTAMPS", (ROCPROFILER_CI_STRICT_TIMESTAMPS > 0) ? true : false);
+    static auto skip_adjustment = common::get_env(
+        "ROCPROFILER_CI_SKIP_TIMESTAMP_ADJUSTMENT", false);
+
+    if(ROCPROFILER_UNLIKELY(skip_adjustment)) return _value;
 
     // normalize
     if(ROCPROFILER_UNLIKELY(normalize_env)) _value *= sysclock_period;
