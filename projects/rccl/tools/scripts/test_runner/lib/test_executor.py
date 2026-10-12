@@ -1332,6 +1332,7 @@ class TestExecutor:
             "node_names": re_mod.node_names_from_mpi_hosts(getattr(self, "mpi_hosts", None)) or [socket.gethostname()],
             "gpu_arch": re_mod.gpu_arch(),
             "config_name": sys_cfg.get("name"),
+            "config_file": os.path.basename(getattr(self.args, "config", "") or ""),
             "label": getattr(self.args, "run_label", "") or None,
             "tags": run_tags or None,
         }
@@ -3906,6 +3907,7 @@ class TestExecutor:
             "num_nodes": num_nodes,
             "gpus_per_node": self.gpus_per_node or None,
             "config_name": sys_cfg.get("name"),
+            "config_file": os.path.basename(getattr(self.args, "config", "") or ""),
             "config_description": sys_cfg.get("description"),
             "label": getattr(self.args, "run_label", "") or None,
             "tags": run_tags or None,

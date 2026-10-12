@@ -130,7 +130,9 @@ def list_gtest_cases(binary_path, rocm_path="/opt/rocm"):
     """Run binary --gtest_list_tests and return list of 'Suite.Case' strings."""
     env = os.environ.copy()
     lib_path = os.path.join(rocm_path, "lib")
-    env["LD_LIBRARY_PATH"] = lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
+    bin_dir = os.path.dirname(os.path.abspath(binary_path))
+    bin_parent = os.path.dirname(bin_dir)
+    env["LD_LIBRARY_PATH"] = bin_dir + ":" + bin_parent + ":" + lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
     env["HSA_HOTSWAP_DISABLE"] = "0"
 
     try:
