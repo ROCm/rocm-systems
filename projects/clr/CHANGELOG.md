@@ -21,6 +21,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
+* The saturating half-precision intrinsics `__hadd_sat`, `__hsub_sat`, `__hmul_sat`, `__hfma_sat` and their `__half2`
+counterparts `__hadd2_sat`, `__hsub2_sat`, `__hmul2_sat` and `__hfma2_sat` now flush a NaN result to `+0.0` instead of
+propagating it, matching the expected output and improving the performance
 
 ## HIP 7.16.0 for ROCm 10.1.0
 

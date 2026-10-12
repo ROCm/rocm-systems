@@ -784,14 +784,15 @@ inline __HOST_DEVICE__ __half __hmin_nan(const __half x, const __half y) {
 
 // Arithmetic
 
-// Saturation to [0, 1].  Using builtins to clamp with `minnum(maxnum(x, 0), 1)`
+// Saturation to [0, 1].  Using builtins to clamp with `minnum(maxnum(x, 0), 1)`.  minnum/maxnum
+// return the non-NaN operand, so a NaN input is flushed to +0.0.
 inline __HOST_DEVICE__ __half __clamp_01(__half x) {
   return __half_raw{__builtin_elementwise_minnum(
       __builtin_elementwise_maxnum(static_cast<__half_raw>(x).data, static_cast<_Float16>(0.0f)),
       static_cast<_Float16>(1.0f))};
 }
 
-// Saturation to [0, 1].  Using elementwise builtins to clamp with `minnum(maxnum(x, 0), 1)`
+// Saturation to [0, 1], per lane.  NaN is flushed to +0.0, see __clamp_01().
 inline __HOST_DEVICE__ __half2 __clamp2_01(__half2 x) {
   constexpr _Float16_2 lo{static_cast<_Float16>(0.0f), static_cast<_Float16>(0.0f)};
   constexpr _Float16_2 hi{static_cast<_Float16>(1.0f), static_cast<_Float16>(1.0f)};
