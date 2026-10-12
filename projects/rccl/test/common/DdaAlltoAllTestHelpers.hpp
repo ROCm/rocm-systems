@@ -80,9 +80,9 @@ constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     4194304UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
-// Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB (gfx1250 LL128 ceiling).
-constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
-    1048576UL /
+// Per-rank float32 count whose 8-rank AlltoAll totals exactly 16 MiB (gfx1250 LL128 ceiling).
+constexpr size_t kAlltoAllFloat32CountAtLL128Threshold =
+    16777216UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).

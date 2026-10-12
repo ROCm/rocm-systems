@@ -952,7 +952,7 @@ TEST(WrapMicrotest, CanonicalTuningParamDefaults_MatchProduction) {
 }
 
 TEST(WrapMicrotest, ExternalParamDefault_MatchesProduction) {
-  EXPECT_EQ(1, rcclParamForceCe());
+  EXPECT_EQ(-1, rcclParamForceCe());
 }
 
 // ===========================================================================
@@ -4729,6 +4729,168 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
                                                    &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo)
             << "ncclCeScratchAvailable() returning false must block the force-scratch branch";
+        DeleteCommWithArch(comm);
+      });
+}
+
+namespace {
+// gfx1250 comm with every CE-Scratch gate armed except the force decision itself:
+// scratch probe true, unregistered windows, no sysmem, receive fits ddaScratch,
+// and the arch table's ceNonRegMax[AG] = 0 so the table window cannot fire.
+ncclComm* MakeGfx1250CeScratchComm(uint8_t* scratch, size_t bytes) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 1;
+  comm->nNodes = 1;
+  comm->ddaScratch = scratch;
+  comm->ddaScratchBytes = bytes;
+  return comm;
+}
+
+int SelectAllGatherAlgo(ncclComm* comm) {
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
+                                             /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                             &decision));
+  return decision.algo;
+}
+
+int SelectAlltoAllAlgo(ncclComm* comm) {
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, /*stream=*/nullptr,
+                                            /*query=*/true, /*graphCapturingHint=*/false, &decision));
+  return decision.algo;
+}
+}  // namespace
+
+// AICOMRCCL-2876: on gfx1250 an unset RCCL_FORCE_CE must not force CE-Scratch, which
+// trails the Ring kernel across the whole forced band. The FORCE_CE=1 control proves
+// every other gate is armed, so the default alone is what keeps CE-Scratch off.
+TEST(WrapMicrotestIsolated, SelectAllGather_Gfx1250DefaultDoesNotForceCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_Gfx1250DefaultDoesNotForceCeScratch",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        uint8_t scratch[64];
+        ncclComm* comm = MakeGfx1250CeScratchComm(scratch, sizeof(scratch));
+        EXPECT_EQ(NCCL_ALGO_RING, SelectAllGatherAlgo(comm));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(1); });
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// CE-Scratch is the one zero-CU path for unregistered buffers, so the gfx1250
+// default keeps forcing it under NCCL_CTA_POLICY_ZERO. An explicit FORCE_CE=0 still wins.
+TEST(WrapMicrotestIsolated, SelectAllGather_Gfx1250CtaZeroKeepsCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_Gfx1250CtaZeroKeepsCeScratch",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        uint8_t scratch[64];
+        ncclComm* comm = MakeGfx1250CeScratchComm(scratch, sizeof(scratch));
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Other arches keep the old default: an unset RCCL_FORCE_CE still forces CE-Scratch.
+TEST(WrapMicrotestIsolated, SelectAllGather_NonGfx1250DefaultStillForcesCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_NonGfx1250DefaultStillForcesCeScratch",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nRanks = 1;
+          comm->nNodes = 1;
+          uint8_t scratch[64];
+          comm->ddaScratch = scratch;
+          comm->ddaScratchBytes = sizeof(scratch);
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch;
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// AICOMRCCL-2877: gfx1250 AlltoAll takes DDA LL128 while each peer's chunk is at
+// most 256 KiB and falls to Direct one 16 B step above it, unless the user set
+// RCCL_DDA_LL128_THRESHOLD. The kernel seam accepts every size, so only the
+// selector's per-peer cut decides.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250LL128StopsAt256KiBPerPeer) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250LL128StopsAt256KiBPerPeer",
+      []() {
+        ScopedHook ll128(g_allToAllDdaFabricLL128Eligible,
+                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+        // Host tests link no arch table; give the comm one whose LL128 ceiling sits
+        // far above both probes, so only the per-peer cut can separate them.
+        rcclArchThresholds table{};
+        table.ddaLL128Max[ncclFuncAlltoAll] = 16ULL * 1024 * 1024;
+        comm->archThresholds = &table;
+        auto select = [&](size_t perPeerCount) {
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, perPeerCount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+          return decision.algo;
+        };
+        const size_t atCap = 256 * 1024 / sizeof(float);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, select(atCap));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL, select(atCap + 4));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Params are read once per process, so the user-threshold case gets its own child.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250UserLL128ThresholdBypassesPerPeerCut) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250UserLL128ThresholdBypassesPerPeerCut",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL128_THRESHOLD", int64_t(64) * 1024 * 1024);
+        ScopedHook ll128(g_allToAllDdaFabricLL128Eligible,
+                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 4;
+        comm->nNodes = 1;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAlltoAll(comm, nullptr, nullptr, 256 * 1024 / sizeof(float) + 4, ncclFloat32,
+                                                  /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
+                                                  &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AlltoAll selector reads the same resolver.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250CeScratchFollowsForceCeDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250CeScratchFollowsForceCeDefault",
+      []() {
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        uint8_t scratch[64];
+        ncclComm* comm = MakeGfx1250CeScratchComm(scratch, sizeof(scratch));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        comm->config.CTAPolicy = 0;
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(1); });
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
+        }
         DeleteCommWithArch(comm);
       });
 }

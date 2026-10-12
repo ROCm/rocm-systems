@@ -3204,7 +3204,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 }
 
 // gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0 disables VMM;
-// ddaLL128Max[A2A] = 1 MiB): anything above 1 MiB falls to Direct p2p.
+// ddaLL128Max[A2A] = 16 MiB): anything above it falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();

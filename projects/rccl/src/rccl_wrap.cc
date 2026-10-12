@@ -857,6 +857,27 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
   return rcclForceCeAllReduceEnabledDef(rcclCeAllReduceArchDefault(comm));
 }
 
+// CE-Scratch (unregistered AllGather / AlltoAll / Gather / Scatter staged through
+// ddaScratch) is forced whenever the receive fits the scratch. On gfx1250 that
+// scratch is sized by the DDA LL slots (2 x nRanks x 32 MiB), so the forced band
+// runs from the DDA ceiling up to nRanks x 64 MiB, where the copy engine trails
+// the Ring kernel it displaces (AICOMRCCL-2876). There it is forced only under
+// NCCL_CTA_POLICY_ZERO, where it is the one zero-CU path for unregistered
+// buffers. Other arches keep it forced.
+static inline bool rcclForceCeScratchArchDefault(const ncclComm* comm) {
+  if (comm == nullptr || !IsArchMatch(comm->archName, "gfx1250")) return true;
+  return (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+}
+
+inline bool rcclForceCeScratchEnabledDef(bool archDefault) {
+  const int64_t param = rcclParamForceCe();
+  if (param >= 0) return param != 0;
+  return archDefault;
+}
+bool rcclForceCeScratchEnabled(const ncclComm* comm) {
+  return rcclForceCeScratchEnabledDef(rcclForceCeScratchArchDefault(comm));
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
@@ -1695,7 +1716,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
                                      totalBytes >= agCeNonRegMin &&
                                      totalBytes <= agCeNonRegMax;
-      if ((rcclParamForceCe() || agCeNonRegWindow) && ceScratch &&
+      if ((rcclForceCeScratchEnabled(comm) || agCeNonRegWindow) && ceScratch &&
           winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
           comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
@@ -1703,7 +1724,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         return ncclSuccess;
       }
       if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu forceCe=%d agCeNonRegWindow=%d",
-           (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclParamForceCe(), (int)agCeNonRegWindow);
+           (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclForceCeScratchEnabled(comm), (int)agCeNonRegWindow);
       // Branch #3: CE via registered symmetric windows. Taken when symk is not
       // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
       // CE for every size.
@@ -1891,6 +1912,9 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncReduceScatter, recvcount, datatype, query, decision);
 }
 
+// gfx1250 AlltoAll takes DDA LL128 only up to this many bytes per peer.
+static constexpr size_t kGfx1250A2ALL128MaxPerPeerBytes = 256 * 1024;
+
 // Single source of truth for AlltoAll implementation selection. Runs the full
 // priority chain (Pivot -> GDA -> DDA LL/LL128/VMM/IPC -> CE registered ->
 // HierCE -> CE scratch -> Direct p2p) and returns the decision.
@@ -1990,7 +2014,14 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
         decision->nMaxChannels = ncclAllToAllDdaFabricLLBlocks(comm, count, datatype);
         return ncclSuccess;
       }
-      if (ll128Thresh > 0 && totalBytes <= ll128Thresh &&
+      // LL128 beats Direct only while each peer's chunk is at most 256 KiB; at
+      // 512 KiB (the kernel's own cap) it loses on 8-32 ranks (AICOMRCCL-2877).
+      // A user-set RCCL_DDA_LL128_THRESHOLD bypasses this tuning cut.
+      size_t unusedEnv;
+      const bool a2aLL128PerPeerOk =
+        ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &unusedEnv) ||
+        totalBytes <= (size_t)comm->nRanks * kGfx1250A2ALL128MaxPerPeerBytes;
+      if (ll128Thresh > 0 && totalBytes <= ll128Thresh && a2aLL128PerPeerOk &&
           ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
         decision->algo = RCCL_DDA_FABRIC_LL128;
         decision->protocol = NCCL_PROTO_LL128;
@@ -2063,7 +2094,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // Guard a2aWinRegType to reject registered recv windows (they must not be routed through
     // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
     // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
-    if (rcclParamForceCe() && !a2aHasSysmem &&
+    if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem &&
         comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;

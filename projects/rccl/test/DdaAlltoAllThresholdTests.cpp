@@ -63,7 +63,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAtLL128Threshold_Enabled)
     const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
     EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), threshold, threshold));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold, ncclFloat32));
+        mockComm_.get(), kAlltoAllFloat32CountAtLL128Threshold, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
@@ -72,7 +72,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
     const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
     EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), threshold + 1, threshold));
     EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold + 1, ncclFloat32));
+        mockComm_.get(), kAlltoAllFloat32CountAtLL128Threshold + 1, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)

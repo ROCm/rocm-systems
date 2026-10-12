@@ -97,7 +97,7 @@ char  ncclLastError[1024] = {};
 // checks the invocation text against the original sources at configure time,
 // when those files are guaranteed to be available.
 // ---------------------------------------------------------------------------
-static int64_t DefaultParamForceCe() { return 1; }  // enqueue/enqueue.cc:4108
+static int64_t DefaultParamForceCe() { return -1; }  // enqueue/enqueue.cc RCCL_PARAM(ForceCe)
 std::function<int64_t()> g_paramForceCe = DefaultParamForceCe;
 int64_t rcclParamForceCe() { return g_paramForceCe(); }
 
