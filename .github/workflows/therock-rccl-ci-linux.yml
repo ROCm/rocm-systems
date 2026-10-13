@@ -361,5 +361,10 @@ jobs:
       # per_device_batch_size were validated at 4 nodes in ROCm/MAD#228 and
       # the memory headroom does not survive a smaller allocation.
       nodes: '4'
+      # 5 h time_limit + the same 90 minutes of queue slack the 2-node
+      # workloads get: the script's budget covers queueing, so leaving this at
+      # the 360 default would kill a 4-node allocation that waited more than
+      # half an hour and report that neither phase ran.
+      timeout_minutes: '420'
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
