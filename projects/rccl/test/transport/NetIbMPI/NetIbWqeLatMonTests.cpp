@@ -24,8 +24,9 @@
  * stamps the first signaled WQE on an idle QP at post time and closes the
  * sample when ncclIbTest polls its CQE. The CQ is only polled from test(), so
  * a test that posts and then sleeps before polling produces a known minimum
- * latency. Closing a send comm logs one NET INFO summary per QP that holds
- * samples, unless NCCL_IB_WQE_LATENCY_REPORT=0.
+ * latency, and busy polling a long transfer exercises the stall scan that
+ * test() runs on every poll. Closing a send comm logs one NET INFO summary
+ * per QP that holds samples, unless NCCL_IB_WQE_LATENCY_REPORT=0.
  *
  * The monitor's switches are process globals set once from the environment.
  * Tests that need it on (or off) regardless of the launch environment
@@ -70,11 +71,11 @@ WqeLatTotals sumWqeLat(const struct ncclIbWqeLatCommState& st) {
 void logWqeLatState(const char* tag, const struct ncclIbWqeLatCommState& st) {
     for (int q = 0; q < st.nqps; q++) {
         const struct ncclIbWqeLatQpState& s = st.qps[q];
-        TEST_INFO("Rank %d %s: %s qp[%d] qpn=%u dev=%d n=%lu slow=%lu inflight=%u tracking=%d "
+        TEST_INFO("Rank %d %s: %s qp[%d] qpn=%u dev=%d n=%lu slow=%lu inflight=%u tracking=%d stalled=%d "
                   "mean=%.0f p50=%lu p99=%lu max=%lu",
                   MPIEnvironment::world_rank, tag, st.isSend ? "send" : "recv", q, s.qpNum, s.devIndex,
                   (unsigned long)s.stats.count, (unsigned long)s.stats.slowCount, s.inflight, s.tracking ? 1 : 0,
-                  s.stats.meanNs, (unsigned long)s.stats.p50Ns, (unsigned long)s.stats.p99Ns,
+                  s.lastStallWarnNs != 0 ? 1 : 0, s.stats.meanNs, (unsigned long)s.stats.p50Ns, (unsigned long)s.stats.p99Ns,
                   (unsigned long)s.stats.maxNs);
     }
 }
@@ -99,12 +100,31 @@ protected:
         return all != 0;
     }
 
-    // Allocates and registers a host buffer on comm. Returns false on every
-    // rank if either rank failed, after recording the failure locally.
-    bool AllocAndRegister(void* comm, size_t size, void** buf, void** mhandle) {
-        *buf = malloc(size);
-        *mhandle = nullptr;
-        const bool ok = *buf != nullptr && RegisterMemory(comm, *buf, size, NCCL_PTR_HOST, mhandle) == ncclSuccess;
+    // One connection and a host buffer registered on this rank's comm (the recv
+    // comm on rank 0, the send comm on rank 1). Members are destroyed in reverse
+    // order: deregister, free, then close the connection.
+    struct WqeLatSession {
+        explicit WqeLatSession(ncclNet_t* net) : connGuard(net) {}
+        ConnectionPair pair;
+        NetConnectionGuard connGuard;
+        void* comm = nullptr;
+        void* buf = nullptr;
+        void* mhandle = nullptr;
+        HostBufferAutoGuard bufGuard;
+        NetMHandleGuard mhandleGuard;
+    };
+
+    // Connects, then allocates and registers size bytes on this rank's comm.
+    // Returns false on every rank if either rank failed, after recording the
+    // failure locally.
+    bool OpenSession(WqeLatSession& s, size_t size) {
+        SetupConnectionWithGuard(0, s.pair, s.connGuard);
+        s.comm = (MPIEnvironment::world_rank == 0) ? s.pair.recvComm : s.pair.sendComm;
+        s.buf = malloc(size);
+        s.bufGuard = makeHostBufferAutoGuard(s.buf);
+        const bool ok =
+            s.buf != nullptr && RegisterMemory(s.comm, s.buf, size, NCCL_PTR_HOST, &s.mhandle) == ncclSuccess;
+        s.mhandleGuard = NetMHandleGuard(s.mhandle, NetMHandleDeleter(net_, s.comm));
         EXPECT_TRUE(ok) << "malloc/register of " << size << " bytes failed";
         return AllRanksOk(ok);
     }
@@ -124,9 +144,16 @@ protected:
             } else {
                 PostSendWithRetry(pair.sendComm, buf, sizes[i], tag, mhandle, &request);
             }
-            int recvSizes[1] = {0};
-            const ThreadResult r = WorkerWaitBusy(request, recvSizes, kLargeTransferTimeoutMs);
-            EXPECT_TRUE(r.ok) << "transfer " << i << " size " << sizes[i] << ": " << r.msg;
+            // A failed post leaves no request to poll (and test() would crash on
+            // NULL); skip the wait but still reach the barrier, so the peer
+            // fails at its own timeout rather than blocking there.
+            if (IsRealRequest(request)) {
+                int recvSizes[1] = {0};
+                const ThreadResult r = WorkerWaitBusy(request, recvSizes, kLargeTransferTimeoutMs);
+                EXPECT_TRUE(r.ok) << "transfer " << i << " size " << sizes[i] << ": " << r.msg;
+            } else {
+                ADD_FAILURE() << "transfer " << i << " size " << sizes[i] << ": no request was posted";
+            }
             MPI_Barrier(MPI_COMM_WORLD);
         }
     }
@@ -182,29 +209,20 @@ protected:
     // Then the sender closes its comm and checks the close-time summaries.
     void CheckSyncTransfersAreCounted(const char* tag, bool expectNoSlow, bool expectSummaries) {
         const int rank = MPIEnvironment::world_rank;
-        ConnectionPair pair;
-        NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
-
         const size_t kMaxSize = 1 << 20;
-        void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-        void* buf = nullptr;
-        void* mhandle = nullptr;
-        const bool ok = AllocAndRegister(comm, kMaxSize, &buf, &mhandle);
-        HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
-        NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-        if (!ok) return;
-        memset(buf, 0x5a, kMaxSize);
+        WqeLatSession s(net_);
+        if (!OpenSession(s, kMaxSize)) return;
+        memset(s.buf, 0x5a, kMaxSize);
 
         // Small sends exercise the zero-length WRs posted on the extra QPs
         // under split-data; 1 MB exercises the real split.
         std::vector<size_t> sizes;
         for (int i = 0; i < 20; i++) sizes.push_back(kSmallBufferSize);
         for (int i = 0; i < 20; i++) sizes.push_back(kMaxSize);
-        RunSyncTransfers(pair, buf, mhandle, sizes, kWqeLatTagBase);
+        RunSyncTransfers(s.pair, s.buf, s.mhandle, sizes, kWqeLatTagBase);
 
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &st), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
         logWqeLatState(tag, st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.inflight, 0u);
@@ -244,9 +262,9 @@ protected:
         if (rank == 1) {
             // Deregister before the explicit close: the guard would otherwise
             // deregister on scope exit, against an already closed comm.
-            mhandleGuard.reset();
-            void* sendComm = pair.sendComm;
-            connGuard.setSendComm(nullptr);
+            s.mhandleGuard.reset();
+            void* sendComm = s.pair.sendComm;
+            s.connGuard.setSendComm(nullptr);
             CloseSendAndCheckSummaries(sendComm, st, expectSummaries);
         }
         MPI_Barrier(MPI_COMM_WORLD);
@@ -297,23 +315,13 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDisabledRecordsNothing) {
     ScopedWqeLatGlobals g(false, 0);
     AssertInitAndGetDevices(nullptr);
 
-    const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    WqeLatSession s(net_);
+    if (!OpenSession(s, kSmallBufferSize)) return;
 
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    void* buf = nullptr;
-    void* mhandle = nullptr;
-    const bool ok = AllocAndRegister(comm, kSmallBufferSize, &buf, &mhandle);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-    if (!ok) return;
-
-    RunSyncTransfers(pair, buf, mhandle, std::vector<size_t>(20, kSmallBufferSize), kWqeLatTagBase);
+    RunSyncTransfers(s.pair, s.buf, s.mhandle, std::vector<size_t>(20, kSmallBufferSize), kWqeLatTagBase);
 
     struct ncclIbWqeLatCommState st;
-    EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &st), ncclSuccess);
+    EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
     logWqeLatState("disabled", st);
     const WqeLatTotals t = sumWqeLat(st);
     EXPECT_EQ(t.count, 0u);
@@ -370,26 +378,17 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
     AssertInitAndGetDevices(nullptr);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
-
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    void* buf = nullptr;
-    void* mhandle = nullptr;
-    const bool ok = AllocAndRegister(comm, kSmallBufferSize, &buf, &mhandle);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-    if (!ok) return;
+    WqeLatSession s(net_);
+    if (!OpenSession(s, kSmallBufferSize)) return;
 
     void* request = nullptr;
     struct ncclIbWqeLatCommState before{};
     if (rank == 0) {
-        PostSingleRecv(pair.recvComm, buf, kSmallBufferSize, kWqeLatTagBase, mhandle, &request);
+        PostSingleRecv(s.pair.recvComm, s.buf, kSmallBufferSize, kWqeLatTagBase, s.mhandle, &request);
     } else {
-        PostSendWithRetry(pair.sendComm, buf, kSmallBufferSize, kWqeLatTagBase, mhandle, &request);
+        PostSendWithRetry(s.pair.sendComm, s.buf, kSmallBufferSize, kWqeLatTagBase, s.mhandle, &request);
         std::this_thread::sleep_for(std::chrono::milliseconds(kDelayMs));
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &before), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &before), ncclSuccess);
         logWqeLatState("before-poll", before);
         const WqeLatTotals t = sumWqeLat(before);
         EXPECT_EQ(t.count, 0u);
@@ -401,7 +400,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
 
     if (rank == 1) {
         struct ncclIbWqeLatCommState after;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &after), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &after), ncclSuccess);
         logWqeLatState("after-poll", after);
         const WqeLatTotals t = sumWqeLat(after);
         EXPECT_EQ(t.count, (uint64_t)after.nqpsPerRequest);
@@ -413,6 +412,47 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
             EXPECT_EQ(after.qps[q].stats.count, 1u) << "qp " << q;
             EXPECT_GE(after.qps[q].stats.maxNs, (uint64_t)kDelayMs * 1000000ULL) << "qp " << q;
         }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// =============================================================================
+// Test: WqeLatMonBusyPollReportsStall
+//
+// The stall scan runs on every poll, including polls that find no CQE. One
+// 64 MB send takes far longer than a 100 us threshold on any NIC, so busy
+// polling it sees the tracked WQE still outstanding past the threshold and
+// the sender reports a stall. A QP that stalled was slow by definition, so
+// its sample is slow too. The receive side tracks nothing and never stalls.
+// =============================================================================
+TEST_F(NetIbWqeLatMonTest, WqeLatMonBusyPollReportsStall) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
+    constexpr uint64_t kThrNs = 100000;
+    constexpr size_t kSize = 64 << 20;
+    ScopedWqeLatGlobals g(true, kThrNs);
+    AssertInitAndGetDevices(nullptr);
+
+    const int rank = MPIEnvironment::world_rank;
+    WqeLatSession s(net_);
+    if (!OpenSession(s, kSize)) return;
+
+    RunSyncTransfers(s.pair, s.buf, s.mhandle, std::vector<size_t>(1, kSize), kWqeLatTagBase);
+
+    struct ncclIbWqeLatCommState st;
+    EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+    logWqeLatState("stall", st);
+    int stalledQps = 0;
+    for (int q = 0; q < st.nqps; q++) {
+        if (st.qps[q].lastStallWarnNs == 0) continue;
+        stalledQps++;
+        EXPECT_EQ(st.qps[q].stats.slowCount, st.qps[q].stats.count) << "qp " << q;
+        EXPECT_GT(st.qps[q].stats.count, 0u) << "qp " << q;
+    }
+    if (rank == 1) {
+        EXPECT_GT(stalledQps, 0);
+        EXPECT_EQ(sumWqeLat(st).count, (uint64_t)st.nqpsPerRequest);
+    } else {
+        EXPECT_EQ(stalledQps, 0);
     }
     MPI_Barrier(MPI_COMM_WORLD);
 }
@@ -434,31 +474,21 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
     AssertInitAndGetDevices(nullptr);
 
     const int rank = MPIEnvironment::world_rank;
-    ConnectionPair pair;
-    NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
-
-    const size_t bufSize = kSmallBufferSize * kPipelined;
-    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
-    void* buf = nullptr;
-    void* mhandle = nullptr;
-    const bool ok = AllocAndRegister(comm, bufSize, &buf, &mhandle);
-    HostBufferAutoGuard bufGuard = makeHostBufferAutoGuard(buf);
-    NetMHandleGuard mhandleGuard(mhandle, NetMHandleDeleter(net_, comm));
-    if (!ok) return;
+    WqeLatSession s(net_);
+    if (!OpenSession(s, kSmallBufferSize * kPipelined)) return;
 
     std::vector<void*> requests(kPipelined, nullptr);
     for (int i = 0; i < kPipelined; i++) {
-        char* slot = (char*)buf + i * kSmallBufferSize;
+        char* slot = (char*)s.buf + i * kSmallBufferSize;
         if (rank == 0) {
-            PostSingleRecv(pair.recvComm, slot, kSmallBufferSize, kWqeLatTagBase + i, mhandle, &requests[i]);
+            PostSingleRecv(s.pair.recvComm, slot, kSmallBufferSize, kWqeLatTagBase + i, s.mhandle, &requests[i]);
         } else {
-            PostSendWithRetry(pair.sendComm, slot, kSmallBufferSize, kWqeLatTagBase + i, mhandle, &requests[i]);
+            PostSendWithRetry(s.pair.sendComm, slot, kSmallBufferSize, kWqeLatTagBase + i, s.mhandle, &requests[i]);
         }
     }
     struct ncclIbWqeLatCommState posted{};
     if (rank == 1) {
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &posted), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &posted), ncclSuccess);
         logWqeLatState("posted", posted);
         const WqeLatTotals t = sumWqeLat(posted);
         EXPECT_EQ(t.count, 0u);
@@ -472,7 +502,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
 
     if (rank == 1) {
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &st), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
         logWqeLatState("pipelined", st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.inflight, 0u);
@@ -484,11 +514,11 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
         }
     }
 
-    RunSyncTransfers(pair, buf, mhandle, std::vector<size_t>(kSyncAfter, kSmallBufferSize),
+    RunSyncTransfers(s.pair, s.buf, s.mhandle, std::vector<size_t>(kSyncAfter, kSmallBufferSize),
                      kWqeLatTagBase + kPipelined);
     if (rank == 1) {
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(comm, &st), ncclSuccess);
+        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
         logWqeLatState("after-sync", st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.count, (uint64_t)sumWqeLat(posted).tracking + (uint64_t)kSyncAfter * st.nqpsPerRequest);

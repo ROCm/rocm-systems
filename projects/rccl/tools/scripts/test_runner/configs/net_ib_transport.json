@@ -450,6 +450,7 @@
 
     "net_ib_wqe_lat_unit": {
       "extends": "net_ib_base",
+      "skip_if_missing": true,
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 1,
@@ -469,7 +470,7 @@
       "tests": [
         {
           "name": "NetIB_WqeLatMon_Functional",
-          "description": "AICOMRCCL-2013: per-QP WQE latency sampling on live net_ib connections (disabled/sync/delayed-poll/pipelined, env knobs)",
+          "description": "AICOMRCCL-2013: per-QP WQE latency sampling on live net_ib connections (disabled/sync/report-off/delayed-poll/busy-poll stall/pipelined, env knobs)",
           "test_filter": "NetIbWqeLatMonTest.*"
         }
       ]

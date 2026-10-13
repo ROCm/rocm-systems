@@ -11,6 +11,10 @@
 #include "net_ib_limits.h"
 #include "net_ib/wqe_lat_mon.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /*
  * Test-only introspection of the net_ib per-QP WQE post-to-poll latency
  * monitor (wqe_lat_mon.cc). Lets tests read each QP's latMon of a live
@@ -23,6 +27,7 @@ struct ncclIbWqeLatQpState {
   bool tracking;
   uint32_t inflight;
   uint32_t pendingBefore;
+  uint64_t lastStallWarnNs; /* 0 until the QP has reported a stall */
   struct ncclIbWqeLatStats stats;
 };
 
@@ -38,5 +43,9 @@ ncclResult_t ncclIbWqeLatGetCommState(void* comm, struct ncclIbWqeLatCommState* 
 
 /* Runs ncclIbWqeLatMonStampSend on m as if m were the latMon of a QP posting head. */
 ncclResult_t ncclIbWqeLatTestStampSend(struct ncclIbWqeLatMon* m, struct ibv_send_wr* head);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif /* RCCL_NET_IB_WQE_LAT_INSPECT_H_ */
