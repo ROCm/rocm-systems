@@ -1350,6 +1350,12 @@ class Common:
                 self.print(f"\t\t{key} : {value}")
         return
 
+    def cleaner_shader_resets_gpu(self):
+        """True if a GPU here is gfx906 (Vega 20). Running the cleaner shader there
+        times out its compute queue and the driver resets the whole GPU, after
+        which later calls can hang."""
+        return any(info.get("target_graphics_version") == "gfx906" for info in self.asic_info)
+
     def get_error_code(self, exc):
         error_code = "-1"
         error_code_name = "UNKNOWN_ERROR"
