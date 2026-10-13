@@ -79,3 +79,38 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
   )
 endforeach()
 
+###############################################################################
+# tile_ck_gemm — optional example requiring AMD Composable Kernels (CK Tile)
+#
+# Pass -DCK_INSTALL_DIR=<path> at configure time to point at a CK install.
+# ck_tile is header-only so no library link is required.
+###############################################################################
+set(CK_INSTALL_DIR "" CACHE PATH "Path to composablekernel install directory")
+
+find_package(composable_kernel QUIET
+  COMPONENTS utility
+  HINTS ${CK_INSTALL_DIR}/lib/cmake/composable_kernel)
+if(composable_kernel_FOUND)
+  message(STATUS "Found composable_kernel ${composable_kernel_VERSION}: building tile_ck_gemm example")
+  add_executable(tile_ck_gemm tile_ck_gemm.cc)
+  target_link_libraries(tile_ck_gemm
+    PRIVATE
+      roc::rocshmem
+      composable_kernel::utility
+      $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
+  )
+  # Force CK_INSTALL_DIR/include before the ROCm system includes so hipcc
+  # picks up the source-built ck_tile headers rather than /opt/rocm's copy.
+  # Pass GPU target define so CK tile shape constexprs resolve correctly on
+  # both the host and device compilation passes.
+  target_compile_options(tile_ck_gemm PRIVATE
+    -I${CK_INSTALL_DIR}/include
+    -DCK_USE_GFX950
+    -DCK_GFX950_SUPPORT
+    -mllvm -enable-noalias-to-md-conversion=0
+  )
+else()
+  message(STATUS "composable_kernel not found — skipping tile_ck_gemm example")
+  message(STATUS "  Re-run cmake with -DCK_INSTALL_DIR=<path-to-ck-install>")
+endif()
+
