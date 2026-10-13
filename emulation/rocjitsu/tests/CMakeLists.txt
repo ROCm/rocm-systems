@@ -2,7 +2,21 @@
 # SPDX-License-Identifier: MIT
 
 include(rj_configure_target)
-include(rj_find_amdcxx)
+include(rj_configure_device_tests)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME cmake.hip_toolchain_failure
+        COMMAND
+            ${CMAKE_COMMAND} "-DRJ_SOURCE_DIR=${PROJECT_SOURCE_DIR}"
+            "-DRJ_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/hip_toolchain_failure"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DGOOGLETEST_SOURCE_DIR=${googletest_SOURCE_DIR}"
+            "-DFLATBUFFERS_SOURCE_DIR=${flatbuffers_SOURCE_DIR}" -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_hip_toolchain_failure.cmake
+    )
+endif()
 
 # Device kernels (compiled from HIP sources for simulator testing).
 add_subdirectory(kernels)
@@ -21,6 +35,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_plugin_logging
     rocjitsu_plugin_race_detector
     rocjitsu_plugin_throughput
+    rocjitsu_plugin_instruction_mix
     rocjitsu_plugin_loader
     rocjitsu_vm_risc_v
     rocjitsu_config
@@ -423,6 +438,16 @@ rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -581,6 +606,7 @@ add_executable(
     sdma_packet_processor_test.cpp
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
+    ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
@@ -618,6 +644,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
     patch/smem_builder_test.cpp
+    patch/entry_prologue_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -630,6 +657,8 @@ add_executable(
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
+    dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -663,6 +692,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -1421,6 +1451,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1432,6 +1463,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
@@ -3467,7 +3499,6 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
-rj_find_amdcxx(AMDCXX)
 set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
@@ -3492,6 +3523,9 @@ endfunction()
 if(NOT AMDCXX)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (amdclang++ not found)")
+elseif(NOT RJ_HAS_HIP_KERNEL_TOOLCHAIN)
+    set(RJ_ENABLE_HIP_TESTS OFF)
+    message(STATUS "HIP tests disabled (HIP compilation probe failed)")
 elseif(NOT HSA_RUNTIME64)
     set(RJ_ENABLE_HIP_TESTS OFF)
     message(STATUS "HIP tests disabled (libhsa-runtime64 not found)")

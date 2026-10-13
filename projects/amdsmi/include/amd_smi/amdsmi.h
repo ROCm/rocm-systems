@@ -210,7 +210,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 1
+#define AMDSMI_LIB_VERSION_MINOR 2
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -1860,6 +1860,18 @@ typedef enum {
 } amdsmi_cper_notify_type_t;
 
 /**
+ * @brief IFoE CPER notify type GUID
+ *
+ * Placeholder GUID for IFoE fabric error records. The all-FF value means
+ * "N/A, not yet assigned". Will be replaced with official GUID once provided
+ * by UALoE team.
+ *
+ * @cond @tag{host} @endcond
+ */
+#define AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID \
+  {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
+
+/**
  * @brief Ras policy v4.0
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -2731,6 +2743,18 @@ typedef struct {
 } amdsmi_npm_info_t;
 
 /**
+ * @brief NPM balancing mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NPM_BALANCING_MODE_INVALID = 0,  //!< Invalid/unavailable (e.g. unreadable sysfs value)
+  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,      //!< Power Balancing (PB), the default mode
+  AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,  //!< Frequency Balancing (FB)
+  AMDSMI_NPM_BALANCING_MODE_MAX = 3  //!< Not a valid mode; bounds the defined enum range
+} amdsmi_npm_balancing_mode_t;
+
+/**
  * @brief Compute tray type
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3206,7 +3230,8 @@ typedef struct {
  *
  *  @details This function initializes the library and the internal data structures,
  *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  Singleton Design, requires the same number of inits as shutdowns. Threads may call
+ *  ::amdsmi_init and ::amdsmi_shut_down concurrently; the calls are serialized.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -3232,7 +3257,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *
  *  @details This function shuts down the library and internal data structures and
  *  performs any necessary clean ups. Singleton Design, requires the same number
- *  of inits as shutdowns.
+ *  of inits as shutdowns. The call that releases the last reference frees every
+ *  handle, so no other thread may still be using one.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -4075,7 +4101,13 @@ amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle proces
  *  ::amdsmi_frequencies_t::num_supported (of ::amdsmi_pcie_bandwidth_t) bits of
  *  this mask are relevant.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p bw_bitmask selects no settable bandwidth
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  */
 amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              uint64_t bw_bitmask);
@@ -5443,33 +5475,46 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a processor handle @p processor_handle, a clock type @p clk_type, and a
- *  64 bit bitmask @p freq_bitmask, this function will limit the set of
- *  allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- *  the frequency (as ordered in an ::amdsmi_frequencies_t returned by
- *  amdsmi_get_clk_freq()) corresponding to that bit index will be
- *  allowed.
+ *  @details Given a processor handle @p processor_handle, this
+ *  function restricts clock @p clk_type to the frequencies
+ *  selected in @p freq_bitmask. Bit N maps to DPM level N in the
+ *  order returned by amdsmi_get_clk_freq(). Set a bit to 1 to
+ *  enable and 0 to disable that level.
  *
- *  This function will change the performance level to
- *  ::AMDSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- *  frequencies. Caller will need to set to ::AMDSMI_DEV_PERF_LEVEL_AUTO in order
- *  to get back to default state.
+ *  Only settable DPM levels can be enabled. Bits outside the settable range are
+ *  dropped before the request is sent, so an out-of-range level is never
+ *  requested; the remaining in-range bits are still applied. The deep-sleep
+ *  frequency (see ::amdsmi_frequencies_t::has_deep_sleep)
+ *  is not settable, so when it is present the settable level count is
+ *  ::amdsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ *  frequency, all ::amdsmi_frequencies_t::num_supported levels (0 to
+ *  num_supported - 1) are settable. The call returns ::AMDSMI_STATUS_INVAL if
+ *  @p freq_bitmask selects no settable level, or ::AMDSMI_STATUS_UNEXPECTED_DATA
+ *  if the device reports zero settable levels for @p clk_type.
  *
- *  All bits with indices greater than or equal to
- *  ::amdsmi_frequencies_t::num_supported will be ignored.
+ *  This call sets the performance level to ::AMDSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ *  back to ::AMDSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @note This function requires admin/sudo privileges
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::amdsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p clk_type is not a valid ::amdsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than AMDSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  */
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
@@ -6233,6 +6278,53 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
                                             uint32_t severity_mask, char* cper_data,
                                             uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
                                             uint64_t* entry_count, uint64_t* cursor);
+
+/**
+ *  @brief Retrieve CPER entries for IFoE fabric RAS events
+ *
+ *  @ingroup tagRasInfo
+ *
+ *  @platform{host}
+ *
+ *  @details Returns CPER-formatted error records for IFoE network port link events
+ *  (link down, link up, fatal errors).
+ *
+ *  Records are fetched from the UALoE library and transformed into full UEFI CPER
+ *  format. The notify_type field is set to AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID to
+ *  distinguish fabric events from GPU events.
+ *
+ *  @param[in] processor_handle GPU processor handle with UALoE fabric support.
+ *  @param[in] severity_mask Bitmask of severity levels to retrieve.
+ *                           Use (1U << AMDSMI_CPER_SEV_*) to construct the mask.
+ *                           Use (1U << AMDSMI_CPER_SEV_NUM) to retrieve all severities.
+ *
+ *  @param[in,out] cper_data Caller-allocated buffer for raw CPER data.
+ *                 Records are packed back-to-back.
+ *
+ *  @param[in,out] buf_size [in] size of cper_data buffer in bytes.
+ *                 [out] actual bytes written.
+ *
+ *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
+ *                 returned entry. Caller allocates the array.
+ *
+ *  @param[in,out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
+ *                 must be in [1, 4096].
+ *                 [out] number of CPER entries returned.
+ *
+ *  @param[in,out] cursor [in] cursor from previous call (0 = start).
+ *                 [out] cursor for next call (0 = no more data).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success with no more data,
+ *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UALoE not available,
+ *          ::AMDSMI_STATUS_INVAL if null pointer or out-of-range entry_count arguments,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small (cursor advanced, partial output
+ * may be present), or if internal allocation fails, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor);
 
 /** @} End tagRasInfo */
 
@@ -7729,6 +7821,75 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
  */
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* info);
+
+/**
+ * @brief Retrieves the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Queries whether the node is currently operating in Power Balancing (PB) or Frequency
+ * Balancing (FB) mode. This call is not gated on NPM enablement: it reports the last-selected
+ * mode regardless of whether NPM is currently enabled or disabled on the node.
+ * ::AMDSMI_STATUS_NOT_SUPPORTED is returned, and @p mode left unset, if the underlying sysfs
+ * value is missing or unreadable. If the sysfs value is present but cannot be decoded,
+ * ::AMDSMI_STATUS_UNEXPECTED_DATA is returned instead.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] mode Pointer to amdsmi_npm_balancing_mode_t to receive the current balancing mode.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs value is
+ * missing or unreadable. ::AMDSMI_STATUS_UNEXPECTED_DATA if the sysfs value is present but not
+ * decodable. Non-zero on other failures.
+ */
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode);
+
+/**
+ * @brief Sets the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Sets the node to Power Balancing (PB) or Frequency Balancing (FB) mode. This is an
+ * AMD-SMI only operation; it is not exposed via BMC Redfish/APML. Requires elevated privileges.
+ *
+ * @param[in] node_handle Handle to the Node to configure.
+ * @param[in] mode Requested balancing mode (::AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING or
+ *            ::AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING).
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if NPM is disabled on
+ * the node (no write is attempted). ::AMDSMI_STATUS_SETTING_UNAVAILABLE if the requested mode is
+ * not present in this platform's supported balancing modes (see
+ * ::amdsmi_get_npm_supported_balancing_modes). ::AMDSMI_STATUS_NO_PERM if the caller lacks
+ * elevation.
+ */
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode);
+
+/**
+ * @brief Retrieves the set of NPM balancing modes supported by this node's platform/ASIC,
+ * independent of current NPM enablement.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @note Bit N of *supported_modes corresponds to enum value N of ::amdsmi_npm_balancing_mode_t.
+ * Decoding should iterate the full defined enum range (up to ::AMDSMI_NPM_BALANCING_MODE_MAX) so
+ * that modes added in the future are picked up without caller changes. Not gated on NPM enablement.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] supported_modes Pointer to amdsmi_bit_field_t to receive the supported-modes bitmask.
+ *             Must be allocated by the user.
+ *
+ * @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ */
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes);
 
 /**
  * @brief Retrieves compute-tray type and accelerator count for the specified node.
