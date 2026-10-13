@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import json
 import math
 import os
+import platform
 from pathlib import Path
 import selectors
 import signal
@@ -31,6 +33,25 @@ MANAGED_TERMINATION_SIGNALS = frozenset((signal.SIGTERM, signal.SIGINT))
 
 class GuestRunError(ValueError):
     """A QEMU or vfio-user launch requirement was not satisfied."""
+
+
+def open_pidfd(pid: int) -> int:
+    """Open a process handle even when Python was built against old glibc."""
+
+    if hasattr(os, "pidfd_open"):
+        return os.pidfd_open(pid)
+    # manylinux Python lacks os.pidfd_open despite the runtime kernel supporting
+    # it. These are the same Linux syscall numbers used by simulated_kfd.cpp.
+    if platform.machine() not in ("x86_64", "aarch64"):
+        raise GuestRunError("this host requires Python with os.pidfd_open")
+    libc = ctypes.CDLL(None, use_errno=True)
+    syscall = libc.syscall
+    syscall.restype = ctypes.c_long
+    fd = syscall(ctypes.c_long(434), ctypes.c_int(pid), ctypes.c_uint(0))
+    if fd < 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return int(fd)
 
 
 @contextlib.contextmanager
@@ -392,8 +413,8 @@ def run_qemu(
                 stderr=subprocess.STDOUT,
                 preexec_fn=restore_child_signal_mask,
             )
-        guest_pidfd = os.pidfd_open(guest.pid)
-        server_pidfd = os.pidfd_open(server.pid)
+        guest_pidfd = open_pidfd(guest.pid)
+        server_pidfd = open_pidfd(server.pid)
         with selectors.DefaultSelector() as selector:
             selector.register(guest_pidfd, selectors.EVENT_READ, "guest")
             selector.register(server_pidfd, selectors.EVENT_READ, "server")

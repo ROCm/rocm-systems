@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import importlib.util
 import io
 import json
 import os
+import selectors
 from pathlib import Path
 import signal
 import socket
@@ -139,6 +141,35 @@ def fake_server(path: Path, behavior: str, supports_vfio: bool = True) -> None:
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "VFIO launcher is Linux-only")
+class PidfdTest(unittest.TestCase):
+    def test_missing_python_wrapper_still_observes_child_exit(self) -> None:
+        # Force the manylinux Python path but use a real kernel process handle.
+        with mock.patch.object(RUNNER, "os", wraps=os) as old_os:
+            del old_os.pidfd_open
+            child = subprocess.Popen([sys.executable, "-c", "pass"])
+            try:
+                fd = RUNNER.open_pidfd(child.pid)
+                try:
+                    self.assertFalse(os.get_inheritable(fd))
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(fd, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(timeout=5))
+                    self.assertEqual(child.wait(timeout=5), 0)
+                finally:
+                    os.close(fd)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait()
+
+    def test_missing_python_wrapper_preserves_kernel_errors(self) -> None:
+        with mock.patch.object(RUNNER, "os", wraps=os) as old_os:
+            del old_os.pidfd_open
+            with self.assertRaises(OSError) as caught:
+                RUNNER.open_pidfd(-1)
+            self.assertEqual(caught.exception.errno, errno.EINVAL)
+
+
 class RunVfioGuestTest(unittest.TestCase):
     def run_fake_guest(
         self,
