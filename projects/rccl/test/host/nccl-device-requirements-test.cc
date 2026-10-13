@@ -83,8 +83,8 @@ void ExpectNoGinCounterFields(const ncclDevResourceRequirements_t& req) {
   EXPECT_EQ(req.outGinCounterStart, nullptr);
 }
 
-// The isolated child re-execs, resetting PR_SET_DUMPABLE, so it must be set again here rather than
-// once in the runner. ci-precheckin.json builds Debug with coverage on, so a core dump is sizable.
+// gtest's default death-test style forks without re-exec, so clear this inside the death statement:
+// only the child is affected. ci-precheckin.json builds Debug with coverage on, so a dump is sizable.
 void DisableCoreDumpsForExpectedCrash() {
 #if defined(__linux__)
   if (prctl(PR_SET_DUMPABLE, 0) != 0) {
