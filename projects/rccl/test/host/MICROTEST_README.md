@@ -201,12 +201,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `param-parsers-test.cc`; suite `ParamParsersMicrotest.*`. Header-only, no
     `_CC_PATH` macro needed. Covers the bool/const-char*/integer
     `ncclParamParserDefault<T>` specializations (including the unsigned
-    strtoull negative-input wraparound and narrower-type truncation, both
-    pinned as current behavior rather than bugs), the primary-template
+    strtoull negative-input wraparound, narrower-type truncation, and
+    base-10-only parsing, all pinned as current behavior rather than bugs),
+    the primary-template
     unsupported-type fallback, the `ncclParamDefault<T>` factory singleton,
     `ncclParamBounded`'s closed-range validation and single-arg overload,
     `ncclParamOneOf`'s case-insensitive trimmed matching and per-option
-    descriptions, `ncclParamBitsetOf`'s comma-separated OR, `^`-prefixed
+    descriptions, `ncclParamBitsetOf`'s case-insensitive delimited OR
+    (including a `uint64_t` result with a custom delimiter), `^`-prefixed
     negation, `ignoreUnknown`, and its exact-alias-first/decompose-to-single-bits
     `toString`, and `ncclParamListOf`'s trim/empty-token-skip
     resolution into both vector and set containers. Second PR in the

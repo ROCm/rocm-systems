@@ -126,6 +126,21 @@ TEST(ParamParsersMicrotest, Integer_RejectsNullEmptyAndTrailingGarbage) {
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("abc", unsignedOut));
 }
 
+TEST(ParamParsersMicrotest, Integer_ParsesBase10Only_NoHexOrOctalPrefix) {
+  // parser_default.h passes base 10 to strtoll/strtoull, whereas the legacy
+  // loader (misc/param.cc) passes base 0. Pinning the current contract: a param
+  // moved to DEFINE_NCCL_PARAM rejects "0x10" and reads "010" as ten, not eight.
+  int64_t s = 0;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int64_t>::resolve("0x10", s));
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int64_t>::resolve("010", s));
+  EXPECT_EQ(10, s);
+
+  uint64_t u = 0;
+  EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint64_t>::resolve("0x10", u));
+  EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint64_t>::resolve("010", u));
+  EXPECT_EQ(10u, u);
+}
+
 TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
   // Exercises strtoll/strtoull's own ERANGE, as distinct from the T-narrowing
   // truncation in Integer_NarrowerTypeTruncatesRatherThanErrors below: this
@@ -308,6 +323,35 @@ TEST(ParamParsersMicrotest, Bitset_ResolveOrsEachCommaSeparatedBit) {
   uint32_t out = 0;
   EXPECT_EQ(ncclSuccess, parser.resolve("A,C", out));
   EXPECT_EQ(5u, out);
+}
+
+TEST(ParamParsersMicrotest, Bitset_ResolveMatchesTokensCaseInsensitively) {
+  // Users commonly write NCCL_DEBUG_SUBSYS=init,coll in lower case; the names
+  // here are all upper case, so this pins the case-insensitive compare.
+  auto parser = MakeFlagParser();
+  uint32_t out = 0;
+  EXPECT_EQ(ncclSuccess, parser.resolve("a,c", out));
+  EXPECT_EQ(5u, out);
+  EXPECT_EQ(ncclSuccess, parser.resolve("^b", out));
+  EXPECT_EQ(~uint32_t(0) & ~uint32_t(2), out);
+}
+
+enum class WideFlag : uint64_t { A = 1, B = 2, High = uint64_t(1) << 40, All = ~uint64_t(0) };
+
+TEST(ParamParsersMicrotest, Bitset_Uint64WithCustomDelimiterInvertsAcrossAllBits) {
+  // Shaped like NCCL_DEBUG_SUBSYS: a uint64_t result with an ALL = ~0 option
+  // and a bit above 32. The other bitset tests use uint32_t and ',', so a
+  // 32-bit inversion seed or a hardcoded ',' in parser_bitset.h would pass them.
+  auto opts = makeOptions(makeOption<WideFlag>("A", WideFlag::A), makeOption<WideFlag>("B", WideFlag::B),
+                          makeOption<WideFlag>("HIGH", WideFlag::High), makeOption<WideFlag>("ALL", WideFlag::All));
+  auto parser = ncclParamBitsetOf<WideFlag, uint64_t>(opts, ';');
+  uint64_t out = 0;
+  EXPECT_EQ(ncclSuccess, parser.resolve("A;HIGH", out));
+  EXPECT_EQ((uint64_t(1) << 40) | 1u, out);
+  EXPECT_EQ(ncclSuccess, parser.resolve("^A", out));
+  EXPECT_EQ(~uint64_t(0) & ~uint64_t(1), out);
+  // ',' is not this parser's delimiter, so "A,B" is one unknown token.
+  EXPECT_EQ(ncclInvalidArgument, parser.resolve("A,B", out));
 }
 
 TEST(ParamParsersMicrotest, Bitset_ResolveTrimsAndSkipsEmptyTokens) {
