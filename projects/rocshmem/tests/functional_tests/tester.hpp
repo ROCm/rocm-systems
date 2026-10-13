@@ -229,7 +229,11 @@
   X(TilePut4D,                      187)  \
   X(TileGet4D,                      188)  \
   X(TilePutWG4D,                    189)  \
-  X(TileGetWG4D,                    190)
+  X(TileGetWG4D,                    190)  \
+  X(TilePutWave3D,                  191)  \
+  X(TileGetWave3D,                  192)  \
+  X(TilePutWave4D,                  193)  \
+  X(TileGetWave4D,                  194)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {

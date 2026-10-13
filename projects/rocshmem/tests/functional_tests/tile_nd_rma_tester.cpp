@@ -184,6 +184,30 @@ __global__ void TileNDRMATest(long long int* start_time, long long int* end_time
       Tuple4D start(0, 0, 0, 0);
       Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
       rocshmem_ctx_tile_get_wg(ctx, dst, src, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWave3DTestType) {
+      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
+      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
+      Tuple3D start(0, 0, 0);
+      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
+      rocshmem_ctx_tile_put_wave(ctx, dst, src, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWave3DTestType) {
+      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
+      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
+      Tuple3D start(0, 0, 0);
+      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
+      rocshmem_ctx_tile_get_wave(ctx, dst, src, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWave4DTestType) {
+      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
+      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
+      Tuple4D start(0, 0, 0, 0);
+      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
+      rocshmem_ctx_tile_put_wave(ctx, dst, src, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWave4DTestType) {
+      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
+      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
+      Tuple4D start(0, 0, 0, 0);
+      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
+      rocshmem_ctx_tile_get_wave(ctx, dst, src, start, boundary, 1, 0);
     }
   }
 
@@ -206,8 +230,10 @@ TileNDRMATester::TileNDRMATester(TesterArguments args) : Tester(args) {
   const size_t num_elements  = static_cast<size_t>(total_threads) * TILE_ELEMS;
 
   // Put: local=source, remote=dest. Get: remote=source, local=dest.
-  const bool is_put = (_type == TilePut3DTestType  || _type == TilePutWG3DTestType ||
-                       _type == TilePut4DTestType  || _type == TilePutWG4DTestType);
+  const bool is_put = (_type == TilePut3DTestType     || _type == TilePutWG3DTestType     ||
+                       _type == TilePutWave3DTestType ||
+                       _type == TilePut4DTestType     || _type == TilePutWG4DTestType     ||
+                       _type == TilePutWave4DTestType);
 
   source_buf = static_cast<float*>(rocshmem_malloc(num_elements * sizeof(float)));
   dest_buf   = static_cast<float*>(rocshmem_malloc(num_elements * sizeof(float)));
@@ -269,8 +295,12 @@ void TileNDRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
     case TileGetWG3DTestType:  LAUNCH(TileGetWG3D);  break;
     case TilePut4DTestType:    LAUNCH(TilePut4D);    break;
     case TileGet4DTestType:    LAUNCH(TileGet4D);    break;
-    case TilePutWG4DTestType:  LAUNCH(TilePutWG4D);  break;
-    case TileGetWG4DTestType:  LAUNCH(TileGetWG4D);  break;
+    case TilePutWG4DTestType:    LAUNCH(TilePutWG4D);    break;
+    case TileGetWG4DTestType:    LAUNCH(TileGetWG4D);    break;
+    case TilePutWave3DTestType:  LAUNCH(TilePutWave3D);  break;
+    case TileGetWave3DTestType:  LAUNCH(TileGetWave3D);  break;
+    case TilePutWave4DTestType:  LAUNCH(TilePutWave4D);  break;
+    case TileGetWave4DTestType:  LAUNCH(TileGetWave4D);  break;
     default:
       std::cerr << "TileNDRMATester: unhandled TestType " << _type << "\n";
       exit(-1);
@@ -284,8 +314,10 @@ void TileNDRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 void TileNDRMATester::verifyResults(uint64_t /*size*/) {
   // For put: PE 1 receives into dest — verify on PE 1 (check_id=1).
   // For get: PE 0 receives into dest — verify on PE 0 (check_id=0).
-  const bool is_put = (_type == TilePut3DTestType  || _type == TilePutWG3DTestType ||
-                       _type == TilePut4DTestType  || _type == TilePutWG4DTestType);
+  const bool is_put = (_type == TilePut3DTestType     || _type == TilePutWG3DTestType     ||
+                       _type == TilePutWave3DTestType ||
+                       _type == TilePut4DTestType     || _type == TilePutWG4DTestType     ||
+                       _type == TilePutWave4DTestType);
   const int check_id = is_put ? 1 : 0;
 
   if (args.myid != check_id) return;

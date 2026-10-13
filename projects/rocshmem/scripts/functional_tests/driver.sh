@@ -198,6 +198,10 @@ declare -A TEST_NUMBERS=(
   ["tile_get_4d"]="188"
   ["tile_put_wg_4d"]="189"
   ["tile_get_wg_4d"]="190"
+  ["tile_put_wave_3d"]="191"
+  ["tile_get_wave_3d"]="192"
+  ["tile_put_wave_4d"]="193"
+  ["tile_get_wave_4d"]="194"
 )
 
 # Detect which runtime to use
@@ -1113,6 +1117,12 @@ TestTiles() {
   ExecTest  "tile_get_4d"                         2       1            1
   ExecTest  "tile_put_wg_4d"                      2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_4d"                      2       4            $((WAVE_SIZE * 16))
+  export ROCSHMEM_MAX_NUM_CONTEXTS=$((1 * 4))
+  ExecTest  "tile_put_wave_3d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_3d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_put_wave_4d"                    2       1            $WAVE_SIZE
+  ExecTest  "tile_get_wave_4d"                    2       1            $WAVE_SIZE
+  unset ROCSHMEM_MAX_NUM_CONTEXTS
   ExecTest  "tile_broadcast"            2       1            1            1048576
   ExecTest  "tile_broadcast"            4       1            1            1048576
   # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF
