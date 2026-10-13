@@ -4,7 +4,7 @@
 
 This note is the collection algorithm for Phase 1 in the high-level design (requirement FR-1), and how analyze reads every counter of a metric from one pass. The rule for combining SPU parts across passes, and the YAML functions that combine them, stay in the high-level design.
 
-A **PMC set** is the counters of one metric that must share one perfmon pass. A **bucket** is one perfmon pass. This note uses "bucket" for that pass. A block's counter limit is that block's capacity in `perfmon_config` (`CounterFile` in `soc_base.py`). GRBM and SQ are charged separately.
+A metric's **PMC set** is the hardware counters its expression reads. For an SPP metric, they share one perfmon pass. A **bucket** is one perfmon pass. This note uses "bucket" for that pass. A block's counter limit is that block's capacity in `perfmon_config` (`CounterFile` in `soc_base.py`). GRBM and SQ are charged separately.
 
 ---
 
@@ -23,7 +23,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 6. Place leftover SPU counters. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, placement raises `ValueError` and does not drop the counter or keep looping.
 7. Keep those request-counter copies again, after the leftover SPU counters are placed.
 
-A `*_ACCUM` counter (for example `SQ_INST_LEVEL_VMEM_ACCUM`) uses hardware slots for itself and for its base counter. Charging happens when a counter is added to a bucket: two slots alone (`BASE` + `HIGH_RES`), one extra slot when `BASE` is already in the bucket, and no extra slot when `BASE` is added after its `*_ACCUM`. The main flowchart stays the general placement flow. The TCC chart in §4 matches this order and stays out of that flowchart.
+A `*_ACCUM` counter (for example `SQ_INST_LEVEL_VMEM_ACCUM`) uses hardware slots for itself and for its base counter. Charging happens when a counter is added to a bucket: two slots when the `*_ACCUM` counter is added alone (one for the base counter, one for its high-resolution accumulation), one extra slot when the base counter is already in the bucket, and no extra slot when the base counter is added after its `*_ACCUM`. The main flowchart stays the general placement flow. The TCC chart in §4 matches this order and stays out of that flowchart.
 
 **Decisions.** The list is in the high-level design: [Decisions and alternatives](hld-plan.md#decisions-and-alternatives).
 
@@ -108,7 +108,7 @@ Analyze reads all of a metric's counters from the same pass. Code: `src/utils/me
 
 ## 4. TCC counters that must share a pass
 
-The TCC handling here is a **short-term solution**. Those rules live in one module so a later design can replace them. A general way to handle other replicated blocks is **out of scope**. [Instance-aware metrics](#instance-aware-metrics-out-of-scope) records that boundary.
+The TCC handling here is a **short-term solution**. Those rules live in one module so a later design can replace them. A general way to handle other replicated blocks is **out of scope**. [Other replicated blocks](#other-replicated-blocks-out-of-scope) records that boundary.
 
 An L2 channel map can change between replays, so the counters one expression joins share a pass. A TCC counter is read once per L2 channel. When one is chosen, every channel of that counter goes in the same pass. gfx942 is the example, not the only architecture, and the pass count there stays **14**. On gfx908 and gfx115x, use that chip's own L2 channel count. Do not multiply it by the number of dies.
 
@@ -128,11 +128,11 @@ flowchart TD
   K2 --> B[Table 1805 uses the lowest-numbered<br/>pass that holds read, write, and atomic.<br/>It is not chosen for ATOMIC_LEVEL]
 ```
 
-### Instance-aware metrics (out of scope)
+### Other replicated blocks (out of scope)
 
-Today the replicated block is a TCC channel. TCP, a shader engine, and SDMA come later. TCC is the first consumer. The later framework would cover:
+Today the replicated block is a TCC channel. TCP, a shader engine, and SDMA come later. TCC is the first block that needs this. A later design would cover:
 
-- **Per-instance counters.** Each replica of a block exposes its own counter.
-- **Aggregation strategies.** A metric sums, averages, or otherwise combines those readings.
-- **Balance metrics.** A balance metric compares instances with each other.
-- **Joined counters.** Joined counters share a pass when the instance map can change between replays.
+- Each replica of a block exposes its own counter.
+- A metric sums, averages, or otherwise combines the readings from those replicas.
+- A metric compares replicas with each other.
+- Counters that one expression combines share a pass when the replica map can change between replays.
