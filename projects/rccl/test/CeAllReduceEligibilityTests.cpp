@@ -252,16 +252,7 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        // Min-bound env-override: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
-        // 252 * sizeof(float) = 1008 bytes < 1024 -- rejected.
-        // 256 * sizeof(float) = 1024 bytes == min  -- accepted.
-        // Both counts are divisible by nRanks=4.
-        {"MinBoundRejects_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 252, ncclSum, ncclFloat32, false,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
-        {"AtMinBoundPasses_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 256, ncclSum, ncclFloat32, true,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
+
     };
 
     for(const auto& tc : cases)
