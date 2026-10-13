@@ -42,10 +42,16 @@ else()
         CACHE STRING
         "Upstream SQLite3 git tag to check out"
     )
-    set(SQLITE3_AMALGAMATION_YEAR
-        "2024"
+    # Windows amalgamation zip. Bump URL + SHA256 together with SQLITE3_GIT_TAG.
+    set(SQLITE3_AMALGAMATION_URL
+        "https://www.sqlite.org/2024/sqlite-amalgamation-3450300.zip"
         CACHE STRING
-        "Release year folder on sqlite.org for the amalgamation download (Windows)"
+        "URL of the prebuilt sqlite.org amalgamation zip used on Windows"
+    )
+    set(SQLITE3_AMALGAMATION_SHA256
+        "ea170e73e447703e8359308ca2e4366a3ae0c4304a8665896f068c736781c651"
+        CACHE STRING
+        "Expected SHA256 of SQLITE3_AMALGAMATION_URL"
     )
 
     # Windows downloads the official amalgamation zip. Linux clones and runs
@@ -68,7 +74,8 @@ else()
             ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
             -DMAKE_COMMAND=${MAKE_COMMAND} -DSQLITE3_GIT_URL=${SQLITE3_GIT_URL}
             -DSQLITE3_GIT_TAG=${SQLITE3_GIT_TAG}
-            -DSQLITE3_AMALGAMATION_YEAR=${SQLITE3_AMALGAMATION_YEAR}
+            -DSQLITE3_AMALGAMATION_URL=${SQLITE3_AMALGAMATION_URL}
+            -DSQLITE3_AMALGAMATION_SHA256=${SQLITE3_AMALGAMATION_SHA256}
             -DSQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR} -P
             ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
         DEPENDS ${CMAKE_CURRENT_LIST_DIR}/fetch_sqlite3.cmake
