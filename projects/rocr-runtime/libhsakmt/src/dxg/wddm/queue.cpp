@@ -713,7 +713,7 @@ hsa_status_t ComputeQueue::EndSubmit(void) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t ComputeQueue::Submit(void) {
+hsa_status_t ComputeQueue::Submit(uint64_t* issued_fence) {
   hsa_status_t ret = PreSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
@@ -731,6 +731,7 @@ hsa_status_t ComputeQueue::Submit(void) {
   ret = EndSubmit();
   if (ret) return HSA_STATUS_ERROR;
 
+  *issued_fence = fence_value;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1167,7 +1168,8 @@ hsa_status_t ComputeQueue::Process(void) {
 
     if (!ready_to_submit) continue;
 
-    ret = Submit();
+    uint64_t fence_value = 0;
+    ret = Submit(&fence_value);
     if (ret != HSA_STATUS_SUCCESS) return ret;
 
     // CPU wait for GPU fence, and cpu update the signal.
@@ -1175,21 +1177,16 @@ hsa_status_t ComputeQueue::Process(void) {
       // A signalled packet ends its merge run, so it is the last packet of the submission
       // just issued. The AQL write index is not a fence value: once dispatches share a
       // submission it runs ahead of every value this syncobj will ever reach.
-      const uint64_t fence_value = CmdbufFrameRing::LastFenceValue(sync_point);
-      constexpr int kFaultTimeoutMs = 30000;
-      const FenceWaitPolicy policy{std::chrono::microseconds(200), std::chrono::microseconds(20),
-                                   std::chrono::microseconds(250),
-                                   std::chrono::milliseconds(kFaultTimeoutMs),
-                                   !dxg_runtime->disable_wait_timeout_};
-      const FenceWaitResult result = WaitForFence(
-          fence_value, policy, [this] { return LoadSyncValue(sync_addr); },
-          [] { return std::chrono::steady_clock::now().time_since_epoch(); },
-          [] { std::this_thread::yield(); },
-          [](std::chrono::nanoseconds interval) { std::this_thread::sleep_for(interval); });
+      FenceWaitPolicy policy;
+      policy.enforce_timeout = !dxg_runtime->disable_wait_timeout_;
+      const FenceWaitResult result =
+          WaitForFence(fence_value, policy, [this] { return LoadSyncValue(sync_addr); });
       if (result == FenceWaitResult::kTimedOut) {
-        pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+        const auto timeout_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(policy.timeout).count();
+        pr_err("GPU fence timeout after %" PRId64 "ms — possible device fault (sync_addr=%" PRIu64
                " expected=%" PRIu64 ")\n",
-               kFaultTimeoutMs, LoadSyncValue(sync_addr), fence_value);
+               static_cast<int64_t>(timeout_ms), LoadSyncValue(sync_addr), fence_value);
         return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
       }
       // CPU update completional signal

@@ -169,7 +169,7 @@ public:
 
   virtual hsa_status_t Init(void);
   virtual hsa_status_t Fini(void);
-  virtual hsa_status_t Submit(void);
+  virtual hsa_status_t Submit(uint64_t* issued_fence);
 
   void* GetRing(void) const { return ring; }
   uint64_t GetRingSize(void) const { return ring_size; }

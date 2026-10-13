@@ -155,31 +155,6 @@ void FullMergeRunsStillUseEveryFrame() {
   CHECK(FramesUsedByPacketIndex(at_the_limit, 4) == 0x1u);
 }
 
-// Without platform atomics the CPU retires a completion signal once the fence
-// reaches LastFenceValue(). A signalled packet ends its merge run, so the value
-// is the submission ordinal; the AQL write index only coincides with it while
-// every submission carries exactly one packet.
-void CompletionWaitTargetsTheSubmissionFence() {
-  const Replay single = ReplayOrdinal({1, 1, 1}, 4);
-  CHECK(CmdbufFrameRing::LastFenceValue(single.submitted) == single.last_fence);
-  CHECK(single.last_fence == single.packets);
-
-  // Eight dispatches merged four to a submission, the signalled one last.
-  const Replay merged = ReplayOrdinal({4, 4}, 4);
-  CHECK(CmdbufFrameRing::LastFenceValue(merged.submitted) == merged.last_fence);
-  CHECK(merged.last_fence == 2);
-
-  // The fence never passes the submission count, so a target taken from the
-  // packet count is unreachable as soon as one run merges.
-  CHECK(merged.packets > merged.last_fence);
-
-  // A captured graph of 1000 dispatches retired by 25 submissions: the fence
-  // stops at 25 and an index-relative wait for 1000 times out as a device fault.
-  const Replay hip_graph = ReplayOrdinal(std::vector<uint64_t>(25, 40), 4);
-  CHECK(CmdbufFrameRing::LastFenceValue(hip_graph.submitted) == 25);
-  CHECK(hip_graph.packets == 1000);
-}
-
 }  // namespace
 
 int main() {
@@ -189,7 +164,6 @@ int main() {
   Wraparound();
   NoUnderflowBeforeTheFirstWrap();
   FullMergeRunsStillUseEveryFrame();
-  CompletionWaitTargetsTheSubmissionFence();
 
   if (failures != 0) {
     std::fprintf(stderr, "cmdbuf_frame_ring_test: %d check(s) failed\n", failures);

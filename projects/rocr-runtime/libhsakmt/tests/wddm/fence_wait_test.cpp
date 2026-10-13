@@ -31,10 +31,18 @@ void Failed(const char* expr, int line) {
 
 #define CHECK(expr) ((expr) ? (void)0 : Failed(#expr, __LINE__))
 
-constexpr FenceWaitPolicy kPolicy{200us, 20us, 250us, 30000ms, true};
+// The schedule ComputeQueue ships.
+constexpr FenceWaitPolicy kPolicy{};
 
-// A monitored fence that jumps to `value` once the fake clock reaches
-// `retire_at`. A yield costs 1us of fake time; a sleep costs exactly its length.
+FenceWaitPolicy WithTimeout(std::chrono::nanoseconds timeout) {
+  FenceWaitPolicy policy = kPolicy;
+  policy.timeout = timeout;
+  return policy;
+}
+
+// A monitored fence that holds `value` until the fake clock reaches `retire_at`
+// and then jumps to `retire_value`. A yield costs 1us of fake time; a sleep
+// costs exactly its length.
 struct FakeFence {
   uint64_t value = 0;
   uint64_t retire_value = 0;
@@ -71,7 +79,7 @@ void AlreadyReachedReturnsWithoutWaiting() {
   CHECK(f.sleeps.empty());
 }
 
-// A kernel that retires inside the spin window is noticed within one yield and
+// A kernel that retires inside the yield window is noticed within one yield and
 // never pays a sleep.
 void ShortKernelOnlyYields() {
   FakeFence f;
@@ -82,7 +90,7 @@ void ShortKernelOnlyYields() {
   CHECK(f.clock - f.retire_at <= 1us);
 }
 
-// Past the spin window the interval starts at min_sleep and doubles up to
+// Past the yield window the interval starts at min_sleep and doubles up to
 // max_sleep, so a long kernel is noticed within max_sleep of retiring - not
 // within the 50 ms that used to be the floor.
 void LongKernelBacksOffToTheCap() {
@@ -91,6 +99,7 @@ void LongKernelBacksOffToTheCap() {
   f.retire_at = 10ms;
   CHECK(f.Wait(1) == FenceWaitResult::kReached);
   CHECK(f.sleeps.size() >= 5);
+  if (f.sleeps.size() < 5) return;
   CHECK(f.sleeps[0] == 20us);
   CHECK(f.sleeps[1] == 40us);
   CHECK(f.sleeps[2] == 80us);
@@ -107,12 +116,15 @@ void WaitsForTheTargetNotForProgress() {
   f.value = 1;
   f.retire_value = 2;
   f.retire_at = 1ms;
-  CHECK(f.Wait(3, {200us, 20us, 250us, 5ms, true}) == FenceWaitResult::kTimedOut);
+  CHECK(f.Wait(3, WithTimeout(5ms)) == FenceWaitResult::kTimedOut);
   CHECK(f.value == 2);
 }
 
-// The regression the submission-fence target fixes: 1000 merged dispatches
-// retire with the fence at 25, so a wait for 1000 can only end as a fault.
+// Why the target matters: a captured graph of 1000 dispatches merged 40 to a
+// submission leaves the fence at 25, so a wait for the AQL write index (1000)
+// can only end as a fault while the submission's own fence value is reached.
+// This pins how the wait treats each target, not which one
+// ComputeQueue::Process() passes; no host test reaches that call site.
 void UnreachableTargetTimesOutAsAFault() {
   FakeFence f;
   f.retire_value = 25;
@@ -146,7 +158,7 @@ void ValueArrivingAtTheDeadlineIsReached() {
   FakeFence f;
   f.retire_value = 1;
   f.retire_at = 5ms;
-  CHECK(f.Wait(1, {200us, 20us, 250us, 5ms, true}) == FenceWaitResult::kReached);
+  CHECK(f.Wait(1, WithTimeout(5ms)) == FenceWaitResult::kReached);
 }
 
 // Fence values are compared as plain 64-bit ordinals, matching every other
