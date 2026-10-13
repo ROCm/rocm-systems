@@ -753,6 +753,9 @@ function(rccl_standalone_setup)
   # binary; run_host_tests.sh (the only in-repo workflow that runs these) uses
   # this standalone path, so build the shipping arm explicitly too.
   set(_ENQ_BUILD_DEVLINKER TRUE PARENT_SCOPE)
+  # Same reason for roctx.cc's ROCTX_ENABLE arm: in-tree inherits it from the rccl target when
+  # roctracer is found, so standalone builds that arm explicitly.
+  set(_MICRO_BUILD_ROCTX_VARIANT TRUE PARENT_SCOPE)
   # No GENERATE_SYM_KERNELS variable exists in this standalone project(); check
   # for the generated host TU on disk instead.
   if(EXISTS "${RCCL_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
@@ -789,6 +792,7 @@ if(BUILD_TESTS)
   set(_MICRO_MODE_DEFS "")
   set(_MICRO_AMDSMI_DEF "")
   set(_ENQ_BUILD_DEVLINKER FALSE)
+  set(_MICRO_BUILD_ROCTX_VARIANT FALSE)
   set(_MICRO_BUILD_SYM_KERNELS ${GENERATE_SYM_KERNELS})
 else()
   # --- hipcc is mandatory (must be resolved before project() at top level) ---
@@ -1068,13 +1072,24 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRoctxNvml
 # ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml
+set(_roctx_nvml_common_args
   SOURCES ${TEST_MICRO_ROCTX_NVML_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ROCTX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/roctx.cc"
     NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml ${_roctx_nvml_common_args})
+# roctx.cc gates its roctracer calls on ROCTX_ENABLE at the preprocessor, so one compile covers
+# one arm. The -roctx variant covers the roctracer arm against a stand-in <roctracer/roctx.h>
+# (fakes/roctx_include), so it builds whether or not roctracer is installed.
+if(_MICRO_BUILD_ROCTX_VARIANT)
+  rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml-roctx ${_roctx_nvml_common_args})
+  target_compile_definitions(rccl-UnitTestsMicroRoctxNvml-roctx PRIVATE ROCTX_ENABLE)
+  target_include_directories(rccl-UnitTestsMicroRoctxNvml-roctx BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes/roctx_include)
+endif()
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

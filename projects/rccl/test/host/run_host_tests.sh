@@ -168,6 +168,9 @@ do_host_tests() {
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
+    # roctx.cc gates its roctracer calls on ROCTX_ENABLE at the preprocessor; this
+    # variant builds that arm against a stand-in roctracer header. See test/host/CMakeLists.txt.
+    "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
   )

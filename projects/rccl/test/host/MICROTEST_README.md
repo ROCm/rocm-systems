@@ -248,6 +248,19 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroRoctxNvml`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
+  `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH`/`NVMLWRAP_STUB_CC_PATH`, both
+  from `roctx-nvml-stub-test.cc`); suites `RoctxNvmlRoctxMicrotest.*` and
+  `RoctxNvmlStubMicrotest.*`, both caught by the `RoctxNvml*` pattern. Its own
+  binary because `fakes/comm_fakes.cc`, linked by most other targets, stubs the
+  `roctx_scoped_range_in` constructor/destructor this file compiles for real,
+  and `ras-diagnostics-gpu-test.cc` defines its own NVML seams; the TU supplies
+  its own `ncclDebugLog` and `g_loadParam`, so no shared fakes are linked.
+  `roctx.cc` gates its `roctxRangePushA`/`roctxRangePop` calls on
+  `ROCTX_ENABLE` at the preprocessor: the base binary covers the WARN fallback,
+  and the standalone-only `-roctx` variant defines `ROCTX_ENABLE` against the
+  stand-in `fakes/roctx_include/roctracer/roctx.h`, with the test TU recording
+  each push and pop.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -829,19 +842,21 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroRoctxNvml[-roctx]`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
-Three of those names are preprocessor variants, not duplicates. `init.cc` gates
+Four of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
 on `ENABLE_FAULT_INJECTION`, and `enqueue.cc` gates `rcclShmemDynamicSize` on
-`RCCL_DEVICE_LINKER`, all at the **preprocessor**, so one compile can only ever
-reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
+`RCCL_DEVICE_LINKER`, and `roctx.cc` gates its roctracer calls on `ROCTX_ENABLE`,
+all at the **preprocessor**, so one compile can only ever reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
 `rccl` target's compile definitions (`ENABLE_DEVICE_LINKER` defaults ON, so the
 device-linker arm is the one that ships); this standalone project has no `rccl`
 target to inherit from, which is why it builds the `-devlinker` variant
-explicitly. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
+explicitly, and likewise the `-roctx` variant for `ROCTX_ENABLE`, which in-tree
+is inherited only when roctracer is found. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
 defined in-tree, absent standalone, so the two paths tested different code - and
 is now stripped from the inherited list and set per variant in both paths, so the
 `-faultinj` binary is the only one that has it either way.
@@ -868,6 +883,8 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
+./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
+./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests

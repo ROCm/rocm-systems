@@ -114,9 +114,8 @@ test_categories:
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
-      # misc/roctx.cc, misc/nvmlwrap_stub.cc (rccl-UnitTestsMicroRoctxNvml)
-      - "RoctxMicrotest.*"
-      - "NvmlStubMicrotest.*"
+      # misc/roctx.cc, misc/nvmlwrap_stub.cc (rccl-UnitTestsMicroRoctxNvml[-roctx])
+      - "RoctxNvml*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
