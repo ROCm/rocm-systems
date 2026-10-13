@@ -1087,8 +1087,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroNcclDeviceCore
   SOURCES ${TEST_MICRO_NCCL_DEVICE_CORE_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # core.cc includes "nccl_device/impl/core__funcs.h" unqualified
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"

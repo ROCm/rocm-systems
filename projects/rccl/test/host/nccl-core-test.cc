@@ -6,11 +6,11 @@
 
 // Host-only microtests for src/nccl_device/core.cc: the ncclTeam* family that
 // maps a communicator onto its world/LSA/CFT/rail views, plus the
-// world/LSA rank-translation helpers. Every function but ncclTeamRankToWorld
-// gates through ncclDevrInitOnce first, so the fake's hook lets us drive both
-// the success path (devrState fields read back verbatim) and the failure
-// path (all five return a poisoned/zeroed answer rather than touching
-// uninitialised devrState).
+// world/LSA rank-translation helpers. Five of the seven gate through
+// ncclDevrInitOnce first (all but ncclTeamWorld and ncclTeamRankToWorld), so
+// the fake's hook lets us drive both the success path (devrState fields read
+// back verbatim) and the failure path (all five return a poisoned/zeroed
+// answer rather than touching uninitialised devrState).
 
 #include <gtest/gtest.h>
 
@@ -87,11 +87,14 @@ TEST_F(NcclCoreMicrotest, TeamCftMultimem_InitOnceFails_ReturnsZeroedTeam) {
 }
 
 TEST_F(NcclCoreMicrotest, TeamRail_SuccessPath_DividesCommNRanksAndRankByLsaSize) {
-  comm->nRanks = 16;
+  // nRanks=24, lsaSize=4 deliberately avoids lsaSize^2 == nRanks: with the
+  // earlier 16/4 the expected team.nRanks (4) was indistinguishable from a
+  // mutation that replaced the division with a bare `lsaSize` readback.
+  comm->nRanks = 24;
   comm->rank = 10;
   comm->devrState.lsaSize = 4;
   ncclTeam_t team = ncclTeamRail(comm);
-  EXPECT_EQ(team.nRanks, 4);  // 16 / 4
+  EXPECT_EQ(team.nRanks, 6);  // 24 / 4
   EXPECT_EQ(team.rank, 2);    // 10 / 4
   EXPECT_EQ(team.stride, 4);  // == lsaSize
 }
@@ -121,9 +124,15 @@ TEST_F(NcclCoreMicrotest, TeamCft_HierMultimemMode_OuterFactorsTheFlatTeamByCftM
   // ncclTeamOuterFactor(flat, innerSize): nRanks = flat.nRanks/innerSize,
   // rank = flat.rank/innerSize, stride = flat.stride*innerSize (== 1*innerSize
   // here since the flat team's stride is always 1).
+  //
+  // lsaSize is set to a distinct non-zero value (the HIER_LSA test's own
+  // divisor) so that if the two mode arms in production were swapped, this
+  // test would divide by a real, wrong number and get a mis-answer to diff
+  // against -- not silently divide by zero and crash identically either way.
   comm->devrState.cftSize = 12;
   comm->devrState.cftSelf = 7;
   comm->devrState.cftMcSize = 3;
+  comm->devrState.lsaSize = 2;
   ncclTeam_t team = ncclTeamCft(comm, NCCL_CFT_TEAM_HIER_MULTIMEM);
   EXPECT_EQ(team.nRanks, 4);  // 12 / 3
   EXPECT_EQ(team.rank, 2);    // 7 / 3
@@ -131,9 +140,12 @@ TEST_F(NcclCoreMicrotest, TeamCft_HierMultimemMode_OuterFactorsTheFlatTeamByCftM
 }
 
 TEST_F(NcclCoreMicrotest, TeamCft_HierLsaMode_OuterFactorsTheFlatTeamByLsaSize) {
+  // cftMcSize is likewise set to a distinct non-zero value for the same
+  // swapped-arm reason as the HIER_MULTIMEM test above.
   comm->devrState.cftSize = 20;
   comm->devrState.cftSelf = 9;
   comm->devrState.lsaSize = 5;
+  comm->devrState.cftMcSize = 3;
   ncclTeam_t team = ncclTeamCft(comm, NCCL_CFT_TEAM_HIER_LSA);
   EXPECT_EQ(team.nRanks, 4);  // 20 / 5
   EXPECT_EQ(team.rank, 1);    // 9 / 5
@@ -178,6 +190,7 @@ TEST_F(NcclCoreMicrotest, TeamRankToLsa_SuccessPath_MapsATeamLocalRankToAnLsaRan
   // devrState.lsaSelf + (rank - team.rank) * team.stride
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank), 5);
   EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank + 1), 8);
+  EXPECT_EQ(ncclTeamRankToLsa(comm, team, team.rank - 1), 2);  // 5 + (-1)*3
 }
 
 TEST_F(NcclCoreMicrotest, TeamRankToLsa_InitOnceFails_ReturnsNegativeOneWithoutReadingLsaSelf) {
