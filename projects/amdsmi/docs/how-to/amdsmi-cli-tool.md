@@ -45,7 +45,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 27.0.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.2.0 | ROCm version: 10.2.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -172,9 +172,10 @@ output](#cli-ex-static) for `amd-smi static`.
 
 ```shell-session
 ~$ amd-smi static --help
-usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
-                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+usage: amd-smi static [-h] [-a] [-b] [-I] [-d] [-v] [-c] [-B] [-R] [-r] [-C [CLOCK ...]]
+                      [-p] [-m] [-l] [-P] [-x] [-o] [-u] [-s] [-i]
+                      [-g GPU [GPU ...] | -U CPU [CPU ...]] [--json | --csv] [--file FILE]
+                      [--overwrite] [--append] [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
 If no static argument is provided, all static information will be displayed.
@@ -183,7 +184,7 @@ Static Arguments:
   -h, --help               show this help message and exit
   -a, --asic               All asic information
   -b, --bus                All bus information
-  -I, --ifwi               All video bios\IFWI information (if available)
+  -I, --ifwi               All video bios/IFWI information (if available)
   -d, --driver             Displays driver version
   -v, --vram               All vram information
   -c, --cache              All cache information
@@ -193,10 +194,17 @@ Static Arguments:
                                 Sudo may be required for some features
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
-  -p, --partition          Partition information
+  -p, --partition          Partition information:
+                                No longer available in default output.
+                                Argument is required to display.
+                                Ex. `amd-smi static -p` or use
+                                `amd-smi partition -c -m`/`sudo amd-smi partition -a`
+  -m, --mem-carveout       Display VRAM carveout memory options and current setting.
+                                Only supported on some APUs.
   -l, --limit              All limit metric values (i.e. power and thermal limits)
   -P, --soc-pstate         The available soc pstate policy
   -x, --xgmi-plpd          The available XGMI per-link power down policy
+  -o, --profile            Display current and available power profiles
   -u, --numa               All numa node information
 
 CPU Arguments:
@@ -218,11 +226,13 @@ Device Arguments:
                              all | Selects all devices
 
 Command Modifiers:
-  --json                       Displays output in JSON format (human readable by default).
-  --csv                        Displays output in CSV format (human readable by default).
-  --file FILE                  Saves output into a file on the provided path (stdout by default).
-  --loglevel LEVEL             Set the logging level from the possible choices:
-                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --json                   Displays output in JSON format
+  --csv                    Displays output in CSV format
+  --file FILE              Saves output into a file on the provided path
+  --overwrite              Overwrite the file
+  --append                 Append to the file
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                               DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
 (cmd-firmware)=
@@ -1045,7 +1055,7 @@ not supported.
 
 ```shell-session
 ~$ amd-smi fabric --help
-usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+usage: amd-smi fabric [-h] [-t] [-T] [-g GPU [GPU ...]] [--json | --csv]
                       [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns information for all GPUs on the system.
@@ -1053,8 +1063,8 @@ If no fabric argument is provided, all fabric information will be displayed.
 
 Fabric arguments:
   -h, --help               show this help message and exit
-  -t, --topology           Display fabric topology data (counters per category, instance, and item)
-  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -t, --topology           Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -T, --telemetry          Display fabric telemetry data (counters per category, instance, and item)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
@@ -1143,9 +1153,9 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI            27.0.0                                                    |
+| AMD-SMI            27.2.0                                                    |
 | amdgpu Version:    6.19.14.31400000-2370381                                  |
-| ROCm Version:      7.14.0                                                    |
+| ROCm Version:      10.2.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
