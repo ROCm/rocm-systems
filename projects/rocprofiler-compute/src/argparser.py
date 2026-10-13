@@ -719,7 +719,7 @@ Examples:
         help=(
             "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
             "\t\t\tselect their kernels, and display metrics.\n"
-            "\t\t\tWith no arguments, matches all operators (default: **).\n"
+            "\t\t\tWith no arguments, matches all operators.\n"
             "\t\t\t/ in patterns is the reconstructed call path.\n"
             "\t\t\tExamples:\n"
             "\t\t\t  *relu*              contains relu\n"
@@ -729,7 +729,8 @@ Examples:
             "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
             "\t\t\tCombine with -k to intersect with kernel IDs.\n"
             "\t\t\tRequires --output-format stdout.\n"
-            "\t\t\tIgnored when --list-*-operators or --list-stats is set."
+            "\t\t\tIgnored when --list-*-operators or --list-stats is set.\n"
+            "\t\t\t(Default: **)"
         ),
     )
     analyze_group.add_argument(
@@ -762,7 +763,7 @@ Examples:
         help=(
             "\t\tFilter Triton kernels using shell-style glob patterns\n"
             "\t\t\t(fnmatch), select their GPU kernels, and display metrics.\n"
-            "\t\t\tWith no arguments, matches all kernels (default: **).\n"
+            "\t\t\tWith no arguments, matches all kernels.\n"
             "\t\t\t/ in patterns is the reconstructed call path.\n"
             "\t\t\tExamples:\n"
             "\t\t\t  *matmul*            contains matmul\n"
@@ -772,7 +773,8 @@ Examples:
             "\t\t\t  --triton-operator *matmul*,*/rmsnorm_kernel\n"
             "\t\t\tCombine with -k to intersect with kernel IDs.\n"
             "\t\t\tRequires --output-format stdout.\n"
-            "\t\t\tIgnored when --list-*-operators or --list-stats is set."
+            "\t\t\tIgnored when --list-*-operators or --list-stats is set.\n"
+            "\t\t\t(Default: **)"
         ),
     )
     analyze_group.add_argument(
