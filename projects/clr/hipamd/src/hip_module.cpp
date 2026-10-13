@@ -1110,7 +1110,8 @@ hipError_t hipLaunchKernel_common(
     return hipErrorInvalidValue;
   }
   CHECK_STREAM_DETACHED(stream);
-  STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
+  STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes,
+                 clusterDim);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim, clusterDimsSpecified, dynDataPrefetchConfig);
 }

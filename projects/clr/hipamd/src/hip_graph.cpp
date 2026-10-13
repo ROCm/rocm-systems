@@ -281,7 +281,8 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
 }
 
 hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction, dim3& gridDim,
-                                  dim3& blockDim, void**& args, size_t& sharedMemBytes) {
+                                  dim3& blockDim, void**& args, size_t& sharedMemBytes,
+                                  dim3& clusterDim) {
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_API,
           "[hipGraph] Current capture node LaunchKernel on stream : %p", stream);
 
@@ -300,7 +301,8 @@ hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction
   hip::GraphNode* pGraphNode;
   hipError_t status = ihipGraphAddKernelNode(
       &pGraphNode, s->GetCaptureGraph(), s->GetLastCapturedNodes().data(),
-      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0, s->DeviceId());
+      s->GetLastCapturedNodes().size(), &nodeParams, nullptr, true, 0, s->DeviceId(),
+      0, 0, 0, clusterDim);
   if (status != hipSuccess) {
     return status;
   }

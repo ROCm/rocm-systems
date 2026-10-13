@@ -8,7 +8,8 @@
 namespace hip {
 // forward declaration of capture methods
 hipError_t capturehipLaunchKernel(hipStream_t& stream, const void*& hostFunction, dim3& gridDim,
-                                  dim3& blockDim, void**& args, size_t& sharedMemBytes);
+                                  dim3& blockDim, void**& args, size_t& sharedMemBytes,
+                                  dim3& clusterDim);
 
 hipError_t capturehipExtModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f,
                                            uint32_t& globalWorkSizeX, uint32_t& globalWorkSizeY,
