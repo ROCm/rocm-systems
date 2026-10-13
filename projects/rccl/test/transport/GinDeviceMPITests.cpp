@@ -164,6 +164,15 @@ std::string proxyNthreadsSkipReason() {
   return "";
 }
 
+// GIN_PROXY_POLL_BATCH and the aggregation hint exist only on the PROXY backend.
+std::string proxyPollBatchSkipReason() {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty()) return reason;
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_PROXY)
+    return "GIN_PROXY_POLL_BATCH is a host-proxy feature (NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_PROXY) + ")";
+  return "";
+}
+
 // rocSHMEM-GDA and SDMA implement only INDEXED signals; VA signals are
 // unsupported (Put/PutValue address the signal via indexedSignal.signalId).
 std::string vaSignalTestSkipReason() {
@@ -1714,7 +1723,7 @@ __global__ void putBurstLocalCounterKernel(
 // data, such as plugins/rma/example. The ext-rma suite uses it to check the
 // aggregation hint that backend receives.
 TEST_F(GinMPIDeviceTests, PutBurst_LocalCounter) {
-  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+  if (auto reason = proxyPollBatchSkipReason(); !reason.empty())
     GTEST_SKIP() << reason;
 
   if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
