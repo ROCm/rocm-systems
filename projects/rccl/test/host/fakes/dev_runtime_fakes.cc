@@ -4,14 +4,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// See dev_runtime_fakes.h. ncclDevrFindWindow is controllable here; only
-// ncclDevrIsOneLsaTeam remains in nccl_stubs.cc as a fail-loud floor.
+// See dev_runtime_fakes.h. ncclDevrFindWindow is controllable here; ncclDevrIsOneLsaTeam
+// stays in nccl_stubs.cc because rccl-UnitTestsMicroSymKernels links that file without this one.
 
 #include "dev_runtime_fakes.h"
 
 #include "dev_runtime.h"
+#include "dev_runtime_internal.h"
 #include "fail_loud.h"
 #include "signature-drift.h"
+
+#include <algorithm>
 
 ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowIsMultiSegment, ncclDevrWindowIsMultiSegment);
@@ -46,6 +49,15 @@ bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* window) {
 }
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) {
   return g_devrWindowHasSysmemSegment(window);
+}
+
+// Same arithmetic as dev_runtime.cc, so ce_coll.cc's receive-window bound sees production sizes.
+size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win) {
+  if (win == nullptr) return 0;
+  const size_t allocMin = win->memory != nullptr ? win->memory->lsaMinSize : win->size;
+  const size_t memOffset = win->memory == nullptr ? 0 : win->bigOffset - win->memory->bigOffset;
+  if (allocMin <= memOffset) return 0;
+  return std::min(win->size, allocMin - memOffset);
 }
 
 static ncclResult_t DefaultDevrInitOnce(struct ncclComm*) { return ncclSuccess; }
@@ -92,6 +104,7 @@ void ResetDevRuntimeFakes() {
   g_devrFindWindow = DefaultDevrFindWindow;
   g_devrWindowIsMultiSegmentValue = false;
   g_devrWindowHasSysmemSegmentValue = false;
+  g_devrIsOneLsaTeamValue = true;
   g_devrWindowIsMultiSegment = DefaultDevrWindowIsMultiSegment;
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
   g_devrInitOnce = DefaultDevrInitOnce;

@@ -82,7 +82,8 @@ ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
-bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
+bool g_devrIsOneLsaTeamValue = true;
+bool ncclDevrIsOneLsaTeam(struct ncclComm*) { return g_devrIsOneLsaTeamValue; }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
