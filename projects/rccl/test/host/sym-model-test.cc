@@ -13,6 +13,7 @@
 
 #include <cfloat>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -92,17 +93,18 @@ class SymModelTdmTest : public ::testing::Test {
     comm_->symmetricSupport = true;
     comm_->isAllDirectNvlink = true;
     comm_->symkState.hasLsaMultimem = false;
-    comm_->WarpSize = 32;
-    SetArch("gfx1250", kGfx1250CompCap);
+    SetArch("gfx1250", kGfx1250CompCap, /*warpSize=*/32);
   }
   void TearDown() override {
     ResetDevcommFakes();
     ResetNcclFakes();
   }
 
-  void SetArch(const char* arch, int compCap) {
+  // rcclSymkCalculateWarps divides the block width by WarpSize, so it must match the arch.
+  void SetArch(const char* arch, int compCap, int warpSize) {
     comm_->archName = const_cast<char*>(arch);
     comm_->compCap = comm_->minCompCap = comm_->maxCompCap = compCap;
+    comm_->WarpSize = warpSize;
   }
 
   // ncclTuningSymkModelSim reads nBytes as the per-rank bytes for AllGather/ReduceScatter and the
@@ -151,6 +153,17 @@ class SymModelTdmTest : public ::testing::Test {
 
   static bool TmaReachableOnThisBuild() { return TDM_TOOLCHAIN_AVAILABLE; }
 
+  // Large messages, where the Tma kernels would otherwise win, must land on a vector kernel.
+  void ExpectLargeMessagesStayOnVectorKernels(const std::function<void(ncclTuningInput_t&)>& mutate = {}) {
+    for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
+      ncclTuningInput_t in = Input(func, size_t(256) << 20);
+      if (mutate) mutate(in);
+      Pick p = Select(in);
+      ASSERT_NE(p.kernelId, ncclSymkKernelId_Count) << FuncName(func);
+      EXPECT_FALSE(TmaKernel(p.kernelId)) << FuncName(func) << " picked " << ncclSymkKernelIdToString(p.kernelId);
+    }
+  }
+
   std::unique_ptr<ncclComm> comm_;
 };
 
@@ -163,21 +176,22 @@ TEST_F(SymModelTdmTest, DefaultParam_Gfx1250_TmaAvailableButNotForced) {
 }
 
 TEST_F(SymModelTdmTest, DefaultParam_NonTdmArch_TmaUnavailable) {
-  for (const char* arch : {"gfx950", "gfx942", "gfx90a", "gfx1200"}) {
-    SetArch(arch, 95);
-    EXPECT_FALSE(ncclSymkTmaAvailable(comm_.get())) << arch;
+  struct {
+    const char* arch;
+    int compCap;
+    int warpSize;
+  } const archs[] = {{"gfx950", 95, 64}, {"gfx942", 94, 64}, {"gfx90a", 90, 64}, {"gfx1200", 120, 32}};
+  for (const auto& a : archs) {
+    SetArch(a.arch, a.compCap, a.warpSize);
+    EXPECT_FALSE(ncclSymkTmaAvailable(comm_.get())) << a.arch;
   }
   comm_->archName = nullptr;
   EXPECT_FALSE(ncclSymkTmaAvailable(comm_.get())) << "unknown arch";
 }
 
 TEST_F(SymModelTdmTest, DefaultParam_Gfx950_LargeMessagesStayOnVectorKernels) {
-  SetArch("gfx950", 95);
-  for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
-    Pick p = Select(Input(func, size_t(256) << 20));
-    ASSERT_NE(p.kernelId, ncclSymkKernelId_Count) << FuncName(func);
-    EXPECT_FALSE(TmaKernel(p.kernelId)) << FuncName(func) << " picked " << ncclSymkKernelIdToString(p.kernelId);
-  }
+  SetArch("gfx950", 95, /*warpSize=*/64);
+  ExpectLargeMessagesStayOnVectorKernels();
 }
 
 // ---- Cost model integration: which kernel the model picks, and how it launches it ----
@@ -209,7 +223,7 @@ TEST_P(SymModelTdmSelectionTest, DefaultParam_PicksTmaOnlyForLargeMessages) {
 }
 
 // Endpoints only: the crossover between them is a tuning choice, not a contract.
-INSTANTIATE_TEST_SUITE_P(Endpoints, SymModelTdmSelectionTest,
+INSTANTIATE_TEST_SUITE_P(SymTdmEndpoints, SymModelTdmSelectionTest,
                          ::testing::Values(SelectionCase{ncclFuncAllReduce, 64 << 10, false},
                                            SelectionCase{ncclFuncAllReduce, size_t(1) << 30, true},
                                            SelectionCase{ncclFuncAllGather, 16 << 10, false},
@@ -265,24 +279,17 @@ TEST_F(SymModelTdmTest, DefaultParam_LargeMessage_TmaCheaperThanVectorCounterpar
 }
 
 // ---- Gates that keep the default-on Tma kernels out of reach ----
+// Each skips without the TDM header: the mask already drops Tma there, so the gate under test would not run.
 
 TEST_F(SymModelTdmTest, TmaParamDisabled_LargeMessagePicksVectorKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   ScopedHook loadParam(g_loadParam, SymTmaEnable(0));
-  for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
-    Pick p = Select(Input(func, size_t(256) << 20));
-    ASSERT_NE(p.kernelId, ncclSymkKernelId_Count) << FuncName(func);
-    EXPECT_FALSE(TmaKernel(p.kernelId)) << FuncName(func) << " picked " << ncclSymkKernelIdToString(p.kernelId);
-  }
+  ExpectLargeMessagesStayOnVectorKernels();
 }
 
 TEST_F(SymModelTdmTest, DefaultParam_NotSymAligned16B_LargeMessagePicksVectorKernel) {
-  for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncAllGather, ncclFuncReduceScatter}) {
-    ncclTuningInput_t in = Input(func, size_t(256) << 20);
-    in.symAligned16B = false;
-    Pick p = Select(in);
-    ASSERT_NE(p.kernelId, ncclSymkKernelId_Count) << FuncName(func);
-    EXPECT_FALSE(TmaKernel(p.kernelId)) << FuncName(func) << " picked " << ncclSymkKernelIdToString(p.kernelId);
-  }
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  ExpectLargeMessagesStayOnVectorKernels([](ncclTuningInput_t& in) { in.symAligned16B = false; });
 }
 
 // Deep-loop eligibility is per work (countMax), not per batch: many small grouped works must not reach Tma.
@@ -296,9 +303,31 @@ TEST_F(SymModelTdmTest, DefaultParam_GroupOfSmallWorks_TmaKernelInvalid) {
 
 // Without registered windows on both sides only LL kernels are valid, Tma included.
 TEST_F(SymModelTdmTest, DefaultParam_UnregisteredWindows_TmaKernelInvalid) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
   ncclTuningInput_t in = Input(ncclFuncAllReduce, size_t(1) << 30);
   in.winRegType = ncclSymSendNonregRecvNonreg;
   EXPECT_FALSE(Evaluate(in, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST).valid);
+}
+
+// The model's one-sided contract: AllGather needs only the receive window registered and
+// ReduceScatter only the send window; AllReduce needs both. (rcclSelect* still requires both
+// windows before it chooses a symmetric kernel at all.)
+TEST_F(SymModelTdmTest, DefaultParam_OneSidedRegistration_TmaValidOnlyOnTheRequiredSide) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  struct {
+    ncclFunc_t func;
+    ncclSymRegType_t reg;
+    bool valid;
+  } const cases[] = {
+      {ncclFuncAllGather, ncclSymSendNonregRecvReg, true},     {ncclFuncAllGather, ncclSymSendRegRecvNonreg, false},
+      {ncclFuncReduceScatter, ncclSymSendRegRecvNonreg, true}, {ncclFuncReduceScatter, ncclSymSendNonregRecvReg, false},
+      {ncclFuncAllReduce, ncclSymSendNonregRecvReg, false},    {ncclFuncAllReduce, ncclSymSendRegRecvNonreg, false},
+  };
+  for (const auto& c : cases) {
+    ncclTuningInput_t in = Input(c.func, size_t(256) << 20);
+    in.winRegType = c.reg;
+    EXPECT_EQ(Evaluate(in, TmaKernelFor(c.func)).valid != 0, c.valid) << FuncName(c.func) << " winRegType " << c.reg;
+  }
 }
 
 }  // namespace
