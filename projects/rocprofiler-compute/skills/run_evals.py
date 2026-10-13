@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 SKILLS_ROOT = Path(__file__).resolve().parent
+SAMPLES_ROOT = SKILLS_ROOT.parent / "sample"
 EXIT_SKIPPED = 77
 
 # Only these keys are understood. A typo is an error rather than an expectation
@@ -44,9 +45,13 @@ KNOWN_KEYS = {
     "unexpected_behavior",
     "logs_contain",
     "files_exist",
+    "sample",
 }
 JUDGED_KEYS = ("expected_behavior", "unexpected_behavior")
-BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist")
+BEHAVIORAL_KEYS = (*JUDGED_KEYS, "logs_contain", "files_exist", "sample")
+
+# Keep the agent off the user's own CLAUDE.md, skills, and settings.
+ISOLATED_SETTINGS = ["--setting-sources", "project,local"]
 
 JUDGE_SCHEMA = {
     "type": "object",
@@ -91,6 +96,8 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         if case["id"] in seen:
             sys.exit(f"{skill.name}: duplicate case id {case['id']!r}")
         seen.add(case["id"])
+        if "sample" in case and not (SAMPLES_ROOT / case["sample"]).exists():
+            sys.exit(f"{skill.name}: {case['id']} names a missing sample")
 
         if case["skill_should_trigger"]:
             positive += 1
@@ -112,7 +119,7 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
 
 
 def build_workspace(root: Path) -> Path:
-    """Install every skill into a scratch workspace with install-skills.sh."""
+    """Install every skill and copy the samples into a scratch workspace."""
     workspace = root / "workspace"
     workspace.mkdir(parents=True)
     subprocess.run(
@@ -121,11 +128,22 @@ def build_workspace(root: Path) -> Path:
         stdout=subprocess.DEVNULL,
         check=True,
     )
+    shutil.copytree(SAMPLES_ROOT, workspace / "sample")
     return workspace
 
 
+def case_prompt(case: dict[str, Any]) -> str:
+    """Return the prompt, pointing at the case's sample when it has one."""
+    if "sample" not in case:
+        return case["prompt"]
+    return f"{case['prompt']}\n\nThe application is ./sample/{case['sample']}."
+
+
 def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list[str]]:
-    """Run one prompt and return the transcript text and the skills it loaded."""
+    """Run one prompt and return the transcript text and the skills it loaded.
+
+    Raises RuntimeError when the claude CLI itself fails.
+    """
     command = [
         "claude",
         "-p",
@@ -135,9 +153,12 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
         "--verbose",
         "--add-dir",
         str(workspace),
+        *ISOLATED_SETTINGS,
     ]
     if behavioral:
-        command += ["--permission-mode", "acceptEdits"]
+        # The agent has to build and profile the sample, so it runs commands
+        # without asking.
+        command += ["--permission-mode", "bypassPermissions"]
     else:
         # Routing only: the decision to load a skill is all we grade, so deny
         # the agent the tools that would make it start doing the work.
@@ -150,6 +171,10 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
         text=True,
         timeout=900 if behavioral else 300,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude exited {result.returncode}: {result.stderr.strip()[-500:]}"
+        )
 
     transcript: list[str] = []
     loaded: list[str] = []
@@ -164,17 +189,23 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
     return "\n".join(transcript), loaded
 
 
-def _skills_in(event: dict[str, Any]) -> list[str]:
-    """Pull skill names out of Skill tool calls and SKILL.md reads."""
+def _skills_in(event: Any) -> list[str]:
+    """Pull skill names out of Skill tool calls and SKILL.md reads.
+
+    Events of any other shape are skipped, so new CLI event types are ignored.
+    """
     names: list[str] = []
-    content = event.get("message", {}).get("content")
+    message = event.get("message") if isinstance(event, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, list):
         return names
 
     for block in content:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
-        payload = block.get("input", {})
+        payload = block.get("input")
+        if not isinstance(payload, dict):
+            continue
         if block.get("name") == "Skill":
             skill = str(payload.get("skill", ""))
             names.append(skill.split(":")[-1])
@@ -188,9 +219,9 @@ def _skills_in(event: dict[str, Any]) -> list[str]:
 def grade_judged(claim: str, transcript: str, should_hold: bool) -> tuple[bool, str]:
     """Ask a second agent whether a plain-language claim holds in the transcript."""
     question = (
-        "You are grading an AI agent transcript against one expectation.\n"
-        f"Expectation: {claim}\n"
-        f"The expectation should be {'met' if should_hold else 'NOT met'}.\n"
+        "You are grading an AI agent transcript against one claim.\n"
+        f"Claim: {claim}\n"
+        "Set pass to true if the claim holds in the transcript, false if not.\n"
         "Answer only with the JSON object.\n\n"
         f"Transcript:\n{transcript[:200000]}"
     )
@@ -198,12 +229,13 @@ def grade_judged(claim: str, transcript: str, should_hold: bool) -> tuple[bool, 
         [
             "claude",
             "-p",
-            question,
             "--output-format",
             "json",
             "--json-schema",
             json.dumps(JUDGE_SCHEMA),
+            *ISOLATED_SETTINGS,
         ],
+        input=question,
         capture_output=True,
         text=True,
         timeout=300,
@@ -264,9 +296,11 @@ def run_case(
     """Run and grade one case. Returns (skill, case id, failure messages)."""
     workspace = build_workspace(tmp / f"{name}-{case['id']}")
     try:
-        transcript, loaded = run_agent(case["prompt"], workspace, behavioral)
+        transcript, loaded = run_agent(case_prompt(case), workspace, behavioral)
     except subprocess.TimeoutExpired:
         return name, case["id"], ["timed out"]
+    except RuntimeError as error:
+        return name, case["id"], [str(error)]
     failures = grade(case, name, transcript, loaded, workspace, behavioral)
     return name, case["id"], failures
 
