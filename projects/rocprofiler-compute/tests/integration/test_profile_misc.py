@@ -12,7 +12,7 @@ import pytest
 
 from tests.integration import common as integration_common
 from tests.integration.common import (
-    CSVS,
+    ROOF_ONLY_FILES,
     config,
     num_kernels,
     skip_unsupported_roofline_soc,
@@ -24,6 +24,7 @@ def test_analyze_rocpd(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
     tmp_path,
+    monkeypatch,
 ):
     skip_unsupported_roofline_soc()
 
@@ -33,17 +34,21 @@ def test_analyze_rocpd(
 
     db_name = "test"
     analysis_dir = tmp_path / "analysis"
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--output-directory",
-        str(analysis_dir),
-        "--output-format",
-        "db",
-        "--output-name",
-        f"{db_name}",
-        "--path",
-        workload_dir,
-    ])
+    analysis_dir.mkdir(parents=True)
+    # --output-name rejects path separators, so run from inside analysis_dir
+    # to keep the db there.
+    workload_path = str(Path(workload_dir).resolve())
+    with monkeypatch.context() as m:
+        m.chdir(analysis_dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--output-format",
+            "db",
+            "--output-name",
+            f"{db_name}",
+            "--path",
+            workload_path,
+        ])
     assert code == 0
     database_path = analysis_dir / f"{db_name}.db"
     common.check_analysis_db(database_path, expected_workloads=1)
@@ -157,7 +162,7 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    assert sorted(list(file_dict.keys())) == CSVS
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
     roofline_df = pd.read_csv(Path(workload_dir) / "roofline.csv")
     assert roofline_df["device"].tolist() == [0]
