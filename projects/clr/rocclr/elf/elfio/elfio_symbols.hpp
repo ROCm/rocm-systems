@@ -228,7 +228,8 @@ template <class S> class symbol_section_accessor_template {
     bool found = false;
 
     hash_result result = hash_result::invalid;
-    if (get_hash_table_index() != 0) {
+    // Unnamed symbols are never reachable through the hash table.
+    if (get_hash_table_index() != 0 && !name.empty()) {
       result = hash_lookup(name, section_name, found_value, found_size, found_bind, found_type,
                            found_section_index, found_other);
       found = result == hash_result::found;
