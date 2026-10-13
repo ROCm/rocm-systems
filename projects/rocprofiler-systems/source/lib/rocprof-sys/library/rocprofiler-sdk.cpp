@@ -8,14 +8,12 @@
 #include "binary/analysis.hpp"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
+#include "common/environment.hpp"
 #include "common/path.hpp"
-#include "common/synchronized.hpp"
 #include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/common.hpp"
-#include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/containers/stable_vector.hpp"
 #include "core/control/session.hpp"
 #include "core/control/triggers/roctx.hpp"
 #include "core/demangler.hpp"
@@ -34,7 +32,7 @@
 #include "library/rocprofiler-sdk/domain_selection.hpp"
 #include "library/rocprofiler-sdk/domain_service.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/rocprofiler-sdk/stream_stack_service.hpp"
+#include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-sdk.hpp"
@@ -50,16 +48,16 @@
 #include <iterator>
 #include <optional>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 #include <fmt/format.h>
 #include <nlohmann/json_fwd.hpp>
 
-#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/internal_threading.h>
 
 #include <rocprofiler-sdk/version.h>
 
@@ -70,10 +68,8 @@
 #endif
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
 #include <fmt/ranges.h>
@@ -82,17 +78,17 @@
 #include "logger/debug.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <dlfcn.h>
-#include <iostream>
 #include <memory>
 #include <mutex>
 #include <regex>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
@@ -133,30 +129,6 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& bt_data)
     }
     return backtrace;
 }
-
-// NOLINTBEGIN(readability-function-size)
-// Implementation of rocprofiler_callback_tracing_operation_args_cb_t
-// for iterating through arguments in a callback for rocpd_arg table in database
-int
-iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/,
-                      std::int32_t /*operation*/, std::uint32_t arg_number,
-                      const void* const /*arg_value_addr*/,
-                      std::int32_t /*arg_indirection_count*/, const char* arg_type,
-                      const char* arg_name, const char*             arg_value_str,
-                      std::int32_t /*arg_dereference_count*/, void* data)
-{
-    auto* func_args = static_cast<function_args_t*>(data);
-    if(arg_type && arg_name && arg_value_str)
-    {
-        func_args->emplace_back(
-            argument_info{ .arg_number = arg_number,
-                           .arg_type   = rocprofsys::utility::demangle(arg_type),
-                           .arg_name   = arg_name,
-                           .arg_value  = arg_value_str });
-    }
-    return 0;
-}
-// NOLINTEND(readability-function-size)
 
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 client_data* g_tool_data = new client_data{};
@@ -874,7 +846,7 @@ dispatch_counting_service_callback(
     rocprofiler_profile_config_id_t* config, rocprofiler_user_data_t* /*user_data*/,
     void*                            callback_data_arg)
 {
-    auto* _data = as_client_data(callback_data_arg);
+    auto* _data = static_cast<client_data*>(callback_data_arg);
     if(!_data || !config)
     {
         return;
@@ -975,7 +947,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         LOG_WARNING("rocprofiler-sdk version not initialized");
     }
 
-    auto* _data        = as_client_data(user_data);
+    auto* _data        = static_cast<client_data*>(user_data);
     _data->client_fini = fini_func;
 
     if(!_counter_events.empty())
@@ -1010,7 +982,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
        _buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
     {
@@ -1020,7 +992,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION))
     {
         domain_selection selection;
@@ -1036,7 +1008,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 10202)
+#if (ROCPROFILER_VERSION >= 10202)
     if(_buffered_domain.contains(ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT))
     {
         domain_selection selection;
@@ -1226,7 +1198,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         domain_selection_list.push_back(selection);
     }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_OMPT))
     {
         _data->backtrace_operations.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT,
@@ -1240,7 +1212,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1256,7 +1228,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 700)
+#if (ROCPROFILER_VERSION >= 700)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API))
     {
         _data->backtrace_operations.emplace(
@@ -1272,7 +1244,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10304)
+#if (ROCPROFILER_VERSION >= 10304)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_ROCSHMEM_API))
     {
         _data->backtrace_operations.emplace(
@@ -1288,7 +1260,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
-#if(ROCPROFILER_VERSION >= 10305)
+#if (ROCPROFILER_VERSION >= 10305)
     if(_callback_domains.contains(ROCPROFILER_CALLBACK_TRACING_HIPFILE_API))
     {
         _data->backtrace_operations.emplace(
@@ -1407,7 +1379,7 @@ tool_fini(void* callback_data)
     stop();
     finalize_sdk_common();
 
-    auto* _data        = as_client_data(callback_data);
+    auto* _data        = static_cast<client_data*>(callback_data);
     _data->client_id   = nullptr;
     _data->client_fini = nullptr;
     delete g_tool_data;
@@ -1478,18 +1450,6 @@ shutdown()
 
     g_roctx_trigger.reset();
 }
-
-void
-config()
-{}
-
-void
-post_process()
-{}
-
-void
-sample()
-{}
 
 void
 start()

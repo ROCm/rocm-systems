@@ -7,8 +7,6 @@
 
 #include "core/control/session.hpp"
 
-#include <vector>
-
 namespace rocprofsys::rocprofiler_sdk
 {
 
@@ -17,15 +15,6 @@ setup();
 
 void
 shutdown();
-
-void
-config();
-
-void
-post_process();
-
-void
-sample();
 
 void
 start();

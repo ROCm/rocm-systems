@@ -3,11 +3,7 @@
 
 #pragma once
 
-#include "core/timemory.hpp"
-
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -16,9 +12,9 @@
 
 #include "logger/debug.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys::rocprofiler_sdk
@@ -92,11 +88,6 @@ client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,
     return nullptr;
 }
 
-constexpr client_data*
-as_client_data(void* _ptr)
-{
-    return static_cast<client_data*>(_ptr);
-}
 }  // namespace rocprofsys::rocprofiler_sdk
 
 #if !defined(ROCPROFILER_CALL)
