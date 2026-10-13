@@ -146,6 +146,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed GPU metrics APIs returning `AMDSMI_STATUS_UNEXPECTED_DATA` for a GPU with an unsupported metrics table**.  
+  - A Ryzen iGPU next to a discrete GPU (for example gfx1036, which exposes `gpu_metrics` v2.1) made `amdsmi_get_gpu_metrics_info()` and the APIs built on it return `AMDSMI_STATUS_UNEXPECTED_DATA`. This includes `amdsmi_get_temp_metric()` for HBM and PLX, `amdsmi_get_violation_status()`, `amdsmi_get_utilization_count()`, `amdsmi_get_energy_count()`, `amdsmi_get_gpu_pci_bandwidth()` and `amdsmi_get_gpu_xgmi_link_status()`.
+  - They now return `AMDSMI_STATUS_NOT_SUPPORTED`. `amdsmi_get_gpu_partition_metrics_info()` handles an unsupported table the same way.
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
