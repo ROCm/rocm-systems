@@ -151,8 +151,8 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
-                                                bool* needPreconnect) {
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
+                                                bool* needPreconnect, ncclFunc_t collAPI = ncclNumFuncs) {
   struct ncclKernelPlanner* planner = &comm->planner;
   uint8_t base;
 
@@ -904,7 +904,7 @@ static ncclResult_t postTuneP2pTasks(
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect, raw->collAPI));
   }
 
   if (needPreconnect) {
