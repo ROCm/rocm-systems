@@ -23,7 +23,7 @@ _ARTIFACT_NAME = "torch_trace_collector.so"
 _TORCH_CPU_LIBRARY_NAME = "libtorch_cpu.so"
 _EXPECTED_COLLECTOR_ABI_REVISION = 2
 
-# The temporary shim reads private PyTorch layouts recorded for these minors.
+# The ABI shim uses private PyTorch layouts validated for these minor versions.
 _SUPPORTED_TORCH_VERSIONS: FrozenSet[str] = frozenset({"2.13", "2.14"})
 
 # PyTorch retains the callback and debug-info pointers for the process lifetime.
