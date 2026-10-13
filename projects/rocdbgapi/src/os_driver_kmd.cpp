@@ -88,6 +88,8 @@ os_queue_type (enum KMD_DBGR_USER_QUEUE_TYPE kmd_type)
       return os_queue_type_t::compute;
     case KMD_DBGR_USER_QUEUE_TYPE_DMA:
       return os_queue_type_t::sdma;
+    case KMD_DBGR_USER_QUEUE_TYPE_COMPUTE_AQL:
+      return os_queue_type_t::compute_aql;
     }
 
   return os_queue_type_t::unknown;
@@ -624,6 +626,8 @@ to_string (KMD_DBGR_USER_QUEUE_TYPE type)
       return "COMPUTE";
     case KMD_DBGR_USER_QUEUE_TYPE_DMA:
       return "DMA";
+    case KMD_DBGR_USER_QUEUE_TYPE_COMPUTE_AQL:
+      return "AQL";
     }
   return "UNKNOWN";
 }

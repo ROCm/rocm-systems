@@ -86,10 +86,10 @@ typedef enum _KMD_ESCAPE_SUBFUNCTION
 // Version 1.3: Add support for trap on wave start/end. Improved GPU memory read/write performance in KMD.
 // Version 1.4: Adjust gpuvmLimit to be the last valid address and enable traps for exceptions output to include previous and current trap support mask.
 // Version 2.0: Switch debugger error reporting from NTSTATUS to LHESCAPE return codes. Increment major version as changes cause ABI breakage.
-//
+// Version 2.1: Add support for compute AQL user queues.
 
 #define KMD_DBGR_HEADER_MAJOR_VER                      0x0002
-#define KMD_DBGR_HEADER_MINOR_VER                      0x0000
+#define KMD_DBGR_HEADER_MINOR_VER                      0x0001
 #define KMD_DBGR_HEADER_VER ((KMD_DBGR_HEADER_MAJOR_VER << 16) | KMD_DBGR_HEADER_MINOR_VER)
 
 #define MAX_USER_QUEUES_VISIBLE_TO_DEBUGGER 32
@@ -206,7 +206,8 @@ enum KMD_DBGR_USER_QUEUE_TYPE
 {
     KMD_DBGR_USER_QUEUE_TYPE_GFX = 0,
     KMD_DBGR_USER_QUEUE_TYPE_COMPUTE = 1,
-    KMD_DBGR_USER_QUEUE_TYPE_DMA = 2
+    KMD_DBGR_USER_QUEUE_TYPE_DMA = 2,
+    KMD_DBGR_USER_QUEUE_TYPE_COMPUTE_AQL = 3
 };
 
 enum KMD_DBGR_USER_QUEUE_STATUS
