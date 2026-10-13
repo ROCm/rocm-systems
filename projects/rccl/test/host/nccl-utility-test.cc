@@ -53,10 +53,8 @@ using nccl::utility::toCudaOrder;
 
 namespace {
 
-// Brute-force reference: idivFast32/64 claim idivFast(x, y, idivRcp(y)) == x/y
-// for every valid (x, y); these helpers recompute that division the ordinary
-// way so the fast path can't share a bug with its own golden.
-uint32_t refDiv32(uint32_t x, uint32_t y) { return x / y; }
+// Reference for idivFast64's truncation check: recomputes the division the
+// ordinary way so the fast path can't share a bug with its own golden.
 uint64_t refDiv64(uint64_t x, uint64_t y) { return x / y; }
 
 } // namespace
@@ -102,15 +100,17 @@ TEST(NcclUtilityMicrotest, AlignUpDown_PointerOverload_RoundsTheAddressNotTheByt
   alignas(32) char buf[64];
   // Single-byte-type overload: static_assert(sizeof(T) == 1) gates this at
   // compile time, so the test itself is part of the contract being checked.
-  // Exact expectations, not just "divisible by 16": the mod/bound checks
-  // below would equally pass an off-by-one mutation of utility.h's
-  // `(addr + a - 1) & -uintptr_t(a)` to `(addr + a) & -uintptr_t(a)`, since
-  // buf + 3 rounds to buf + 16 either way.
+  // buf + 3 rounds to buf + 16 under both `(addr + a - 1) & -uintptr_t(a)` and
+  // an off-by-one `(addr + a) & -uintptr_t(a)`, so the unaligned case alone
+  // cannot pin the `- 1`. An already-aligned pointer can: correct returns buf,
+  // the mutant returns buf + 16. alignDown has no `- 1` term, so only alignUp
+  // needs the extra case.
   char* base = buf + 3;
   char* up = alignUp(base, size_t(16));
   char* down = alignDown(base, size_t(16));
   EXPECT_EQ(up, buf + 16);
   EXPECT_EQ(down, buf);
+  EXPECT_EQ(alignUp(buf, size_t(16)), buf);
 }
 
 TEST(NcclUtilityMicrotest, IsPow2_TrueOnlyForPowersOfTwoAndZero) {
@@ -142,6 +142,11 @@ TEST(NcclUtilityMicrotest, RollingLessEqAndLessThan_WrapAroundHalfTheRangeCorrec
   // true only because the high 32 bits are masked out of the wraparound check.
   EXPECT_TRUE(rollingLessEq(uint64_t(0xFFFFFFF0ull), uint64_t(0x10ull), 32));
   EXPECT_FALSE(rollingLessEq(uint64_t(0x10ull), uint64_t(0xFFFFFFF0ull), 32));
+
+  // rollingLessThan must forward nBits rather than fall back to its own
+  // default: dropping the forward at utility.h:202 flips both of these.
+  EXPECT_TRUE(rollingLessThan(uint64_t(0xFFFFFFF0ull), uint64_t(0x10ull), 32));
+  EXPECT_FALSE(rollingLessThan(uint64_t(0x10ull), uint64_t(0xFFFFFFF0ull), 32));
 }
 
 TEST(NcclUtilityMicrotest, IdivRcp32_MatchesExactFormulaIncludingPow2Correction) {
@@ -249,13 +254,10 @@ TEST(NcclUtilityMicrotest, IdivmodFast64_MatchesOrdinaryDivisionAcrossDivisorsAn
   EXPECT_EQ(r, 0ull);
 }
 
-TEST(NcclUtilityMicrotest, IdivFast32_MatchesRefDivisionAndIdivFast64TruncatesToLow32Bits) {
-  for (uint32_t y : {1u, 3u, 16u, 4096u}) {
-    uint32_t yrcp = idivRcp32(y);
-    for (uint32_t x : {0u, 41u, 4095u, 1000000u}) {
-      EXPECT_EQ(idivFast32(x, y, yrcp), refDiv32(x, y));
-    }
-  }
+TEST(NcclUtilityMicrotest, IdivFast32_ReturnsTheQuotientAndIdivFast64TruncatesToLow32Bits) {
+  // idivFast32 is a one-line wrapper over idivmodFast32, which the sweep above
+  // already checks; one case pins that it returns q (13), not r (2).
+  EXPECT_EQ(idivFast32(41u, 3u, idivRcp32(3u)), 13u);
   // idivFast64 narrows a 64-bit quotient to uint32_t. A quotient that fits in
   // 32 bits leaves the narrowing inert (the oracle's own uint32_t cast is a
   // no-op too), so the second case below -- whose true quotient is far above
@@ -266,19 +268,11 @@ TEST(NcclUtilityMicrotest, IdivFast32_MatchesRefDivisionAndIdivFast64TruncatesTo
   EXPECT_EQ(idivFast64(1ull << 40, 1ull, idivRcp64(1ull)), 0u);
 }
 
-TEST(NcclUtilityMicrotest, ImodFast32And64_MatchRefModulo) {
-  for (uint32_t y : {1u, 3u, 16u, 4096u}) {
-    uint32_t yrcp = idivRcp32(y);
-    for (uint32_t x : {0u, 41u, 4095u, 1000000u}) {
-      EXPECT_EQ(imodFast32(x, y, yrcp), x % y);
-    }
-  }
-  for (uint64_t y : {1ull, 3ull, 16ull, 1ull << 20}) {
-    uint64_t yrcp = idivRcp64(y);
-    for (uint64_t x : {0ull, 41ull, (1ull << 20) - 1, 1ull << 40}) {
-      EXPECT_EQ(imodFast64(x, y, yrcp), x % y);
-    }
-  }
+TEST(NcclUtilityMicrotest, ImodFast32And64_ReturnTheRemainder) {
+  // imodFast32/64 are one-line wrappers over idivmodFast32/64, which the sweeps
+  // above already check; one case each pins that they return r (2), not q (13).
+  EXPECT_EQ(imodFast32(41u, 3u, idivRcp32(3u)), 2u);
+  EXPECT_EQ(imodFast64(41ull, 3ull, idivRcp64(3ull)), 2ull);
 }
 
 TEST(NcclUtilityMicrotest, Optional_DefaultAndAbsentConstructLeavePresentFalse) {
