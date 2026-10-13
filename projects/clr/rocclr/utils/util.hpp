@@ -126,6 +126,10 @@ template <typename T> inline T* alignUp(T* value, size_t alignment) {
   return (T*)alignDown((intptr_t)(value + alignment - 1), alignment);
 }
 
+template <typename T> constexpr inline T divRoundUp(T dividend, T divisor) {
+  return (dividend + divisor - 1) / divisor;
+}
+
 template <typename T> inline bool isMultipleOf(T value, size_t alignment) {
   if (isPowerOfTwo(alignment)) {
     // fast path, using logical operators

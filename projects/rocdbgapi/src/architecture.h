@@ -183,9 +183,6 @@ public:
     virtual std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const = 0;
 
-    /* Return true if a scratch slot is allocated for this record.  */
-    virtual bool is_scratch_enabled () const = 0;
-
     /* The shader engine ID this wave was created on.  */
     virtual uint32_t shader_engine_id () const = 0;
     /* Scratch region slot ID.  */
