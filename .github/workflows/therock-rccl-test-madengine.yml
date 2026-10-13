@@ -220,9 +220,11 @@ jobs:
             NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
           fi
 
-          # Arithmetic in bash, not in a ${{ }} expression: GitHub Actions
-          # expressions have no arithmetic operators, and `... - 30` there is
+          # Arithmetic in bash, not in a workflow expression: GitHub Actions
+          # expressions have no arithmetic operators, so subtracting there is
           # a parse error that rejects the whole workflow file at dispatch.
+          # (Do not write an empty expression in these comments either -- the
+          # run block is scanned for expressions, comment lines included.)
           SCRIPT_TIMEOUT=$(( ${{ inputs.timeout_minutes }} - 30 ))
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
