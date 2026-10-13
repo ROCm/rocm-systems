@@ -105,11 +105,19 @@ template <class S> class note_section_accessor_template {
       }
     }
 
-    // Records start on a 4-byte boundary, even after data that does not.
+    // Records start on a 4-byte boundary, even when the existing data does not
+    // end on one.
+    constexpr Elf_Xword word_size = sizeof(Elf_Word);
     const Elf_Xword current_size = note_section->get_size();
-    const size_t padding = (align - current_size % align) % align;
-    note_start_positions.push_back(current_size + padding);
-    note_section->append_data(std::string(padding, '\0') + buffer);
+    const Elf_Xword padding = (word_size - current_size % word_size) % word_size;
+    note_section->append_data(std::string(static_cast<size_t>(padding), '\0') + buffer);
+    if (padding == 0) {
+      note_start_positions.push_back(current_size);
+    } else {
+      // The padding may complete a record that was rejected before, so rescan to
+      // keep indices consistent with a fresh accessor.
+      process_section();
+    }
   }
 
  private:
