@@ -41,6 +41,8 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/diagnostics_gpu.cc
+      - "RasDiagnosticsGpuMicrotest.*"
       # ras/peers.cc
       - "RasPeersMicrotest.*"
       # ras/diagnostics_env.cc
@@ -80,12 +82,19 @@ test_categories:
       - "TuningMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
+      - "GroupCommHeadChainTest.*"
       - "ReclaimPlannerStateTest.*"
       - "AsyncLaunchTest.*"
       - "GroupJobAbortTest.*"
       - "GroupApiWrapperTest.*"
       - "ArgsGlobalCheckTest.*"
+      - "GroupJobUnlinkCommsTest.*"
+      - "JobFreeCallbacksTest.*"
+      - "MgmtTaskJobFuncTest.*"
+      - "GroupRegisterSymmetricCeInitTest.*"
       - "GroupRegisterSymmetricTest.*"
+      - "GroupCleanupTest.*"
+      - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"

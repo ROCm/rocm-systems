@@ -121,7 +121,7 @@ pub const AMDSMI_MAX_NUM_CLKS_PER_MID: u32 = 2;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 27;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 1;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
 pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_DRIVER_INFO_RSVD: u32 = 64;
 pub const AMDSMI_MAX_UUID_ELEMENTS: u32 = 16;
@@ -4852,6 +4852,17 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_get_gpu_cper_entries(
+        processor_handle: AmdsmiProcessorHandle,
+        severity_mask: u32,
+        cper_data: *mut ::std::os::raw::c_char,
+        buf_size: *mut u64,
+        cper_hdrs: *mut *mut AmdsmiCperHdrT,
+        entry_count: *mut u64,
+        cursor: *mut u64,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_fabric_cper_entries(
         processor_handle: AmdsmiProcessorHandle,
         severity_mask: u32,
         cper_data: *mut ::std::os::raw::c_char,
