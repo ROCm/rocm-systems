@@ -103,6 +103,23 @@ typedef enum {
   }                                                 \
 } while(0)
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_GIN_BACKEND_MASK_ALL)
+// NCCL_GIN_BACKEND_MASK_ALL depends on per-target defines (ENABLE_ROCSHMEM_GIN),
+// so it must expand in the translation unit that compiles the GIN kernels: keep
+// this static. A backend missing from the mask is not caught on the device; its
+// context is dispatched as another backend's and faults.
+static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
+  if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
+  if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
+  fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
+                  "was built without that backend (compiled-in backend mask 0x%x). GIN types 6 "
+                  "(rocSHMEM GDA) and 7 (Anvil SDMA) need the CMake build with "
+                  "-DENABLE_ROCSHMEM_GIN=ON; the Makefile build (install.sh) does not support them.\n",
+          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL));
+  return testInvalidUsage;
+}
+#endif
+
 struct testColl {
   const char name[20];
   void (*getCollByteCount)(
