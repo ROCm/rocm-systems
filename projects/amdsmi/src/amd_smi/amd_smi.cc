@@ -62,6 +62,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
@@ -6094,6 +6095,19 @@ amdsmi_status_t amdsmi_get_switch_device_uuid(amdsmi_processor_handle processor_
   return status;
 }
 #endif  // BRCM_NIC
+
+// KFD reports how the GPU reaches its CPU. Over xGMI there is no PCIe host link, and the PCIe
+// link in config space is emulated.
+static bool has_xgmi_host_link(amdsmi_processor_handle processor_handle) {
+  uint64_t kfd_gpu_id = 0;
+  if (rsmi_wrapper(rsmi_dev_guid_get, processor_handle, 0, &kfd_gpu_id) != AMDSMI_STATUS_SUCCESS) {
+    return false;
+  }
+  const auto& kfd_nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  const auto node = kfd_nodes.find(kfd_gpu_id);
+  return node != kfd_nodes.end() && node->second->numa_node_type() == amd::smi::IOLINK_TYPE_XGMI;
+}
+
 amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
                                      amdsmi_pcie_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -6182,6 +6196,12 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
       break;
     default:
       info->pcie_static.pcie_interface_version = 0;
+  }
+
+  if (has_xgmi_host_link(processor_handle)) {
+    info->pcie_static.max_pcie_width = std::numeric_limits<uint16_t>::max();
+    info->pcie_static.max_pcie_speed = std::numeric_limits<uint32_t>::max();
+    info->pcie_static.pcie_interface_version = std::numeric_limits<uint32_t>::max();
   }
 
   // default to PCIe
