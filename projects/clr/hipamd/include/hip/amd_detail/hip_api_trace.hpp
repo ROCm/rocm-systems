@@ -1861,11 +1861,11 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
   t_hipKernelSetAttributeForDevice hipKernelSetAttributeForDevice_fn;
 
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
   t_hipKernelSetCacheConfig hipKernelSetCacheConfig_fn;
 
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
 
   // ******************************************************************************************* //
   //
