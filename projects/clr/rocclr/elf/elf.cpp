@@ -532,11 +532,11 @@ bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name) {
   auto idx = section->get_name_string_offset();
 
   if (idx <= 0) {
-    LogElfError("failed: idx=%d", idx);
+    LogElfError("failed: idx=%u", idx);
     return false;
   }
   outNdx = idx;
-  LogElfDebug("Succeeded: name=%s, idx=%d", name, idx);
+  LogElfDebug("Succeeded: name=%s, idx=%u", name, idx);
   return true;
 }
 
@@ -642,7 +642,7 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
                                        (isFunction) ? STT_FUNC : STT_OBJECT, 0, sec_ndx);
 
   LogElfDebug("%s: sectionName=%s symbolName=%s strtab_offset=%" PRIu64 ", sec_offset=%" PRIu64
-              ", size=%zu, sec_ndx=%zu, ret=%d",
+              ", size=%zu, sec_ndx=%zu, ret=%u",
               ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset,
               size, sec_ndx, ret);
   return ret >= 1;

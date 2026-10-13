@@ -41,7 +41,9 @@ template <class S> class symbol_section_accessor_template {
 
   //------------------------------------------------------------------------------
   Elf_Xword get_symbols_num() const {
-    if (symbol_section == nullptr) {
+    // A section whose data was not loaded (e.g. sh_size beyond the file) has no
+    // records, whatever its header claims.
+    if (symbol_section == nullptr || symbol_section->get_data() == nullptr) {
       return 0;
     }
 
@@ -99,22 +101,25 @@ template <class S> class symbol_section_accessor_template {
                   unsigned char& type, Elf_Half& section_index, unsigned char& other) const {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
-    Elf_Xword idx = 0;
-    bool match = false;
-    Elf64_Addr v = 0;
-
-    if (elf_file.get_class() == ELFCLASS32) {
-      match = generic_search_symbols<Elf32_Sym>(
-          [&convertor, &value](const Elf32_Sym* sym) { return convertor(sym->st_value) == value; },
-          idx);
-    } else {
-      match = generic_search_symbols<Elf64_Sym>(
+    auto search = [&](Elf_Xword& idx) {
+      if (elf_file.get_class() == ELFCLASS32) {
+        return generic_search_symbols<Elf32_Sym>(
+            [&convertor, &value](const Elf32_Sym* sym) {
+              return convertor(sym->st_value) == value;
+            },
+            idx);
+      }
+      return generic_search_symbols<Elf64_Sym>(
           [&convertor, &value](const Elf64_Sym* sym) { return convertor(sym->st_value) == value; },
           idx);
-    }
+    };
 
-    if (match) {
-      return get_symbol(idx, name, v, size, bind, type, section_index, other);
+    // A matching symbol whose name cannot be resolved does not end the search.
+    Elf64_Addr v = 0;
+    for (Elf_Xword idx = 0; search(idx); ++idx) {
+      if (get_symbol(idx, name, v, size, bind, type, section_index, other)) {
+        return true;
+      }
     }
 
     return false;
@@ -234,10 +239,15 @@ template <class S> class symbol_section_accessor_template {
                            found_section_index, found_other);
       found = result == hash_result::found;
     }
-    // Only an unusable table falls back to the linear scan.
-    if (result == hash_result::invalid) {
+    // An unusable table needs a full scan. After a miss only local symbols are
+    // searched, since linkers may add them to the table without hashing them.
+    if (!found) {
+      const bool locals_only = result == hash_result::not_found;
       const Elf_Xword symbol_count = get_symbols_num();
       for (Elf_Xword i = 0; i < symbol_count && !found; ++i) {
+        if (locals_only && !is_local_symbol(i)) {
+          continue;
+        }
         std::string symbol_name;
         found = get_symbol(i, symbol_name, found_value, found_size, found_bind, found_type,
                            found_section_index, found_other) &&
@@ -337,9 +347,29 @@ template <class S> class symbol_section_accessor_template {
   }
 
   //------------------------------------------------------------------------------
+  bool is_local_symbol(Elf_Xword index) const {
+    if (elf_file.get_class() == ELFCLASS32) {
+      return generic_is_local_symbol<Elf32_Sym>(index);
+    }
+    return generic_is_local_symbol<Elf64_Sym>(index);
+  }
+
+  //------------------------------------------------------------------------------
+  template <class T> bool generic_is_local_symbol(Elf_Xword index) const {
+    const T* record = generic_get_symbol_ptr<T>(index);
+    if (record == nullptr) {
+      return false;
+    }
+    T symbol;
+    std::memcpy(&symbol, record, sizeof(symbol));
+    return ELF_ST_BIND(symbol.st_info) == STB_LOCAL;
+  }
+
+  //------------------------------------------------------------------------------
+  // Searches from idx onwards; on a match idx holds the matching index.
   template <class T>
   bool generic_search_symbols(std::function<bool(const T*)> match, Elf_Xword& idx) const {
-    for (Elf_Xword i = 0; i < get_symbols_num(); i++) {
+    for (Elf_Xword i = idx; i < get_symbols_num(); i++) {
       const T* symPtr = generic_get_symbol_ptr<T>(i);
 
       if (symPtr == nullptr) return false;
