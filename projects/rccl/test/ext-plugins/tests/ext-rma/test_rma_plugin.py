@@ -141,6 +141,14 @@ def test_rma_v15_is_selected_and_preserves_opt_flags(paths):
     plugin = ctypes.CDLL(paths.RMA_SO)
     table = _RmaV15.in_dll(plugin, "ncclRmaPlugin_v15")
     assert table.name == b"Example"
+    _issue_hinted_rma_ops(table)
+
+
+@pytest.mark.ext_rma
+def test_rma_example_counts_hinted_data_ops(paths):
+    """Each hinted iput, iputSignal and iget is counted in the finalize log line."""
+    plugin = ctypes.CDLL(paths.RMA_SO)
+    table = _RmaV15.in_dll(plugin, "ncclRmaPlugin_v15")
 
     # The logger is variadic; the two counts are its first variadic arguments, which
     # x86-64 and aarch64 Linux pass like fixed integer arguments.
