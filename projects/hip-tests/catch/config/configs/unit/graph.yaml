@@ -1636,6 +1636,21 @@ graph:
   Unit_hipGraphKernelNodeSetAttribute_Negative_Priority_OutOfRange:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphSegmentOrdering_SameLevelPeers:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_ForkSeesLaunchStreamWrites:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_DisabledJoinHead:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_LongChainBatches:
+    <<: *level_2
+    tags: [exec]
+  Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion:
+    <<: *level_2
+    tags: [exec]
   Unit_hipGraphKernelNodePriority_CaptureStreamPriorityCopied:
     <<: *level_default
     tags: [node]

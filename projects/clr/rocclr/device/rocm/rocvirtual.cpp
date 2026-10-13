@@ -3766,29 +3766,29 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   bool result = true;
 
-  // Sync caches for all ops
-  device::Memory::SyncFlags syncFlags;
-  syncFlags.skipEntire_ = false;
+  if (!amd::IS_HIP) {
+    device::Memory::SyncFlags syncFlags;
+    syncFlags.skipEntire_ = false;
 
-  for (const auto& op : copyOps) {
-    Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
-    Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
+    for (const auto& op : copyOps) {
+      Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
+      Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
 
-    if (srcDevMem == nullptr || dstDevMem == nullptr) {
-      LogError("submitBatchCopyMemory: Invalid memory objects!");
-      cmd.setStatus(CL_INVALID_MEM_OBJECT);
-      profilingEnd();
-      return;
+      if (srcDevMem == nullptr || dstDevMem == nullptr) {
+        LogError("submitBatchCopyMemory: Invalid memory objects!");
+        cmd.setStatus(CL_INVALID_MEM_OBJECT);
+        profilingEnd();
+        return;
+      }
+
+      dstDevMem->syncCacheFromHost(*this, syncFlags);
+      srcDevMem->syncCacheFromHost(*this);
     }
-
-    dstDevMem->syncCacheFromHost(*this, syncFlags);
-    srcDevMem->syncCacheFromHost(*this);
   }
 
   // KernelBlitManager::copyBufferBatch handles the D2D/D2H/H2D/P2P split:
   // D2D copies use copyBuffer (kernel blit), D2H/H2D/P2P use DMA batch
-  std::vector<amd::BatchCopyOp> batchOps(copyOps.begin(), copyOps.end());
-  if (!blitMgr().copyBufferBatch(batchOps)) {
+  if (!blitMgr().copyBufferBatch(copyOps)) {
     LogError("submitBatchCopyMemory: Batch copy failed!");
     result = false;
   }
@@ -3810,8 +3810,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
     cmd.setStatus(CL_OUT_OF_RESOURCES);
-  } else {
-    // Mark all destinations as written
+  } else if (!amd::IS_HIP) {
     for (const auto& op : copyOps) {
       op.dstMemory->signalWrite(&dev());
     }
@@ -4411,19 +4410,24 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // If Physical address is not set, then it is map command. If set, it is unmap command.
   if (phys_mem_obj != nullptr) {
-    amd::Memory* vaddr_sub_obj =
-        dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
-    if (vaddr_sub_obj == nullptr) {
-      LogError("HSA Command: MapMemObjBookkeeping failed!");
-      profilingEnd();
-      return;
+    amd::Memory* vaddr_sub_obj = nullptr;
+    if (vcmd.trackMapping()) {
+      vaddr_sub_obj =
+          dev().MapMemObjBookkeeping(phys_mem_obj, const_cast<void*>(vcmd.ptr()), vcmd.size());
+      if (vaddr_sub_obj == nullptr) {
+        LogError("HSA Command: MapMemObjBookkeeping failed!");
+        profilingEnd();
+        return;
+      }
     }
     // Map the physical to virtual address the hsa api
     hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
     opaque_hsa_handle.handle = phys_mem_obj->getUserData().hsa_handle;
-    if ((hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), vcmd.size(),
-                                       vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0)) ==
-        HSA_STATUS_SUCCESS) {
+    size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
+    if ((hsa_status = Hsa::vmem_map(const_cast<void*>(vcmd.ptr()), vcmd.size(), phys_offset,
+                                    opaque_hsa_handle, 0)) != HSA_STATUS_SUCCESS) {
+      LogError("HSA Command: hsa_amd_vmem_map failed!");
+    } else if (vaddr_sub_obj != nullptr) {
       constexpr bool kImportVmmForInterprocess = true;
       dev().FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys_mem_obj, const_cast<void*>(vcmd.ptr()),
                                          kImportVmmForInterprocess);
@@ -4432,25 +4436,30 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(dev()))) {
         devMem->refreshOwningAgentFromPointerInfo();
       }
-    } else {
-      LogError("HSA Command: hsa_amd_vmem_map failed!");
     }
   } else {
     dispatchBarrierPacket(kBarrierPacketHeader, false);
     Barriers().WaitCurrent();
 
-    amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
-    assert(vaddr_sub_obj != nullptr);
-
-    // Unmap the object, since the physical addr is set.
-    if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
-        HSA_STATUS_SUCCESS) {
-      constexpr bool kDestroyVirtualBuffer = true;
-      constexpr bool kReleaseSubObj = true;
-      dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
-                                   kDestroyVirtualBuffer, kReleaseSubObj);
+    if (!vcmd.trackMapping()) {
+      if ((hsa_status = Hsa::vmem_unmap(const_cast<void*>(vcmd.ptr()), vcmd.size())) !=
+          HSA_STATUS_SUCCESS) {
+        LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      }
     } else {
-      LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+      assert(vaddr_sub_obj != nullptr);
+
+      // Unmap the object, since the physical addr is set.
+      if ((hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), vcmd.size())) ==
+          HSA_STATUS_SUCCESS) {
+        constexpr bool kDestroyVirtualBuffer = true;
+        constexpr bool kReleaseSubObj = true;
+        dev().UnmapMemObjBookkeeping(vaddr_sub_obj, const_cast<void*>(vcmd.ptr()),
+                                     kDestroyVirtualBuffer, kReleaseSubObj);
+      } else {
+        LogError("HSA Command: hsa_amd_vmem_unmap failed");
+      }
     }
   }
 
@@ -5052,14 +5061,14 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       dispatchPacketExt.cluster_size_y = sizes.dimensions() > 1 ? sizes.cluster()[1] : 1;
       dispatchPacketExt.cluster_size_z = sizes.dimensions() > 2 ? sizes.cluster()[2] : 1;
 
-      // Already validated in HIP Launch Params that newGlobalSize is perfectly divisible by local
-      // and it is divisible by cluster size.
+      // Round up both divisions to support OpenCL 2.0 non-uniform workgroups where
+      // newGlobalSize may not be a multiple of local or cluster size.
       dispatchPacketExt.cluster_count_x = sizes.dimensions() > 0
-                                          ? (newGlobalSize[0] / local[0] / sizes.cluster()[0]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[0], (uint32_t)local[0]), (uint32_t)sizes.cluster()[0]) : 1;
       dispatchPacketExt.cluster_count_y = sizes.dimensions() > 1
-                                          ? (newGlobalSize[1] / local[1] / sizes.cluster()[1]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[1], (uint32_t)local[1]), (uint32_t)sizes.cluster()[1]) : 1;
       dispatchPacketExt.cluster_count_z = sizes.dimensions() > 2
-                                          ? (newGlobalSize[2] / local[2] / sizes.cluster()[2]) : 1;
+          ? amd::divRoundUp(amd::divRoundUp(newGlobalSize[2], (uint32_t)local[2]), (uint32_t)sizes.cluster()[2]) : 1;
 
     } else {
       dispatchPacket.grid_size_x = sizes.dimensions() > 0 ? newGlobalSize[0] : 1;
@@ -5068,9 +5077,11 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
     }
 
     if (dev().settings().groupMemCarveout_) {
-      uint8_t percent = devKernel->workGroupInfo()->groupMemCarveout_
-          ? devKernel->workGroupInfo()->groupMemCarveout_
-          : dev().GetGroupMemCarveout();
+      const int requestedPercent = devKernel->workGroupInfo()->groupMemCarveout_;
+      // Signed storage preserves -1 (device default) and explicit 0; cast only resolved 0..100.
+      const uint8_t percent = requestedPercent >= 0
+                                  ? static_cast<uint8_t>(requestedPercent)
+                                  : dev().GetGroupMemCarveout();
       auto& dispatchPacketExt = dispatchPacketUnion.extKernelDispatch;
       // Encodings [1, 127] represent a range from 0% (no group memory) to 100% (maximum
       // group memory)
