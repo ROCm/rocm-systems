@@ -35,7 +35,7 @@ function(rj_add_device_kernel name offload_arch)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
             --rocm-path=${ROCM_PATH} -fPIC -c -O2 -o ${out} ${src}
-        DEPENDS ${src}
+        DEPENDS ${src} ${AMDCXX}
         COMMENT "Compiling device kernel: ${output_name} (${offload_arch})"
     )
 
@@ -88,7 +88,7 @@ function(rj_add_probe_object name offload_arch)
         COMMAND
             ${AMDCXX} -x hip --offload-arch=${offload_arch}
             --rocm-path=${ROCM_PATH} --cuda-device-only -O2 -o ${bundle} ${src}
-        DEPENDS ${src}
+        DEPENDS ${src} ${AMDCXX}
         COMMENT
             "Compiling probe object (device-only): ${output_name} (${offload_arch})"
     )
@@ -101,7 +101,7 @@ function(rj_add_probe_object name offload_arch)
             ${CLANG_OFFLOAD_BUNDLER} --type=o --unbundle
             --targets=hipv4-amdgcn-amd-amdhsa--${offload_arch} --input=${bundle}
             --output=${hsaco}
-        DEPENDS ${bundle}
+        DEPENDS ${bundle} ${CLANG_OFFLOAD_BUNDLER}
         COMMENT "Unbundling probe object: ${output_name} (${offload_arch})"
     )
 

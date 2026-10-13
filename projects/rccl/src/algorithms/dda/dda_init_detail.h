@@ -7,6 +7,7 @@
 #pragma once
 
 #include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/device/CollCommon_ll128.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
@@ -23,38 +24,32 @@
 
 namespace nccl_dda_detail {
 
+using dda::common::ddaLL128Slices;
+using dda::common::kDdaLL128WireBytesPerSlice;
 using dda::common::kDdaLLMaxBytes;
 constexpr int kDdaNranks = dda::common::NRANKS;
-
-// LL/LL128 fixed slot layout constants. These define the per-rank slot stride
-// used by the kernels, which must be known at compile time so all ranks use
-// identical offsets. The values match the algorithm headers:
-//   LL128: 512 KiB per rank (all_gather_dda_fabric_ll128.h, etc.)
-constexpr size_t kDdaLL128MaxPerRankBytes = 524288;   // 512 KiB
-constexpr int kDdaLL128DataElems = 15;                // payload words per 128B line
-
-// Derive slot stride from max per-rank bytes.
-constexpr size_t kDdaLL128SlotStrideLines =
-  (kDdaLL128MaxPerRankBytes / 8 + kDdaLL128DataElems - 1) / kDdaLL128DataElems;  // 4370 lines
 
 // Compute the fabric scratch allocation from the runtime configuration.
 // An explicit buffer-size override takes precedence over derived sizing.
 //
 // The derived size is: max(simpleCap, llFloor, ll128Floor) where:
-// - simpleCap: DDA_THRESHOLD (default 128 MiB)
+// - simpleCap: rcclDdaScratchPayloadCap() (max DDA/CE-scratch table/env cap,
+//   including graph VMM even when the comm never captures, or the pre-table
+//   DDA defaults when the arch table is ignored)
 // - llFloor:   2 banks * nRanks * kDdaLLMaxBytes (when LL enabled)
-// - ll128Floor: 2 banks * nRanks * kDdaLL128SlotStrideLines * 128B (when LL128 enabled)
+// - ll128Floor: whole slices per rank to carry DDA_LL128_THRESHOLD, 2 banks
 //
-// Collectives that need more scratch (e.g., LL128 AR with large messages) are
-// bounded by the eligibility check (scratchNeeded > ddaScratchBytes), which
-// causes them to fall through to Simple path.
-inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, int64_t ddaThreshold,
-                                     int64_t llEnabled, int64_t ll128Enabled) {
+// simpleCap is the 1:1 payload footprint (VMM Simple, AG CE-Scratch). LL/LL128
+// slot arrays can still exceed that at high rank counts, which is why the
+// floors remain. Kernel-internal slot caps (kDdaLLArMaxBytes, etc.) may still
+// refuse a message even when scratch is large enough.
+inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t ddaEnabled, size_t ddaThreshold,
+                                     int64_t llEnabled, int64_t ll128Enabled, size_t ll128Threshold = 0) {
   if (overrideBytes >= 0) {
     return overrideBytes > 0 ? (size_t)overrideBytes : 0;
   }
 
-  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? (size_t)ddaThreshold : 0;
+  const size_t simpleCap = ddaEnabled && ddaThreshold > 0 ? ddaThreshold : 0;
   if (simpleCap == 0) {
     return 0;
   }
@@ -64,8 +59,15 @@ inline size_t ddaFabricScratchSizing(int nRanks, int64_t overrideBytes, int64_t 
   // LL fixed slot arrays: 2 banks * nRanks * slotMaxBytes.
   const size_t llFloor = llEnabled ? (size_t)2 * nRanks * kDdaLLMaxBytes : 0;
 
-  // LL128 fixed slot arrays: 2 banks * nRanks * slotStrideLines * 128B.
-  const size_t ll128Floor = ll128Enabled ? (size_t)2 * nRanks * kDdaLL128SlotStrideLines * 128 : 0;
+  // LL128 slot arrays sized to carry the LL128 threshold: whole slices per rank,
+  // nRanks slots, 2 banks.
+  size_t ll128Floor = 0;
+  if ((llEnabled || ll128Enabled) && ll128Threshold > 0) {
+    const size_t perRank = (ll128Threshold + (size_t)nRanks - 1) / (size_t)nRanks;
+    size_t slotSlices = ddaLL128Slices(perRank);
+    slotSlices += slotSlices & 1; // even: the two-shot tier halves this slot
+    ll128Floor = (size_t)2 * nRanks * slotSlices * (size_t)kDdaLL128WireBytesPerSlice;
+  }
 
   size_t bytes = simpleCap;
   if (llFloor > bytes) bytes = llFloor;
@@ -91,22 +93,44 @@ inline int ddaMaxNBlocksForScratch() {
   return static_cast<int>(maxBlocks);
 }
 
-inline int ddaFabricMaxNBlocksForScratch() {
-  static int maxBlocks = -1;
-  if (maxBlocks < 0) {
-    int n = DDA_FABRIC_MAXBLOCKS;
-    const char* s = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
-    if (s != nullptr) {
-      n = atoi(s);
-    }
-    if (n < 1) {
-      n = 1;
-    }
-    if (n > 256) {
-      n = 256;
-    }
-    maxBlocks = n;
+struct DdaFabricMaxBlocksOverride {
+  bool specified = false;
+  bool valid = false;
+  long requested = 0;
+};
+
+inline int ddaFabricMaxNBlocksForScratch(int cuCount, const char* overrideValue,
+                                         DdaFabricMaxBlocksOverride* parsedOverride = nullptr) {
+  int maxBlocks = cuCount;
+  if (maxBlocks < 1) {
+    maxBlocks = 1;
   }
+  if (maxBlocks > DDA_FABRIC_MAXBLOCKS) {
+    maxBlocks = DDA_FABRIC_MAXBLOCKS;
+  }
+
+  DdaFabricMaxBlocksOverride parsed;
+  if (overrideValue != nullptr && overrideValue[0] != '\0') {
+    parsed.specified = true;
+    char* endptr = nullptr;
+    parsed.requested = strtol(overrideValue, &endptr, 10);
+    // Only apply if the entire string was a valid integer
+    if (endptr != overrideValue && *endptr == '\0') {
+      parsed.valid = true;
+      // Clamp to [1, maxBlocks] while still a long to avoid int overflow
+      if (parsed.requested < 1) {
+        maxBlocks = 1;
+      } else if (parsed.requested < maxBlocks) {
+        maxBlocks = static_cast<int>(parsed.requested);
+      }
+      // requested >= maxBlocks: keep maxBlocks unchanged (override cannot raise)
+    }
+  }
+
+  if (parsedOverride != nullptr) {
+    *parsedOverride = parsed;
+  }
+
   return maxBlocks;
 }
 

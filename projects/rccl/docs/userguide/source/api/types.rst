@@ -186,6 +186,27 @@ ncclScalarResidence_t
 ncclConfig_t
 ------------
 
+.. c:type:: ncclHostCftMode_t
+
+ Values for the :c:macro:`hostCftMode` communicator configuration.
+
+ .. c:macro:: ncclHostCftDefault
+
+  Use the version-specific default.
+
+ .. c:macro:: ncclHostCftEnable
+
+  Enable host-side CFT support.
+
+ .. c:macro:: ncclHostCftDisable
+
+  Disable host-side CFT support.
+
+ .. c:macro:: ncclHostCftFallback
+
+  Try to create CFT logical endpoints. In case of an error, host-side CFT will be
+  disabled.
+
 .. c:type:: ncclConfig_t
 
  A structure-based configuration users can set to initialize a communicator; a
@@ -284,19 +305,26 @@ ncclConfig_t
 
   (since 2.30)
 
-  Per-communicator override of :ref:`NCCL_GRAPH_STREAM_ORDERING`. ``1`` keeps
+  Per-communicator setting, honored unless
+  :ref:`NCCL_GRAPH_STREAM_ORDERING` is set to ``0`` or ``1``. ``1`` keeps
   NCCL's default capture-time serialization of communication kernels. ``0``
   disables it for this communicator—kernels are placed on the capture stream
   and the application must guarantee correct ordering (see
   :ref:`NCCL_GRAPH_STREAM_ORDERING`).
 
   Defaults to ``NCCL_CONFIG_UNDEF_INT`` (inherits
-  :ref:`NCCL_GRAPH_STREAM_ORDERING`). ``0`` or ``1`` overrides the env var
-  for this communicator.
+  :ref:`NCCL_GRAPH_STREAM_ORDERING`). Setting that environment variable to
+  ``0`` or ``1`` overrides this field.
 
   ``graphStreamOrdering=0`` requires ``graphUsageMode`` ``0`` or ``1``
-  (mixing **off**). Combining it with ``graphUsageMode=2`` is **not
-  supported**; see :ref:`NCCL_GRAPH_STREAM_ORDERING`.
+  (mixing **off**). If it is combined with ``graphUsageMode=2``, NCCL emits a
+  warning and forces ``graphStreamOrdering`` to ``1``; communicator creation
+  still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. NCCL enforces this
+  compatibility fallback within a single communicator only. Communicators
+  created by ``ncclCommSplit`` with ``splitShare`` share one internal
+  serialization event with their parent, so ordering ``0`` on one and
+  ``graphUsageMode=2`` on another that shares those resources is equally
+  unsupported and is **not** diagnosed.
 
   **Mixed values on one GPU:** A communicator set to ``1`` still receives
   NCCL's internal serialization for its own kernels, but NCCL does **not**
@@ -305,9 +333,323 @@ ncclConfig_t
   application guarantees ordering of **all** NCCL communication kernels that
   may run concurrently on the GPU.
 
+ .. c:macro:: launchOrderImplicit
+
+  (since 2.31)
+
+  Per-communicator request for :ref:`NCCL_LAUNCH_ORDER_IMPLICIT`.
+  ``1`` enables implicit launch ordering for this communicator; ``0`` disables
+  it. ``NCCL_CONFIG_UNDEF_INT`` is the default and has the same effective
+  behavior as ``0``.
+
+  Communicators with different effective values can coexist. Overlap safety is
+  about communication operations that may run concurrently on the same GPU:
+
+  * Operations on disabled/default communicators retain the existing
+    multiple-communicator ordering guarantees.
+  * Operations on enabled communicators may overlap with operations on other
+    enabled communicators if the application follows the host-side ordering
+    requirements described for :ref:`NCCL_LAUNCH_ORDER_IMPLICIT`.
+  * Operations on enabled communicators must not overlap with operations on
+    disabled/default communicators. The application must order or synchronize
+    those operations so they do not overlap, or configure the communicators
+    consistently.
+
+  NCCL logs an ``INFO`` message if a CUDA context has used both enabled and
+  disabled/default effective values, but it still initializes the communicator.
+
+  If :ref:`NCCL_LAUNCH_ORDER_IMPLICIT` is set in the environment, it overrides
+  this field before initialization.
+
  .. c:macro:: maxP2pPeers
 
-  Set the maximum number of peers any rank will concurrently communicate with using P2P communication. Setting this value will influence all send/recv and send/recv-based collectives (all-to-all, scatter, gather). Values less than one or greater than the number of ranks will default to the number of ranks in the communicator.
+  (since 2.30)
+
+  Set the maximum number of peers any rank will concurrently communicate with
+  using P2P communication. Where it applies, RCCL divides the P2P channel pool
+  among this many peers rather than among all ranks, so a smaller value gives each
+  peer more channels, influencing send/recv and the send/recv-based collectives
+  (all-to-all, scatter, gather). It does not restrict which peers a rank is allowed
+  to communicate with.
+
+  The value is read in two places only: the per-peer channel tiling enabled by
+  ``RCCL_SATURATE_P2P_NCHANNELS`` (on by default for gfx1250 only), and the
+  multi-node per-peer reduction, which requires more than one node and
+  ``nChannelsPerNetPeer`` left unset. A single-node job on another architecture
+  with default settings is unaffected by this field.
+
+  Defaults to ``NCCL_CONFIG_UNDEF_INT``, which resolves to the number of ranks in
+  the communicator. Values greater than the number of ranks are capped to the
+  communicator size, with a message logged at ``NCCL_DEBUG=INFO``. Any other value
+  less than one is rejected: ``ncclCommInitRankConfig`` returns
+  ``ncclInvalidArgument``. The field is ignored when ``config.version`` is below
+  ``2.30``.
+
+  Setting the ``NCCL_P2P_MAX_PEERS`` environment variable overrides this field.
+  Values ``<= 0`` in that variable are ignored rather than rejected, and the
+  field keeps its value.
+
+ .. c:macro:: numRmaCtx
+
+  (since 2.31)
+
+  Number of one-sided RMA communication contexts to provision on the communicator. The ``ctx`` argument of
+  :c:func:`ncclPutSignal`, :c:func:`ncclSignal`, and :c:func:`ncclWaitSignal` must lie in ``[0, numRmaCtx)``.
+  The default value is 1.
+
+ .. c:macro:: numRmaSig
+
+  (since 2.31)
+
+  Set the number of one-sided RMA signal indexes available per context. The default
+  value is ``1``.
+  Host one-sided RMA operations such as :c:func:`ncclPutSignal`, :c:func:`ncclSignal`,
+  and :c:func:`ncclWaitSignal` use ``sigIdx`` values in the range ``[0, numRmaSig)``.
+
+ .. c:macro:: rmaEagerInit
+
+  (since 2.31)
+
+  Controls when the collective one-sided RMA signal setup is initialized. With
+  ``0`` (default), it is initialized during the first window registration
+  (:c:func:`ncclCommWindowRegister`), a collective point. Use ``1`` to initialize
+  it at communicator-init time instead; this is required if a communicator issues
+  :c:func:`ncclSignal` or :c:func:`ncclWaitSignal` without first registering a
+  window, which otherwise returns ``ncclInvalidUsage``.
+
+  If :ref:`NCCL_RMA_EAGER_INIT` is set in the environment, it overrides this field
+  before initialization.
+
+ .. c:macro:: hostCftMode
+
+  (since 2.31)
+
+  Controls support for host-side Compute Fabric Transport (CFT) queries.
+  :c:macro:`ncclHostCftEnable` creates the communicator's unicast and multicast
+  logical endpoints during the first :c:func:`ncclCommWindowRegister` call on a
+  CFT-capable communicator. :c:macro:`ncclHostCftDisable` disables support, and
+  :c:macro:`ncclHostCftFallback` tries to create logical endpoints and disables
+  host-side CFT in case of error.
+  :c:macro:`ncclHostCftDefault` selects the library-defined default behavior.
+
+ .. c:macro:: nvlsHostMode
+
+  (since 2.31)
+
+  Controls host-side use of NVLink SHARP (NVLS) for a single communicator.
+  The value is a bitmask that can independently disable the NVLS collective
+  transport and multimem use by NCCL's internal symmetric kernels and Copy
+  Engine (CE) collectives. Explicit Device API multimem requests remain
+  available. Selectively disabling host NVLS components on small or infrequently
+  used communicators can preserve limited hardware multicast resources for other
+  communicators that can utilize them more effectively.
+
+  Supported values (``ncclNvlsHostMode_t``):
+
+  * ``ncclNvlsHostModeDefault`` — Library-defined default. Currently equivalent
+    to ``ncclNvlsHostModeEnable``.
+  * ``ncclNvlsHostModeEnable`` — Enable all host NVLS components.
+  * ``ncclNvlsHostModeDisableTransport`` — Disable the NVLS collective transport
+    and its registered-buffer optimization. The NVLS, NVLS_TREE, and multi-RPN
+    PAT algorithms will be disabled.
+  * ``ncclNvlsHostModeDisableSymmetricMultimem`` — Disable multimem use by NCCL's
+    internal symmetric kernels and CE collectives. UC symmetric kernels and CE
+    fallbacks remain available.
+  * ``ncclNvlsHostModeDisable`` — Disable all present and future host NVLS
+    components. This value sets all non-reserved bits for forward compatibility.
+
+  The component flags can be combined with the bitwise OR operator. These flags
+  do not affect the communicator's reported Device API multimem capability and
+  do not prevent explicit Device API calls from allocating multimem resources.
+
+.. _ncclcollconfig:
+
+ncclCollConfig_t
+----------------
+
+.. c:type:: ncclCollConfig_t
+
+ Per-collective configuration passed through an ``nccl*Config`` collective API.
+ Every :c:type:`ncclCollConfig_t` must be initialized with
+ :c:macro:`NCCL_COLLCONFIG_INITIALIZER` before any member is set. Passing
+ ``NULL`` to a config-taking collective is equivalent to calling the
+ corresponding collective without a configuration.
+
+ The application owns the configuration and any storage it references, and must
+ keep them valid for the duration of each call that uses them. Set the same
+ configuration on every rank unless a member is documented otherwise.
+
+ For options that also have environment-variable and communicator-level forms,
+ NCCL applies values in the following order: environment variable, per-collective
+ configuration, communicator configuration, and library default. Leave resource and CTA-policy
+ members at ``NCCL_CONFIG_UNDEF_INT`` to fall through to the next source in this list.
+
+ .. c:macro:: NCCL_COLLCONFIG_INITIALIZER
+
+  (since 2.31)
+
+  Initializes a new :c:type:`ncclCollConfig_t` with default values.
+
+ .. c:member:: ncclConfigExt_t* ext
+
+  (since 2.31)
+
+  Head of a linked list of vendor-specific :c:type:`ncclConfigExt_t` options,
+  or ``NULL``. The official NCCL library does not read this member; it exists
+  for vendor libraries layered on top of NCCL to forward their own
+  vendor-defined options through the same call.
+
+ .. c:member:: int minCTAs
+
+  (since 2.31)
+
+  Per-collective override of ``minCTAs`` in :ref:`ncclconfig`. Accepts the
+  same value range as :ref:`NCCL_MIN_CTAS`; an out-of-range value is ignored
+  and NCCL falls through to the next priority source. If the resolved value
+  exceeds the resolved ``maxCTAs``, NCCL resets ``minCTAs`` to ``1``.
+
+ .. c:member:: int maxCTAs
+
+  (since 2.31)
+
+  Per-collective override of ``maxCTAs`` in :ref:`ncclconfig`. Accepts the
+  same value range as :ref:`NCCL_MAX_CTAS`; an out-of-range value is ignored
+  and NCCL falls through to the next priority source. The resolved value is
+  further clamped to the communicator's ``maxCTAs`` and applies only to this
+  collective, including when calls are grouped.
+
+ .. c:member:: int nvlsCTAs
+
+  (since 2.31)
+
+  Per-collective override of ``nvlsCTAs`` in :ref:`ncclconfig`. This setting applies only to NVLS algorithms.
+
+ .. c:member:: int cgaClusterSize
+
+  (since 2.31)
+
+  Per-collective override of ``cgaClusterSize`` in :ref:`ncclconfig`. Accepts
+  the same value range as :ref:`NCCL_CGA_CLUSTER_SIZE`; an out-of-range value
+  is ignored and NCCL falls through to the next priority source. All
+  collectives in a group must use the same value; inconsistent values result
+  in undefined behavior.
+
+ .. c:member:: const char* algSelection
+
+  (since 2.31)
+
+  A case-insensitive expression that filters the algorithms and kernels NCCL may
+  use for this call. ``NULL`` or an empty string requests automatic selection.
+
+  Each name is matched as a prefix from the start of a known name. For example,
+  ``ring`` selects ``RING_LL``, ``RING_LL128``, and ``RING_SIMPLE``, but does not
+  select ``SYMK_RailRing_LsaSTMC``; similarly, ``nvls`` selects both ``NVLS_SIMPLE``
+  and ``NVLSTREE_SIMPLE``. The supported operators are ``+`` (AND), ``,``
+  (OR), and ``^`` (NOT); parentheses are not supported. For example,
+  ``tree,ring`` permits either family, ``ring + ^RING_LL128`` permits Ring except
+  LL128, and ``^symk`` excludes symmetric kernels.
+
+  The selectable built-in names and the collectives for which they are valid are:
+
+  * AllReduce: ``TREE_LL``, ``TREE_LL128``, ``TREE_SIMPLE``, ``RING_LL``,
+    ``RING_LL128``, ``RING_SIMPLE``, ``COLLNET_DIRECT_SIMPLE``,
+    ``COLLNET_CHAIN_SIMPLE``, ``NVLS_SIMPLE``, ``NVLSTREE_SIMPLE``,
+    ``SYMK_AGxLL_R``, ``SYMK_AGxLLMC_R``, ``SYMK_RSxTmaLD_AGxTmaST``,
+    ``SYMK_RSxLD_AGxST``, and ``SYMK_RSxLDMC_AGxSTMC``.
+  * AllGather: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``,
+    ``COLLNET_DIRECT_SIMPLE``, ``NVLS_SIMPLE``, ``PAT_SIMPLE``, ``SYMK_LL``,
+    ``SYMK_LLMC``, ``SYMK_TmaST``, ``SYMK_ST``, ``SYMK_TmaSTMC``,
+    ``SYMK_STMC``, and ``SYMK_RailRing_LsaSTMC``.
+  * ReduceScatter: ``RING_LL``, ``RING_LL128``, ``RING_SIMPLE``,
+    ``COLLNET_DIRECT_SIMPLE``, ``NVLS_SIMPLE``, ``PAT_SIMPLE``, ``SYMK_LL``,
+    ``SYMK_TmaLD``, ``SYMK_LD``, ``SYMK_LDMC``, ``SYMK_RailA2A_LsaLD``, and
+    ``SYMK_RailA2A_LsaLDMC``.
+  * Broadcast and Reduce: ``RING_LL``, ``RING_LL128``, and ``RING_SIMPLE``.
+
+  The ``SYMK_*`` names refer to symmetric-memory kernels built on the NCCL
+  Device API. ``LL`` is a low-latency protocol that tags data with an inline
+  flag instead of a separate synchronization step; ``LD``/``ST`` are ordinary
+  load/store data movement and ``TmaLD``/``TmaST`` use the Tensor Memory
+  Accelerator for bulk asynchronous copies; the ``MC`` suffix (as in
+  ``LLMC``, ``LDMC``, ``STMC``) means the load, store, or reduction is done
+  through NVLink SHARP multimem (multicast) instead of per-peer accesses; and
+  ``Rail``/``Lsa`` names are multi-node kernels that combine a local
+  NVLink-domain (``Lsa``) step with a network exchange between same-rail ranks
+  across nodes.
+
+  Algorithm names are implementation details and may evolve. AllToAll,
+  Gather, and Scatter lower to point-to-point sends and receives and expose
+  no selectable names; Copy Engine paths are likewise not selectable here.
+  Request a Copy Engine path with ``CTAPolicy`` instead.
+
+ .. c:member:: int forceAlgSelection
+
+  (since 2.31)
+
+  Controls what happens when ``algSelection`` is invalid or cannot be honored.
+  With the default value, ``1``, NCCL returns an error. Set it to ``0`` to
+  fall back to automatic selection instead.
+
+ .. c:member:: int CTAPolicy
+
+  (since 2.31)
+
+  Per-collective override of the communicator's CTA policy. A set value replaces
+  the communicator value; see :ref:`cta_policy_flags`. If both
+  ``NCCL_CTA_POLICY_ZERO`` and ``NCCL_CTA_POLICY_EFFICIENCY`` are set, Zero-CTA
+  takes precedence. Copy Engine paths are selected through this policy, not
+  ``algSelection``.
+
+ .. c:member:: uint64_t userProfilerTag
+
+  (since 2.31)
+
+  An opaque value delivered with the call's events to profiler plugins that
+  support profiler interface v7. Zero denotes an untagged call; older profiler
+  interfaces ignore the tag.
+
+  The tag does not affect execution. NCCL reserves values with the
+  most-significant bit set for possible future use; applications should use
+  values with that bit clear.
+
+ .. c:member:: cudaEvent_t launchCompletionEvent
+
+  (since 2.32)
+
+  A caller-owned CUDA event that NCCL records at the collective kernel-launch completion
+  boundary. Create the event with `cudaEventCreateWithFlags and cudaEventDisableTiming
+  <https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__EVENT.html>`_. It must
+  not be an interprocess or interop event.
+
+  A NULL event requests no update. Event presence must match across ranks: every rank in the
+  corresponding collective must provide a rank-local non-NULL event, or every rank must provide
+  NULL. A group supports at most one non-NULL event per communicator.
+
+  Keep the event alive through all queued waits and graph executions that use it. For a grouped
+  collective, enqueue a dependent ``cudaStreamWaitEvent`` only after ``ncclGroupEnd`` returns
+  ``ncclSuccess``. With a nonblocking communicator, first poll ``ncclCommGetAsyncError`` until it
+  returns ``ncclSuccess``; do not enqueue the wait after an error.
+
+  NCCL records the event only for kernel launches; Copy Engine and RMA work do not record it.
+
+  CUDA 12.3 or newer provides launch-completion semantics. On older CUDA platforms, NCCL
+  emits a warning and records the event before the kernel launch; this fallback does not
+  provide a launch-completion guarantee. CUDA launch completion is best effort and does not
+  guarantee that dependent work overlaps the collective. Graph capture is supported with a
+  capture-compatible event; sharing a recorded event across graphs is not supported.
+
+.. c:type:: ncclConfigExt_t
+
+ A vendor-specific key-value option that can be linked through its ``next``
+ member and attached to :c:member:`ncclCollConfig_t.ext`. Each option has a key
+ consisting of ``key.vendorId`` and ``key.optionId`` and one value in the
+ ``val.i``, ``val.s``, or ``val.raw`` union member. The list is unordered and
+ must not contain duplicate keys.
+
+ Vendors should choose a non-zero ``vendorId`` under ``2^24`` that is unlikely
+ to collide with other vendor libraries, for example by picking a random
+ number; ``optionId`` then distinguishes options within that vendor's own
+ namespace.
 
 .. _ncclsiminfo:
 

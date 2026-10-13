@@ -22,9 +22,7 @@
 #include <dlfcn.h>
 #include <map>
 
-namespace rocprofsys
-{
-namespace causal
+namespace rocprofsys::causal
 {
 void
 save_line_info(const settings::compose_filename_config&, int _verbose);
@@ -58,5 +56,4 @@ start_experimenting();
 
 void
 finish_experimenting();
-}  // namespace causal
-}  // namespace rocprofsys
+}  // namespace rocprofsys::causal

@@ -103,7 +103,7 @@ Build ROCprofiler-SDK
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
     cd rocm-systems
     git sparse-checkout init --cone
-    git sparse-checkout set projects/rocprofiler-sdk
+    git sparse-checkout set projects/rocprofiler-sdk shared/sha256
     git checkout develop
     python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
     cmake                                         \

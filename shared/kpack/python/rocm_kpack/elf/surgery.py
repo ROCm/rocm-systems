@@ -254,6 +254,17 @@ class ElfSurgery:
         return ElfSurgery._section_location(file_path, ".hip_fatbin") is not None
 
     @staticmethod
+    def has_kpack_ref_section(file_path: Path) -> bool:
+        """Fast check for .rocm_kpack_ref without loading the full binary.
+
+        Its presence means the binary has already been through
+        kpack_offload_binary(): the device code lives in a .kpack archive and
+        the .hip_fatbin section header that remains is a leftover, not
+        splittable content.
+        """
+        return ElfSurgery._section_location(file_path, ".rocm_kpack_ref") is not None
+
+    @staticmethod
     def read_section(file_path: Path, section_name: str) -> bytes | None:
         """Read one ELF section without retaining the rest of the ELF image."""
         location = ElfSurgery._section_location(file_path, section_name)

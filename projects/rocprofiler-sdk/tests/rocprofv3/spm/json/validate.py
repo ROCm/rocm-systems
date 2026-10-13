@@ -57,7 +57,9 @@ def test_validate_spm_json(spm_json_data):
 def test_validate_spm(pmc_json_data, spm_json_data):
 
     TOLERANCE = 0.2
-    within_tolerance = lambda x, y: abs(x - y) < TOLERANCE * max(x, y)
+
+    def within_tolerance(x, y):
+        return abs(x - y) < TOLERANCE * max(x, y)
 
     def _collect_counter_totals(json_data, record_kind, kernel_filter):
         data = json_data["rocprofiler-sdk-tool"]
@@ -92,8 +94,12 @@ def test_validate_spm(pmc_json_data, spm_json_data):
 
     assert pmc_values and spm_values
 
-    is_cycle = lambda x: x[:2] == "CP" or x == "SQ_CYCLES"
-    is_deterministic = lambda x: x[:3] == "SQ_" and x != "SQ_CYCLES"
+    def is_cycle(x):
+        return x[:2] == "CP" or x == "SQ_CYCLES"
+
+    def is_deterministic(x):
+        return x[:3] == "SQ_" and x != "SQ_CYCLES"
+
     # Deterministic and nearly deterministic counters
     for counter_name, pmc_value in pmc_values.items():
         if counter_name not in spm_values:
@@ -106,7 +112,7 @@ def test_validate_spm(pmc_json_data, spm_json_data):
         elif not is_cycle(counter_name):
             assert within_tolerance(
                 pmc_value, spm_value
-            ), f"{counter_name}: pmc={pmc_value}, spm={spm_value}, not within {TOLERANCE*100}% tolerance"
+            ), f"{counter_name}: pmc={pmc_value}, spm={spm_value}, not within {TOLERANCE * 100}% tolerance"
 
 
 def test_validate_spm_multigpu_stream_id(spm_json_data):

@@ -44,6 +44,8 @@ inline bool is_trivial_match(int wave, InstCategory line)
         return line == InstCategory::IMMED;
     else if (wave == WaveInstCategory::FLAT)
         return line == InstCategory::VMEM;
+    else if (wave == WaveInstCategory::VMEM)
+        return line == InstCategory::FLAT;
 
     return false;
 }

@@ -68,6 +68,15 @@ inline bool isCeDispatchConfigured()
            MPIHelpers::getEnvParam("NCCL_CUMEM_ENABLE",          kCuMemEnableDefault)       == kCuMemEnable;
 }
 
+// Returns true when CE AlltoAll dispatch is expected (CE prerequisites + RCCL_DDA_ENABLE=0).
+inline bool isCeAlltoAllDispatchConfigured()
+{
+    constexpr int kDdaEnableDefault = 1; // RCCL_DDA_ENABLE defaults on
+    constexpr int kDdaDisabled      = 0;
+    return isCeDispatchConfigured() &&
+           MPIHelpers::getEnvParam("RCCL_DDA_ENABLE", kDdaEnableDefault) == kDdaDisabled;
+}
+
 // Returns true when CE AllReduce dispatch is expected (CE prerequisites + RCCL_CE_ALLREDUCE=1).
 inline bool isCeAllReduceDispatchConfigured()
 {
@@ -105,9 +114,13 @@ inline hipError_t ceFillRankScalarFloat(void* buf, size_t nElem, int rank)
 }
 
 // True when NCCL logs indicate the CE AllReduce pipeline ran.
+// Match the execution INFO lines from ncclCeAllReduce(), not the
+// "Skipping CE AllReduce: ..." WARN that rcclUseCeAr2Shot() emits
+// when nNodes > 1 (that substring used to fail multi-node EightRanks).
 inline bool ceLogShowsAllReducePath(const std::string& log)
 {
-    return log.find("CE AllReduce:") != std::string::npos ||
+    return log.find("CE AllReduce: rank") != std::string::npos ||
+           log.find("CE AllReduce: Phase") != std::string::npos ||
            log.find("CE 2-shot AllReduce") != std::string::npos;
 }
 

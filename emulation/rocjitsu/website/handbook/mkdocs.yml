@@ -1,0 +1,117 @@
+site_name: Rocjitsu
+site_description: User and developer documentation for the ROCm Just-in-Time Suite.
+site_url: https://rocm.github.io/rocm-systems/rocjitsu/
+repo_url: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
+repo_name: ROCm/rocm-systems
+docs_dir: ../../docs
+exclude_docs: |
+  /sphinx/
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    anchors: warn
+site_dir: site
+hooks:
+  - hooks.py
+theme:
+  name: material
+  custom_dir: overrides
+  icon:
+    repo: fontawesome/brands/github
+  favicon: "data:,"
+  font: false
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - toc.follow
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+plugins:
+  - search
+  - blog:
+      post_url_format: '{slug}'
+      archive: false
+      categories: false
+      authors: false
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - toc:
+      permalink: true
+extra_css:
+  - assets/handbook.css
+extra_javascript:
+  - assets/repository-stats.js
+nav:
+  - Overview: index.md
+  - User guide:
+      - Build from source: building.md
+      - Command-line interface: rocjitsu-cli.md
+      - Configuration: configuration.md
+      - Race detection: race-detector.md
+      - GPU debugging: rocgdb-debugging.md
+      - Benchmarking: benchmarking.md
+      - QEMU VFIO-user compute: qemu-vfio.md
+      - Vulkan compute: vulkan-compute.md
+      - Memory wait diagnostics: memory-wait-diagnostics.md
+      - ISA diagnostics: isa-diagnostics.md
+  - Developer guide:
+      - Architecture: architecture.md
+      - Code style: style.md
+      - Simulation engine: simdojo.md
+      - GPU hardware model: vm-design.md
+      - Binary translation: dbt-design.md
+      - Translation tool: rj_dbt_translate.md
+      - DBT guest mode: rocjitsu_dbt_guest.md
+      - Binary instrumentation: dbi-design.md
+      - Instrumentation overview: dbi-overview.md
+      - Execution plugins: plugins.md
+      - ISA code generation: codegen.md
+      - ISA target providers: isa-target-providers.md
+      - ISA gap audit: isa-gap-audit.md
+      - Adding a GPU: npi.md
+      - Asynchronous MMA execution: async-instructions.md
+      - MMA lookahead admission: mma-admission.md
+      - Concurrent dispatch: concurrent-dispatch.md
+      - Memory wait coverage: memory-wait-counter-coverage.md
+  - Project:
+      - Blog: blog/index.md
+      - Performance dashboard: performance-dashboard.md
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
+      name: Rocjitsu on GitHub
+    - icon: material/bug-outline
+      link: https://github.com/ROCm/rocm-systems/issues
+      name: Report an issue
+copyright: >-
+  Copyright &copy; 2025–2026 Advanced Micro Devices, Inc.<br>
+  <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/LICENSE.md">MIT License</a>

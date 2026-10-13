@@ -48,17 +48,10 @@ amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
 bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue) {
   amd_comgr_metadata_node_t isaMeta;
 
-  // Workaround: Strip -strict suffix for gfx1250 as metadata may not exist for strict variant
-  std::string lookup_isa = isa;
-  size_t strict_pos = lookup_isa.find("-strict");
-  if (strict_pos != std::string::npos) {
-    lookup_isa = lookup_isa.substr(0, strict_pos);
-  }
-
-  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(lookup_isa.c_str(), &isaMeta);
+  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isa.c_str(), &isaMeta);
 
   if (status != AMD_COMGR_STATUS_SUCCESS) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", lookup_isa.c_str());
+    ClPrint(amd::LOG_ERROR, amd::LOG_INIT, "getIsaMeta(%s) failed!", isa.c_str());
     return false;
   }
 
@@ -609,6 +602,9 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.clusterSize_[0] = 1;
   workGroupInfo_.clusterSize_[1] = 1;
   workGroupInfo_.clusterSize_[2] = 1;
+  workGroupInfo_.runtimeClusterSize_[0] = 0;
+  workGroupInfo_.runtimeClusterSize_[1] = 0;
+  workGroupInfo_.runtimeClusterSize_[2] = 0;
   workGroupInfo_.localMemSize_ = 0;
   workGroupInfo_.preferredSizeMultiple_ = 0;
   workGroupInfo_.privateMemSize_ = 0;
@@ -634,7 +630,14 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.wavesPerSimdHint_ = 0;
   workGroupInfo_.constMemSize_ = 0;
   workGroupInfo_.maxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.kernelMaxDynamicSharedSizeBytes_ = 0;
+  workGroupInfo_.kernelPreferredShmemCarveout_ = -1;
+  workGroupInfo_.nonPortableClusterSizeAllowed_ = 0;
+  workGroupInfo_.clusterSchedulingPolicyPreference_ = 0;
   workGroupInfo_.hasClusterAttr_ = false;
+  workGroupInfo_.hasFuncMaxDynamicSharedSize_ = false;
+  workGroupInfo_.hasFuncPreferredShmemCarveout_ = false;
+  workGroupInfo_.groupMemCarveout_ = -1;
 }
 
 // ================================================================================================

@@ -5,6 +5,7 @@ set(target test-pc-sampling-collector)
 add_executable(
     ${target}
     main.cpp
+    test_filesystem_wrapper.cpp
     test_pc_sampling_collector.h
     test_pc_sampling_collector.cpp
     test_code_object_writer.h

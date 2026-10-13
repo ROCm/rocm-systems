@@ -47,6 +47,13 @@ SELECT
 FROM regions
 ORDER BY start
 """
+KERNEL_SYMBOLS_QUERY = """
+SELECT
+    display_name as Kernel_Name,
+    truncated_kernel_name as Kernel_Short_Name
+FROM kernel_symbols
+ORDER BY Kernel_Name, Kernel_Short_Name
+"""
 KERNEL_DISPATCH_QUERY = """
 SELECT dispatch_id, event_id, guid
 FROM rocpd_kernel_dispatch
@@ -68,16 +75,20 @@ def convert_dbs_to_csv(
     db_paths: list[str],
     counter_collection_csv_path: str,
     marker_trace_csv_path: str,
+    kernel_symbols_csv_path: str,
 ) -> None:
     queries = {
         counter_collection_csv_path: COUNTERS_COLLECTION_QUERY,
         marker_trace_csv_path: MARKER_API_TRACE_QUERY,
+        kernel_symbols_csv_path: KERNEL_SYMBOLS_QUERY,
     }
     header_written = {path: False for path in queries}
 
     with ExitStack() as stack:
         writers = {
-            path: csv.writer(stack.enter_context(csv_compression.open_csv_write(path)))
+            path: csv.writer(
+                stack.enter_context(csv_compression.open_gzip_csv_write(path))
+            )
             for path in queries
         }
         for db_path in db_paths:

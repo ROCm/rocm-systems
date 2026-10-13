@@ -1,6 +1,31 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Fixed
+* Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
+  Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
+
+### Added
+* GDA device code refactor (#7217)
+  * Core GDA device code is now header-only.
+  * Removed indirection and branching when compiled for a single GDA provider.
+  * Significantly reduced size of device code GDA Queue Pair management objects.
+  * Reduced latency of `rocshmem_quiet` for AMD Pensando IONIC provider.
+    This also reduces the latency of blocking communication calls.
+  * Communications using the GDA backend can now selectively choose at compilation time
+    to reduce the internal GDA Queue Pair object correctness and safety constraints,
+    improving application performance when such relaxations are known to be safe by the caller.
+    These relaxations can be applied independently at each call site.
+    This is currently an internal mechanism and is not exposed by the public rocSHMEM APIs.
+* Added standalone signal APIs:
+    * `rocshmem_signal_add` and `rocshmem_ctx_signal_add`
+    * `rocshmem_signal_set` and `rocshmem_ctx_signal_set`
+    * `rocshmem_signal_wait_until`
+
+### Deprecated
+* Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
+  Use `rocshmem_signal_fetch` instead.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

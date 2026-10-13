@@ -4,6 +4,7 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_KFD_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
@@ -15,6 +16,10 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 
 namespace amd::smi {
+
+// Sentinel for KFDNode::numa_node_* when no CPU io_link was found.
+constexpr auto kInvalidNumaNode = std::numeric_limits<uint32_t>::max();
+constexpr auto kInvalidNumaNodeWeight = std::numeric_limits<uint64_t>::max();
 
 class KFDNode {
  public:
@@ -64,9 +69,9 @@ class KFDNode {
   uint32_t amdgpu_dev_index_;
   uint64_t gpu_id_;
   std::string name_;
-  uint32_t numa_node_number_;
-  uint64_t numa_node_weight_;
-  IO_LINK_TYPE numa_node_type_;
+  uint32_t numa_node_number_ = kInvalidNumaNode;
+  uint64_t numa_node_weight_ = kInvalidNumaNodeWeight;
+  IO_LINK_TYPE numa_node_type_ = IOLINK_TYPE_UNDEFINED;
   uint64_t xgmi_hive_id_;
   uint32_t cu_count_;
   std::map<uint32_t, IO_LINK_TYPE> io_link_type_;

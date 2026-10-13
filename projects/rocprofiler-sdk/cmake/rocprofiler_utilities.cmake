@@ -1066,7 +1066,7 @@ function(rocprofiler_add_unit_test)
         "SKIP_REGULAR_EXPRESSION"
         "RESOURCE_LOCK")
     set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA"
-                    "CONFIGURE_FILES")
+                    "CONFIGURE_FILES" "SPM_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
 
@@ -1148,6 +1148,20 @@ function(rocprofiler_add_unit_test)
         set_tests_properties(${_DISABLE_TESTS_SOURCE} PROPERTIES DISABLED ON)
     endif()
 
+    if(RAUT_SPM_TESTS)
+        foreach(_TEST ${RAUT_SPM_TESTS})
+            set(_spm_test "${RAUT_TEST_PREFIX}${_TEST}")
+            get_property(
+                _labels
+                TEST ${_spm_test}
+                PROPERTY LABELS)
+            if(NOT "spm" IN_LIST _labels)
+                list(APPEND _labels "spm")
+                set_tests_properties(${_spm_test} PROPERTIES LABELS "${_labels}")
+            endif()
+        endforeach()
+    endif()
+
     set(_INSTALL_RUNTIME_OUTPUT_DIRECTORY
         ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests/unit-tests/bin)
     set(_BUILD_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
@@ -1184,6 +1198,14 @@ function(rocprofiler_add_unit_test)
         endforeach()
     endif()
     set(RAUT_DISABLE_TESTS "${_DISABLE_TESTS_INSTALLED}")
+
+    set(_SPM_TESTS_INSTALLED "")
+    if(RAUT_SPM_TESTS)
+        foreach(_TEST ${RAUT_SPM_TESTS})
+            list(APPEND _SPM_TESTS_INSTALLED "${RAUT_TEST_PREFIX}${_TEST}")
+        endforeach()
+    endif()
+    set(RAUT_SPM_TESTS "${_SPM_TESTS_INSTALLED}")
 
     configure_file(
         ${CMAKE_SOURCE_DIR}/cmake/Templates/unit-test.cmake.in

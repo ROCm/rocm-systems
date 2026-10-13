@@ -40,7 +40,8 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_PROTO_SIMPLE 2
 #define NCCL_NUM_PROTOCOLS NCCL_NUM_PROTOCOLS_V5 // Simple/LL/LL128
 
-#define NCCL_ALGO_PROTO_IGNORE -1.0
+#define NCCL_TUNING_IGNORE -1.0
+#define NCCL_ALGO_PROTO_IGNORE NCCL_TUNING_IGNORE
 
 #define NCCL_NUM_UNROLLS 6 // 1/2/4/8/16/32
 #define NCCL_UNROLL_1 0

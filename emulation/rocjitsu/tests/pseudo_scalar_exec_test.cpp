@@ -11,7 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -166,7 +166,7 @@ struct PseudoScalarSpecialCase {
   uint32_t mode = 0;
 };
 
-constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
+constexpr std::array<PseudoScalarSpecialCase, 92> kSpecialCases{{
     {"literal_f32",
      "v_s_sqrt_f32",
      0,
@@ -190,9 +190,24 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
      "",
      {.source_opsel = true},
      amdgpu::Wavefront::FP16_OVFL_BIT},
+    // Physical gfx1201 scalar instructions match the vector hardware mappings.
+    {"f32_exp_approximation", "v_s_exp_f32", 0xB6128C18u, 0x3F7FFFE6u, "", {}},
+    {"f32_log_approximation", "v_s_log_f32", 0x266D35EFu, 0xC248709Eu, "", {}},
     {"f32_input_denorm_flush", "v_s_log_f32", 0x00000001u, 0xFF800000u, "", {}},
-    {"f32_input_denorm_allow", "v_s_log_f32", 0x00000001u, f32_bits(-149.0f), "", {}, 1u << 4},
-    {"f32_output_denorm_allow", "v_s_exp_f32", f32_bits(-149.0f), 0x00000001u, "", {}, 1u << 5},
+    {"f32_log_flushes_allowed_input_denorm",
+     "v_s_log_f32",
+     0x00000001u,
+     0xFF800000u,
+     "",
+     {},
+     1u << 4},
+    {"f32_exp_flushes_allowed_output_denorm",
+     "v_s_exp_f32",
+     f32_bits(-149.0f),
+     0x00000000u,
+     "",
+     {},
+     1u << 5},
     {"f32_ignores_f16_output_denorm_mode",
      "v_s_exp_f32",
      f32_bits(-149.0f),
@@ -214,36 +229,36 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
      "",
      {.source_opsel = true},
      1u << 7},
-    {"f32_round_toward_positive", "v_s_exp_f32", f32_bits(0.5f), 0x3FB504F4u, "", {}, 1u},
+    {"f32_round_toward_positive", "v_s_exp_f32", f32_bits(0.5f), 0x3FB504F3u, "", {}, 1u},
     {"f16_round_toward_positive",
      "v_s_exp_f16",
      0xCAFE3800u,
-     0x00003DA9u,
+     0x00003DA8u,
      "",
      {.source_opsel = true},
      1u << 2},
-    {"f32_round_toward_negative", "v_s_sqrt_f32", f32_bits(5.0f), 0x400F1BBCu, "", {}, 2u},
-    {"f32_round_toward_zero", "v_s_sqrt_f32", f32_bits(5.0f), 0x400F1BBCu, "", {}, 3u},
+    {"f32_round_toward_negative", "v_s_sqrt_f32", f32_bits(5.0f), 0x400F1BBDu, "", {}, 2u},
+    {"f32_round_toward_zero", "v_s_sqrt_f32", f32_bits(5.0f), 0x400F1BBDu, "", {}, 3u},
     {"f16_round_toward_negative",
      "v_s_sqrt_f16",
      0xCAFE4200u,
-     0x00003EEDu,
+     0x00003EEEu,
      "",
      {.source_opsel = true},
      2u << 2},
     {"f16_round_toward_zero",
      "v_s_sqrt_f16",
      0xCAFE4200u,
-     0x00003EEDu,
+     0x00003EEEu,
      "",
      {.source_opsel = true},
      3u << 2},
-    {"f32_negative_round_toward_negative", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAABu, "", {}, 2u},
+    {"f32_negative_round_toward_negative", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAAAu, "", {}, 2u},
     {"f32_negative_round_toward_zero", "v_s_rcp_f32", f32_bits(-3.0f), 0xBEAAAAAAu, "", {}, 3u},
     {"f16_negative_round_toward_negative",
      "v_s_rcp_f16",
      0xCAFEC200u,
-     0x0000B556u,
+     0x0000B555u,
      "",
      {.source_opsel = true},
      2u << 2},
@@ -257,14 +272,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_finite_overflow_round_toward_negative",
      "v_s_exp_f32",
      f32_bits(1024.0f),
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {},
      2u},
     {"f32_finite_overflow_round_toward_zero",
      "v_s_exp_f32",
      f32_bits(2000.0f),
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {},
      3u},
@@ -279,7 +294,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_finite_underflow_round_toward_positive",
      "v_s_exp_f32",
      f32_bits(-2000.0f),
-     0x00000001u,
+     0x00000000u,
      "",
      {},
      1u | (1u << 5)},
@@ -320,14 +335,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_destination_overflow_round_toward_negative",
      "v_s_exp_f32",
      f32_bits(128.0f),
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {},
      2u},
     {"f32_destination_overflow_round_toward_zero",
      "v_s_exp_f32",
      f32_bits(128.0f),
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {},
      3u},
@@ -341,7 +356,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_destination_underflow_round_toward_positive",
      "v_s_exp_f32",
      f32_bits(-150.0f),
-     0x00000001u,
+     0x00000000u,
      "",
      {},
      1u | (1u << 5)},
@@ -375,14 +390,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_destination_overflow_round_toward_negative",
      "v_s_exp_f16",
      0xCAFE4C00u,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true},
      2u << 2},
     {"f16_destination_overflow_round_toward_zero",
      "v_s_exp_f16",
      0xCAFE4C00u,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true},
      3u << 2},
@@ -396,7 +411,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_destination_underflow_round_toward_positive",
      "v_s_exp_f16",
      0xCAFECE40u,
-     0x00000001u,
+     0x00000000u,
      "",
      {.source_opsel = true},
      (1u << 2) | (1u << 7)},
@@ -430,14 +445,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f32_rcp_omod_destination_overflow_round_toward_negative",
      "v_s_rcp_f32",
      0x00800000u,
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {.omod = 2},
      2u},
     {"f32_rcp_omod_destination_overflow_round_toward_zero",
      "v_s_rcp_f32",
      0x00800000u,
-     0x7F7FFFFFu,
+     0x7F800000u,
      "",
      {.omod = 2},
      3u},
@@ -457,14 +472,14 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_rcp_omod_destination_overflow_round_toward_negative",
      "v_s_rcp_f16",
      0xCAFE0400u,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true, .omod = 2},
      2u << 2},
     {"f16_rcp_omod_destination_overflow_round_toward_zero",
      "v_s_rcp_f16",
      0xCAFE0400u,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true, .omod = 2},
      3u << 2},
@@ -496,7 +511,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_finite_overflow_round_toward_zero",
      "v_s_exp_f16",
      0xCAFE7BFFu,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true},
      3u << 2},
@@ -516,7 +531,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_finite_overflow_round_toward_negative",
      "v_s_exp_f16",
      0xCAFE7BFFu,
-     0x00007BFFu,
+     0x00007C00u,
      "",
      {.source_opsel = true},
      2u << 2},
@@ -530,7 +545,7 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_finite_underflow_round_toward_positive",
      "v_s_exp_f16",
      0xCAFEFBFFu,
-     0x00000001u,
+     0x00000000u,
      "",
      {.source_opsel = true},
      (1u << 2) | (1u << 7)},
@@ -565,10 +580,16 @@ constexpr std::array<PseudoScalarSpecialCase, 85> kSpecialCases{{
     {"f16_divide_by_zero_with_fp16_ovfl",
      "v_s_rcp_f16",
      0xCAFE0000u,
-     0x00007C00u,
+     0x00007BFFu,
      "",
      {.source_opsel = true},
      amdgpu::Wavefront::FP16_OVFL_BIT},
+    // Raw gfx1201 captures: half rounding/flush precedes OMOD; guest rounding is ignored.
+    {"f16_exp_round_before_omod", "v_s_exp_f16", 0x4c00u, 0x7c00u, "", {.omod = 3}, 0x30u},
+    {"f16_exp_saturate_before_omod", "v_s_exp_f16", 0x4c00u, 0x77ffu, "", {.omod = 3}, 0x800030u},
+    {"f16_exp_flush_before_omod", "v_s_exp_f16", 0xcb80u, 0x0000u, "", {.omod = 1}, 0xc0u},
+    {"f16_exp_ignores_guest_rounding", "v_s_exp_f16", 0x0001u, 0x3c00u, "", {}, 0xc4u},
+    {"f16_log_zero_saturates", "v_s_log_f16", 0x0000u, 0xfbffu, "", {}, 0x8000c0u},
     {"f32_omod_flushes_output_denorm",
      "v_s_exp_f32",
      f32_bits(-149.0f),
@@ -711,7 +732,8 @@ TEST_P(PseudoScalarExecTest, ExecutesAtExecZeroWithDestinationOpselZeroAndUsesLo
   fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kDestinationSgpr, kDestinationSentinel);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -741,7 +763,8 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
                                   ? (uint64_t{kOtherHalfSentinel} << 32) | test_case.expected
                                   : (uint64_t{test_case.expected} << 32) | kOtherHalfSentinel;
     fixture.wavefront->set_vcc_raw(source);
-    fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
+                    .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
   }
 }
@@ -804,15 +827,15 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
       Operation::EXP2, std::bit_cast<float>(0xFF800000u), false, false, 0, 3, 0, false);
   const uint32_t f32_signaling_nan = amdgpu::pseudo_scalar::execute_f32(
       Operation::SQRT, std::bit_cast<float>(0x7FA00001u), false, false, 0, 3, 0, false);
-  const uint32_t f16_rcp_zero = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_rcp_zero = amdgpu::transcendental::execute_pseudo_f16(
       Operation::RCP, util::f16_to_f32(0x0000u), false, false, 0, 3, 0, false, true);
-  const uint32_t f16_sqrt_negative = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_sqrt_negative = amdgpu::transcendental::execute_pseudo_f16(
       Operation::SQRT, util::f16_to_f32(0xBC00u), false, false, 0, 3, 0, false, false);
-  const uint32_t f16_rsq_negative = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_rsq_negative = amdgpu::transcendental::execute_pseudo_f16(
       Operation::RSQ, util::f16_to_f32(0xBC00u), false, false, 0, 3, 0, false, false);
-  const uint32_t f16_log_negative = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_log_negative = amdgpu::transcendental::execute_pseudo_f16(
       Operation::LOG2, util::f16_to_f32(0xBC00u), false, false, 0, 3, 0, false, false);
-  const uint32_t f16_signaling_nan = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_signaling_nan = amdgpu::transcendental::execute_pseudo_f16(
       Operation::SQRT, util::f16_to_f32(0x7D01u), false, false, 0, 3, 0, false, false);
   const int leaked_exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
   const int restore_result = std::fesetenv(&saved_environment);
@@ -829,13 +852,133 @@ TEST(PseudoScalarHelperTest, HandlesExplicitSpecialCasesWithoutHostInvalidOrDivi
   EXPECT_EQ(f32_exp_negative_infinity, 0x00000000u);
   EXPECT_TRUE(std::isnan(std::bit_cast<float>(f32_signaling_nan)));
   EXPECT_NE(f32_signaling_nan & 0x00400000u, 0u);
-  EXPECT_EQ(f16_rcp_zero, 0x00007C00u);
+  EXPECT_EQ(f16_rcp_zero, 0x00007BFFu);
   EXPECT_EQ(f16_sqrt_negative, 0x0000FE00u);
   EXPECT_EQ(f16_rsq_negative, 0x0000FE00u);
   EXPECT_EQ(f16_log_negative, 0x0000FE00u);
   EXPECT_EQ(f16_signaling_nan & 0x7C00u, 0x7C00u);
   EXPECT_NE(f16_signaling_nan & 0x03FFu, 0u);
   EXPECT_NE(f16_signaling_nan & 0x0200u, 0u);
+}
+
+TEST(PseudoScalarHelperTest, QuietsSignalingNanWithoutHostExceptions) {
+  using amdgpu::pseudo_scalar::Operation;
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (Operation operation :
+       {Operation::EXP2, Operation::LOG2, Operation::RCP, Operation::RSQ, Operation::SQRT})
+    for (uint32_t input : {0x7f800001u, 0xffbfffffu})
+      for (uint32_t omod = 0; omod < 4; ++omod)
+        for (bool clamp : {false, true}) {
+          // Keep the source dynamic so constant folding cannot hide an unsafe
+          // host floating-point comparison in the NaN classification.
+          volatile uint32_t source = input;
+          EXPECT_EQ(std::feclearexcept(FE_ALL_EXCEPT), 0);
+          const uint32_t result = amdgpu::pseudo_scalar::execute_f32(
+              operation, std::bit_cast<float>(uint32_t{source}), false, false, 0, 3, omod, clamp);
+          const int exceptions = std::fetestexcept(FE_INVALID | FE_DIVBYZERO);
+          EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+          EXPECT_EQ(exceptions, 0) << "operation=" << static_cast<unsigned>(operation);
+          EXPECT_EQ(result, clamp ? 0u : (input | 0x00400000u));
+        }
+}
+
+TEST(PseudoScalarHelperTest, ReciprocalSquareRootMatchesPhysicalGfx12ModesAndModifiers) {
+  // Physical scalar and vector RSQ agree in all sixteen FP_ROUND/FP_DENORM modes.
+  const uint32_t cases[][5] = {
+      {0x7f7fffffu, 0x1f800000u, 0x20000000u, 0x20800000u, 0x1f000000u},
+      {0xff7fffffu, 0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u},
+      {0x00800000u, 0x5f000000u, 0x5f800000u, 0x60000000u, 0x5e800000u},
+      {0x00000001u, 0x7f800000u, 0x7f800000u, 0x7f800000u, 0x7f800000u},
+      {0x3f800000u, 0x3f800000u, 0x40000000u, 0x40800000u, 0x3f000000u},
+      {0x40400000u, 0x3f13cd3au, 0x3f93cd3au, 0x4013cd3au, 0x3e93cd3au},
+      {0x007fffffu, 0x7f800000u, 0x7f800000u, 0x7f800000u, 0x7f800000u},
+      {0x80800000u, 0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u},
+      {0x3d5389d4u, 0x408ccf83u, 0x410ccf83u, 0x418ccf83u, 0x400ccf83u},
+      {0x3dd28815u, 0x40479ca3u, 0x40c79ca3u, 0x41479ca3u, 0x3fc79ca3u},
+      {0x4314a8c6u, 0x3da7f88au, 0x3e27f88au, 0x3ea7f88au, 0x3d27f88au},
+      {0x496e2c06u, 0x3a84b446u, 0x3b04b446u, 0x3b84b446u, 0x3a04b446u},
+      {0x83f75dfcu, 0xffc00000u, 0xffc00000u, 0xffc00000u, 0xffc00000u},
+  };
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(host_mode), 0);
+    for (const auto &test : cases)
+      for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
+        for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
+          for (uint32_t omod = 0; omod < 4; ++omod)
+            EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(
+                          amdgpu::pseudo_scalar::Operation::RSQ, std::bit_cast<float>(test[0]),
+                          false, false, round_mode, denorm_mode, omod, false),
+                      test[omod + 1])
+                << "host rounding mode=" << host_mode;
+  }
+  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+}
+
+TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModifiers) {
+  // Physical scalar/vector results ignore rounding, including all four OMOD settings.
+  const uint16_t cases[][5] = {
+      {0x0401, 0x57ff, 0x5bff, 0x5fff, 0x53ff},
+      {0x7c02, 0x7e02, 0x7e02, 0x7e02, 0x7e02},
+      {0xbc00, 0xfe00, 0xfe00, 0xfe00, 0xfe00},
+      {0x7bff, 0x1c00, 0x2000, 0x2400, 0x1800},
+  };
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(host_mode), 0);
+    for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
+      for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode) {
+        for (const auto &test : cases)
+          for (uint32_t omod = 0; omod < 4; ++omod)
+            EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
+                          amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(test[0]), false,
+                          false, round_mode, denorm_mode, omod, false, false),
+                      test[omod + 1]);
+        EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
+                      amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(0x0001), false, false,
+                      round_mode, denorm_mode, 0, false, false),
+                  (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
+      }
+  }
+  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
+}
+
+TEST(PseudoScalarHelperTest, ReciprocalMatchesPhysicalGfx12ModesAndModifiers) {
+  // Physical V_S_RCP_F32 captures are identical for all sixteen combinations
+  // of FP_ROUND and FP_DENORM. OMOD also retains reciprocal's overflow policy.
+  const uint32_t cases[][5] = {
+      {0x7F7FFFFFu, 0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u},
+      {0xFF7FFFFFu, 0x80000000u, 0x00000000u, 0x00000000u, 0x00000000u},
+      {0x00800000u, 0x7E800000u, 0x7F000000u, 0x7F800000u, 0x7E000000u},
+      {0x00000001u, 0x7F800000u, 0x7F800000u, 0x7F800000u, 0x7F800000u},
+      {0x3F800000u, 0x3F800000u, 0x40000000u, 0x40800000u, 0x3F000000u},
+      {0x40400000u, 0x3EAAAAAAu, 0x3F2AAAAAu, 0x3FAAAAAAu, 0x3E2AAAAAu},
+      {0x007FFFFFu, 0x7F800000u, 0x7F800000u, 0x7F800000u, 0x7F800000u},
+      {0x80800000u, 0xFE800000u, 0xFF000000u, 0xFF800000u, 0xFE000000u},
+  };
+  std::fenv_t saved_environment{};
+  ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+  for (int host_mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
+    EXPECT_EQ(std::fesetround(host_mode), 0);
+    for (const auto &test : cases)
+      for (uint32_t round_mode = 0; round_mode < 4; ++round_mode)
+        for (uint32_t denorm_mode = 0; denorm_mode < 4; ++denorm_mode)
+          for (uint32_t omod = 0; omod < 4; ++omod)
+            EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(
+                          amdgpu::pseudo_scalar::Operation::RCP, std::bit_cast<float>(test[0]),
+                          false, false, round_mode, denorm_mode, omod, false),
+                      test[omod + 1])
+                << "host rounding mode=" << host_mode;
+    for (uint32_t sign : {0u, 0x80000000u})
+      EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(amdgpu::pseudo_scalar::Operation::RCP,
+                                                   std::bit_cast<float>(0x00800000u | sign), false,
+                                                   false, 3, 3, 2, true),
+                sign ? 0u : 0x3F800000u);
+  }
+  EXPECT_EQ(std::fesetenv(&saved_environment), 0);
 }
 
 TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
@@ -848,28 +991,29 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
             0x80000000u);
   const uint32_t f32_allowed_negative_input = amdgpu::pseudo_scalar::execute_f32(
       Operation::SQRT, f32_negative_minimum, false, false, 0, 1, 0, false);
-  EXPECT_TRUE(std::isnan(std::bit_cast<float>(f32_allowed_negative_input)));
+  // F32 SQRT flushes input denormals independently of MODE.
+  EXPECT_EQ(f32_allowed_negative_input, 0x80000000u);
   EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(Operation::RCP, f32_negative_maximum, false, false,
                                                0, 2, 0, false),
-            0x80200000u);
+            0x80000000u);
   EXPECT_EQ(amdgpu::pseudo_scalar::execute_f32(Operation::RCP, f32_negative_maximum, false, false,
                                                0, 0, 0, false),
             0x80000000u);
 
   const float f16_negative_minimum = util::f16_to_f32(0x8001u);
   const float f16_negative_maximum = util::f16_to_f32(0xFBFFu);
-  EXPECT_EQ(amdgpu::pseudo_scalar::execute_f16(Operation::SQRT, f16_negative_minimum, false, false,
-                                               0, 0, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT, f16_negative_minimum, false,
+                                                       false, 0, 0, 0, false, false),
             0x00008000u);
-  const uint32_t f16_allowed_negative_input = amdgpu::pseudo_scalar::execute_f16(
+  const uint32_t f16_allowed_negative_input = amdgpu::transcendental::execute_pseudo_f16(
       Operation::SQRT, f16_negative_minimum, false, false, 0, 1, 0, false, false);
   EXPECT_EQ(f16_allowed_negative_input & 0x7C00u, 0x7C00u);
   EXPECT_NE(f16_allowed_negative_input & 0x03FFu, 0u);
-  EXPECT_EQ(amdgpu::pseudo_scalar::execute_f16(Operation::RCP, f16_negative_maximum, false, false,
-                                               0, 2, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
+                                                       false, 0, 2, 0, false, false),
             0x00008100u);
-  EXPECT_EQ(amdgpu::pseudo_scalar::execute_f16(Operation::RCP, f16_negative_maximum, false, false,
-                                               0, 0, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
+                                                       false, 0, 0, 0, false, false),
             0x00008000u);
 }
 
@@ -904,7 +1048,8 @@ TEST_P(PseudoScalarSpecialExecTest, CoversLiteralModifierAndModeBehavior) {
   fixture.wavefront->set_mode_raw(test_case.mode);
   fixture.wavefront->set_exec(0);
 
-  fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront);
+  EXPECT_TRUE(
+      fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront).succeeded());
 
   EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr),
             test_case.expected);
@@ -940,10 +1085,12 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kModeSgpr, 1u);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, f32_bits(0.5f));
-    fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront);
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(set_round.get(), *fixture.wavefront).succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(exp.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u);
-    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x3FB504F4u);
+    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x3FB504F3u);
 
     const BaseEncodingWords set_denorm_words =
         encode_sopk(profile.setreg_imm_op, 0, encode_hwreg(kModeHwreg, 6, 2), 1u);
@@ -959,8 +1106,10 @@ TEST(PseudoScalarModeIntegrationTest, SetregInstructionsUpdateModesConsumedByPse
 
     fixture.wavefront->set_mode_raw(0);
     fixture.compute_unit->write_sgpr(fixture.sgpr_base() + kSourceSgpr, 0xCAFE0001u);
-    fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront);
-    fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront);
+    EXPECT_TRUE(fixture.compute_unit->execute_instruction(set_denorm.get(), *fixture.wavefront)
+                    .succeeded());
+    EXPECT_TRUE(
+        fixture.compute_unit->execute_instruction(log.get(), *fixture.wavefront).succeeded());
     EXPECT_EQ(fixture.wavefront->mode_raw(), 1u << 6);
     EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + kDestinationSgpr), 0x0000CE00u);
   }

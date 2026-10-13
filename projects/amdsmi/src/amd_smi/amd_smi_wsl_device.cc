@@ -509,6 +509,9 @@ amdsmi_status_t WSLGPUBackend::GetDriverInfo(amdsmi_driver_info_t* info) {
   copy_rocdxg_string(info->driver_version, device_info_.driver.driver_version);
   copy_rocdxg_string(info->driver_date, device_info_.driver.driver_date);
   copy_rocdxg_string(info->driver_name, device_info_.driver.driver_name);
+  // WSL has no amdgpu sysfs/DKMS fields. CLI AMDGPU Version reads
+  // driver_full_version, so reuse the WDDM driver_version string.
+  copy_rocdxg_string(info->driver_full_version, device_info_.driver.driver_version);
   return AMDSMI_STATUS_SUCCESS;
 }
 

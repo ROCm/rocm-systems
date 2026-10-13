@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: MIT
 
 /// @file sysfs_test.cpp
-/// @brief Golden tests for the synthetic KFD topology's debug capability bits.
+/// @brief Tests for synthetic GPU topology, IP discovery, and debug capabilities.
 ///
 /// @details Verifies that Sysfs::generate() advertises the KFD debugger API
 /// (HSA_CAP_TRAP_DEBUG_*) capability/debug_prop bits that rocdbgapi's
 /// os_driver_kfd.cpp reads to decide whether an agent is debuggable, and that
-/// architecture-specific "precise" debug bits are gated correctly.
+/// architecture-specific "precise" debug bits are gated correctly. Also checks
+/// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
 #include "rocjitsu/kmd/linux/sysfs.h"
 
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
@@ -27,10 +29,12 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -79,6 +83,132 @@ TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
   ASSERT_TRUE(props.count("num_sdma_queues_per_engine"));
   EXPECT_EQ(props["num_sdma_engines"], 0u);
   EXPECT_EQ(props["num_sdma_queues_per_engine"], 0u);
+}
+
+TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
+  Sysfs sysfs;
+  const auto identity = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1100_w7900.json", kEmbeddedSchema);
+  auto gpu = gpu_info_from_config(identity.device, 1);
+  gpu.drm_render_minor = 129;
+  ASSERT_FALSE(sysfs.generate(gpu).empty());
+
+  // Captured W7900 sysfs values used by direct KFD/PM4 clients such as tinygrad.
+  for (const std::string node : {"card0", "renderD129"}) {
+    const std::string base = sysfs.drm_path() + "/" + node + "/device/ip_discovery/die/0/";
+    EXPECT_EQ(read_sysfs_file(base + "11/0/major"), "11\n");
+    EXPECT_EQ(read_sysfs_file(base + "11/0/minor"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "11/0/revision"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/major"), "6\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/minor"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/revision"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/major"), "4\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/minor"), "3\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/revision"), "0\n");
+  }
+}
+
+TEST(SysfsTopologyTest, R9700PublishesComputeIpDiscoveryVersions) {
+  Sysfs sysfs;
+  const auto identity = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1201_r9700.json", kEmbeddedSchema);
+  auto gpu = gpu_info_from_config(identity.device, 1);
+  gpu.drm_render_minor = 128;
+  ASSERT_FALSE(sysfs.generate(gpu).empty());
+
+  // Captured R9700 sysfs values used by direct KFD/PM4 clients such as tinygrad.
+  for (const std::string node : {"card0", "renderD128"}) {
+    const std::string base = sysfs.drm_path() + "/" + node + "/device/ip_discovery/die/0/";
+    EXPECT_EQ(read_sysfs_file(base + "11/0/major"), "12\n");
+    EXPECT_EQ(read_sysfs_file(base + "11/0/minor"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "11/0/revision"), "1\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/major"), "7\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/minor"), "0\n");
+    EXPECT_EQ(read_sysfs_file(base + "42/0/revision"), "1\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/major"), "6\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/minor"), "3\n");
+    EXPECT_EQ(read_sysfs_file(base + "108/0/revision"), "1\n");
+  }
+}
+
+TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
+  struct Profile {
+    const char *filename;
+    uint32_t num_xcc;
+    std::array<std::array<uint32_t, 4>, 3> blocks;
+  };
+  const Profile profiles[] = {
+      {"gfx942_cdna3_kmd.json", 8, {{{11, 9, 4, 3}, {42, 4, 4, 2}, {108, 7, 9, 0}}}},
+      {"gfx950_mi355x_kmd.json", 8, {{{11, 9, 5, 0}, {42, 4, 4, 5}, {108, 7, 9, 0}}}},
+      {"gfx1151.json", 1, {{{11, 11, 5, 1}, {42, 6, 1, 1}, {108, 7, 11, 1}}}},
+  };
+  for (const auto &profile : profiles) {
+    SCOPED_TRACE(profile.filename);
+    Sysfs sysfs;
+    const auto identity = config::load_device_identity(
+        std::string(CONFIG_DIR) + "/" + profile.filename, kEmbeddedSchema);
+    auto gpu = gpu_info_from_config(identity.device, profile.num_xcc);
+    gpu.drm_render_minor = 128;
+    ASSERT_FALSE(sysfs.generate(gpu).empty());
+    for (const std::string node : {"card0", "renderD128"}) {
+      const std::string base = sysfs.drm_path() + "/" + node + "/device/ip_discovery/die/0/";
+      for (const auto &block : profile.blocks) {
+        const std::string path = base + std::to_string(block[0]) + "/0/";
+        EXPECT_EQ(read_sysfs_file(path + "major"), std::to_string(block[1]) + "\n");
+        EXPECT_EQ(read_sysfs_file(path + "minor"), std::to_string(block[2]) + "\n");
+        EXPECT_EQ(read_sysfs_file(path + "revision"), std::to_string(block[3]) + "\n");
+      }
+    }
+  }
+}
+
+TEST(SysfsTopologyTest, IpDiscoveryUsesOwnedConfigVersions) {
+  const auto device = config::with_parsed_simulation_config_json(
+      R"({"vm":{"gpu":{"device":{
+        "gfx_target_version":110000, "num_sdma_engines":0,
+        "ip_versions":[{"hardware_id":11,"major":11,"minor":0,"revision":7}]
+      }}}})",
+      kEmbeddedSchema, [](const fb::SimulationConfig *parsed) {
+        return config::kfd_device_from_fb(parsed->vm()->gpu()->device(), "vm.gpu.device");
+      });
+  // The parser and its storage have been destroyed before sysfs consumes the data.
+  Sysfs sysfs;
+  ASSERT_FALSE(sysfs.generate(gpu_info_from_config(device, 1)).empty());
+  const std::string base = sysfs.drm_path() + "/card0/device/ip_discovery/die/0/";
+  EXPECT_EQ(read_sysfs_file(base + "11/0/revision"), "7\n");
+  EXPECT_FALSE(std::filesystem::exists(base + "42"));
+  EXPECT_FALSE(std::filesystem::exists(base + "108"));
+}
+
+TEST(SysfsTopologyTest, OmittedIpVersionsDoNotInventDiscoveryBlocks) {
+  Sysfs sysfs;
+  ASSERT_FALSE(sysfs.generate(make_gpu_info(110000)).empty());
+  EXPECT_FALSE(std::filesystem::exists(sysfs.drm_path() + "/card0/device/ip_discovery"));
+}
+
+TEST(SysfsTopologyTest, RejectsInvalidIpVersionsInVmAndGuestConfigs) {
+  for (const std::string entries :
+       {R"({"hardware_id":0,"major":11})", R"({"hardware_id":11,"major":0})",
+        R"({"hardware_id":11,"major":256})", R"({"hardware_id":11,"major":11,"revision":256})",
+        R"({"hardware_id":11,"major":11},{"hardware_id":11,"major":12})"}) {
+    SCOPED_TRACE(entries);
+    for (bool guest : {false, true}) {
+      SCOPED_TRACE(guest);
+      const std::string json =
+          (guest ? R"({"dbt_guest":{"guest_device":)" : R"({"vm":{"gpu":{"device":)") +
+          std::string(R"({"num_sdma_engines":0,"ip_versions":[)") + entries +
+          (guest ? "]}}}" : "]}}}}");
+      EXPECT_THROW(config::with_parsed_simulation_config_json(
+                       json, kEmbeddedSchema,
+                       [guest](const fb::SimulationConfig *parsed) {
+                         const auto *device = guest ? parsed->dbt_guest()->guest_device()
+                                                    : parsed->vm()->gpu()->device();
+                         (void)config::kfd_device_from_fb(device, guest ? "dbt_guest.guest_device"
+                                                                        : "vm.gpu.device");
+                       }),
+                   std::runtime_error);
+    }
+  }
 }
 
 // Golden per-GFXIP expectations. Each row mirrors what

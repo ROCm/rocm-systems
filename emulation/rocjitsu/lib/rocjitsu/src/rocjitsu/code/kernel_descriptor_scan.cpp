@@ -5,7 +5,9 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/isa_traits.h"
+#include "rocjitsu/isa/register_set.h"
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -241,6 +243,62 @@ void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch, KD &desc,
   }
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
                   user_sgpr_count);
+}
+
+uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count) {
+  const uint32_t tail = arch_is_cdna_4_or_lower(arch) ? kCdnaSpecialSgprTailReserve : 0;
+  // The tail sits at the top of the allocation itself, so it comes off before
+  // the clamp to the addressable maximum, not after.
+  const uint32_t ordinary = kernel_sgpr_count > tail ? kernel_sgpr_count - tail : 0;
+  return std::min<uint32_t>(ordinary, REGISTER_SET_ALLOCATABLE_SGPRS);
+}
+
+uint32_t kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch, const KD &desc) {
+  uint32_t sgprs = kernel_descriptor_user_sgpr_count(arch, desc);
+  const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z))
+    ++sgprs;
+  if (AMDHSA_BITS_GET(rsrc2, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    ++sgprs;
+  return sgprs;
+}
+
+bool has_kernarg_segment_ptr(const KD &desc) {
+  return AMDHSA_BITS_GET(
+             desc.kernel_code_properties,
+             rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR) != 0;
+}
+
+uint16_t kernarg_segment_ptr_slot(const KD &desc) {
+  const uint32_t properties = desc.kernel_code_properties;
+  uint32_t sgpr = 0;
+  if (AMDHSA_BITS_GET(properties,
+                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER))
+    sgpr += 4;
+  if (AMDHSA_BITS_GET(properties,
+                      rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR))
+    sgpr += 2;
+  if (AMDHSA_BITS_GET(properties, rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR))
+    sgpr += 2;
+  return static_cast<uint16_t>(sgpr);
+}
+
+std::optional<uint16_t> kernarg_segment_ptr_sgpr(const KD &desc) {
+  if (!has_kernarg_segment_ptr(desc))
+    return std::nullopt;
+  return kernarg_segment_ptr_slot(desc);
+}
+
+uint32_t kernarg_preload_length(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_LENGTH);
+}
+
+uint32_t kernarg_preload_offset(const KD &desc) {
+  return AMDHSA_BITS_GET(desc.kernarg_preload, rocr::llvm::amdhsa::KERNARG_PRELOAD_SPEC_OFFSET);
 }
 
 } // namespace rocjitsu
