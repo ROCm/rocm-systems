@@ -191,8 +191,10 @@ template <class T> class section_impl : public section {
 
 
     Elf_Xword size = get_size();
+    // The section must lie entirely within the stream.
+    const Elf_Xword offset = get_offset();
     if (0 == data && SHT_NULL != get_type() && SHT_NOBITS != get_type() &&
-        size < get_stream_size()) {
+        size < get_stream_size() && offset <= get_stream_size() - size) {
       try {
         data = new char[size + 1];
       } catch (const std::bad_alloc&) {
@@ -201,10 +203,19 @@ template <class T> class section_impl : public section {
       }
 
       if ((0 != size) && (0 != data)) {
-        stream.seekg((*convertor)(header.sh_offset));
+        stream.seekg(offset);
         stream.read(data, size);
-        data[size] = 0;  // Ensure data is ended with 0 to avoid oob read
-        data_size = size;
+        if (static_cast<Elf_Xword>(stream.gcount()) != size) {
+          // A short read leaves part of the buffer unread; treat the data as missing
+          // and clear the error so later sections can still be read.
+          delete[] data;
+          data = 0;
+          data_size = 0;
+          stream.clear();
+        } else {
+          data[size] = 0;  // Ensure data is ended with 0 to avoid oob read
+          data_size = size;
+        }
       }
     }
   }
