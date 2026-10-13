@@ -48,6 +48,7 @@ test_categories:
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
       - "SocketPollTimeout.*"
+      - "SocketCrypt.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
