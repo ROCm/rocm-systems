@@ -111,10 +111,12 @@ template <class S> class note_section_accessor_template {
     const Elf_Xword current_size = note_section->get_size();
     const Elf_Xword padding = (word_size - current_size % word_size) % word_size;
     note_section->append_data(std::string(static_cast<size_t>(padding), '\0') + buffer);
-    if (padding == 0) {
+    if (current_size == scanned_size) {
+      // The existing data decoded completely, so the new record simply follows it.
       note_start_positions.push_back(current_size);
+      scanned_size = current_size + buffer.size();
     } else {
-      // The padding may complete a record that was rejected before, so rescan to
+      // The appended bytes may complete a record the scan stopped at, so rescan to
       // keep indices consistent with a fresh accessor.
       process_section();
     }
@@ -170,6 +172,7 @@ template <class S> class note_section_accessor_template {
   //------------------------------------------------------------------------------
   void process_section() {
     note_start_positions.clear();
+    scanned_size = 0;
     if (note_section == nullptr) {
       return;
     }
@@ -181,6 +184,7 @@ template <class S> class note_section_accessor_template {
       note_start_positions.push_back(current);
       current += record.total_size;
     }
+    scanned_size = current;
   }
 
   //------------------------------------------------------------------------------
@@ -188,6 +192,7 @@ template <class S> class note_section_accessor_template {
   const elfio& elf_file;
   S* note_section;
   std::vector<Elf_Xword> note_start_positions;
+  Elf_Xword scanned_size = 0;  // End of the records decoded by process_section()
 };
 
 using note_section_accessor = note_section_accessor_template<section>;
