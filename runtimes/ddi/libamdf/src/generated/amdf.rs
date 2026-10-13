@@ -272,38 +272,6 @@ impl Default for amdf_kernel_queue_t {
     }
 }
 
-pub type amdf_allocator_allocate_fn_t =
-    Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, u64, u64) -> *mut ::core::ffi::c_void>;
-
-pub type amdf_allocator_resize_fn_t = Option<
-    unsafe extern "C" fn(
-        *mut ::core::ffi::c_void,
-        *mut ::core::ffi::c_void,
-        u64,
-        u64,
-        u64,
-    ) -> *mut ::core::ffi::c_void,
->;
-
-pub type amdf_allocator_free_fn_t =
-    Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, *mut ::core::ffi::c_void)>;
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct amdf_allocator_t {
-    pub user_data: *mut ::core::ffi::c_void,
-    pub allocate: amdf_allocator_allocate_fn_t,
-    pub resize: amdf_allocator_resize_fn_t,
-    pub free: amdf_allocator_free_fn_t,
-}
-impl Default for amdf_allocator_t {
-    fn default() -> Self {
-        // SAFETY: ABI records contain only integer values, raw pointers,
-        // nullable function pointers, and aggregates of those types.
-        unsafe { ::core::mem::zeroed() }
-    }
-}
-
 pub type amdf_native_lifetime_t = u32;
 
 pub type amdf_native_lifetime_e = ::core::ffi::c_uint;
@@ -320,7 +288,6 @@ pub struct amdf_instance_create_info_t {
     pub next: *const ::core::ffi::c_void,
     pub native_lifetime: amdf_native_lifetime_t,
     pub reserved: u32,
-    pub host_allocator: amdf_allocator_t,
 }
 impl Default for amdf_instance_create_info_t {
     fn default() -> Self {

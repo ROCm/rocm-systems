@@ -32,7 +32,7 @@ use crate::platform::memory::{
 };
 use rocddi::device::Device;
 use rocddi::device::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
-use rocddi::memory::{
+use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
 };
@@ -436,8 +436,8 @@ fn contains(base: usize, size: usize, address: usize) -> bool {
 }
 
 fn current_host_page() -> Result<usize, Status> {
-    let page =
-        usize::try_from(rocddi::memory::host_page_size().map_err(map_error)?).map_err(|_| ERROR)?;
+    let page = usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
+        .map_err(|_| ERROR)?;
     if page < 4096 || !page.is_power_of_two() {
         return Err(ERROR);
     }
@@ -2555,12 +2555,8 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             .iter()
             .map(|gpu| &gpu.device)
             .collect::<Vec<_>>();
-        let reservation = match runtime.session.reserve_virtual_address(
-            &devices,
-            size as u64,
-            alignment,
-            requested,
-        ) {
+        let reservation = match VirtualAddress::reserve(&devices, size as u64, alignment, requested)
+        {
             Ok(reservation) => reservation,
             Err(error) => return map_error(error),
         };
@@ -3837,7 +3833,7 @@ fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
     if pointer.is_null() || size == 0 {
         return Err(INVALID_ARGUMENT);
     }
-    let page_size = rocddi::memory::host_page_size().map_err(map_error)?;
+    let page_size = rocddi::memory::host::host_page_size().map_err(map_error)?;
     let page_size = usize::try_from(page_size).map_err(|_| INVALID_ARGUMENT)?;
     if page_size == 0 || !page_size.is_power_of_two() {
         return Err(ERROR);
