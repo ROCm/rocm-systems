@@ -3591,18 +3591,22 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   }
 
   bool tried_system_mem_fallback = false;
-  while (Hsa::amd_queue_create(bkendDevice_, &desc, 1) != HSA_STATUS_SUCCESS) {
-    // If device-memory ring creation is rejected, fall back once to a
-    // system-memory ring before shrinking the queue size.
-    if (device_mem_ring_buf && !tried_system_mem_fallback) {
+  hsa_status_t queue_status = HSA_STATUS_SUCCESS;
+  while ((queue_status = Hsa::amd_queue_create(bkendDevice_, &desc, 1)) != HSA_STATUS_SUCCESS) {
+    // ROCr returns INVALID_QUEUE_CREATION when a device-memory ring is
+    // requested on an agent without large BAR. Other failures, such as
+    // resource limits, keep shrinking the device-memory ring.
+    if (device_mem_ring_buf && !tried_system_mem_fallback &&
+        queue_status == HSA_STATUS_ERROR_INVALID_QUEUE_CREATION) {
       tried_system_mem_fallback = true;
       device_mem_ring_buf = false;
       desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
           static_cast<uint32_t>(desc.flags) &
           ~static_cast<uint32_t>(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF));
-      ClPrint(amd::LOG_INFO, amd::LOG_QUEUE,
-              "Device::acquireQueue: device-memory AQL ring rejected; "
-              "falling back to system-memory ring");
+      ClPrint(amd::LOG_WARNING, amd::LOG_QUEUE,
+              "Device::acquireQueue: device-memory AQL ring rejected (status 0x%x, "
+              "queue size %u); falling back to system-memory ring",
+              queue_status, queue_size);
       continue;
     }
     queue_size >>= 1;
