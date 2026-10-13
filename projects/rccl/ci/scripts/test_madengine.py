@@ -620,13 +620,24 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
       matters for the same reason in reverse: that destination resolves through
       the loader's search path, and leaving ours behind would silently change
       where its dependencies come from.
-    * **The gate compares the SET of unresolved sonames** per target, before
-      and after. Counts are not enough -- dropping one missing soname while
-      introducing another leaves the count unchanged. An absolute "must resolve
-      everything" test would fail a good build instead: the pristine
-      _rocm_sdk_devel copy already reports unresolved deps because it is only
-      ever dlopen'd where they are already loaded. The rule is that the swap
-      must not make linkage worse than it found it.
+    * **The gate compares unresolved sonames by LIBRARY, not by exact name**,
+      per target, before and after. Counts alone are not enough -- dropping one
+      missing soname while introducing another leaves the count unchanged. An
+      absolute "must resolve everything" test would fail a good build instead:
+      the pristine _rocm_sdk_devel copy already reports unresolved deps because
+      it is only ever dlopen'd where they are already loaded. The rule is that
+      the swap must not make linkage worse than it found it.
+
+      Comparing exact names was too strict, and run 38404457804 proved it: the
+      artifact needs libamd_smi.so.27 where the base ships .26, and that copy's
+      RUNPATH is a row of empty entries, so the loader never searches its own
+      directory and _soname_bridge()'s symlink cannot help. `.26` was already
+      unresolved there before the swap and `.27` is unresolved after -- the same
+      library, equally absent, under a different version. Linkage is no worse,
+      but a set comparison reads it as new breakage and fails the build. So a
+      newly unresolved soname is tolerated only when some version of the same
+      library was already unresolved on that target; a library that resolved
+      before and does not now still fails.
 
     *bridge* runs after the copy and before the post-swap measurement, so a
     soname the artifact needs and the base predates (libamd_smi .27 against
@@ -685,11 +696,18 @@ RUN set -e; \\
 {kpack_block}{bridge}    ldconfig || true; \\
     while IFS="$(printf '\\t')" read -r n t; do \\
       ldd "$t" 2>/dev/null | awk '/not found/ {{print $1}}' | sort -u > "/tmp/rcclswap/post.$n"; \\
-      newmiss="$(comm -13 "/tmp/rcclswap/pre.$n" "/tmp/rcclswap/post.$n")"; \\
+      sed 's/\\.so\\..*/.so/' "/tmp/rcclswap/pre.$n" | sort -u > "/tmp/rcclswap/prefam.$n"; \\
       echo "  unresolved sonames before=$(wc -l < "/tmp/rcclswap/pre.$n") after=$(wc -l < "/tmp/rcclswap/post.$n")  $t"; \\
-      if [ -n "$newmiss" ]; then \\
-        echo "GATE FAIL: the swap introduced unresolved sonames not present before on $t:"; \\
-        printf '    %s\\n' $newmiss; \\
+      regressed=""; \\
+      for s in $(comm -13 "/tmp/rcclswap/pre.$n" "/tmp/rcclswap/post.$n"); do \\
+        fam="$(printf '%s' "$s" | sed 's/\\.so\\..*/.so/')"; \\
+        if grep -qxF "$fam" "/tmp/rcclswap/prefam.$n"; then \\
+          echo "    tolerated: $s (${{fam}}.* was already unresolved here)"; \\
+        else regressed="$regressed $s"; fi; \\
+      done; \\
+      if [ -n "$regressed" ]; then \\
+        echo "GATE FAIL: the swap left a library unresolved that resolved before on $t:"; \\
+        printf '    %s\\n' $regressed; \\
         echo "  The candidate was installed without the RUNPATH this location needs;"; \\
         echo "  loading it would fail at import time, before any step runs."; exit 1; \\
       fi; \\
