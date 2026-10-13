@@ -4,6 +4,7 @@
 
 #include <cxxabi.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 
