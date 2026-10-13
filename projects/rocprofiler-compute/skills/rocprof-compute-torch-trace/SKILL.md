@@ -25,8 +25,7 @@ before interpreting missing backward operators as an absence of GPU work.
 The workload must be a Python command or Python script; the tracer cannot
 annotate a compiled binary. The collector is a generic prebuilt
 `torch_trace_collector.so` and needs no PyTorch or Python development packages
-to build. The workload still needs Python-compatible `roctx` bindings. The
-full requirement list is in the Torch trace section of
+to build. The full requirement list is in the Torch trace section of
 [profile mode](../../docs/how-to/profile/mode.rst).
 
 ## 2. Collect
