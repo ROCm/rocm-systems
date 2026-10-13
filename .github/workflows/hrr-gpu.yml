@@ -160,6 +160,8 @@ jobs:
           path: build
 
       - name: Install base ROCm artifacts and the capture-enabled amdhip64
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
 
       - name: Run integration suite
@@ -168,6 +170,9 @@ jobs:
           HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
           # --arch auto finds this machine's GPU with the installed rocminfo.
           ROCM_SDK: ${{ github.workspace }}/dist
+          # A regions case faults the GPU on purpose; without this ROCr writes a
+          # gpucore file of about 160 MB into the workspace.
+          HSA_DISABLE_COREDUMP_ON_EXCEPTION: "1"
         run: >-
           python projects/hrr/tests/scripts/run_catch2.py
           --xml "integration-${FAMILY}.xml"
