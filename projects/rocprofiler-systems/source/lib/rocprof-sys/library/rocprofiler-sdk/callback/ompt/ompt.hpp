@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "common/static_object.hpp"
 #include "core/common_types.hpp"
 
 #include "library/rocprofiler-sdk/callback/common_tracing_callbacks.hpp"
@@ -12,11 +13,15 @@
 #include "policies/rocprofiler-sdk/domain_service/backend.hpp"
 #include "policies/rocprofiler-sdk/domain_service/externals.hpp"
 
+#include <algorithm>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace rocprofsys::domains::callback::ompt
 {
@@ -36,14 +41,15 @@ struct pending_region
 template <policies::domain_service::backend SdkBackend>
 using pending_regions_t = std::unordered_map<std::uint64_t, pending_region<SdkBackend>>;
 
+// The regions of one thread that have begun but not yet ended.
 template <policies::domain_service::backend SdkBackend>
-struct open_regions
+struct thread_open_regions
 {
     // Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
     //  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
     //  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
     // Keyed by the internal id from rocprofiler_correlation_id_t.
-    static inline thread_local auto s_standard = pending_regions_t<SdkBackend>{};
+    pending_regions_t<SdkBackend> standard = {};
 
     // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
     // ROCPROFILER_OMPT_ID_parallel_end
@@ -53,7 +59,79 @@ struct open_regions
     //  the information that parallel_end has as well as the flags and number of
     //  threads/teams that were requested.
     // Keyed by the parallel_data address (see callback definition).
-    static inline thread_local auto s_parallel = pending_regions_t<SdkBackend>{};
+    pending_regions_t<SdkBackend> parallel = {};
+};
+
+// Directory of every thread's open regions. Some OMPT ends arrive after our tool has
+// finalized, leaving worker-thread regions open, so finalization must drain the maps of
+// all threads, not just the caller's. A thread's entry is dropped when the thread exits.
+template <policies::domain_service::backend SdkBackend>
+struct open_regions
+{
+    struct registry_t
+    {
+        std::vector<std::unique_ptr<thread_open_regions<SdkBackend>>> threads = {};
+        std::mutex                                                    mutex;
+    };
+
+    // Returns the calling thread's regions, registering them on first use.
+    static thread_open_regions<SdkBackend>& current()
+    {
+        static thread_local handle_t handle{};
+        return *handle.regions;
+    }
+
+    // Invokes @p visit on every registered thread's regions while holding the registry
+    // lock.
+    template <typename VisitorT>
+    static void for_each_thread(VisitorT&& visit)
+    {
+        auto&                       registry = get_registry();
+        std::lock_guard<std::mutex> lock{ registry.mutex };
+        for(auto& thread_regions : registry.threads)
+        {
+            visit(*thread_regions);
+        }
+    }
+
+private:
+    // Owns the calling thread's slot: registers on construction, removes on thread exit.
+    struct handle_t
+    {
+        handle_t()
+        {
+            auto&                       registry = get_registry();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            regions =
+                registry.threads
+                    .emplace_back(std::make_unique<thread_open_regions<SdkBackend>>())
+                    .get();
+        }
+
+        ~handle_t()
+        {
+            auto&                       registry = get_registry();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            std::erase_if(registry.threads,
+                          [this](const auto& entry) { return entry.get() == regions; });
+        }
+
+        handle_t(const handle_t&)            = delete;
+        handle_t& operator=(const handle_t&) = delete;
+
+        thread_open_regions<SdkBackend>* regions = nullptr;
+    };
+
+    static registry_t& get_registry()
+    {
+        // Never destroyed: handle_t destructors run at thread exit, which can follow
+        // static destruction. registry_t is the context type so every translation unit
+        // including this header shares one registry.
+        static auto*& s_registry =
+            common::static_object<registry_t, registry_t>::construct(
+                common::do_not_destroy{});
+        return *s_registry;
+    }
 };
 
 // Map and key under which the begin and end records of one region meet.
@@ -113,10 +191,12 @@ template <policies::domain_service::backend SdkBackend>
 region_slot<SdkBackend>
 find_slot(const typename SdkBackend::callback_tracing_record_t& record)
 {
+    auto& thread_regions = open_regions<SdkBackend>::current();
+
     if(record.operation != SdkBackend::OMPT_ID_parallel_begin &&
        record.operation != SdkBackend::OMPT_ID_parallel_end)
     {
-        return { open_regions<SdkBackend>::s_standard, record.correlation_id.internal };
+        return { thread_regions.standard, record.correlation_id.internal };
     }
 
     const auto* payload =
@@ -128,13 +208,14 @@ find_slot(const typename SdkBackend::callback_tracing_record_t& record)
 
     static_assert(sizeof(std::uintptr_t) <= sizeof(std::uint64_t));
     // The address is only compared for identity, never dereferenced.
-    return { open_regions<SdkBackend>::s_parallel,
+    return { thread_regions.parallel,
              reinterpret_cast<std::uintptr_t>(parallel_data_address) };
 }
 
 // Records a completed OMPT region (instant, standard, or parallel) into the trace
 // cache: registers the category/thread-info metadata once and stores the region
-// sample, mirroring domains::callback::on_tracing_api_exit's tail.
+// sample, mirroring domains::callback::on_tracing_api_exit's tail. A non-empty
+// @p name_suffix is appended to the region name as " [suffix]".
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category, typename BacktraceDataT>
@@ -142,9 +223,10 @@ void
 emit_region(const typename SdkBackend::callback_tracing_record_t& record,
             typename SdkBackend::timestamp_t                      begin_timestamp,
             typename SdkBackend::timestamp_t                      end_timestamp,
-            BacktraceDataT& backtrace_data, const function_args_t& args)
+            BacktraceDataT& backtrace_data, const function_args_t& args,
+            std::string_view name_suffix = {})
 {
-    const std::string_view name = get_unified_name<SdkBackend>(record);
+    std::string_view name{ get_unified_name<SdkBackend>(record) };
 
     auto call_stack = Externals::get_backtrace_json(backtrace_data);
 
@@ -162,7 +244,9 @@ emit_region(const typename SdkBackend::callback_tracing_record_t& record,
     const std::string args_str = get_args_string(args);
 
     Externals::get_buffer_storage().store(typename Externals::region_sample{
-        record.thread_id, name, record.correlation_id.internal,
+        record.thread_id,
+        (name_suffix.empty() ? name : fmt::format("{} [{}]", name, name_suffix)),
+        record.correlation_id.internal,
         SdkBackend::get_parent_stack_id(record.correlation_id), begin_timestamp,
         end_timestamp, call_stack.dump(), args_str, Category<Externals>::k_name });
 }
@@ -389,27 +473,42 @@ on_ompt_none(typename SdkBackend::callback_tracing_record_t record,
     }
 }
 
-// Regions still open at finalization never received their end; they are emitted as
-// instant events at their begin timestamp.
+// Regions still open on any thread at finalization never received their end. They are
+// emitted with the finalization timestamp as their end and an "[incomplete]" name suffix.
 template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals,
           template <typename> class Category>
 void
 on_ompt_finalize()
 {
+    // Draining before the tool has stopped would race with callbacks still in flight.
+    if(!Externals::is_finalized())
+    {
+        LOG_WARNING("on_ompt_finalize() called while state is not Finalized; "
+                    "skipping orphan drain");
+        return;
+    }
+
+    static constexpr std::string_view k_incomplete_suffix{ "incomplete" };
+
     auto empty_backtrace_data = Externals::get_backtrace_data(false);
 
-    for(auto* regions : { &detail::open_regions<SdkBackend>::s_parallel,
-                          &detail::open_regions<SdkBackend>::s_standard })
-    {
-        for(const auto& [key, pending] : *regions)
-        {
-            detail::emit_region<SdkBackend, Externals, Category>(
-                pending.record, pending.begin_timestamp, pending.begin_timestamp,
-                empty_backtrace_data, pending.args);
-        }
-        regions->clear();
-    }
+    // One shared end-of-program timestamp for every region drained in this pass.
+    const auto finalize_timestamp = SdkBackend::get_timestamp();
+
+    detail::open_regions<SdkBackend>::for_each_thread(
+        [&](detail::thread_open_regions<SdkBackend>& thread_regions) {
+            for(auto* regions : { &thread_regions.parallel, &thread_regions.standard })
+            {
+                for(const auto& [key, pending] : *regions)
+                {
+                    detail::emit_region<SdkBackend, Externals, Category>(
+                        pending.record, pending.begin_timestamp, finalize_timestamp,
+                        empty_backtrace_data, pending.args, k_incomplete_suffix);
+                }
+                regions->clear();
+            }
+        });
 }
 
 template <typename Externals>

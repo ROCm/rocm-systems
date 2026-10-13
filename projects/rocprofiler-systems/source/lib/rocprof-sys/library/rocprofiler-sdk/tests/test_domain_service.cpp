@@ -823,7 +823,7 @@ TEST_F(domain_service_test,
     record.correlation_id.internal = 42U;
 
     auto& pending_standard_callbacks =
-        domains::callback::ompt::detail::open_regions<mock_sdk>::s_standard;
+        domains::callback::ompt::detail::open_regions<mock_sdk>::current().standard;
     pending_standard_callbacks.emplace(
         record.correlation_id.internal,
         domains::callback::ompt::detail::pending_region<mock_sdk>{
