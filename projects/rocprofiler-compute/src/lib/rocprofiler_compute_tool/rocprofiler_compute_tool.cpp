@@ -141,7 +141,7 @@ void record_gpu_agents(tool_data_t* tool_data)
     }
     catch (const std::exception& error)
     {
-        // Profiling goes on without the agent table.
+        // Profiling goes on without the agent table, analyze will skip this process
         std::cerr << "[rocprofiler-compute] " << error.what() << std::endl;
         return;
     }

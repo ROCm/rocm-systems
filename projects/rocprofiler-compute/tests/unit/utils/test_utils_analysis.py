@@ -2771,24 +2771,17 @@ def test_find_native_artifacts_sorts_by_counter_set_then_pid(tmp_path):
     ]
 
 
-def test_find_native_artifacts_ignores_the_rocpd_csvs(tmp_path, monkeypatch):
-    warnings = []
-    monkeypatch.setattr(utils_analysis, "console_warning", warnings.append)
+def test_find_native_artifacts_ignores_the_rocpd_csvs(tmp_path):
     (tmp_path / "results_pmc_perf_0.csv.gz").touch()
     (tmp_path / "rocpd_kernel_symbols_pmc_perf_0.csv.gz").touch()
 
     assert find_native_artifacts(tmp_path) == []
-    assert warnings == []
 
 
-def test_find_native_artifacts_skips_an_incomplete_set(tmp_path, monkeypatch):
-    warnings = []
-    monkeypatch.setattr(utils_analysis, "console_warning", warnings.append)
+def test_find_native_artifacts_skips_an_incomplete_set(tmp_path):
     touch_native_process(tmp_path, "pmc_perf_0", 100, ("counters",))
 
     assert find_native_artifacts(tmp_path) == []
-    assert len(warnings) == 1
-    assert "dispatch" in warnings[0]
 
 
 def test_number_gpus_by_node_numbers_every_node_once_in_order():

@@ -21,6 +21,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
 
+* `GPU_ID` in analyze output and the `--gpu-id` filter count every GPU on the node in topology order, not only the GPUs that ran kernels. A run on only the fourth GPU now reports and filters as `GPU_ID` 3 instead of 0.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

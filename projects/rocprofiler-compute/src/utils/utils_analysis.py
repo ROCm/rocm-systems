@@ -860,7 +860,7 @@ def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
     """Return the complete per-pid native artifact sets in workload_dir.
 
     Sorted by counter set then pid, since ids are numbered in read order. An
-    incomplete set cannot be joined, so it is skipped with a warning.
+    incomplete set cannot be joined, so it is skipped.
     """
     found: Dict[Tuple[str, int], Dict[str, Path]] = {}
     for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
@@ -878,12 +878,7 @@ def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
     }
     artifacts = []
     for (fbase, pid), paths in sorted(found.items()):
-        missing = kinds - set(paths)
-        if missing:
-            console_warning(
-                f"Incomplete native profiling data for pid {pid} of {fbase}: "
-                f"missing {', '.join(sorted(missing))}. Skipping this process."
-            )
+        if not kinds <= set(paths):
             continue
         artifacts.append(
             NativeArtifacts(
