@@ -420,7 +420,8 @@ def main() -> None:
     arg_parser.add_argument(
         '--gen-dbt',
         action='store_true',
-        help='Generate DBT legalization tables and encoding translators.',
+        help='Generate DBT legalization tables, matrix layout conversions, '
+        'and encoding translators.',
     )
     arg_parser.add_argument(
         '--isa-output', help='Output path for generated ISA C++ files'

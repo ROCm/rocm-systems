@@ -63,7 +63,7 @@ python -m amdisa [--isa-additions NAME:XML]
 | `--isa-additions NAME:XML` | Apply an ISA additions XML file to the named ISA. May be repeated. |
 | `--isa-variants NAME:JSON` | Attach one target-feature and legality manifest to the named ISA. |
 | `--gen-isas` | Generate ISA C++ files (decoders, encodings, execute bodies). Enabled by default. |
-| `--gen-dbt` | Generate DBT legalization tables and encoding translators. Enabled by default. |
+| `--gen-dbt` | Generate DBT legalization tables, matrix layout conversions, and encoding translators. Enabled by default. |
 | `--isa-output DIR` | Output path for generated ISA C++ files. |
 | `--include-root DIR` | Compiler include root used to spell relocatable generated includes. |
 | `--dbt-output DIR` | Output directory for DBT tables. Defaults to `--isa-output`. |
