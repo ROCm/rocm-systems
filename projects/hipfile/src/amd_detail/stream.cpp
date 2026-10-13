@@ -4,6 +4,7 @@
  */
 #include "configuration.h"
 #include "context.h"
+#include "device-guard.h"
 #include "hip.h"
 #include "hipfile.h"
 #include "passkey.h"
@@ -36,6 +37,8 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
 
     can_use_stream_wait_value =
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
+
+    DeviceGuard device_guard{device_id};
 
     copy_stream = Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking);
 
@@ -148,11 +151,22 @@ Stream::releaseSignalTarget()
 Stream::~Stream()
 {
     try {
+        DeviceGuard device_guard{device_id};
         if (signal_slot) {
-            Context<Hip>::get()->hipFree(signal_slot);
+            try {
+                Context<Hip>::get()->hipFree(signal_slot);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+            }
         }
         if (copy_stream) {
-            Context<Hip>::get()->hipStreamDestroy(copy_stream);
+            try {
+                Context<Hip>::get()->hipStreamDestroy(copy_stream);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+            }
         }
     }
     catch (...) {

@@ -49,6 +49,8 @@ expectStreamResources(StrictMock<MHip> &mhip)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(&g_stream_signal_slot_storage));
     EXPECT_CALL(mhip, hipFree).Times(::testing::AnyNumber());
+    EXPECT_CALL(mhip, hipGetDevice).Times(::testing::AnyNumber()).WillRepeatedly(::testing::Return(0));
+    EXPECT_CALL(mhip, hipSetDevice).Times(::testing::AnyNumber());
     EXPECT_CALL(mhip, hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, ::testing::_))
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Return(1));
@@ -130,6 +132,28 @@ TEST_F(HipFileStream, owns_copy_stream_and_signal_slot)
     ASSERT_EQ(stream->signalSlot(), &g_stream_signal_slot_storage);
 }
 
+TEST_F(HipFileStream, creates_resources_on_the_stream_device)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice).WillRepeatedly(::testing::Return(1));
+    EXPECT_CALL(mhip, hipGetDevice).WillRepeatedly(::testing::Return(0));
+
+    {
+        ::testing::InSequence seq;
+        EXPECT_CALL(mhip, hipSetDevice(1));
+        EXPECT_CALL(mhip, hipStreamCreateWithFlags)
+            .WillOnce(::testing::Return(reinterpret_cast<hipStream_t>(0xC0C0)));
+        EXPECT_CALL(mhip, hipExtMallocWithFlags).WillOnce(::testing::Return(&g_stream_signal_slot_storage));
+        EXPECT_CALL(mhip, hipSetDevice(0));
+    }
+
+    stream_map.registerStream(nonnull_stream, 0);
+    ::testing::Mock::VerifyAndClearExpectations(&mhip);
+
+    expectStreamResources(mhip);
+    EXPECT_CALL(mhip, hipStreamGetDevice).WillRepeatedly(::testing::Return(1));
+    EXPECT_CALL(mhip, hipGetDevice).WillRepeatedly(::testing::Return(0));
+}
+
 TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
@@ -194,6 +218,7 @@ TEST(HipFileStreamDestructor, resource_free_failure_logs)
     EXPECT_CALL(mhip, hipFree)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(mhip, hipStreamDestroy(reinterpret_cast<hipStream_t>(0xC0C0)));
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;
