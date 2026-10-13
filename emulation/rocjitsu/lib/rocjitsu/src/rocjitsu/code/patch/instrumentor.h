@@ -19,7 +19,8 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append trampoline caves into .text + emit()
+///         |  splice anchors + append probe bodies, entry stub and trampolines
+///         |  into .text + redirect the entry to the stub + emit()
 ///         v
 ///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
 ///
@@ -267,11 +268,11 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // The two inputs come from different owners: `probe_clobbers` is the callee fact
 // from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
 // call-envelope fact the builder's resource plan reports (link pair,
-// target-address pair, SCC temp, ...). That builder plan and its dead-register
-// selection land in a later slice; these helpers take `builder_clobbers` as a
-// plain RegisterSet so the formula and v0 policy are testable now. Combining the
-// two and applying policy is the Instrumentor's job, so it lives here rather
-// than in the callee-only probe_clobber unit.
+// target-address pair, SCC temp, ...). These helpers take `builder_clobbers` as
+// a plain RegisterSet rather than reaching into the builder's plan, so the
+// formula is testable on its own. Combining the two and applying policy is the
+// Instrumentor's job, so it lives here rather than in the callee-only
+// probe_clobber unit.
 //==============================================================================
 
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
@@ -486,24 +487,24 @@ private:
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
-  // A synthesized site at the kernel entry carrying the DBI entry prologue. Not
+  // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
+  // is redirected to it, and it branches to the untouched original entry. Not
   // one of the caller's points: it exists because a probe asked for the
   // framework's entry storage, and it is what defines that storage.
   struct EntryProloguePatch {
-    uint64_t anchor_offset = 0;
-    uint32_t original_size = 0;
-    uint16_t storage_base = 0; ///< Persistent pair every later site reads.
-    TrampolineBytes bytes;
+    uint64_t padding_bytes = 0;  ///< s_nop fill ahead of the stub, for entry alignment.
+    uint64_t stub_offset = 0;    ///< .text offset the descriptor enters at.
+    uint16_t storage_base = 0;   ///< Persistent pair every later site reads.
+    std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
   };
 
-  // Gate the kernel, choose the storage, and build the entry trampoline at
-  // @p trampoline_offset. Fails closed with a diagnostic rather than patching a
-  // kernel whose entry the prologue could not cover.
+  // Gate the kernel, choose the storage, and build the stub for a cave that
+  // currently ends at @p cave_offset. Fails closed with a diagnostic rather
+  // than patching a kernel the prologue could not cover.
   [[nodiscard]] std::optional<EntryProloguePatch> plan_entry_prologue(
       const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
       const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
-      const std::vector<ProbeClobberSummary> &summaries,
-      const std::vector<ResolvedInstrumentationSite> &user_sites, uint64_t trampoline_offset,
+      const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
       std::string *error_out);
 
   // Everything one resolution pass produces.
