@@ -35,8 +35,7 @@ static void ginWriteCounters() {
     close(fd);
     return;
   }
-  fprintf(f, "connect %d\ncloseColl %d\ncloseListen %d\n", ginConnectCalls, ginCloseCollCalls,
-          ginCloseListenCalls);
+  fprintf(f, "connect %d\ncloseColl %d\ncloseListen %d\n", ginConnectCalls, ginCloseCollCalls, ginCloseListenCalls);
   fclose(f);
 }
 
@@ -82,8 +81,7 @@ __hidden ncclResult_t ginListen(void* ctx, int dev, void* handle, void** listenC
   return *listenComm ? ncclSuccess : ncclSystemError;
 }
 
-__hidden ncclResult_t ginConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm,
-                                 void** collComm) {
+__hidden ncclResult_t ginConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm) {
   ginConnectCalls++;
   if (ginConnectCalls == ginEnvInt("RCCL_TEST_GIN_FAULT_FAIL_CONNECT_AT", 0)) {
     ginWriteCounters();
@@ -116,13 +114,21 @@ __hidden ncclResult_t ginFinalize(void* ctx) {
 __hidden ncclResult_t ginCreateContext(void*, ncclGinConfig_v14_t*, void**, ncclNetDeviceHandle_v11_t**) {
   return ncclInternalError;
 }
-__hidden ncclResult_t ginRegMrSym(void*, void*, size_t, int, uint64_t, void**, void**) { return ncclInternalError; }
+__hidden ncclResult_t ginRegMrSym(void*, void*, size_t, int, uint64_t, void**, void**) {
+  return ncclInternalError;
+}
 __hidden ncclResult_t ginRegMrSymDmaBuf(void*, void*, size_t, int, uint64_t, int, uint64_t, void**, void**) {
   return ncclInternalError;
 }
-__hidden ncclResult_t ginDeregMrSym(void*, void*) { return ncclInternalError; }
-__hidden ncclResult_t ginDestroyContext(void*) { return ncclInternalError; }
-__hidden ncclResult_t ginProgress(void*) { return ncclInternalError; }
+__hidden ncclResult_t ginDeregMrSym(void*, void*) {
+  return ncclInternalError;
+}
+__hidden ncclResult_t ginDestroyContext(void*) {
+  return ncclInternalError;
+}
+__hidden ncclResult_t ginProgress(void*) {
+  return ncclInternalError;
+}
 __hidden ncclResult_t ginQueryLastError(void*, bool* hasError) {
   *hasError = false;
   return ncclSuccess;
