@@ -39,9 +39,11 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
                   rocprofiler_async_correlation_id_t /* correlation_id */,
                   rocprofiler_kernel_id_t kernel_id,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
-                  void* /* userdata  */,
-                  rocprofiler_user_data_t* /* dispatch_userdata */)
+                  void*                    userdata,
+                  rocprofiler_user_data_t* dispatch_userdata)
 {
+    dispatch_userdata->value =
+        static_cast<const rocprofiler_agent_v0_t*>(userdata)->wave_front_size;
     static rocprofiler_kernel_id_t target_kernel_id = kernel_id;
     if(target_kernel_id == kernel_id) return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 
@@ -51,7 +53,7 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
 int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
-    Callbacks::init();
+    Callbacks::init(true);
 
     static rocprofiler_context_id_t client_ctx = {0};
 
@@ -66,17 +68,17 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr),
         "code object tracing service configure");
 
-    std::vector<rocprofiler_agent_id_t> agents{};
+    std::vector<const rocprofiler_agent_v0_t*> agents{};
 
     ROCPROFILER_CALL(
         rocprofiler_query_available_agents(
             ROCPROFILER_AGENT_INFO_VERSION_0,
             [](rocprofiler_agent_version_t, const void** _agents, size_t _num_agents, void* _data) {
-                auto* agent_v = static_cast<std::vector<rocprofiler_agent_id_t>*>(_data);
+                auto* agent_v = static_cast<std::vector<const rocprofiler_agent_v0_t*>*>(_data);
                 for(size_t i = 0; i < _num_agents; ++i)
                 {
                     auto* agent = static_cast<const rocprofiler_agent_v0_t*>(_agents[i]);
-                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) agent_v->emplace_back(agent->id);
+                    if(agent->type == ROCPROFILER_AGENT_TYPE_GPU) agent_v->emplace_back(agent);
                 }
                 return ROCPROFILER_STATUS_SUCCESS;
             },
@@ -84,20 +86,22 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
             &agents),
         "Failed to iterate agents");
 
-    auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
-    parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x3});
-
-    for(auto id : agents)
+    for(const auto* agent : agents)
     {
-        ROCPROFILER_CALL(
-            rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
-                                                                id,
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                dispatch_callback,
-                                                                Callbacks::shader_data_callback,
-                                                                nullptr),
-            "thread trace service configure");
+        auto parameters = std::vector<rocprofiler_thread_trace_parameter_t>{};
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x3});
+        if(agent->gfx_target_version / 10000 == 12)
+            parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE, 1});
+
+        ROCPROFILER_CALL(rocprofiler_configure_dispatch_thread_trace_service(
+                             client_ctx,
+                             agent->id,
+                             parameters.data(),
+                             parameters.size(),
+                             dispatch_callback,
+                             Callbacks::shader_data_callback,
+                             const_cast<rocprofiler_agent_v0_t*>(agent)),
+                         "thread trace service configure");
     }
 
     int valid_ctx = 0;
