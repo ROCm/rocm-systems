@@ -12,16 +12,20 @@
 #   /sys/kernel/pci_switch_link/virtual_switch_links/<busid>/<peer_busid>
 #
 # Usage:
-#   sudo ./rccl_bcm_isl_discover.sh [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH]
+#   sudo ./rccl_bcm_isl_discover.sh [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]
 #
 # Modes:
 #   --discover     Print discovered switch groups and peer links (default)
 #   --populate     Create the sysfs directory structure for RCCL consumption
+#                  and register the path in /etc/rccl.conf
 #   --clean        Remove all files/directories previously created by --populate
+#                  and remove the RCCL_BCM_LINKS_PATH entry from /etc/rccl.conf
 #
 # Options:
-#   --sysfs-base   Override the base path (default: /sys/kernel/pci_switch_link/virtual_switch_links)
+#   --sysfs-base   Override the base path (default: /var/run/rccl_bcm_links)
 #   --log-file     Override the change log path (default: /var/run/rccl_bcm_isl_discover.log)
+#   --rccl-conf    Override RCCL config file path (default: /etc/rccl.conf)
+#   --no-conf      Skip updating /etc/rccl.conf
 #
 # Modeled after /apps/shared/disable_acs.sh — intended to run as a privileged
 # step during NIC bring-up, before RCCL initializes.
@@ -32,6 +36,8 @@ set -euo pipefail
 # --- Configuration ---
 SYSFS_BASE="/var/run/rccl_bcm_links"
 CHANGE_LOG="/var/run/rccl_bcm_isl_discover.log"
+RCCL_CONF="/etc/rccl.conf"
+UPDATE_CONF=1          # 1 = update /etc/rccl.conf, 0 = skip
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID
 BCM_SWITCH_DEV="c030"  # PEX890xx device ID
@@ -44,22 +50,27 @@ while [[ $# -gt 0 ]]; do
         --clean)      MODE="clean"; shift ;;
         --sysfs-base) SYSFS_BASE="$2"; shift 2 ;;
         --log-file)   CHANGE_LOG="$2"; shift 2 ;;
+        --rccl-conf)  RCCL_CONF="$2"; shift 2 ;;
+        --no-conf)    UPDATE_CONF=0; shift ;;
         -h|--help)
-            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH]"
+            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]"
             echo ""
             echo "Modes:"
             echo "  --discover     Print discovered switch groups and peer links (default)"
-            echo "  --populate     Create sysfs directory structure for RCCL"
-            echo "  --clean        Remove all files/directories created by a previous --populate"
+            echo "  --populate     Create sysfs directory structure for RCCL and register path in /etc/rccl.conf"
+            echo "  --clean        Remove all files/directories created by a previous --populate and"
+            echo "                 remove the RCCL_BCM_LINKS_PATH entry from /etc/rccl.conf"
             echo ""
             echo "Options:"
-            echo "  --sysfs-base   Override base path (default: /sys/kernel/pci_switch_link/virtual_switch_links)"
+            echo "  --sysfs-base   Override base path (default: /var/run/rccl_bcm_links)"
             echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
+            echo "  --rccl-conf    Override RCCL config file path (default: /etc/rccl.conf)"
+            echo "  --no-conf      Skip updating /etc/rccl.conf (path must be passed via env var instead)"
             exit 0
             ;;
         *)
             echo "ERROR: Unknown option: $1"
-            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH]"
+            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]"
             exit 1
             ;;
     esac
@@ -127,6 +138,19 @@ if [ "${MODE}" = "clean" ]; then
             echo "  Already absent: ${ENTRY_PATH}"
         fi
     done
+
+    # Remove RCCL_BCM_LINKS_PATH from /etc/rccl.conf
+    if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
+        if grep -q '^RCCL_BCM_LINKS_PATH=' "${RCCL_CONF}" 2>/dev/null; then
+            sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
+            # Remove the marker comment if present
+            sed -i '/^# Added by rccl_bcm_isl_discover/d' "${RCCL_CONF}"
+            echo "  Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+            logger "rccl_bcm_isl_discover: Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+        else
+            echo "  No RCCL_BCM_LINKS_PATH entry in ${RCCL_CONF}"
+        fi
+    fi
 
     # Remove the change log itself
     rm -f "${CHANGE_LOG}"
@@ -320,6 +344,33 @@ if [ "${MODE}" = "populate" ]; then
     echo ""
     echo "Change log written to: ${CHANGE_LOG}"
     echo "  To undo: sudo $0 --clean --log-file ${CHANGE_LOG}"
+
+    # Register RCCL_BCM_LINKS_PATH in /etc/rccl.conf so RCCL discovers the
+    # links automatically without requiring an env var in mpirun/launcher.
+    # Uses setenv(..., 0) semantics — env var override still takes precedence.
+    if [ "${UPDATE_CONF}" -eq 1 ]; then
+        CONF_ENTRY="RCCL_BCM_LINKS_PATH=${SYSFS_BASE}"
+        if [ -f "${RCCL_CONF}" ] && grep -q "^RCCL_BCM_LINKS_PATH=" "${RCCL_CONF}" 2>/dev/null; then
+            # Update existing entry if path changed
+            EXISTING=$(grep "^RCCL_BCM_LINKS_PATH=" "${RCCL_CONF}" | head -1)
+            if [ "${EXISTING}" = "${CONF_ENTRY}" ]; then
+                echo ""
+                echo "RCCL config: ${RCCL_CONF} already contains ${CONF_ENTRY}"
+            else
+                sed -i "s|^RCCL_BCM_LINKS_PATH=.*|${CONF_ENTRY}|" "${RCCL_CONF}"
+                echo ""
+                echo "RCCL config: Updated ${RCCL_CONF} with ${CONF_ENTRY}"
+                logger "rccl_bcm_isl_discover: Updated ${RCCL_CONF} with ${CONF_ENTRY}"
+            fi
+        else
+            # Append new entry
+            echo "# Added by rccl_bcm_isl_discover ($(date -u '+%Y-%m-%dT%H:%M:%SZ'))" >> "${RCCL_CONF}"
+            echo "${CONF_ENTRY}" >> "${RCCL_CONF}"
+            echo ""
+            echo "RCCL config: Added ${CONF_ENTRY} to ${RCCL_CONF}"
+            logger "rccl_bcm_isl_discover: Added ${CONF_ENTRY} to ${RCCL_CONF}"
+        fi
+    fi
 fi
 
 echo ""
