@@ -14,7 +14,7 @@
 //! state object.
 
 use crate::driver;
-use crate::host_storage::{Buffer, Shared};
+use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
 pub mod platform;
@@ -382,8 +382,8 @@ pub struct Endpoint {
     /// Supported device permission bits. Every allocation requires READ and may
     /// independently request the supported WRITE and EXECUTE bits.
     pub supported_permissions: DeviceAccess,
-    pub(crate) caches: Option<Shared<Buffer<CacheInfo>>>,
-    pub(crate) memory_links: Option<Shared<Buffer<MemoryLink>>>,
+    pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
+    pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
     pub(crate) topology_key: TopologyKey,
     pub(crate) driver_instance: u64,
     pub(crate) selector: driver::EndpointSelector,

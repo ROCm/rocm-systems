@@ -16,7 +16,7 @@ use super::{
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::ClockCounters;
-use crate::host_storage::Shared;
+use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
@@ -125,7 +125,7 @@ impl DriverInstance {
         match self {
             Self::LinuxKfd(driver) => driver.supports_host_registration(endpoint),
             #[cfg(test)]
-            Self::Test(_) => false,
+            Self::Test(driver) => driver.supports_host_registration(endpoint),
         }
     }
 }
@@ -149,6 +149,14 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
+        match self {
+            Self::LinuxKfd { driver, .. } => driver.supports_host_registration(endpoint),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.supports_host_registration(endpoint),
+        }
+    }
+
     /// Checks the exact installed driver owner of an activated device.
     /// A matching numeric endpoint identity alone cannot establish ownership.
     pub(crate) fn belongs_to(&self, instance: &DriverInstance) -> bool {
@@ -226,14 +234,6 @@ impl DeviceDriverState {
         }
     }
 
-    pub(crate) fn allocator(&self) -> crate::host_storage::Allocator {
-        match self {
-            Self::LinuxKfd { driver, .. } => driver.allocator(),
-            #[cfg(test)]
-            Self::Test { driver, .. } => driver.allocator(),
-        }
-    }
-
     // The Result rejects other driver variants when they are installed.
     #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn linux_kfd(&self) -> Result<(&Shared<KfdDriver>, &KfdDeviceState), Error> {
@@ -244,6 +244,16 @@ impl DeviceDriverState {
                 kind: ErrorKind::Unsupported,
                 detail: "device does not use the Linux KFD driver",
             }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_driver(
+        &self,
+    ) -> Option<(&Shared<test_driver::TestDriver>, &test_driver::TestDevice)> {
+        match self {
+            Self::Test { driver, state } => Some((driver, state)),
+            Self::LinuxKfd { .. } => None,
         }
     }
 }

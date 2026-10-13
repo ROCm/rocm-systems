@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use crate::platform::event::{SignalEvent, SignalEventPage, create_signal_event};
 use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
-use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;

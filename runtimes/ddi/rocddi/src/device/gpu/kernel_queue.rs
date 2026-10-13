@@ -9,7 +9,7 @@
 
 use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, KernelQueueResource};
-use crate::host_storage::{Owned, Shared};
+use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
 /// Native command representation selected for a kernel-mediated queue.
@@ -181,7 +181,7 @@ impl KernelQueue {
 impl GpuDevice<'_> {
     /// Returns a bitmask of logical SDMA engine indices available for
     /// kernel-mediated submissions on this activated device. A set bit at
-    /// position `n` permits [`KernelQueueFormat::SdmaOnEngine(n)`]. The indices
+    /// position `n` permits [`KernelQueueFormat::SdmaOnEngine`]. The indices
     /// are scoped to this device and do not expose a driver ring number.
     ///
     /// # Errors

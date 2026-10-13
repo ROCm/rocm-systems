@@ -11,8 +11,9 @@ use super::error;
 use super::imported_system::DrmImportedSystem;
 use super::memory::{self, DeviceVm, KfdAllocation};
 use super::registered_host::DrmRegisteredHost;
-use crate::host_storage::{Owned, Shared};
+use crate::memory::host::HostBackingLease;
 use crate::memory::interop::linux::{AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle};
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
@@ -24,8 +25,7 @@ pub(crate) enum LinuxAllocation {
 
 impl LinuxAllocation {
     fn from_kfd(allocation: Owned<KfdAllocation>) -> Result<Owned<Self>, Error> {
-        let allocator = allocation.allocator();
-        Ok(Owned::new(Self::Kfd(allocation), allocator)?)
+        Ok(Owned::new(Self::Kfd(allocation))?)
     }
 
     pub(super) fn create_scratch(
@@ -45,6 +45,7 @@ impl LinuxAllocation {
         desc: AllocationDesc,
         kind: memory::BufferKind,
         permissions: DeviceAccess,
+        backing: Option<HostBackingLease>,
     ) -> Result<Owned<Self>, Error> {
         Self::from_kfd(KfdAllocation::create_with_peers(
             vm,
@@ -52,12 +53,13 @@ impl LinuxAllocation {
             desc,
             kind,
             permissions,
+            backing,
         )?)
     }
 
     /// # Safety
-    /// The caller retains and synchronizes the entire borrowed host page cover
-    /// through successful cleanup or process teardown.
+    /// Borrowed callers retain and synchronize the entire host page cover
+    /// through cleanup; an owned request transfers that obligation in `backing`.
     #[allow(unsafe_code)]
     pub(super) unsafe fn create_registered_host(
         vm: Shared<DeviceVm>,
@@ -66,12 +68,13 @@ impl LinuxAllocation {
         address: usize,
         permissions: DeviceAccess,
         uncached: bool,
+        backing: Option<HostBackingLease>,
     ) -> Result<Owned<Self>, Error> {
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         // SAFETY: The caller of this function owns the retained-page contract.
-        let registration =
-            unsafe { DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached)? };
+        let registration = unsafe {
+            DrmRegisteredHost::create(vm, peers, desc, address, permissions, uncached, backing)?
+        };
         Ok(owner.write(Self::DrmRegisteredHost(registration)))
     }
 
@@ -101,8 +104,7 @@ impl LinuxAllocation {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self>, Error> {
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         let imported = DrmImportedSystem::create(
             vm,
             descriptor,
