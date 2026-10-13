@@ -1595,6 +1595,11 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
     }
     return true;
   }
+  const char* hca = getenv("NCCL_IB_HCA");
+  if (hca && hca[0] != '\0') {
+    fprintf(stderr, "# Warning: NCCL_IB_HCA=%s matches no IB device, disabling net counter collection\n", hca);
+    return false;
+  }
   std::vector<std::string> all_nics;
   NetCounterGetNetworkInterfaces(all_nics);
   for (const auto& nic : all_nics) {
