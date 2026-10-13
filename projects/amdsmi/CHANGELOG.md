@@ -8,9 +8,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
+
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
@@ -123,6 +133,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A section named on the command line is never emptied. Plain `amd-smi metric` drops a section the version can populate nothing of, which on a metrics v1.3 GPU removes the whole `throttle` section; `amd-smi metric --throttle` prints all 31 rows instead. A named section that is only partly suppressed is still filtered. `--partition` scopes the data rather than naming a section, so `amd-smi metric --partition` protects nothing and filters like plain `amd-smi metric`.
   - A field the version does carry but the ASIC or driver leaves unpopulated still prints `N/A`, a field reporting a real value is never removed, and an unrecognized metrics version or an unreadable header suppresses nothing.
 
+- **`amd-smi static` shows NUMA information on Linux guests**.  
+  - `--numa` was previously limited to Linux baremetal and passthrough guests.
+  - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -163,6 +177,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
 
+- **Fixed `amd-smi static --numa --csv` dropping socket affinity**.  
+  - When NUMA-node CPU affinity was unavailable, as on guests, the CSV row printed `N/A` for the socket columns that human-readable and JSON output showed. It also no longer fails when only the socket affinity is unavailable.
+
 - **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
   - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
 
@@ -171,6 +188,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
+
+- **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
+  - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
 
 ## amd_smi_lib for ROCm 10.1.0
 
