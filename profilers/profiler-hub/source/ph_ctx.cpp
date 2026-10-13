@@ -1,13 +1,13 @@
 #include "ph_ctx.hpp"
+#include "database_probe_failure.hpp"
 #include "debug.hpp"
 #include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
-#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/database_probe.hpp"
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -17,17 +17,6 @@
 
 namespace
 {
-
-std::string
-existing_trace_path(std::string_view path)
-{
-    std::string file_path{ path };
-    if(!std::filesystem::is_regular_file(file_path))
-    {
-        throw std::runtime_error("trace file does not exist: " + file_path);
-    }
-    return file_path;
-}
 
 ph_track_category_t
 to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
@@ -85,8 +74,27 @@ ph_ctx::default_connection_count()
     return 8;
 }
 
+ph_ctx::accepted_trace_t
+ph_ctx::accept_trace(std::string_view trace_path)
+{
+    const auto probe = profiler_hub::probe_database(std::string{ trace_path });
+    if(probe.status != profiler_hub::probe_status_t::supported)
+    {
+        throw profiler_hub::database_probe_failure{ probe };
+    }
+    return accepted_trace_t{ std::string{ trace_path },
+                             ph_schema_version_t{ .major = probe.schema_version.major,
+                                                  .minor = probe.schema_version.minor,
+                                                  .patch = probe.schema_version.patch } };
+}
+
 ph_ctx::ph_ctx(std::string_view trace_path)
-: m_file_path{ existing_trace_path(trace_path) }
+: ph_ctx{ accept_trace(trace_path) }
+{}
+
+ph_ctx::ph_ctx(accepted_trace_t accepted)
+: m_file_path{ std::move(accepted.path) }
+, m_schema_version{ accepted.version }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {}
 
@@ -221,11 +229,6 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     if(stop_requested()) return false;
 
     if(progress) progress(0.0, "Reading schema version");
-    profiler_hub::storage_t version_probe{ m_file_path, "" };
-    const auto              version = version_probe.get_storage_version();
-    m_schema_version                = { .major = version.major,
-                                        .minor = version.minor,
-                                        .patch = version.patch };
 
     if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);

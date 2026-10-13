@@ -1,6 +1,8 @@
+#include "database_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
+#include "profiler-hub/cpp/database_probe.hpp"
 
 #include <functional>
 #include <memory>
@@ -48,6 +50,60 @@ run_operation(ph_ctx_t ctx, ph_future_t future, std::function<ph_result_t()> ope
 }  // namespace
 
 ph_result_t
+ph_probe_database(const char* file_path, ph_database_probe_t* probe)
+{
+    if(file_path == nullptr || probe == nullptr)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    *probe = {};
+    return guard_call([file_path, probe]() {
+        const auto result = profiler_hub::probe_database(file_path);
+
+        switch(result.status)
+        {
+            case profiler_hub::probe_status_t::supported:
+                probe->status = PH_PROBE_STATUS_SUPPORTED;
+                break;
+            case profiler_hub::probe_status_t::file_not_found:
+                probe->status = PH_PROBE_STATUS_FILE_NOT_FOUND;
+                break;
+            case profiler_hub::probe_status_t::unreadable:
+                probe->status = PH_PROBE_STATUS_UNREADABLE;
+                break;
+            case profiler_hub::probe_status_t::unknown_format:
+                probe->status = PH_PROBE_STATUS_UNKNOWN_FORMAT;
+                break;
+            case profiler_hub::probe_status_t::metadata_missing:
+                probe->status = PH_PROBE_STATUS_METADATA_MISSING;
+                break;
+            case profiler_hub::probe_status_t::metadata_malformed:
+                probe->status = PH_PROBE_STATUS_METADATA_MALFORMED;
+                break;
+            case profiler_hub::probe_status_t::ambiguous_trace:
+                probe->status = PH_PROBE_STATUS_AMBIGUOUS_TRACE;
+                break;
+            case profiler_hub::probe_status_t::unsupported_version:
+                probe->status = PH_PROBE_STATUS_UNSUPPORTED_VERSION;
+                break;
+        }
+
+        probe->database_kind =
+            result.database_kind == profiler_hub::database_kind_t::sqlite
+                ? PH_DATABASE_KIND_SQLITE
+                : PH_DATABASE_KIND_UNKNOWN;
+        probe->trace_schema   = result.trace_schema == profiler_hub::trace_schema_t::rocpd
+                                    ? PH_TRACE_SCHEMA_ROCPD
+                                    : PH_TRACE_SCHEMA_UNKNOWN;
+        probe->schema_version = { result.schema_version.major,
+                                  result.schema_version.minor,
+                                  result.schema_version.patch };
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
 {
     if(ctx == nullptr)
@@ -77,6 +133,9 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
         {
             return PH_RESULT_INVALID_ARGUMENT;
         }
+    } catch(const profiler_hub::database_probe_failure& failure)
+    {
+        return profiler_hub::to_ph_result(failure.result().status);
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;

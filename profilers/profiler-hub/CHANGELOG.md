@@ -22,6 +22,19 @@ downstream consumer of the library.
 
 ### Added
 
+- `probe_database()` and the C equivalent `ph_probe_database()` detect a SQLite
+  database, its `rocpd_metadata_<uuid>` table, and the schema version before a
+  reader is opened. A trace that only has the `schema_version` tag is accepted
+  when its value is a major number such as `3`, `major.minor` such as `3.0`, or
+  `major.minor.patch` such as `3.0.1`. They do not create or modify the file.
+  `ph-c-client --probe`
+  runs the C probe against one or more existing trace files. Schema 3 is
+  accepted. `ph_ctx_create()` returns
+  `PH_RESULT_UNSUPPORTED_DATABASE`, `PH_RESULT_INVALID_DATABASE`,
+  `PH_RESULT_METADATA_MISSING`, or `PH_RESULT_UNSUPPORTED_SCHEMA_VERSION`
+  instead of opening an unsupported trace. Another database format is added by
+  registering a detector, and another schema by registering the versions its
+  reader accepts.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
   memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same

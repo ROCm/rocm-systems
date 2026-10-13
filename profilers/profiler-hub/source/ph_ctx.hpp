@@ -15,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <stop_token>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -23,7 +24,8 @@ struct ph_future;
 
 struct ph_ctx
 {
-    /** Opens nothing yet: the trace is read by load() or load_async(). */
+    /** Rejects an unsupported database before any reader is opened. The trace
+     *  catalog is still read by load() or load_async(). */
     explicit ph_ctx(std::string_view trace_path);
     ~ph_ctx();
 
@@ -100,6 +102,15 @@ private:
     void               initialize_node_queues();
     void               initialize_node_pmc_infos();
     void               initialize_stream_hardware_links();
+
+    struct accepted_trace_t
+    {
+        std::string         path;
+        ph_schema_version_t version;
+    };
+
+    explicit ph_ctx(accepted_trace_t accepted);
+    [[nodiscard]] static accepted_trace_t accept_trace(std::string_view trace_path);
 
     static size_t default_thread_pool_size();
     static size_t default_connection_count();

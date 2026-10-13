@@ -19,6 +19,18 @@ extern "C"
 #endif
 
     /**
+     * @brief Detects whether @p file_path is a database and trace schema that
+     *        profiler-hub supports, without loading the trace.
+     * @param file_path Existing database file to inspect.
+     * @param probe Out parameter receiving the detection result.
+     * @return PH_RESULT_SUCCESS when probing completed, including an unsupported
+     *         result reported through @p probe; PH_RESULT_INVALID_ARGUMENT if an
+     *         argument is null; PH_RESULT_INTERNAL_ERROR on an unexpected failure.
+     * @note The database is opened read-only and is not created or modified.
+     */
+    ph_result_t ph_probe_database(const char* file_path, ph_database_probe_t* probe);
+
+    /**
      * @brief Opens a trace file and creates a context for it.
      * @param ctx Out parameter receiving the new context. Must not be null.
      * @param file_path Path to the trace database to open. Must not be null.
@@ -31,6 +43,9 @@ extern "C"
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
+     *         PH_RESULT_UNSUPPORTED_DATABASE, PH_RESULT_INVALID_DATABASE,
+     *         PH_RESULT_METADATA_MISSING or PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
+     *         when the file is not a supported trace,
      *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
      *         created or, without a future, the trace could not be read.
      * @note On success, the caller owns @p *ctx and must release it with

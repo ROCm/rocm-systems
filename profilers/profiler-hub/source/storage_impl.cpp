@@ -7,10 +7,12 @@
 #include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "data_storage/schema_version_text.hpp"
 
 #include <fmt/format.h>
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -83,8 +85,8 @@ storage_t::impl::get_storage_version() const
 
     const auto table = fmt::format("rocpd_metadata_{}", backend->get_uuid());
     const auto query = fmt::format("SELECT tag, value FROM {} WHERE tag IN "
-                                   "('schema_version_major', 'schema_version_minor', "
-                                   "'schema_version_patch')",
+                                   "('schema_version', 'schema_version_major', "
+                                   "'schema_version_minor', 'schema_version_patch')",
                                    table);
 
     profiler_hub::version_t version{ .major = 0, .minor = 0, .patch = 0 };
@@ -93,20 +95,48 @@ storage_t::impl::get_storage_version() const
         auto executor = backend->create_read_statement_executor<metadata_row_t>(
             query, &metadata_row_t::tag, &metadata_row_t::value);
 
+        bool                         saw_component = false;
+        std::optional<std::string>   version_text;
+        std::optional<std::uint32_t> major;
+        std::optional<std::uint32_t> minor;
+        std::optional<std::uint32_t> patch;
         for(const auto& row : executor().to_vector())
         {
-            if(row.tag == "schema_version_major")
+            if(row.tag == "schema_version")
             {
-                version.major = static_cast<std::uint32_t>(std::stoul(row.value));
+                version_text = row.value;
+            }
+            else if(row.tag == "schema_version_major")
+            {
+                major         = static_cast<std::uint32_t>(std::stoul(row.value));
+                saw_component = true;
             }
             else if(row.tag == "schema_version_minor")
             {
-                version.minor = static_cast<std::uint32_t>(std::stoul(row.value));
+                minor         = static_cast<std::uint32_t>(std::stoul(row.value));
+                saw_component = true;
             }
             else if(row.tag == "schema_version_patch")
             {
-                version.patch = static_cast<std::uint32_t>(std::stoul(row.value));
+                patch         = static_cast<std::uint32_t>(std::stoul(row.value));
+                saw_component = true;
             }
+        }
+        if(major.has_value() && minor.has_value() && patch.has_value())
+        {
+            version = { major.value(), minor.value(), patch.value() };
+        }
+        else if(version_text.has_value())
+        {
+            const auto parsed =
+                data_storage::parse_schema_version_text(version_text.value());
+            if(parsed.has_value()) version = parsed.value();
+        }
+        else if(saw_component)
+        {
+            if(major.has_value()) version.major = major.value();
+            if(minor.has_value()) version.minor = minor.value();
+            if(patch.has_value()) version.patch = patch.value();
         }
     } catch(const std::exception& err)
     {

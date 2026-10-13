@@ -29,6 +29,13 @@ extern "C"
                                                  (out of memory). */
         PH_RESULT_CANCELLED,                 /**< The operation was cancelled through its
                                                  future before it finished. */
+        PH_RESULT_UNSUPPORTED_DATABASE,      /**< The file is not a database format
+                                                 profiler-hub can read. */
+        PH_RESULT_INVALID_DATABASE,          /**< The file is missing, unreadable, or its
+                                                 trace metadata is unusable. */
+        PH_RESULT_METADATA_MISSING, /**< The database has no trace metadata table. */
+        PH_RESULT_UNSUPPORTED_SCHEMA_VERSION, /**< The trace schema version is recognized
+                                                  but not supported. */
     } ph_result_t;
 
     struct ph_ctx;
@@ -49,6 +56,42 @@ extern "C"
         uint32_t minor;
         uint32_t patch;
     } ph_version_t;
+
+    /** @brief Physical database container recognized while probing a file. */
+    typedef enum
+    {
+        PH_DATABASE_KIND_UNKNOWN,
+        PH_DATABASE_KIND_SQLITE,
+    } ph_database_kind_t;
+
+    /** @brief Trace schema family found in a recognized database. */
+    typedef enum
+    {
+        PH_TRACE_SCHEMA_UNKNOWN,
+        PH_TRACE_SCHEMA_ROCPD,
+    } ph_trace_schema_t;
+
+    /** @brief Detailed outcome of probing a database without loading its trace. */
+    typedef enum
+    {
+        PH_PROBE_STATUS_SUPPORTED,
+        PH_PROBE_STATUS_FILE_NOT_FOUND,
+        PH_PROBE_STATUS_UNREADABLE,
+        PH_PROBE_STATUS_UNKNOWN_FORMAT,
+        PH_PROBE_STATUS_METADATA_MISSING,
+        PH_PROBE_STATUS_METADATA_MALFORMED,
+        PH_PROBE_STATUS_AMBIGUOUS_TRACE,
+        PH_PROBE_STATUS_UNSUPPORTED_VERSION,
+    } ph_probe_status_t;
+
+    /** @brief Database and schema information returned by ph_probe_database(). */
+    typedef struct
+    {
+        ph_probe_status_t  status;
+        ph_database_kind_t database_kind;
+        ph_trace_schema_t  trace_schema;
+        ph_version_t       schema_version;
+    } ph_database_probe_t;
 
     /** @brief Distinguishes the identity columns a track was derived from. */
     typedef enum
