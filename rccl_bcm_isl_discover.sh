@@ -17,14 +17,14 @@
 # Modes:
 #   --discover     Print discovered switch groups and peer links (default)
 #   --populate     Create the sysfs directory structure for RCCL consumption
-#                  and register the path in <ROCM_PATH>/share/rccl/rccl.conf
+#                  and register the path in /var/run/rccl.conf
 #   --clean        Remove all files/directories previously created by --populate
 #                  and remove the RCCL_BCM_LINKS_PATH entry from rccl.conf
 #
 # Options:
 #   --sysfs-base   Override the base path (default: /var/run/rccl_bcm_links)
 #   --log-file     Override the change log path (default: /var/run/rccl_bcm_isl_discover.log)
-#   --rccl-conf    Override RCCL config file path (default: <ROCM_PATH>/share/rccl/rccl.conf)
+#   --rccl-conf    Override RCCL config file path (default: /var/run/rccl.conf)
 #   --no-conf      Skip updating rccl.conf
 #
 # Modeled after /apps/shared/disable_acs.sh — intended to run as a privileged
@@ -36,8 +36,7 @@ set -euo pipefail
 # --- Configuration ---
 SYSFS_BASE="/var/run/rccl_bcm_links"
 CHANGE_LOG="/var/run/rccl_bcm_isl_discover.log"
-ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-RCCL_CONF="${ROCM_PATH}/share/rccl/rccl.conf"
+RCCL_CONF="/var/run/rccl.conf"
 UPDATE_CONF=1          # 1 = update rccl.conf, 0 = skip
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID
@@ -59,14 +58,14 @@ while [[ $# -gt 0 ]]; do
             echo "Modes:"
             echo "  --discover     Print discovered switch groups and peer links (default)"
             echo "  --populate     Create sysfs directory structure for RCCL and register path in"
-            echo "                 \${ROCM_PATH}/share/rccl/rccl.conf (default: ${RCCL_CONF})"
+            echo "                 /var/run/rccl.conf (default: ${RCCL_CONF})"
             echo "  --clean        Remove all files/directories created by a previous --populate and"
             echo "                 remove the RCCL_BCM_LINKS_PATH entry from rccl.conf"
             echo ""
             echo "Options:"
             echo "  --sysfs-base   Override base path (default: /var/run/rccl_bcm_links)"
             echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
-            echo "  --rccl-conf    Override RCCL config file path (default: \${ROCM_PATH}/share/rccl/rccl.conf)"
+            echo "  --rccl-conf    Override RCCL config file path (default: /var/run/rccl.conf)"
             echo "  --no-conf      Skip updating rccl.conf (path must be passed via env var instead)"
             exit 0
             ;;
