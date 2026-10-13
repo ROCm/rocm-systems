@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -29,9 +30,9 @@ using nccl_dda_detail::DdaFabricBarrierState;
 constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 
 // Single source of the launch geometry: grid/block for `count` elements of
-// `typeSize` bytes, capped at the init-time block count.
+// `typeSize` bytes, capped at rcclDdaFabricVmmBlocks() (at most the init-time block count).
 static inline std::pair<dim3, dim3> ddaAllReduceFabricGeom(ncclComm* comm, size_t count, int typeSize) {
-  return dda::common::getGridAndBlockDims(count, typeSize, comm->ddaFabricMaxBlocks);
+  return dda::common::getGridAndBlockDims(count, typeSize, rcclDdaFabricVmmBlocks(comm));
 }
 
 template <typename T>
@@ -57,7 +58,7 @@ static ncclResult_t ncclAllReduceDdaFabricTyped(const void* sendbuff, void* recv
          count, nRanks);
   }
 
-  // Block cap chosen at init (barrier flag buffer is sized for it).
+  // At most the block cap chosen at init (barrier flag buffer is sized for it).
   auto gridBlock = ddaAllReduceFabricGeom(comm, count, sizeof(T));
   const auto& grid = gridBlock.first;
   const auto& block = gridBlock.second;
