@@ -33,7 +33,7 @@ _HANDLE = amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle
 
 
 def _device_choices(first_value, count, domain):
-    return {
+    choices = {
         str(index): {
             "Device Handle": _HANDLE(first_value + index),
             "bdf": f"{domain:04x}:0{index + 1}:00.0",
@@ -42,6 +42,9 @@ def _device_choices(first_value, count, domain):
         }
         for index in range(count)
     }
+    # The helpers add this entry, and every select action must drop it before lookup.
+    choices["all"] = "all"
+    return choices
 
 
 _GPUS = _device_choices(0x100, 3, 0)
@@ -171,10 +174,10 @@ class _CliFixture(unittest.TestCase):
             raise unittest.SkipTest(f"amd-smi CLI amdsmi_parser.py not found in {_CLI_DIR}")
         stub_modules(cls, _fake_modules())
         cls.parser_mod = load_cli_module(
-            "amdsmi_parser_gpu_selection_test", PARSER_PATH, sys_path_dir=_CLI_DIR
+            "amdsmi_parser_device_selection_test", PARSER_PATH, sys_path_dir=_CLI_DIR
         )
         cls.set_value_mod = load_cli_module(
-            "set_value_gpu_selection_test", SET_VALUE_PATH, sys_path_dir=_CLI_DIR
+            "set_value_device_selection_test", SET_VALUE_PATH, sys_path_dir=_CLI_DIR
         )
         cls.errors = cls.parser_mod.amdsmi_cli_exceptions
 
@@ -216,18 +219,23 @@ class TestRepeatedDeviceSelection(_CliFixture):
         for repeated, listed in (
             (["-g", "0", "1", "-g", "2"], ["-g", "0", "1", "2"]),
             (["-g", "2", "-g", "0"], ["-g", "2", "0"]),
-            (["-g", "0", "-g", "all"], ["-g", "0", "all"]),
         ):
             with self.subTest(argv=repeated):
                 self.assertEqual(
                     self.gpus(*repeated, command="list"), self.gpus(*listed, command="list")
                 )
+        # A later "all" keeps earlier devices first; "all" in one list uses device order.
+        self.assertCountEqual(
+            self.gpus("-g", "2", "-g", "all", command="list"),
+            self.gpus("-g", "2", "all", command="list"),
+        )
 
     def test_duplicate_gpus_are_selected_once(self):
         for argv, expected in (
             (["-g", "1", "-g", "1"], [0x101]),
             (["-g", "1", "1"], [0x101]),
             (["-g", "0", "-g", "all"], _GPU_VALUES),
+            (["-g", "2", "-g", "all"], [0x102, 0x100, 0x101]),
             (["-g", "all", "-g", "0"], _GPU_VALUES),
             (["-g", "2", "-g", "0", "2", "1"], [0x102, 0x100, 0x101]),
         ):
@@ -257,10 +265,36 @@ class TestRepeatedDeviceSelection(_CliFixture):
                 self.assertEqual(_values(getattr(self.parse("list", *argv), dest)), expected)
 
     def test_other_selectors_select_all_once(self):
-        cpus = {"processor_handles": [_HANDLE(0x200), _HANDLE(0x201)]}
-        with mock.patch.object(amdsmi_interface, "amdsmi_get_cpu_handles", return_value=cpus):
-            args = self.parse("list", "-U", "1", "-U", "all")
-        self.assertEqual(_values(args.cpu), [0x201, 0x200])
+        by_type = {
+            amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_NIC: [],
+            amdsmi_interface.AmdSmiProcessorType.AMD_AINIC: [0x400, 0x401],
+            amdsmi_interface.AmdSmiProcessorType.AMD_BRCM_SWITCH: [0x500, 0x501],
+        }
+        with mock.patch.object(
+            amdsmi_interface,
+            "amdsmi_get_cpu_handles",
+            side_effect=lambda: {"processor_handles": [_HANDLE(0x200), _HANDLE(0x201)]},
+        ), mock.patch.object(
+            amdsmi_interface,
+            "amdsmi_get_cpucore_handles",
+            side_effect=lambda: [_HANDLE(0x300), _HANDLE(0x301)],
+        ), mock.patch.object(
+            amdsmi_interface, "amdsmi_get_socket_handles", return_value=["socket"]
+        ), mock.patch.object(
+            amdsmi_interface,
+            "amdsmi_get_processor_handles_by_type",
+            side_effect=lambda socket, kind: {
+                "processor_handles": [_HANDLE(value) for value in by_type[kind]]
+            },
+        ):
+            for argv, dest, expected in (
+                (["-U", "1", "-U", "all"], "cpu", [0x201, 0x200]),
+                (["-O", "all", "-O", "0"], "core", [0x300, 0x301]),
+                (["-N", _NICS["1"]["bdf"], "-N", "all"], "nic", [0x401, 0x400]),
+                (["--switch", "all", "--switch", "1"], "switch", [0x500, 0x501]),
+            ):
+                with self.subTest(argv=argv):
+                    self.assertEqual(_values(getattr(self.parse("list", *argv), dest)), expected)
 
     def test_invalid_repeated_gpu_is_rejected(self):
         for argv, error in (
@@ -272,6 +306,17 @@ class TestRepeatedDeviceSelection(_CliFixture):
             with self.subTest(argv=argv):
                 with self.assertRaises(error):
                     self.parse("metric", *argv)
+
+    def test_unknown_device_in_other_selectors_is_not_found(self):
+        for argv in (
+            ["-U", "0", "-U", "9"],
+            ["-O", "0", "-O", "9"],
+            ["-N", _NICS["0"]["bdf"], "-N", "0003:09:00.0"],
+            ["--switch", "0", "--switch", "9"],
+        ):
+            with self.subTest(argv=argv):
+                with self.assertRaises(self.errors.AmdSmiDeviceNotFoundException):
+                    self.parse("list", *argv)
 
     def test_comma_separated_gpu_values_stay_unsupported(self):
         with self.assertRaises(self.errors.AmdSmiInvalidParameterValueException):

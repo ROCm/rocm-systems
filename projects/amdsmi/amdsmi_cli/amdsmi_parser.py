@@ -33,7 +33,7 @@ def _cpu_set_range_label(value_range):
 
 
 def _add_selected_devices(args, dest, device_handles):
-    """Add device_handles to args.<dest>, so repeated options combine and each device is selected once."""
+    """Add device_handles to args.<dest> once each, so repeated device options combine."""
     selected = list(getattr(args, dest) or [])
     # ctypes handles compare by identity, and every handle query returns new objects.
     selected_values = {handle.value for handle in selected}

@@ -82,10 +82,16 @@ amd-smi --rocm-smi
 
 To select several devices, list them after one device option or repeat the option.
 For example, `amd-smi process --gpu 0 --gpu 1` selects the same GPUs as
-`amd-smi process --gpu 0 1`. This applies to `--gpu`, `--cpu`, `--core`, `--nic`,
-and `--switch`. A device listed more than once, including through `all`, is selected
-once. On virtualization hosts, `--vf` still uses only its last value. Separate values
-with spaces, because comma-separated lists such as `--gpu=0,1` are not supported.
+`amd-smi process --gpu 0 1`. Repeating `--gpu`, `--cpu`, `--core`, `--nic`, or `--switch`:
+
+- Adds devices, so a later option never narrows an earlier one.
+  `amd-smi reset --gpureset --gpu all --gpu 0` resets every GPU.
+- Selects a device listed more than once, including through `all`, only once.
+- Keeps the order in which devices were first selected, so `--gpu 2 --gpu all` reports
+  GPU 2 first.
+
+On virtualization hosts, `--vf` still uses only its last value. Separate values with
+spaces, because comma-separated lists such as `--gpu=0,1` are not supported.
 Single-value options, such as `--memory-partition` in `amd-smi set`, use the last value
 given for every selected device.
 

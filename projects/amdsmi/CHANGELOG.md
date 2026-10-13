@@ -137,6 +137,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `--numa` was previously limited to Linux baremetal and passthrough guests.
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
+- **Repeated `amd-smi` device options add to the selection, and each device is selected once**.  
+  - Applies to `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`. `--vf` on virtualization hosts still uses only its last value.
+  - A later option no longer narrows an earlier one. For example, `amd-smi reset --gpureset -g all -g 0` now resets every GPU, where it previously reset only GPU 0.
+  - A device listed more than once is selected once. For example, `-g 0 0` previously ran the command on GPU 0 twice.
+  - Devices from repeated options keep the order in which they were first selected, so `-g 2 -g all` reports GPU 2 first.
+  - Single-value options in `amd-smi set` still use their last value, which now applies to every selected GPU. For example, `amd-smi set -g 0 -M NPS1 -g 1 -M NPS2` sets both GPUs to NPS2, where it previously set only GPU 1.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -147,9 +154,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Resolved Issues
 
 - **Repeating a device option in an `amd-smi` command now selects every listed device**.  
-  - Previously only the last `--gpu`, `--cpu`, `--core`, `--nic`, or `--switch` option took effect, so `-g 0 -g 1` selected only GPU 1. It now matches `-g 0 1`.
-  - A device listed more than once, including through `all`, is selected once. For example, `-g 0 0` and `-g 0 -g all` no longer run the command on GPU 0 twice.
-  - Single-value options in `amd-smi set`, such as `--memory-partition`, apply their last value to every selected GPU.
+  - Previously only the last `--gpu`, `--cpu`, `--core`, `--nic`, or `--switch` option took effect, so `-g 0 -g 1` selected only GPU 1. It now selects the same devices as `-g 0 1`.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
