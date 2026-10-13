@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 #include <string>
 #include <iostream>
+#include <limits>
 
 namespace amd {
 namespace ELFIO {
@@ -191,10 +192,12 @@ template <class T> class section_impl : public section {
 
 
     Elf_Xword size = get_size();
-    // The section must lie entirely within the stream.
+    // The section must lie entirely within the stream, and size + 1 must not overflow
+    // (the stream size is SIZE_MAX when it could not be determined).
     const Elf_Xword offset = get_offset();
     if (0 == data && SHT_NULL != get_type() && SHT_NOBITS != get_type() &&
-        size < get_stream_size() && offset <= get_stream_size() - size) {
+        size <= get_stream_size() && offset <= get_stream_size() - size &&
+        size < (std::numeric_limits<size_t>::max)()) {
       try {
         data = new char[size + 1];
       } catch (const std::bad_alloc&) {
@@ -203,7 +206,7 @@ template <class T> class section_impl : public section {
       }
 
       if ((0 != size) && (0 != data)) {
-        stream.seekg(offset);
+        stream.seekg(static_cast<std::streamoff>(offset));
         stream.read(data, size);
         if (static_cast<Elf_Xword>(stream.gcount()) != size) {
           // A short read leaves part of the buffer unread; treat the data as missing
