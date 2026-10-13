@@ -102,22 +102,30 @@ ty_to_cxxtype = {
 # when a capable arch is in GPU_TARGETS.
 have_tdm = "gfx1250" in gpu_targets
 
+# NaN-flag kernels (NCCL_PROTO=NaN, src/device/symmetric/nan.cuh): readiness is "no dword is
+# all-ones", which only these types guarantee. Keep in sync with rcclSymkNanDtype() in
+# src/sym_kernels.cc.
+nan_tys = ["f32","f16","bf16"]
+
 def enumerate_kernels():
   ag_algos = ["LL","ST"] + (["TmaST"] if have_tdm else [])
   # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
   # equivalent for, so they stay out regardless of the target.
   ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
   rs_algos = ["LL","LD"] + (["TmaLD"] if have_tdm else [])
-  for algo in ag_algos:
+  ag_nan_algos = ["NaN"] + (["TmaNaN"] if have_tdm else [])
+  ar_nan_algos = ["AGxNaN_R"] + (["AGxTmaNaN_R"] if have_tdm else [])
+  rs_nan_algos = ["NaN"] + (["TmaNaN"] if have_tdm else [])
+  for algo in ag_algos + ag_nan_algos:
     yield Rec(coll="AllGather", algo=algo)
   for red in all_reds:
     for ty in all_tys:
-      for algo in ar_algos:
+      for algo in ar_algos + (ar_nan_algos if ty in nan_tys else []):
         # AllReduce implements sum only; skip avg (matches upstream).
         if red == "avg":
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
-      for algo in rs_algos:
+      for algo in rs_algos + (rs_nan_algos if ty in nan_tys else []):
         # ReduceScatter emits sum and avg for every float type.
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
       # Multi-node GIN ReduceScatter; non-multicast only (no NVLS/multimem on ROCm).
@@ -195,16 +203,21 @@ def kernel_conds(k):
 def kernel_cname_profile(k):
   return kernel_cname(k) + "_profile"
 
+# [RCCL] The NaN kernels always launch ncclSymkNanThreads threads. Without the bound the compiler
+# budgets registers for the largest block and spills.
+def kernel_bounds(k):
+  return "__launch_bounds__(ncclSymkNanThreads) " if "NaN" in k.algo else ""
+
 def instantiate(k, profile):
   form_red_ty = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "__global__ void {bounds}{cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
     "{start}"
     "  ncclSymkRun_{id}<{prof}, {red}, {ty}>(&args4K.args);\n"
     "{stop}"
     "}}"
   )
   form = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "__global__ void {bounds}{cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
     "{start}"
     "  ncclSymkRun_{id}<{prof}>(&args4K.args);\n"
     "{stop}"
@@ -216,16 +229,18 @@ def instantiate(k, profile):
   prof = 'true' if profile else 'false'
   start = '  ncclSymkProfilerStart(&args4K.args);\n' if profile else ''
   stop  = '  ncclSymkProfilerStop(&args4K.args);\n' if profile else ''
+  bounds = kernel_bounds(k)
   if k.coll in reductions:
-    inst = form_red_ty.format(cname=cname, id=id, prof=prof, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty],
-                              start=start, stop=stop)
+    inst = form_red_ty.format(bounds=bounds, cname=cname, id=id, prof=prof, red=red_to_Func[k.red],
+                              ty=ty_to_cxxtype[k.ty], start=start, stop=stop)
   else:
-    inst = form.format(cname=cname, id=id, prof=prof, start=start, stop=stop)
+    inst = form.format(bounds=bounds, cname=cname, id=id, prof=prof, start=start, stop=stop)
   return inst
 
 def prototype(k):
-  form = "__global__ void {cname}(ncclSymkDevWorkArgs4K const);"
-  return "\n".join(form.format(cname=cname) for cname in (kernel_cname(k), kernel_cname_profile(k)))
+  form = "__global__ void {bounds}{cname}(ncclSymkDevWorkArgs4K const);"
+  return "\n".join(form.format(bounds=kernel_bounds(k), cname=cname)
+                   for cname in (kernel_cname(k), kernel_cname_profile(k)))
 
 ################################################################################
 

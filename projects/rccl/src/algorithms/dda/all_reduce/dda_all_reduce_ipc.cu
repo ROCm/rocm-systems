@@ -8,6 +8,7 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda.h"
+#include "algorithms/dda/dda_nan.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -88,7 +89,104 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   return ncclSuccess;
 }
 
+// RCCL_DDA_NAN_AR_ONESHOT_MAX: largest NaN-flag AllReduce, in bytes, that pushes
+// the whole input to every peer instead of going through two shots. The default
+// is per path: 256 KiB on gfx1250 fabric, 64 KiB on IPC.
+static size_t ddaNanOneShotMax(const ncclComm* comm) {
+  static const size_t env = [] {
+    const char* s = ncclGetEnv("RCCL_DDA_NAN_AR_ONESHOT_MAX");
+    return s ? (size_t)strtoull(s, nullptr, 0) : SIZE_MAX;
+  }();
+  if (env != SIZE_MAX) return env;
+  return comm->ddaNanFabricMemHandler != nullptr ? (size_t)256 << 10 : (size_t)64 << 10;
+}
+
+enum class DdaNanArShape { None, OneShot, TwoShot };
+
+static DdaNanArShape ddaNanArShape(const ncclComm* comm, size_t count, size_t typeSize) {
+  const size_t bytes = count * typeSize;
+  const bool twoShot = count % kDdaNranks == 0 && rcclDdaNanFits(comm, bytes / kDdaNranks);
+  if (bytes <= ddaNanOneShotMax(comm) || !twoShot) {
+    // The one-shot has no rounds: its input must fit one slot.
+    return rcclDdaNanFits(comm, bytes) && bytes <= dda::nan::kSlotBytes ? DdaNanArShape::OneShot
+                                                                        : DdaNanArShape::None;
+  }
+  return DdaNanArShape::TwoShot;
+}
+
+// Only the two-shot has a TDM kernel: the one-shot pushes its whole input to every peer, which
+// keeps the fabric just as busy from vector stores, and its TDM kernel ran 4-9% slower.
+// units: the two-shot's units per round.
+static bool ddaNanArTdm(const ncclComm* comm, bool twoShot, size_t units) {
+  return twoShot && rcclDdaNanTdm(comm, units * 16);
+}
+
+static std::pair<dim3, dim3> ddaNanAllReduceGeom(const ncclComm* comm, size_t count, size_t typeSize) {
+  const size_t bytes = count * typeSize;
+  const bool twoShot = ddaNanArShape(comm, count, typeSize) == DdaNanArShape::TwoShot;
+  const size_t units = twoShot ? rcclDdaNanRound(bytes / kDdaNranks / 16) : bytes / 16;
+  if (ddaNanArTdm(comm, twoShot, units)) return rcclDdaNanTdmGeometry(units);
+  return rcclDdaNanGeometry(comm, units, 128);
+}
+
+template <typename T>
+static ncclResult_t ncclAllReduceDdaNanTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
+                                             cudaStream_t stream) {
+  const bool twoShot = ddaNanArShape(comm, count, sizeof(T)) == DdaNanArShape::TwoShot;
+  const size_t units = count * sizeof(T) / 16 / (twoShot ? kDdaNranks : 1);
+  const size_t round = rcclDdaNanRound(units);
+  const auto gridBlock = ddaNanAllReduceGeom(comm, count, sizeof(T));
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+#if ENABLE_TDM_NAN
+  if (ddaNanArTdm(comm, twoShot, round)) {
+    rcclDdaNanTdmLaunch<T, dda::nan::TdmKind::TwoShot>(comm, sendbuff, recvbuff, units, stopEvent, stream);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+#endif
+  if (twoShot) {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllReduceTwoShot<T>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
+  } else {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllReduceOneShot<T>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+  }
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
+
 } // namespace
+
+bool ncclAllReduceDdaNanEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+  if (comm == nullptr || count == 0 || op != ncclSum) {
+    return false;
+  }
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+    return false;
+  }
+  return rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype) &&
+         ddaNanArShape(comm, count, ncclTypeSize(datatype)) != DdaNanArShape::None;
+}
+
+uint32_t ncclAllReduceDdaNanBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  return ddaNanAllReduceGeom(comm, count, ncclTypeSize(datatype)).first.x;
+}
+
+ncclResult_t ncclAllReduceDdaNan(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                 ncclComm* comm, cudaStream_t stream) {
+  switch (datatype) {
+  case ncclFloat32:
+    return ncclAllReduceDdaNanTyped<float>(sendbuff, recvbuff, count, comm, stream);
+  case ncclFloat16:
+    return ncclAllReduceDdaNanTyped<half>(sendbuff, recvbuff, count, comm, stream);
+  case ncclBfloat16:
+    return ncclAllReduceDdaNanTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
+  default:
+    return ncclInvalidArgument;
+  }
+}
 
 bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                  ncclDataType_t datatype, ncclRedOp_t op) {
@@ -125,6 +223,9 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllReduceDdaNanEligible(comm, count, datatype, op);
+  }
   const size_t bytes = count * ncclTypeSize(datatype);
   if (bytes > comm->ddaScratchBytes) {
     return false;
@@ -144,7 +245,9 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
 }
 
 uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  (void)comm;
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllReduceDdaNanBlocks(comm, count, datatype);
+  }
   const auto grid = ddaAllReduceIpcGeom(count, ncclTypeSize(datatype)).first;
   return grid.x * grid.y;
 }
@@ -152,6 +255,9 @@ uint32_t ncclAllReduceDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t 
 ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                  ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   (void)op;
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllReduceDdaNan(sendbuff, recvbuff, count, datatype, comm, stream);
+  }
   switch (datatype) {
   case ncclFloat32:
     return ncclAllReduceDdaIpcTyped<float>(sendbuff, recvbuff, count, comm, stream);

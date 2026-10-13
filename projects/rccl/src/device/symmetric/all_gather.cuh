@@ -9,9 +9,11 @@
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
 #include "symmetric/primitives.h"
+#include "symmetric/nan.h"
 #else
 #include "kernel.cuh"
 #include "primitives.cuh"
+#include "nan.cuh"
 #endif
 
 // TileAligned: the caller's tier guarantees every tile address is ncclSymkTileLine-aligned, which

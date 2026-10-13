@@ -19,7 +19,6 @@
 #include "tuner/tuner_v2.h"
 
 typedef ncclTuner_v6_t ncclTuner_t;
-typedef ncclTunerConstants_v5_t ncclTunerConstants_t;
 typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 
 #define NCCL_TUNER_PLUGIN_SYMBOL "ncclTunerPlugin_v6"
@@ -38,7 +37,12 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_PROTO_LL 0
 #define NCCL_PROTO_LL128 1
 #define NCCL_PROTO_SIMPLE 2
-#define NCCL_NUM_PROTOCOLS NCCL_NUM_PROTOCOLS_V5 // Simple/LL/LL128
+// NaN-flag protocol (src/device/prims_nan.h): the payload doubles as the ready
+// flag, so there is no flag lane on the wire. Kept last, and NCCL_NUM_PROTOCOLS
+// is deliberately not tied to NCCL_NUM_PROTOCOLS_V5 any more: the v5 tuner plugin
+// ABI must keep exactly three protocol columns.
+#define NCCL_PROTO_NAN 3
+#define NCCL_NUM_PROTOCOLS 4 // Simple/LL/LL128/NaN
 
 #define NCCL_TUNING_IGNORE -1.0
 #define NCCL_ALGO_PROTO_IGNORE NCCL_TUNING_IGNORE
@@ -68,5 +72,65 @@ typedef ncclNvlDomainInfo_v6_t ncclNvlDomainInfo_t;
 #define NCCL_TUNING_SCALE_2NODES 1
 #define NCCL_TUNING_SCALE_4NODES 2
 #define NCCL_NUM_TUNING_SCALES NCCL_NUM_TUNING_SCALES_V5
+
+// Internal mirror of ncclTunerConstants_v5_t widened to NCCL_NUM_PROTOCOLS. The
+// v5 struct is frozen at three protocol columns because external tuner plugins
+// compile against it, so anything that crosses the plugin boundary marshals
+// through ncclTunerConstantsFromV5 / ncclTunerConstantsToV5 instead of aliasing.
+typedef struct {
+  double baseLatencies[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+  double hwLatencies[NCCL_NUM_HW_LINKS][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+
+  double llMaxBws[NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double perChMaxRingLL128Bws[NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double perChMaxTreeLL128Bws[NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double perChMaxTreeBws[NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double perChMaxNVLSTreeBws[NCCL_NUM_COMPCAPS][NCCL_NUM_TUNING_SCALES];
+  double bwRatio[2][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+} ncclTunerConstants_t;
+
+#ifdef __cplusplus
+// Narrow to the plugin-visible layout. Protocols beyond NCCL_NUM_PROTOCOLS_V5 are
+// dropped; no plugin knows about them.
+inline void ncclTunerConstantsToV5(ncclTunerConstants_v5_t* dst, const ncclTunerConstants_t* src) {
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS_V5; a++) {
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
+      dst->baseLatencies[a][p] = src->baseLatencies[a][p];
+      for (int hw = 0; hw < NCCL_NUM_HW_LINKS_V5; hw++) dst->hwLatencies[hw][a][p] = src->hwLatencies[hw][a][p];
+      for (int n = 0; n < 2; n++) dst->bwRatio[n][a][p] = src->bwRatio[n][a][p];
+    }
+  }
+  for (int c = 0; c < NCCL_NUM_COMPCAPS_V5; c++) {
+    for (int s = 0; s < NCCL_NUM_TUNING_SCALES_V5; s++) {
+      dst->llMaxBws[c][s] = src->llMaxBws[c][s];
+      dst->perChMaxRingLL128Bws[c][s] = src->perChMaxRingLL128Bws[c][s];
+      dst->perChMaxTreeLL128Bws[c][s] = src->perChMaxTreeLL128Bws[c][s];
+      dst->perChMaxTreeBws[c][s] = src->perChMaxTreeBws[c][s];
+      dst->perChMaxNVLSTreeBws[c][s] = src->perChMaxNVLSTreeBws[c][s];
+    }
+  }
+}
+
+// Widen back after the plugin has written its values. Columns the plugin cannot
+// see keep whatever the caller had in them.
+inline void ncclTunerConstantsFromV5(ncclTunerConstants_t* dst, const ncclTunerConstants_v5_t* src) {
+  for (int a = 0; a < NCCL_NUM_ALGORITHMS_V5; a++) {
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS_V5; p++) {
+      dst->baseLatencies[a][p] = src->baseLatencies[a][p];
+      for (int hw = 0; hw < NCCL_NUM_HW_LINKS_V5; hw++) dst->hwLatencies[hw][a][p] = src->hwLatencies[hw][a][p];
+      for (int n = 0; n < 2; n++) dst->bwRatio[n][a][p] = src->bwRatio[n][a][p];
+    }
+  }
+  for (int c = 0; c < NCCL_NUM_COMPCAPS_V5; c++) {
+    for (int s = 0; s < NCCL_NUM_TUNING_SCALES_V5; s++) {
+      dst->llMaxBws[c][s] = src->llMaxBws[c][s];
+      dst->perChMaxRingLL128Bws[c][s] = src->perChMaxRingLL128Bws[c][s];
+      dst->perChMaxTreeLL128Bws[c][s] = src->perChMaxTreeLL128Bws[c][s];
+      dst->perChMaxTreeBws[c][s] = src->perChMaxTreeBws[c][s];
+      dst->perChMaxNVLSTreeBws[c][s] = src->perChMaxNVLSTreeBws[c][s];
+    }
+  }
+}
+#endif
 
 #endif

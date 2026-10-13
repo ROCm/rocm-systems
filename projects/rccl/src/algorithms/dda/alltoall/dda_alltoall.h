@@ -26,6 +26,14 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
 ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                 ncclComm* comm, cudaStream_t stream);
 
+// NaN-flag path (NCCL_PROTO=NaN, 8 ranks): needs only the NaN-flag scratch, so
+// it runs on whichever of the IPC and fabric inits allocated it.
+bool ncclAllToAllDdaNanEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype);
+uint32_t ncclAllToAllDdaNanBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype);
+ncclResult_t ncclAllToAllDdaNan(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclComm* comm, cudaStream_t stream);
+
 // Total CTAs (grid blocks) each DDA alltoall launcher would use for the given
 // operands. Delegates to the shared *Geom() helper, so block counts are
 // guaranteed to match the actual launch grid.

@@ -10,6 +10,7 @@
 #include "comm.h"
 #include "topo.h"
 #include "nccl_tuner.h"
+#include "archinfo.h"
 
 // These params are now defined by the 2.31 src/tuning/ modules with identical
 // env names and defaults; declare them here so RCCL's legacy tuning path (which
@@ -1401,6 +1402,10 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
   comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL128] =
     getNthreads("NCCL_LL128_NTHREADS", ncclParamLl128Nthreads(), 4 * comm->WarpSize, maxLL128Nthreads, maxLL128Nthreads,
                 comm->WarpSize);
+  // The NaN protocol moves the same 128-bit lines as LL128, minus the flag lane,
+  // so it inherits LL128's thread budget.
+  comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_NAN] = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_NAN] =
+    comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128];
 #else
   int simpleDefaultThreads =
     (graphs[NCCL_ALGO_RING]->bwIntra * graphs[NCCL_ALGO_RING]->nChannels <= PCI_BW) ? 256 : NCCL_MAX_NTHREADS;
@@ -1416,6 +1421,8 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
   comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128] = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL128] =
     getNthreads("NCCL_LL128_NTHREADS", ncclParamLl128Nthreads(), NCCL_LL128_MAX_NTHREADS / 4, NCCL_LL128_MAX_NTHREADS,
                 NCCL_LL128_MAX_NTHREADS);
+  comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_NAN] = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_NAN] =
+    comm->maxThreads[NCCL_ALGO_RING][NCCL_PROTO_LL128];
 #endif
 
   int nNodes = comm->nNodes;
@@ -1623,6 +1630,24 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     }
   }
 
+  // The NaN protocol has no tuning constants of its own: baseLat/hwLat/bwRatio are
+  // sized by NCCL_NUM_PROTOCOLS but only populated for the first three, so the loop
+  // above leaves its column at zero. Seed it from LL128, whose wire format it
+  // matches apart from the flag lane. Selection is still gated in
+  // updateCollCostTable(), so this only affects the cost reported once NaN is
+  // explicitly requested.
+  // No flag lane, so the whole line is payload where LL128 gives up 1/lineElems.
+  // Host code must not read the NCCL_LL128_* macros (they hard-code the 64-byte
+  // line); go through the arch helpers like the rest of the host path does.
+  const float nanBwGain =
+    (float)rcclLL128LineElemsFromArch(comm->archName) / (float)rcclLL128DataElemsFromArch(comm->archName);
+  for (int coll = 0; coll < NCCL_NUM_FUNCTIONS; coll++) {
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
+      comm->latencies[coll][a][NCCL_PROTO_NAN] = comm->latencies[coll][a][NCCL_PROTO_LL128];
+      comm->bandwidths[coll][a][NCCL_PROTO_NAN] = comm->bandwidths[coll][a][NCCL_PROTO_LL128] * nanBwGain;
+    }
+  }
+
   // Protocols/Algorithms enable/disable, and user overrides.
   // All are enabled except ll128 which is enabled by default only in certain cases.
   int protoEnable[NCCL_NUM_FUNCTIONS * NCCL_NUM_PROTOCOLS];
@@ -1636,7 +1661,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     }
   }
 
-  const char* protoStr = ncclGetEnv("NCCL_PROTO");
+  const char* protoStr = rcclTunerProtoEnv();
   if (protoStr) {
     INFO(NCCL_ENV, "NCCL_PROTO set by environment to %s", protoStr);
     NCCLCHECK(parseList(protoStr, ncclFuncStr, NCCL_NUM_FUNCTIONS, ncclProtoStr, NCCL_NUM_PROTOCOLS, protoEnable));
@@ -1797,6 +1822,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
     comm->threadThresholds[a][NCCL_PROTO_LL] = NCCL_LL_THREAD_THRESHOLD;
     comm->threadThresholds[a][NCCL_PROTO_LL128] = NCCL_LL128_THREAD_THRESHOLD;
     comm->threadThresholds[a][NCCL_PROTO_SIMPLE] = NCCL_SIMPLE_THREAD_THRESHOLD;
+    comm->threadThresholds[a][NCCL_PROTO_NAN] = NCCL_LL128_THREAD_THRESHOLD;
   }
   comm->threadThresholds[NCCL_ALGO_RING][NCCL_PROTO_LL] *= nRanks;
   comm->threadThresholds[NCCL_ALGO_COLLNET_DIRECT][NCCL_PROTO_SIMPLE] = 256;
@@ -1806,7 +1832,11 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
   const char* str = ncclGetEnv("NCCL_THREAD_THRESHOLDS");
   if (str) {
     INFO(NCCL_ENV, "NCCL_THREAD_THRESHOLDS set by environment to %s", str);
-    ssize_t t[2][NCCL_NUM_PROTOCOLS] = {{-2, -2, -2}, {-2, -2, -2}};
+    // NCCL_THREAD_THRESHOLDS only names LL/LL128/Simple; -2 keeps every unnamed
+    // protocol (including NaN) on its default instead of being zeroed.
+    ssize_t t[2][NCCL_NUM_PROTOCOLS];
+    for (int a = 0; a < 2; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) t[a][p] = -2;
     sscanf(str, "%ld %ld %ld %ld %ld %ld", t[0], t[0] + 1, t[0] + 2, t[1], t[1] + 1, t[1] + 2);
     for (int a = 0; a < 2; a++) {
       for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
@@ -1847,10 +1877,13 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   int logSize = log2i(nBytes >> 6);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   logSize = std::max(0, std::min(RCCL_FACTOR_TABLE_MAX_INDEX, logSize));
+  // The tuning models only fill LL/LL128/Simple. NaN is seeded from LL128, so it
+  // has to use that row; the NaN row is zero and would make the cost infinite.
+  int corrProto = protocol == NCCL_PROTO_NAN ? NCCL_PROTO_LL128 : protocol;
   if (algorithm == NCCL_ALGO_TREE) {
-    bw *= rcclTuningModel[comm->topo->tuning].treeCorrectionFactor[protocol][logSize];
+    bw *= rcclTuningModel[comm->topo->tuning].treeCorrectionFactor[corrProto][logSize];
   } else if (algorithm == NCCL_ALGO_RING && comm->nNodes > 1) {
-    bw *= rcclTuningModel[comm->topo->tuning].ringCorrectionFactor[protocol][logSize];
+    bw *= rcclTuningModel[comm->topo->tuning].ringCorrectionFactor[corrProto][logSize];
   }
 
 #else

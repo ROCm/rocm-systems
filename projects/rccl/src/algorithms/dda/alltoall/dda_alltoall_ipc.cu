@@ -8,6 +8,7 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/alltoall/alltoall_dda.h"
+#include "algorithms/dda/dda_nan.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -77,7 +78,83 @@ static ncclResult_t ncclAllToAllDdaIpcTyped(const void* sendbuff, void* recvbuff
   return ncclSuccess;
 }
 
+// The registered kernel fills the recv buffer before it has sent everything, so
+// it needs send and recv to be disjoint.
+static bool ddaNanAllToAllRecvAddrs(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t bytesPerPeer,
+                                    dda::nan::RegAddrs* mine) {
+  const size_t total = bytesPerPeer * comm->nRanks;
+  const uintptr_t s = (uintptr_t)sendbuff, r = (uintptr_t)recvbuff;
+  if (s < r + total && r < s + total) return false;
+  return rcclDdaNanRecvAddrs(comm, recvbuff, total, bytesPerPeer, mine);
+}
+
+static ncclResult_t ncclAllToAllDdaNanBytes(const void* sendbuff, void* recvbuff, size_t bytesPerPeer,
+                                            ncclComm* comm, cudaStream_t stream) {
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  dda::nan::RegAddrs mine;
+  const bool reg = ddaNanAllToAllRecvAddrs(comm, sendbuff, recvbuff, bytesPerPeer, &mine);
+  const bool perPeer = !reg && rcclDdaNanPerPeer(bytesPerPeer);
+  const size_t units = bytesPerPeer / 16;
+  const size_t round = reg || perPeer ? units : rcclDdaNanRound(units);
+  const auto gridBlock = rcclDdaNanCopyGeometry(comm, round, perPeer);
+#if ENABLE_TDM_NAN
+  if (!reg && !perPeer && rcclDdaNanTdm(comm, round * 16, /*copy=*/true)) {
+    rcclDdaNanTdmLaunch<uint32_t, dda::nan::TdmKind::AllToAll>(comm, sendbuff, recvbuff, bytesPerPeer / 16, stopEvent, stream);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
+#endif
+  if (reg) {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllToAllReg<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), mine, bytesPerPeer / 16,
+                          comm->rank);
+  } else if (perPeer) {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllToAllPeer<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, comm->rank);
+  } else {
+    hipExtLaunchKernelGGL((dda::nan::ddaNanAllToAll<uint32_t>), gridBlock.first, gridBlock.second, 0, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, rcclDdaNanPeers(comm), comm->ddaNanEpochDev,
+                          static_cast<const v4u*>(sendbuff), static_cast<v4u*>(recvbuff), units, round, comm->rank);
+  }
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
+
 } // namespace
+
+bool ncclAllToAllDdaNanEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                ncclDataType_t datatype) {
+  if (comm == nullptr || count == 0) {
+    return false;
+  }
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+    return false;
+  }
+  if (!rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return false;
+  }
+  dda::nan::RegAddrs unused;
+  return rcclDdaNanFits(comm, count * ncclTypeSize(datatype)) ||
+         ddaNanAllToAllRecvAddrs(comm, sendbuff, recvbuff, count * ncclTypeSize(datatype), &unused);
+}
+
+uint32_t ncclAllToAllDdaNanBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  const size_t bytesPerPeer = count * ncclTypeSize(datatype);
+  const bool perPeer = rcclDdaNanPerPeer(bytesPerPeer);
+  const size_t round = perPeer ? bytesPerPeer / 16 : rcclDdaNanRound(bytesPerPeer / 16);
+  if (!perPeer && rcclDdaNanTdm(comm, round * 16, /*copy=*/true)) {
+    return rcclDdaNanTdmGeometry(round).first.x;
+  }
+  const dim3 grid = rcclDdaNanCopyGeometry(comm, round, perPeer).first;
+  return grid.x * grid.y;
+}
+
+ncclResult_t ncclAllToAllDdaNan(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                ncclComm* comm, cudaStream_t stream) {
+  return ncclAllToAllDdaNanBytes(sendbuff, recvbuff, count * ncclTypeSize(datatype), comm, stream);
+}
 
 bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                 ncclDataType_t datatype) {
@@ -100,6 +177,9 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllToAllDdaNanEligible(comm, sendbuff, recvbuff, count, datatype);
+  }
 
   size_t totalCount = count * comm->nRanks;
   size_t need = totalCount * ncclTypeSize(datatype);
@@ -116,7 +196,9 @@ bool ncclAllToAllDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* recv
 }
 
 uint32_t ncclAllToAllDdaIpcBlocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  (void)comm;
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllToAllDdaNanBlocks(comm, count, datatype);
+  }
   const auto grid = ddaAllToAllIpcGeom(count * ncclTypeSize(datatype)).first;
   return grid.x * grid.y;
 }
@@ -127,5 +209,8 @@ ncclResult_t ncclAllToAllDdaIpc(const void* sendbuff, void* recvbuff, size_t cou
     return ncclInvalidArgument;
   }
   int typeSize = ncclTypeSize(datatype);
+  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+    return ncclAllToAllDdaNan(sendbuff, recvbuff, count, datatype, comm, stream);
+  }
   return ncclAllToAllDdaIpcTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
 }

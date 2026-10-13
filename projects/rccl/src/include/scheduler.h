@@ -23,6 +23,9 @@ static inline int rcclProtoGrainSize(int proto, ncclComm* comm) {
            comm->ll128LineElems;
   case NCCL_PROTO_SIMPLE:
     return 512;
+  case NCCL_PROTO_NAN:
+    // No flag lane, so a warp's grain is its whole register set (prims_nan.h).
+    return comm->WarpSize * NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t);
   default:
     return -1;
   }

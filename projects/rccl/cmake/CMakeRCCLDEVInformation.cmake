@@ -20,6 +20,12 @@ set(CMAKE_RCCLDEV_CREATE_SHARED_MODULE
 set(CMAKE_RCCLDEV_CREATE_SHARED_LIBRARY
   "<CMAKE_RCCLDEV_COMPILER> --link <LINK_FLAGS> -o <TARGET> <OBJECTS>")
 
+# Header tracking: the driver forwards these to the kernel source's compile, and the
+# generator folds the resulting .d into compiler_depend.make.
+set(CMAKE_DEPFILE_FLAGS_RCCLDEV "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
+set(CMAKE_RCCLDEV_DEPFILE_FORMAT gcc)
+set(CMAKE_RCCLDEV_DEPENDS_USE_COMPILER TRUE)
+
 set(CMAKE_RCCLDEV_OUTPUT_EXTENSION ".o")
 set(CMAKE_RCCLDEV_OUTPUT_EXTENSION_REPLACE 1)
 

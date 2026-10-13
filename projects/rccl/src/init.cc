@@ -116,7 +116,7 @@ const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGa
                                                    "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
-const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
+const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple", "NaN"};
 const char* ncclDevRedOpStr[ncclNumDevRedOps] = {"Sum", "Prod", "MinMax", "PreMulSum", "SumPostDiv"};
 const char* ncclTypeStr[ncclNumTypes] = {"_i8", "_u8", "_i32", "_u32", "_i64", "_u64", "_f16", "_f32", "_f64", "_b16"};
 
@@ -225,6 +225,13 @@ RCCL_PARAM(CheapPostSendFenceOff, "CHEAP_POST_SEND_FENCE_OFF", 0);
 #if ENABLE_TDM_SIMPLE
 // Off by default; the mover path is still under evaluation.
 RCCL_PARAM(TdmSimpleEnable, "TDM_SIMPLE_ENABLE", 0);
+#endif
+
+#if ENABLE_TDM_NAN
+// On whenever the build includes it. RCCL_TDM_NAN_MIN_BYTES is the smallest NaN-flag primitive
+// op (one channel's chunk) that moves through TDM; smaller ones keep the register path.
+RCCL_PARAM(TdmNanEnable, "TDM_NAN_ENABLE", 1);
+RCCL_PARAM(TdmNanMinBytes, "TDM_NAN_MIN_BYTES", 1 << 16);
 #endif
 
 /**
@@ -1062,6 +1069,9 @@ static ncclResult_t devCommSetup(ncclComm_t comm) {
 #if ENABLE_TDM_SIMPLE
   tmpCommAndChans.comm.tdmSimpleEnable = comm->tdmSimpleEnable;
 #endif
+#if ENABLE_TDM_NAN
+  tmpCommAndChans.comm.nanTdmMinBytes = comm->nanTdmMinBytes;
+#endif
   tmpCommAndChans.comm.patSharedQps = comm->patSharedQps ? 1 : 0;
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     tmpCommAndChans.comm.buffSizes[p] = comm->buffSizes[p];
@@ -1486,18 +1496,21 @@ static ncclResult_t setupChannel(struct ncclComm* comm, int channelId, int rank,
 NCCL_PARAM(BuffSize, "BUFFSIZE", -2);
 NCCL_PARAM(LlBuffSize, "LL_BUFFSIZE", -2);
 NCCL_PARAM(Ll128BuffSize, "LL128_BUFFSIZE", -2);
+NCCL_PARAM(NanBuffSize, "NAN_BUFFSIZE", -2);
 // Default value of P2P_NET_CHUNKSIZE may be overwritten by changes in src/rccl_wrap.cc
 NCCL_PARAM(P2pNetChunkSize, "P2P_NET_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pPciChunkSize, "P2P_PCI_CHUNKSIZE", (1 << 17)); /* 128 kB */
 NCCL_PARAM(P2pNvlChunkSize, "P2P_NVL_CHUNKSIZE", (1 << 19)); /* 512 kB */
 
 static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
-  int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize()};
+  int64_t envs[NCCL_NUM_PROTOCOLS] = {ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize(),
+                                      ncclParamNanBuffSize()};
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   int defaults[NCCL_NUM_PROTOCOLS];
   rcclSetDefaultBuffSizes(comm, defaults);
 #else
-  int defaults[NCCL_NUM_PROTOCOLS] = {DEFAULT_LL_BUFFSIZE, DEFAULT_LL128_BUFFSIZE, DEFAULT_BUFFSIZE};
+  int defaults[NCCL_NUM_PROTOCOLS] = {DEFAULT_LL_BUFFSIZE, DEFAULT_LL128_BUFFSIZE, DEFAULT_BUFFSIZE,
+                                      DEFAULT_LL128_BUFFSIZE};
 #endif
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     comm->buffSizes[p] = envs[p] != -2 ? envs[p] : defaults[p];
@@ -2215,6 +2228,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->tdmSimpleEnable =
     rcclParamTdmSimpleEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
   if (comm->tdmSimpleEnable) INFO(NCCL_INIT, "TDM SIMPLE path enabled");
+#endif
+#if ENABLE_TDM_NAN
+  comm->nanTdmMinBytes = rcclParamTdmNanEnable() && IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")
+                           ? (int)std::min<int64_t>(std::max<int64_t>(rcclParamTdmNanMinBytes(), 0), INT_MAX)
+                           : -1;
+  if (comm->nanTdmMinBytes >= 0) INFO(NCCL_INIT, "TDM NaN-flag path enabled from %d bytes", comm->nanTdmMinBytes);
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||

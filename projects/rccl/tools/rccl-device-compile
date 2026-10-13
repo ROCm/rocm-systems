@@ -20,6 +20,10 @@ Link mode (--link):
     5. Optionally compiles --rocshmem-bitcode=<path>.bc to a device object
     6. Links all objects + dispatcher (+ optional rocSHMEM object) into device.elf via ld.lld
 
+Depfile flags (-MD, -MF, -MT) apply only to the source compile: the kernel source
+in compile mode, the dispatcher in link mode. -MT defaults to -o rather than to
+the scratch .s that compile writes.
+
 Tool discovery:
     amdclang++, ld.lld are found relative to --clang=<path> or by searching
     PATH and the directory containing the system C++ compiler.
@@ -786,6 +790,11 @@ def parse_compiler_flags(argv):
             # source file.
             forwarded.extend([arg, argv[i + 1]])
             i += 1
+        elif arg in ('-MF', '-MT', '-MQ') and i + 1 < len(argv):
+            # Depfile flags (CMAKE_DEPFILE_FLAGS_RCCLDEV, or the device.elf link's
+            # DEPFILE): their value is a path, not a source or object file.
+            forwarded.extend([arg, argv[i + 1]])
+            i += 1
         elif arg.startswith('-'):
             forwarded.append(arg)
         else:
@@ -793,6 +802,40 @@ def parse_compiler_flags(argv):
             sources.append(arg)
         i += 1
     return our_args, forwarded, sources
+
+
+def device_depfile_flags(flags, default_target):
+    """Rewrite -MD/-MMD/-MF/-MT/-MQ for a --offload-device-only compile.
+
+    The clang driver writes dependency files only for host jobs, so on a
+    device-only compile it drops these flags with an unused-argument warning.
+    Hand cc1 the equivalent options directly instead.
+    """
+    out, depfile, targets, mode = [], None, [], None
+    i = 0
+    while i < len(flags):
+        flag = flags[i]
+        if flag in ('-MD', '-MMD'):
+            mode = flag
+        elif flag in ('-MF', '-MT', '-MQ') and i + 1 < len(flags):
+            if flag == '-MF':
+                depfile = flags[i + 1]
+            else:
+                targets.append(flags[i + 1])
+            i += 1
+        else:
+            out.append(flag)
+        i += 1
+    if mode is None:
+        return out
+    if depfile is None:
+        depfile = os.path.splitext(default_target)[0] + '.d'
+    out += ['-Xclang', '-dependency-file', '-Xclang', depfile]
+    for target in targets or [default_target]:
+        out += ['-Xclang', '-MT', '-Xclang', target]
+    if mode == '-MD':
+        out += ['-Xclang', '-sys-header-deps']
+    return out
 
 
 def expand_response_files(argv):
@@ -828,6 +871,9 @@ def main():
     if args.version:
         print("rccl-device-compile 1.0")
         sys.exit(0)
+
+    if args.output:
+        forwarded_flags = device_depfile_flags(forwarded_flags, args.output)
 
     if args.compile:
         if not positional:

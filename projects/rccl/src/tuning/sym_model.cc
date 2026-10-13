@@ -23,7 +23,8 @@ static constexpr float disableTime = 1.e30f;
 int ncclSymkModelCtasEnvOverride() {
   int64_t nUserCTAs = ncclParamSymCTAs();
   if (nUserCTAs < 1) return 0;
-  if (nUserCTAs > ncclSymkMaxBlocks) return ncclSymkMaxBlocks;
+  // Callers clamp to the kernel's own cap; the NaN kernels take more blocks than the rest.
+  if (nUserCTAs > ncclSymkNanMaxBlocks) return ncclSymkNanMaxBlocks;
   return static_cast<int>(nUserCTAs);
 }
 
@@ -51,6 +52,21 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
 
+// A call forced NaN hands to the Simple Tma kernels leaves its NaN kernels out wherever one of those
+// survives and the buffers are registered as it needs, rather than racing it on predicted time.
+static bool rcclSymkNanYieldsToRegisteredTma(struct ncclTuningInput_t* const inputs, uint32_t tuning_kmask,
+                                             uint32_t valid_kmask) {
+  uint32_t tunable = (uint32_t)(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+  if ((tuning_kmask & ncclSymkNanKernelMask()) == 0 || (valid_kmask & tunable & ncclSymkTmaKernelMask()) == 0)
+    return false;
+  bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
+  bool recvReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg;
+  bool regOk = inputs->func == ncclFuncAllGather     ? recvReg :
+               inputs->func == ncclFuncReduceScatter ? sendReg :
+                                                       sendReg && recvReg;
+  return regOk && rcclSymkNanYieldsToTma(inputs->comm, inputs->func, inputs->datatype, inputs->countMax);
+}
+
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
   struct ncclComm* comm = inputs->comm;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
@@ -59,7 +75,10 @@ static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum n
   // for Tma, so both keep it.
   bool fullWidth = (ncclSymkGinKernelMask() | ncclSymkTmaKernelMask()) >> kernelId & 1;
   int nThreads = ncclSymkMaxThreads;
-  if (fullWidth) {
+  if (ncclSymkNanKernelMask() >> kernelId & 1) {
+    // Fixes the units per epoch, which every rank must agree on, and the TDM kernels' warp per peer.
+    nThreads = ncclSymkNanThreads;
+  } else if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
   } else if (ncclSymkIsGfx950(comm) && isLsa) {
     // The width tuning is fitted to the gfx950 LSA kernels.
@@ -94,14 +113,16 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
     return ncclSuccess;
   }
 
+  // [RCCL] The NaN-flag kernels, like LL, take a single work and move data through their own scratch.
+  uint32_t scratchKernelMask = ncclSymkLLKernelMask() | ncclSymkNanKernelMask();
   if ((inputs->nWorks > 1 &&
-       ((tuning_kmask & ncclSymkLLKernelMask()) != 0)) // We currently don't support grouping for LL kernels.
+       ((tuning_kmask & scratchKernelMask) != 0)) // We currently don't support grouping for LL kernels.
       || (inputs->func == ncclFuncAllReduce && inputs->winRegType != ncclSymSendRegRecvReg &&
-          (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+          (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg &&
-       inputs->winRegType != ncclSymSendNonregRecvReg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+       inputs->winRegType != ncclSymSendNonregRecvReg && (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncReduceScatter && inputs->winRegType != ncclSymSendRegRecvReg &&
-       inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
+       inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & scratchKernelMask) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg && inputs->comm->nNodes > 1 &&
        (tuning_kmask & ncclSymkGinKernelMask()) != 0)) {
     tuning->valid = 0;
@@ -110,7 +131,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+  if (rcclSymkNanYieldsToRegisteredTma(inputs, tuning_kmask, valid_kmask) ||
+      rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

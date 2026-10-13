@@ -76,6 +76,16 @@ DEFINE_DDA_BLOCKS(reduceScatterDdaFabricBlocks, ncclReduceScatterDdaFabricBlocks
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLLBlocks, ncclReduceScatterDdaFabricLLBlocks, 133)
 DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricLL128Blocks, 134)
 
+// NaN-flag DDA kernels: never eligible, so selection falls through to the paths above.
+bool ncclAllReduceDdaNanEligible(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t) { return false; }
+bool ncclAllGatherDdaNanEligible(ncclComm*, void*, size_t, ncclDataType_t) { return false; }
+bool ncclReduceScatterDdaNanEligible(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t) { return false; }
+bool ncclAllToAllDdaNanEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; }
+uint32_t ncclAllReduceDdaNanBlocks(ncclComm*, size_t, ncclDataType_t) { return 115; }
+uint32_t ncclAllGatherDdaNanBlocks(ncclComm*, size_t, ncclDataType_t) { return 125; }
+uint32_t ncclReduceScatterDdaNanBlocks(ncclComm*, size_t, ncclDataType_t) { return 135; }
+uint32_t ncclAllToAllDdaNanBlocks(ncclComm*, size_t, ncclDataType_t) { return 145; }
+
 #undef DEFINE_DDA_BLOCKS
 #undef DEFINE_DDA_ALLGATHER_ELIGIBLE
 #undef DEFINE_DDA_REDUCTION_ELIGIBLE

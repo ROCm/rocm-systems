@@ -106,4 +106,17 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_RailA2A_LsaLDMC(struct
 
 template <bool EnableProfiler>
 __device__ __forceinline__ void ncclSymkRun_AllGather_RailRing_LsaSTMC(struct ncclSymkDevWorkArgs const* args);
+
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_NaN(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_TmaNaN(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_AllReduce_AGxNaN_R(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_AllReduce_AGxTmaNaN_R(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_NaN(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaNaN(struct ncclSymkDevWorkArgs const* args);
 #endif

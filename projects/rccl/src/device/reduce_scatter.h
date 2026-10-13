@@ -195,6 +195,15 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_L
   }
 };
 
+// NaN-flag protocol. The Simple-only direct-reduce early return in runRing is
+// skipped (Proto::Id != SIMPLE), so this is the ordinary ring.
+template <typename T, typename RedOp>
+struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_NAN> {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+    runRing<T, RedOp, ProtoNaN>(tid, nthreads, work);
+  }
+};
+
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {

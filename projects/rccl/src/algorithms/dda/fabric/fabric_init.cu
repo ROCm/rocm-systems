@@ -12,6 +12,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
+#include "algorithms/dda/device/CollCommon_nan.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "bootstrap.h"
@@ -39,6 +40,59 @@ bool ncclDdaUseFabricPath(ncclComm* comm) {
   return comm->MNNVL == 1 && IsArchMatch(comm->archName, "gfx1250");
 }
 
+static void ddaNanFabricFini(ncclComm* comm) {
+  delete comm->ddaNanFabricMemHandler;
+  comm->ddaNanFabricMemHandler = nullptr;
+  free(comm->ddaNanPeers);
+  comm->ddaNanPeers = nullptr;
+  if (comm->ddaNanScratch != nullptr) {
+    (void)ncclCuMemFree(comm->ddaNanScratch, comm->memManager);
+  }
+  comm->ddaNanScratch = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaNanEpochDev));
+  comm->ddaNanEpochDev = nullptr;
+}
+
+// The fabric counterpart of the IPC path's NaN-flag scratch: a VMM allocation
+// exported across the clique. It exists only under NCCL_PROTO=NaN; failure just
+// leaves the NaN-flag DDA kernels ineligible.
+static void ddaNanFabricInit(ncclComm* comm) {
+  if (!rcclNanProtoForced() || comm->nRanks != dda::nan::kRanks || !ncclCuMemEnable()) return;
+  const size_t bytes = dda::nan::kScratchBytes;
+  CUmemGenericAllocationHandle handle{};
+  if (ncclCuMemAlloc(&comm->ddaNanScratch, &handle, ncclCuMemHandleType, bytes, comm->memManager) != ncclSuccess) {
+    comm->ddaNanScratch = nullptr;
+    WARN("ncclDdaFabricCommInit: cannot allocate the %zu-byte NaN-flag scratch", bytes);
+    return;
+  }
+  if (cudaMemset(comm->ddaNanScratch, 0xFF, bytes) != cudaSuccess ||
+      cudaMalloc(&comm->ddaNanEpochDev, dda::nan::kEpochWords * sizeof(uint32_t)) != cudaSuccess ||
+      cudaMemset(comm->ddaNanEpochDev, 0, dda::nan::kEpochWords * sizeof(uint32_t)) != cudaSuccess ||
+      cudaDeviceSynchronize() != cudaSuccess) {
+    (void)cudaGetLastError();
+    WARN("ncclDdaFabricCommInit: cannot initialize the NaN-flag scratch");
+    ddaNanFabricFini(comm);
+    return;
+  }
+  comm->ddaNanFabricMemHandler =
+    new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, comm->nRanks, comm->memManager);
+  if (comm->ddaNanFabricMemHandler == nullptr || ncclCalloc(&comm->ddaNanPeers, dda::nan::kRanks) != ncclSuccess ||
+      comm->ddaNanFabricMemHandler->addSelfDeviceMem(comm->ddaNanScratch, handle, bytes) != ncclSuccess ||
+      comm->ddaNanFabricMemHandler->exchangeMemPtrs() != ncclSuccess) {
+    WARN("ncclDdaFabricCommInit: NaN-flag scratch exchange failed");
+    ddaNanFabricFini(comm);
+    return;
+  }
+  for (int i = 0; i < dda::nan::kRanks; ++i) {
+    if (comm->ddaNanFabricMemHandler->getPeerDeviceMemPtr(i, &comm->ddaNanPeers[i]) != ncclSuccess) {
+      WARN("ncclDdaFabricCommInit: NaN-flag scratch peer %d lookup failed", i);
+      ddaNanFabricFini(comm);
+      return;
+    }
+  }
+  INFO(NCCL_INIT, "ncclDdaFabricCommInit: NaN-flag scratch %zu bytes (vmm)", bytes);
+}
+
 ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
@@ -57,6 +111,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       comm->nRanks, comm->clique.size);
     return ncclSuccess;
   }
+
+  ddaNanFabricInit(comm);
 
   const int nRanks = comm->nRanks;
   const int64_t llEnabled = rcclParamDdaLL();
@@ -242,6 +298,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+  ddaNanFabricFini(comm);
   if (comm->ddaFabricBarrierState != nullptr) {
     delete static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
     comm->ddaFabricBarrierState = nullptr;

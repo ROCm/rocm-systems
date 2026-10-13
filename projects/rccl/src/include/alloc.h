@@ -267,6 +267,26 @@ static inline ncclResult_t getSideStream(cudaStream_t* stream, int priority = 0)
   return ncclSuccess;
 }
 
+// Synchronous memset that is safe while the calling thread's stream is being
+// captured. P2P connections are set up lazily, so this can run inside the
+// first captured send/recv; a plain cudaMemset would touch the legacy stream.
+static inline ncclResult_t ncclCudaMemsetSync(void* ptr, int value, size_t size) {
+  ncclResult_t result = ncclSuccess;
+  cudaStreamCaptureMode capMode = cudaStreamCaptureModeRelaxed;
+  cudaStream_t sidestream = nullptr, stream = nullptr;
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
+  NCCLCHECKGOTO(getSideStream(&sidestream), result, restoreCapMode);
+  stream = sidestream;
+  if (sidestream == nullptr) CUDACHECKGOTO(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking), result, restoreCapMode);
+  CUDACHECKGOTO(cudaMemsetAsync(ptr, value, size, stream), result, destroyStream);
+  CUDACHECKGOTO(cudaStreamSynchronize(stream), result, destroyStream);
+destroyStream:
+  if (sidestream == nullptr) CUDACHECK(cudaStreamDestroy(stream));
+restoreCapMode:
+  CUDACHECK(cudaThreadExchangeStreamCaptureMode(&capMode));
+  return result;
+}
+
 // RAII helper: hold a side-stream scope for the duration of an allocation-heavy
 // phase (e.g. transport pre-connect). All ncclCudaCalloc/ncclCudaMemcpy in the
 // phase - including those issued on the proxy thread for the same device while

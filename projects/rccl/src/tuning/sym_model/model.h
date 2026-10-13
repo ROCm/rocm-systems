@@ -30,6 +30,16 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // CTA search tolerance for this kernel under the selected tuning model.
 double rcclSymkLsaWithinPeakFactor(enum ncclSymkKernelId kernelId);
+
+// The NaN AllReduce kernels' choice of shot, made the same way in nan.cuh.
+inline bool rcclSymkNanTwoShot(enum ncclSymkKernelId kernelId, size_t nBytes) {
+  return (kernelId == ncclSymkKernelId_AllReduce_AGxNaN_R || kernelId == ncclSymkKernelId_AllReduce_AGxTmaNaN_R) &&
+         nBytes > ncclSymkNanTwoShotMinBytes;
+}
+inline bool rcclSymkNanTdm(enum ncclSymkKernelId kernelId) {
+  return kernelId == ncclSymkKernelId_AllGather_TmaNaN || kernelId == ncclSymkKernelId_AllReduce_AGxTmaNaN_R ||
+         kernelId == ncclSymkKernelId_ReduceScatter_TmaNaN;
+}
 #endif
 
 #endif // NCCL_INT_SYM_MODEL_MODEL_H_

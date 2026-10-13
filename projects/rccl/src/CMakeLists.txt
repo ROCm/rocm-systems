@@ -68,6 +68,7 @@ set(SRC_FILES
   device/primitives.h
   device/prims_ll.h
   device/prims_ll128.h
+  device/prims_nan.h
   device/prims_simple.h
   device/rccl_metadata.h
   device/reduce.h
@@ -82,6 +83,7 @@ set(SRC_FILES
   device/symmetric/gin_scratch__funcs.h
   device/symmetric/gin_scratch__types.h
   device/symmetric/kernel.cuh
+  device/symmetric/nan.cuh
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
@@ -141,6 +143,7 @@ set(SRC_FILES
   include/BfdBacktrace.hpp
   algorithms/dda/device/CollCommon.h
   algorithms/dda/device/CollCommon_ll128.h
+  algorithms/dda/device/CollCommon_nan.h
   algorithms/dda/all_gather/all_gather_dda.h
   algorithms/dda/all_gather/all_gather_dda_fabric.h
   algorithms/dda/all_gather/all_gather_dda_fabric_ll.h
@@ -194,6 +197,7 @@ set(SRC_FILES
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
   algorithms/dda/dda_init_detail.h
+  algorithms/dda/dda_nan.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
   include/dev_runtime.h

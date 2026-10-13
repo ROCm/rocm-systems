@@ -271,6 +271,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         task->devFuncId = (uint32_t)kernelId;
         task->nMaxChannels = nChannels;
         task->nWarps = nWarps;
+        // Under NCCL_PROTO=NaN an AllGather keeps its type for the typed NaN kernels; every symmetric
+        // AllGather, the NaN one and the Simple Tma one it may hand off to included, moves bytes.
+        if (task->func == ncclFuncAllGather && task->datatype != ncclInt8) {
+          task->count *= ncclTypeSize(task->datatype);
+          task->datatype = ncclInt8;
+        }
         convertSymTaskDevOp(comm, task);
         ncclIntruQueueEnqueue(&planner->collSymTaskQueue, task);
         task = next;
