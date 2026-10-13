@@ -46,7 +46,6 @@ def test_analyze_rocpd(
     ])
     assert code == 0
     database_path = analysis_dir / f"{db_name}.db"
-    assert database_path.is_file()
     common.check_analysis_db(database_path, expected_workloads=1)
 
     # Open the sqlite database and assert the schema
@@ -151,13 +150,16 @@ def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_comput
 
 @pytest.mark.misc
 def test_device_filter(binary_handler_profile_rocprof_compute):
+    skip_unsupported_roofline_soc()
+
     options = ["--device", "0"]
     workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
     assert sorted(list(file_dict.keys())) == CSVS
 
-    # --device selects the GPU used by the roofline benchmark.
+    roofline_df = pd.read_csv(Path(workload_dir) / "roofline.csv")
+    assert roofline_df["device"].tolist() == [0]
 
     common.clean_output_dir(config["cleanup"], workload_dir)

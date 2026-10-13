@@ -58,11 +58,14 @@ def test_pre_processing_assigns_filters_to_each_workload(
     tmp_path, monkeypatch, option_name, workload_attr, values, singleton
 ):
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
+
     paths = [str(tmp_path / name) for name in ("first", "second")]
     runs = {path: schema.Workload() for path in paths}
+
     args = argparse.Namespace(output_format="stdout", **PRE_PROCESSING_ARGS)
     args.path = [[path] for path in paths]
     setattr(args, option_name, values[:1] if singleton else values)
+
     analyzer = OmniAnalyze_Base(args, {})
     monkeypatch.setattr(analyzer, "initalize_runs", lambda: runs)
     monkeypatch.setattr(analyzer, "prepare_output_directory", lambda: None)

@@ -53,7 +53,7 @@ VALU_ARITHMETIC_COUNTERS = (
     "SQ_INSTS_VALU_FMA_F64",
 )
 
-ROCFLOP_COUNTERS = {
+FLOP_COUNTERS = {
     "gfx908": (),  # This architecture has no defined FLOP metric for block 2.1.0.
     "gfx90a": VALU_ARITHMETIC_COUNTERS,
     "gfx940": VALU_ARITHMETIC_COUNTERS,
@@ -80,12 +80,15 @@ def test_path(binary_handler_profile_rocprof_compute):
 
     sysinfo = common.check_sysinfo(Path(workload_dir) / "sysinfo.csv")
     assert set(sysinfo["gpu_arch"]) == {integration_common.gpu_soc()[0]}
+
     wave_counter = WAVE_COUNTERS[sysinfo["gpu_arch"].iloc[0]]
     results = common.check_counter_results(
         common.read_counter_results(workload_dir), required_counters=(wave_counter,)
     )
+
     waves = results.loc[results["Counter_Name"] == wave_counter, "Counter_Value"]
     assert (waves > 0).all()
+
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -102,17 +105,21 @@ def test_path_rocflop(binary_handler_profile_rocprof_compute):
         app_name="rocflop",
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
+
     sysinfo = common.check_sysinfo(Path(workload_dir) / "sysinfo.csv")
+
     arch = sysinfo["gpu_arch"].iloc[0]
     results = common.check_counter_results(
         common.read_counter_results(workload_dir),
-        required_counters=ROCFLOP_COUNTERS[arch],
+        required_counters=FLOP_COUNTERS[arch],
     )
+
     if arch in {"gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"}:
         fp16_fma = results.loc[
             results["Counter_Name"] == "SQ_INSTS_VALU_FMA_F16", "Counter_Value"
         ]
         assert (fp16_fma > 0).any()
+
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 

@@ -302,6 +302,7 @@ def test_run_benchmark_skips_unsupported_callbacks(bench_class, monkeypatch, tmp
     ]
     assert calls == expected_calls
     assert set(metrics) == set(bench.tests)
+
     for name, values in metrics.items():
         expected = (
             benchmark_base.PerfMetrics(0, 0, 0)
@@ -319,6 +320,7 @@ def test_run_benchmark_skips_unsupported_callbacks(bench_class, monkeypatch, tmp
     }
     frame = check_roofline_csv(csv_path, allowed_zero=allowed_zero)
     assert frame["device"].tolist() == [0]
+
     if bench_class is Bench_gfx942:
         assert allowed_zero == {
             "MFMAF4Flops",
@@ -326,9 +328,12 @@ def test_run_benchmark_skips_unsupported_callbacks(bench_class, monkeypatch, tmp
             "MFMAF6F4Flops",
             "MFMAMXF8Flops",
         }
+
     with csv_path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.reader(handle))
+
     assert len(rows) == 2
+
     for name in bench.unsupported_data_types:
         if name in bench.csv_cols_map:
             index = rows[0].index(bench.csv_cols_map[name])

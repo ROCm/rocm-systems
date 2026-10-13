@@ -393,61 +393,67 @@ def check_counter_results(df, *, required_counters=()):
     """Validate the identities, launch fields, values and timing of counters."""
     assert not df.empty, "Counter results are empty"
     assert set(COUNTER_RESULT_COLUMNS) <= set(df.columns), "Missing counter columns"
+
     for column in ("Counter_Value", "Start_Timestamp", "End_Timestamp"):
         values = pd.to_numeric(df[column], errors="coerce")
         assert np.isfinite(values).all(), f"Nonfinite or nonnumeric {column}"
+
     assert (
         pd.to_numeric(df.Start_Timestamp) < pd.to_numeric(df.End_Timestamp)
     ).all(), "Unordered timestamps"
+
     assert df.Kernel_Name.notna().all(), "Null kernel name"
     assert df.Kernel_Name.astype(str).str.strip().ne("").all(), "Blank kernel name"
+
     assert df.Counter_Name.notna().all(), "Null counter name"
     assert df.Counter_Name.astype(str).str.strip().ne("").all(), "Blank counter name"
     assert set(required_counters) <= set(df.Counter_Name), "Missing required counters"
+
     return df
 
 
 def check_sysinfo(path):
     """Read and validate the hardware metadata of every profiled device."""
-    return _check_sysinfo_frame(pd.read_csv(path))
-
-
-def _check_sysinfo_frame(df):
-    """Validate model, architecture and positive finite hardware counts."""
+    df = pd.read_csv(path)
     required = {"gpu_model", "gpu_arch", "cu_per_gpu", "se_per_gpu", "simd_per_cu"}
+
     assert not df.empty, "Sysinfo is empty"
     assert required <= set(df.columns), "Missing sysinfo columns"
+
     assert df.gpu_model.notna().all(), "Null GPU model"
     assert df.gpu_model.astype(str).str.strip().ne("").all(), "Blank GPU model"
     assert df.gpu_arch.isin(SUPPORTED_ARCHS).all(), "Unsupported GPU architecture"
+
     for column in ("cu_per_gpu", "se_per_gpu", "simd_per_cu"):
         values = pd.to_numeric(df[column], errors="coerce")
         assert (np.isfinite(values) & (values > 0)).all(), f"Invalid {column}"
+
     return df
 
 
 def check_analysis_db(db_path, *, expected_workloads):
     """Validate a saved analysis database and summarize workload ownership."""
     assert Path(db_path).is_file(), f"Missing analysis database: {db_path}"
+
     with closing(sqlite3.connect(db_path)) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
         assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+
         workloads = connection.execute(
             "SELECT workload_id, name, sub_name FROM compute_workload"
         ).fetchall()
+
         kernels = connection.execute(
             "SELECT kernel_uuid, workload_id, kernel_name FROM compute_kernel"
         ).fetchall()
+
         dispatches = connection.execute(
             "SELECT kernel_uuid, start_timestamp, end_timestamp FROM compute_dispatch"
         ).fetchall()
-    return _check_analysis_rows(workloads, kernels, dispatches, expected_workloads)
 
-
-def _check_analysis_rows(workloads, kernels, dispatches, expected_workloads):
-    """Check owners and ordered timestamps without hiding orphan rows in joins."""
     assert len(workloads) == expected_workloads, "Incorrect workload count"
     assert workloads and kernels and dispatches, "Empty analysis tables"
+
     summary = {
         identifier: {
             "name": name,
@@ -459,19 +465,23 @@ def _check_analysis_rows(workloads, kernels, dispatches, expected_workloads):
         for identifier, name, sub_name in workloads
     }
     owners = {}
+
     for identifier, workload_id, name in kernels:
         assert workload_id in summary, "Orphan kernel owner"
         owners[identifier] = workload_id
         summary[workload_id]["kernels"].add(name)
         summary[workload_id]["kernel_uuids"].add(identifier)
+
     for kernel_id, start, end in dispatches:
         assert kernel_id in owners, "Orphan dispatch owner"
         assert start is not None and end is not None, "Null timestamps"
         assert start <= end, "Reversed timestamps"
         summary[owners[kernel_id]]["dispatch_count"] += 1
+
     assert all(row["kernels"] and row["dispatch_count"] for row in summary.values()), (
         "Empty workload data"
     )
+
     return summary
 
 
@@ -481,55 +491,59 @@ def check_analysis_csv_dir(directory):
     for name, columns in ANALYSIS_CSV_HEADERS.items():
         path = Path(directory) / f"{name}.csv"
         assert path.is_file(), f"Missing analysis CSV: {path}"
+
         frames[name] = pd.read_csv(path)
         assert list(frames[name].columns) == columns, f"Incorrect {name} header"
-    _check_analysis_csv_owners(frames)
-    return frames
 
-
-def _check_analysis_csv_owners(frames):
-    """Validate all workload references and workload/kernel pairs against kernel."""
     kernel = frames["kernel"]
     assert not kernel.empty, "Empty kernel CSV"
     assert kernel[["workload_id", "kernel_uuid"]].notna().all().all()
+
     owners = set(zip(kernel.workload_id, kernel.kernel_uuid))
     workloads = set(kernel.workload_id)
+
     for name, frame in frames.items():
         if "workload_id" in frame:
             assert frame.workload_id.notna().all(), f"Null workload in {name}"
             assert set(frame.workload_id) <= workloads, f"Unknown workload in {name}"
+
         if {"workload_id", "kernel_uuid"} <= set(frame.columns):
             assert frame.kernel_uuid.notna().all(), f"Null kernel in {name}"
             assert set(zip(frame.workload_id, frame.kernel_uuid)) <= owners, (
                 f"Mismatched workload/kernel owner in {name}"
             )
 
+    return frames
+
 
 def check_roofline_csv(path, *, allowed_zero=()):
     """Read and validate ordered benchmark mean/Low/High triplets."""
     assert Path(path).is_file(), f"Missing roofline CSV: {path}"
-    return _check_roofline_frame(pd.read_csv(path), allowed_zero)
 
-
-def _check_roofline_frame(df, allowed_zero):
-    """Check benchmark layout, zero allowances and measurement bounds."""
+    df = pd.read_csv(path)
     assert not df.empty, "Empty roofline CSV"
+
     # Historical MI200 exports spell this one column with an extra F.
     aliases = {"mfmafi8opslow": "mfmai8opslow"}
     columns = [aliases.get(str(name).lower(), str(name).lower()) for name in df.columns]
     assert columns[0] == "device", "Device must be first"
     assert len(columns) > 1 and (len(columns) - 1) % 3 == 0, "Incomplete triplets"
     assert len(set(columns)) == len(columns), "Duplicate measurement columns"
+
     devices = pd.to_numeric(df.iloc[:, 0], errors="coerce")
     assert (np.isfinite(devices) & (devices >= 0) & (devices % 1 == 0)).all()
+
     allowed = {str(name).lower() for name in allowed_zero}
+
     for offset in range(1, len(columns), 3):
         mean_name, low_name, high_name = columns[offset : offset + 3]
         assert (low_name, high_name) == (mean_name + "low", mean_name + "high"), (
             f"Malformed triplet: {mean_name}"
         )
+
         values = df.iloc[:, offset : offset + 3].apply(pd.to_numeric, errors="coerce")
         assert (np.isfinite(values) & (values >= 0)).all().all(), "Invalid measurements"
+
         mean, low, high = (values.iloc[:, index] for index in range(3))
         if mean_name not in allowed:
             assert (values > 0).all().all(), f"Unexpected zero: {mean_name}"
@@ -537,4 +551,5 @@ def _check_roofline_frame(df, allowed_zero):
         assert (
             (low[positive] <= mean[positive]) & (mean[positive] <= high[positive])
         ).all(), f"Inverted bounds: {mean_name}"
+
     return df

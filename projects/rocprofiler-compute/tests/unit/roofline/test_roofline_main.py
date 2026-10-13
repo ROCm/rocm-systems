@@ -203,6 +203,7 @@ def test_combined_model_reports_supported_precisions_and_fp32_default(
     assert set(model.precisions) == {"FP16", "FP32", "FP64", "BF16", "I8"}
     assert "FP8" not in model.precisions
     assert model.default_precisions == ["FP32"]
+
     labels = {trace["label"] for trace in model.compute_traces}
     assert {
         "Peak VALU-FP16",

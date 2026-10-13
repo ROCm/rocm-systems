@@ -23,15 +23,18 @@ from tests.integration.common import (
 def check_gpu_roofline_csv(workload_dir):
     """Validate benchmark values, allowing zeros only for unsupported types."""
     bench = load_bench(0, {})
+
     allowed_zero = {
         bench.csv_cols_map[name]
         for name in bench.unsupported_data_types
         if name in bench.csv_cols_map
     }
+
     frame = common.check_roofline_csv(
         Path(workload_dir) / "roofline.csv", allowed_zero=allowed_zero
     )
     assert frame["device"].tolist() == [0]
+
     return frame
 
 
