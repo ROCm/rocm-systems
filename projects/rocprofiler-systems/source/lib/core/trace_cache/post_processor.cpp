@@ -58,11 +58,14 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
 }
 
 void
-publish_process_metadata(const std::shared_ptr<data::processor_config_t>& _config)
+publish_process_metadata(const std::shared_ptr<data::processor_config_t>& config)
 {
-    if(!_config->_metadata_registry) return;
+    if(!config->_metadata_registry)
+    {
+        return;
+    }
 
-    auto process_info = _config->_metadata_registry->get_process_info();
+    auto process_info = config->_metadata_registry->get_process_info();
     output::registry::instance().record_process(
         output::process_metadata{ .pid     = process_info.pid,
                                   .ppid    = process_info.ppid,
@@ -118,9 +121,9 @@ process_buffered_storage(
     publish_process_metadata(_config);
 
     auto const _coordinator = std::make_shared<sample_processor_t>();
-    // _storage keeps the concrete processors reachable (the coordinator shares
+    // storage keeps the concrete processors reachable (the coordinator shares
     // ownership of them as sample_processor_interface).
-    [[maybe_unused]] auto const _storage =
+    [[maybe_unused]] auto const storage =
         configure_processors(_coordinator, _config, _formats, _engine, _tracks);
     storage_parser_t _parser(_storage_filename);
 

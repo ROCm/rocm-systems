@@ -7,25 +7,31 @@
 #include "common/units/data_size.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/chrono.h>
-#include <spdlog/fmt/fmt.h>
-
-#include <unistd.h>
+#include <fmt/chrono.h>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
+#include <functional>
 #include <iterator>
 #include <map>
+#include <mutex>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <unistd.h>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::output
 {

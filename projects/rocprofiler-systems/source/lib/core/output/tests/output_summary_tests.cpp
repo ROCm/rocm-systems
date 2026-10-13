@@ -7,6 +7,7 @@
 
 #include <unistd.h>
 
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>

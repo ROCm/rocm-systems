@@ -3,8 +3,10 @@
 
 #include <array>
 #include <cstdint>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
 //
 //  above should always be included first
 //
@@ -1110,8 +1112,8 @@ rocprofsys_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
-    const bool  _is_child = is_child_process();
-    const pid_t pid       = getpid();
+    const bool  is_child = is_child_process();
+    const pid_t pid      = getpid();
     state::thread::set(state::thread::Completed);
 
     // return if not active
@@ -1123,7 +1125,7 @@ rocprofsys_finalize_hidden(void)
 
     set_metadata_process_end_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
-    if(_is_child)
+    if(is_child)
     {
         state::process::set(state::process::Finalized);
 
@@ -1450,10 +1452,10 @@ rocprofsys_finalize_hidden(void)
 
     if(_timemory_manager && _timemory_manager != nullptr)
     {
-        _timemory_manager->add_metadata([pid](auto& ar) {
-            auto _maps = tim::procfs::read_maps(pid);
+        _timemory_manager->add_metadata([pid](auto& archive) {
+            auto maps  = tim::procfs::read_maps(pid);
             auto _libs = std::set<std::string>{};
-            for(auto& itr : _maps)
+            for(auto& itr : maps)
             {
                 auto&& _path = itr.pathname;
                 if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
@@ -1461,8 +1463,8 @@ rocprofsys_finalize_hidden(void)
                     _libs.emplace(_path);
                 }
             }
-            ar(tim::cereal::make_nvp("memory_maps_files", _libs),
-               tim::cereal::make_nvp("memory_maps", _maps));
+            archive(tim::cereal::make_nvp("memory_maps_files", _libs),
+                    tim::cereal::make_nvp("memory_maps", maps));
         });
 
         static auto const* attach_add_session_id =

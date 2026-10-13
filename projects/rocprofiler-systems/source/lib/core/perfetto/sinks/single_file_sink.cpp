@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <span>
+#include <string>
 #include <utility>
 
 namespace rocprofsys::core
