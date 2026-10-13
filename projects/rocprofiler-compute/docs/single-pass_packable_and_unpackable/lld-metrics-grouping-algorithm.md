@@ -15,17 +15,22 @@ A **PMC set** is the counters of one metric that must share one perfmon pass. A 
 
 Why this allocator: the shipping pack minimizes passes for the whole counter list, so metrics whose PMC sets fit one pass stay split. Largest-first gives a large set a bucket before smaller sets fragment the open passes.
 
-1. Collect each **Single-pass packable (SPP)** metric's PMC set and keep the unique sets (skip **Single-pass unpackable (SPU)** parents). `iter_metric_groups` drops metrics with no profile PMCs before that split, so those metrics are not SPU parents. `collect_unique_packable_unions` keeps a metric only when `counters_fit_one_bucket`. `collect_unique_slot_limit_unions` keeps the rest. No YAML flag.
-2. Largest-first: place each PMC set with the existing-bucket and per-block slot checks in §2 (copy a PMC into another pass when two sets cannot share a bucket).
-3. Run **SPU residual fill** so leftover SPU counters appear somewhere. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, residual fill raises `ValueError` and does not drop the counter or keep looping.
-4. Harden **TCC series affinity + coverage** (and ACCUM slot charging where required). See §4.
+1. Expand TCC groups before placement. `iter_metric_groups` drops metrics with no profile PMCs before the packable split, so those metrics are not **Single-pass unpackable (SPU)** parents. `adjust_candidate_groups` expands a LEVEL series with its request channels. `collect_unique_packable_unions` keeps a metric only when `counters_fit_one_bucket`. `collect_unique_slot_limit_unions` keeps the rest. No YAML flag.
+2. Largest-first: place each **Single-pass packable (SPP)** PMC set with the existing-bucket and per-block slot checks in §2 (copy a PMC into another pass when two sets cannot share a bucket).
+3. First-fit leftovers: counters that are not in any bucket yet.
+4. Merge while every SPP set still fits one bucket under the same block limits.
+5. Keep request copies that a multi-column request row still needs in one pass.
+6. Run **SPU residual fill** so leftover SPU counters appear somewhere. Try the open buckets, then open one new bucket for the largest subset that fits an empty bucket (+0 extra passes on gfx942). If no remaining counter fits even that empty bucket, residual fill raises `ValueError` and does not drop the counter or keep looping.
+7. Keep request copies again, after residual fill.
+
+ACCUM charging happens when a counter is added to a bucket. A `*_ACCUM` counter takes its block slots at that add: two slots alone (`BASE` + `HIGH_RES`), one extra slot when `BASE` is already in the bucket, and no extra slot when `BASE` is added after its `*_ACCUM`. The main flowchart stays the general placement flow. The TCC chart in §4 matches this order and stays out of that flowchart.
 
 **Locked decisions** (from the high-level design):
 
-- SPP packing is the only allocator. There is no switch back to the shipping allocator.
+- The final tree has one allocator. No environment variable is in that tree. Phase 1 and Phase 2 still contain `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` and `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE` until cleanup PR #12848 deletes them. Those variables are not a rollback path.
 - Do **not** use `WEIGHTED_AVG` for metrics the old allocator split that now fit one pass. Packing covers them.
 - Priority policy YAML is not required for the packable guarantee.
-- gfx942 offline packing gates: `packable_multi == 0`, passes == **14** (the shipping layout was 13), SPU count == **16**, SPU extra passes == **0**. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. Panel 1805 stays one packing group in one pass (§4), so that gate includes it.
+- After Phase 2 YAML, the gfx942 allocator gate is `packable_multi == 0`, passes == **14** (the shipping layout was 13), `slot_additional_passes == 0`, and `slot_limit_metrics == 0`. The 16 are `COLLECT_*` composite parents. A health PR before that Phase 2 YAML may still see `slot_limit_metrics == 16`. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. Panel 1805 stays one packing group (§4), so that gate includes it.
 
 **Primary packing code:** `counter_grouping_single_pass.py`, `counter_grouping_buckets.py`, `soc_base.py`.
 
@@ -33,7 +38,7 @@ Why this allocator: the shipping pack minimizes passes for the whole counter lis
 
 ## 2. Flowchart
 
-A **bucket** is one perfmon pass. Flow — Single-pass packable (SPP) placement plus Single-pass unpackable (SPU) residual fill. TCC series affinity is **not** in this chart; it is the layout harden in §4. The TCC event-base budget is still this flow's hardware-block check.
+A **bucket** is one perfmon pass. This chart is the general placement flow: largest-first, first-fit leftovers, merge while every SPP set still fits, then SPU residual fill. Expand-TCC-groups and the two keep-request-copies steps are the §4 chart, not this one. The TCC event-base budget is still this flow's hardware-block check. ACCUM charging happens when a counter is added to a bucket.
 
 **How an SPP PMC set is placed.** Candidates are the unique sets, visited largest first. For each set the allocator tries buckets already opened before it opens a new one:
 
@@ -100,9 +105,9 @@ Analyze reads all of a metric's counters from the same pass. Code: `src/utils/me
 
 - **Bind key.** `key` in `{counter}@pass:{key}` is the perfmon result-file stem from `_pass_key_from_result_file`: `results_pmc_perf_3.csv.gz` becomes `pmc_perf_3`.
 - **Shadow columns.** Only a counter that appears in more than one pass is suffixed (`PassLayout.duplicated` in `process_rocpd_csv`). A counter that appears in one pass keeps its bare name, and that column is the value from that pass.
-- **Pass selection.** `select_pass` chooses the pass from the expression's hardware PMC set. When several passes hold the whole set, the earliest stem in natural order wins (`pmc_perf_2` before `pmc_perf_10`).
+- **Pass selection.** `select_pass` chooses the pass from the expression's hardware PMC set, including `SQ_WAVES` and `GRBM_GUI_ACTIVE` when the expression needs them. When several passes hold the whole set, the earliest stem in natural order wins (`pmc_perf_2` before `pmc_perf_10`). `select_pass_with_normalization_fallback` does not bind when either denominator is only on another pass.
 - **Duration.** `Start_Timestamp` and `End_Timestamp` are read from the selected pass's rows, so `End_Timestamp - Start_Timestamp` is the duration of that expression's pass. Timestamps do not take part in choosing the pass. If the selected pass has no duration, a metric that divides by it stays unset.
-- **Failed bind.** If no pass holds the whole PMC set, the metric stays unset with a warning. Analyze does not fall back to bare columns that can mix passes.
+- **Failed bind.** If the selected pass does not hold every counter the expression needs, including `SQ_WAVES` and `GRBM_GUI_ACTIVE`, the metric stays unset and warns. There is no bare-column fallback, and no exception that reads those denominators from another pass. A denominator that is on the same pass still evaluates.
 
 ---
 
@@ -112,15 +117,18 @@ The TCC handling here is a **short-term solution**. Those rules live in one modu
 
 An L2 channel map can change between replays, so the counters one expression joins share a pass. gfx942 is the example, not the only architecture, and the pass count there stays **14**. A selected series keeps every collectable channel. gfx908 and gfx115x use that chip's own L2 banks. They are not an XCD multiple.
 
-Panel 1805 read, write, and atomic requests (`TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, `TCC_EA0_ATOMIC`) are one required set and bind together, in the pass that already holds them with `TCC_EA0_ATOMIC_LEVEL`. The extra `RDREQ` and `WRREQ` copies in that pass stay. Rows 1806 and 1807 bind to the pass that holds each LEVEL with its request series. Row 1808 binds to the pass that holds `ATOMIC_LEVEL` and `ATOMIC`.
+Panel 1805 binds to the earliest stem that holds read, write, and atomic (`TCC_EA0_RDREQ`, `TCC_EA0_WRREQ`, `TCC_EA0_ATOMIC`). That bind is not the `ATOMIC_LEVEL` pass. Extra `RDREQ` and `WRREQ` copies may remain on LEVEL passes that do not hold `ATOMIC`. Rows 1806 and 1807 bind to the pass that holds each LEVEL with its request series. Row 1808 binds to the pass that holds `ATOMIC_LEVEL` and `ATOMIC`.
 
 ```mermaid
 flowchart TD
-  R[Request row stays one group:<br/>read, write, atomic]
-  L[Each latency row:<br/>LEVEL with its request series]
-  R --> P[Keep extra request copies<br/>the request row needs]
-  L --> P
-  P --> B[Same-pass bind uses the pass<br/>that holds the whole expression]
+  E[Expand TCC groups before placement]
+  E --> L[Largest-first]
+  L --> F[First-fit leftovers]
+  F --> M[Merge while every SPP set still fits]
+  M --> K1[Keep request copies]
+  K1 --> R[Residual fill]
+  R --> K2[Keep request copies again]
+  K2 --> B[Panel 1805 binds to the earliest stem<br/>that holds read, write, and atomic<br/>not the ATOMIC_LEVEL pass]
 ```
 
 ### Instance-aware metrics (out of scope)
