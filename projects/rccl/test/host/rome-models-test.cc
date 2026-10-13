@@ -55,6 +55,28 @@ class RomeModelsParseGraphLightMicrotest : public ::testing::Test {
   std::unique_ptr<ncclTopoGraph> graph_;
 };
 
+// ROCM-31973: every index and accumulator in parseGraphLight is driven straight from
+// RCCL_TREES with no clamping. One test per unchecked quantity,
+// each named for the behaviour the hardened parser should have; all are expected to
+// reject the input rather than write out of bounds.
+//
+//   gpus[] index `gpu`          MoreNumbersInSegmentThanMaxNodes_IsRejected
+//   `gpus[gpu]*10+digit`        NumberWiderThanIntRange_IsRejected
+//   treeBase column `y`         SegmentLongerThanTreeBaseRow_IsRejected
+//   treeBase row `x`            MoreSegmentsThanTreeBaseRows_IsRejected
+//   gpus[] read index `r`       MoreTokensThanNumbersParsed_IsRejected
+//   `start_offset` paren scan   TrailingNumberWithNoClosingParen_IsRejected
+//   `gpu_map[g]`                GpuNumberOutsideGpuMap_IsRejected
+//   `number_str[10]`            RemappedGpuNumberTooWideForBuffer_IsRejected
+//   `str` itself                NullString_IsRejected
+//
+// Accepted-input contracts, so the above cannot be satisfied by rejecting everything:
+//
+//   EmptyString_ProducesEmptyTreeBase            (below)
+//   WellFormedTree_IsTranscribedToTreeBase
+//   MultipleSegments_ProduceOneTreeBaseRowEach
+//   GpuNumbersAreTranslatedThroughGpuMap
+
 TEST_F(RomeModelsParseGraphLightMicrotest, EmptyString_ProducesEmptyTreeBase) {
   graph()->treeBase[0][0] = 'x';
 
