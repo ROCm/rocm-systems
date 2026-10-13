@@ -189,6 +189,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
 
+- **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
+  - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

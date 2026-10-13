@@ -179,6 +179,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
     return false;
   }
 
+  // The driver fills unavailable entries with 0xFF bytes: the type's max value, or -1 if signed.
   switch (attr_type) {
     case details::AMDGpuMetricAttributeType_t::TYPE_UINT8: {
       auto v = std::uint8_t(0);
@@ -190,6 +191,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
     case details::AMDGpuMetricAttributeType_t::TYPE_INT8: {
       auto v = std::int8_t(0);
       std::memcpy(&v, data, sizeof(v));
+      if (v == -1) return false;
       *value = static_cast<int64_t>(v);
       return true;
     }
@@ -203,6 +205,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
     case details::AMDGpuMetricAttributeType_t::TYPE_INT16: {
       auto v = std::int16_t(0);
       std::memcpy(&v, data, sizeof(v));
+      if (v == -1) return false;
       *value = static_cast<int64_t>(v);
       return true;
     }
@@ -216,6 +219,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
     case details::AMDGpuMetricAttributeType_t::TYPE_INT32: {
       auto v = std::int32_t(0);
       std::memcpy(&v, data, sizeof(v));
+      if (v == -1) return false;
       *value = static_cast<int64_t>(v);
       return true;
     }
@@ -229,6 +233,7 @@ static bool read_dynamic_scalar_value(const std::byte* data,
     case details::AMDGpuMetricAttributeType_t::TYPE_INT64: {
       auto v = std::int64_t(0);
       std::memcpy(&v, data, sizeof(v));
+      if (v == -1) return false;
       *value = v;
       return true;
     }
