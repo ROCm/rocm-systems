@@ -314,7 +314,7 @@ __CG_STATIC_QUALIFIER__ unsigned int masked_bit_count(lane_mask x, unsigned int 
                     : counter;
     }
   } else {
-     __builtin_trap();
+    __builtin_trap();
   }
 
   return counter;
