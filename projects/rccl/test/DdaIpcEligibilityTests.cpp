@@ -5,9 +5,11 @@
  ************************************************************************/
 
 #include "common/DdaAlltoAllTestHelpers.hpp"
+#include "common/DdaFp8TestHelpers.hpp"
 #include "common/DdaIpcTestHelpers.hpp"
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "gtest/gtest.h"
@@ -206,6 +208,51 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
                                      mockComm_.get(),
                                      nullptr),
               ncclInvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// fp8
+//
+// The IPC tier admits both fp8 formats wherever it admits the float types.
+// Dispatch is driven with the IPC resources absent: the typed launcher then
+// returns ncclInvalidUsage before launching anything, which a datatype the
+// dispatcher does not route (ncclInvalidArgument) cannot reach.
+// ---------------------------------------------------------------------------
+
+TEST_F(DdaIpcEligibilityTest, GatesAdmitFp8)
+{
+    expectDdaGates(
+        {
+            {"AllGather", ddaGateIgnoringOp<ncclAllGatherDdaIpcEligible>, kDdaFp8LineCount},
+            {"AllReduce", ncclAllReduceDdaIpcEligible, kDdaFp8LineCount},
+            {"AlltoAll", ddaGateIgnoringOp<ncclAllToAllDdaIpcEligible>, kDdaFp8LineCount},
+            {"ReduceScatter", ncclReduceScatterDdaIpcEligible, kDdaFp8LineCount},
+        },
+        kDdaFp8Types, /*expected=*/true, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaIpcEligibilityTest, GatesRejectUnsupportedDatatype)
+{
+    expectDdaGates(
+        {
+            {"AllReduce", ncclAllReduceDdaIpcEligible, 4},
+            {"AlltoAll", ddaGateIgnoringOp<ncclAllToAllDdaIpcEligible>, 4},
+            {"ReduceScatter", ncclReduceScatterDdaIpcEligible, 4},
+        },
+        {ncclInt32}, /*expected=*/false, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaIpcEligibilityTest, Fp8DispatchReachesTypedLauncher)
+{
+    mockComm_.setIpcResourcesPresent(false);
+    expectDdaLaunches(
+        {
+            {"AllGather", ddaLaunchIgnoringOp<ncclAllGatherDdaIpc>},
+            {"AllReduce", ncclAllReduceDdaIpc},
+            {"AlltoAll", ddaLaunchIgnoringOp<ncclAllToAllDdaIpc>},
+            {"ReduceScatter", ncclReduceScatterDdaIpc},
+        },
+        kDdaFp8Types, kDdaFp8LineCount, ncclInvalidUsage, mockComm_.get(), sendbuff_, recvbuff_);
 }
 
 } // namespace RcclUnitTesting

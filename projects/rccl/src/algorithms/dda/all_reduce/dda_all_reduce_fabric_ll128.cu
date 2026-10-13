@@ -151,7 +151,7 @@ bool ncclAllReduceDdaFabricLL128Eligible_old(ncclComm* comm, const void* sendbuf
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
 
@@ -192,10 +192,6 @@ ncclResult_t ncclAllReduceDdaFabricLL128_old(const void* sendbuff, void* recvbuf
     return ncclAllReduceDdaFabricLL128Typed<half>(sendbuff, recvbuff, count, comm, stream);
   case ncclBfloat16:
     return ncclAllReduceDdaFabricLL128Typed<bf16>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat8e4m3:
-    return ncclAllReduceDdaFabricLL128Typed<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat8e5m2:
-    return ncclAllReduceDdaFabricLL128Typed<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream);
   default:
     return ncclInvalidArgument;
   }
