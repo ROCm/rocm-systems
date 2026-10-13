@@ -52,6 +52,9 @@
  *       -I ../src/include net_telemetry_test.cpp ../src/transport/net_telemetry.cc \
  *       -o /tmp/net_telemetry_test_asan && /tmp/net_telemetry_test_asan
  *
+ * The Thor2 counter table is checked against a fake sysfs tree. That test
+ * flushes, which is one-shot, so it runs last.
+ *
  * The allocator never frees its blocks, so LeakSanitizer reporting them at exit
  * under ASan is expected and is not a defect.
  */
@@ -66,6 +69,12 @@
 #include <thread>
 #include <vector>
 #include <atomic>
+#include <climits>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <unistd.h>
+#include <sys/stat.h>
 
 extern int rcclTelemetryEnabled;
 extern RcclTelemetryConfig rcclTelemetryCfg;
@@ -923,6 +932,125 @@ static void testConcurrent(void) {
   resetState();
 }
 
+/* ---- ethtool key matching ------------------------------------------- */
+
+/* bnxt_en lists rx_pause_frames (fallback) before rx_pfc_frames (primary). */
+static void testEthtoolFallbackOrder(void) {
+  std::printf("testEthtoolFallbackOrder\n");
+  const size_t stride = 32;
+  const char* order[] = {"rx_pause_frames", "rx_pfc_frames", "rx_pfc_frames_x", "only_fallback"};
+  const unsigned n = 4;
+  char names[4 * 32];
+  std::memset(names, 0, sizeof(names));
+  for (unsigned i = 0; i < n; i++) std::strncpy(names + i * stride, order[i], stride);
+  const uint64_t values[] = {11, 22, 33, 44};
+
+  int64_t pfc = -1, onlyFb = -1, missing = -1;
+  RcclEthtoolWantedEx w[5];
+  std::snprintf(w[0].key, sizeof(w[0].key), "rx_pfc_frames");   w[0].target = &pfc;
+  std::snprintf(w[1].key, sizeof(w[1].key), "rx_pause_frames"); w[1].target = &pfc;
+  std::snprintf(w[2].key, sizeof(w[2].key), "absent_primary");  w[2].target = &onlyFb;
+  std::snprintf(w[3].key, sizeof(w[3].key), "only_fallback");   w[3].target = &onlyFb;
+  std::snprintf(w[4].key, sizeof(w[4].key), "rx_pfc");          w[4].target = &missing;
+  rcclTelemetryEthtoolResolve(names, stride, values, n, w, 5);
+  CHECK_EQ(pfc, 22);
+  CHECK_EQ(onlyFb, 44);
+  CHECK_EQ(missing, -1);
+
+  /* A name filling its slot has no NUL. */
+  char full[32];
+  std::memset(full, 'a', sizeof(full));
+  int64_t got = -1;
+  RcclEthtoolWantedEx f;
+  std::memset(f.key, 'a', 32);
+  f.key[32] = '\0';
+  f.target = &got;
+  const uint64_t v = 7;
+  rcclTelemetryEthtoolResolve(full, sizeof(full), &v, 1, &f, 1);
+  CHECK_EQ(got, 7);
+}
+
+/* ---- Thor2 counter table against a fake sysfs ----------------------- */
+
+static void writeFile(const std::string& path, const std::string& body) {
+  std::ofstream(path) << body << "\n";
+}
+
+static long long jsonInt(const std::string& json, const std::string& key) {
+  size_t at = json.find("\"" + key + "\": ");
+  if (at == std::string::npos) return LLONG_MIN;
+  return std::atoll(json.c_str() + at + key.size() + 4);
+}
+
+/* Counter names exposed by a current bnxt_re (Thor2) driver. */
+static void testThor2SysfsNames(void) {
+  std::printf("testThor2SysfsNames\n");
+  resetState();
+  char root[] = "/tmp/rccl_tel_sysfs_XXXXXX";
+  CHECK(mkdtemp(root) != NULL);
+  const std::string r(root);
+  const std::string dev = r + "/class/infiniband/bnxt_re0";
+  const std::string hwc = dev + "/ports/1/hw_counters/";
+  for (const std::string& d : {r + "/class", r + "/class/infiniband", dev, dev + "/device", dev + "/device/net",
+                               dev + "/device/net/telfake0", dev + "/ports", dev + "/ports/1", hwc, r + "/bnxt_en",
+                               r + "/out"})
+    CHECK_EQ(mkdir(d.c_str(), 0755), 0);
+  CHECK_EQ(symlink((r + "/bnxt_en").c_str(), (dev + "/device/driver").c_str()), 0);
+
+  struct Ctr { const char* key; int base; int fin; };
+  const Ctr ctrs[] = {
+    {"tx_cnp_pkts", 100, 107},      {"rx_cnp_pkts", 50, 53},       {"rx_out_of_buffer", 9, 11},
+    {"rx_roce_errors", 1, 2},       {"rx_roce_discards", 4, 8},    {"tx_roce_errors", 0, 5},
+    {"tx_roce_discards", 3, 3},     {"res_mem_err", 2, 6},         {"rx_ecn_marked_pkts", 10, 30},
+    {"to_retransmits", 0, 1},       {"oos_drop_count", 5, 5},      {"tx_bytes", 1000, 5000},
+    {"rx_bytes", 2000, 2600},       {"tx_pkts", 10, 40},           {"rx_pkts", 20, 25},
+  };
+  for (const Ctr& c : ctrs) writeFile(hwc + c.key, std::to_string(c.base));
+
+  rcclTelemetrySysRoot = root;
+  std::snprintf(rcclTelemetryCfg.output_dir, sizeof(rcclTelemetryCfg.output_dir), "%s/out", root);
+  rcclTelemetryCfg.hw_counter_list[0] = '\0';
+  CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
+  CHECK(std::strcmp(rcclTelemetryDevs[0].eth_device, "telfake0") == 0);
+  int numSlots = 0;
+  CHECK_EQ(rcclTelemetrySetupChannel(0, 0, 1, &numSlots), 0); /* takes the baseline */
+  rcclTelemetryBytes(0, 1, 4096);
+
+  for (const Ctr& c : ctrs) writeFile(hwc + c.key, std::to_string(c.fin));
+  CHECK_EQ(rcclTelemetryFlush(), 0);
+
+  char host[HOST_NAME_MAX + 1];
+  gethostname(host, sizeof(host));
+  std::ifstream in(r + "/out/rccl_telemetry_" + host + "_" + std::to_string(getuid()) + "_" +
+                   std::to_string(getpid()) + ".json");
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const std::string json = ss.str();
+  CHECK(!json.empty());
+  CHECK(json.find("\"transport\": \"IB-CAST\"") != std::string::npos);
+  CHECK(json.find("\"hw_type\": \"thor2\"") != std::string::npos);
+  CHECK_EQ(jsonInt(json, "cnp_sent"), 7);
+  CHECK_EQ(jsonInt(json, "cnp_handled"), 3);
+  CHECK_EQ(jsonInt(json, "out_of_buffer"), 2);
+  CHECK_EQ(jsonInt(json, "ecn_marked_pkts"), 20);
+  CHECK_EQ(jsonInt(json, "rx_errors"), 1);
+  CHECK_EQ(jsonInt(json, "rx_discards"), 4);
+  CHECK_EQ(jsonInt(json, "tx_errors"), 5);
+  CHECK_EQ(jsonInt(json, "tx_discards"), 0);
+  CHECK_EQ(jsonInt(json, "rx_roce_error_pkts"), 1);
+  CHECK_EQ(jsonInt(json, "rx_roce_discard_pkts"), 4);
+  CHECK_EQ(jsonInt(json, "res_mem_error"), 4);
+  CHECK_EQ(jsonInt(json, "to_retransmits"), 1);
+  CHECK_EQ(jsonInt(json, "oos_drop_count"), 0);
+  CHECK_EQ(jsonInt(json, "delta_tx_bytes"), 4000);
+  CHECK_EQ(jsonInt(json, "delta_rx_packets"), 5);
+  CHECK_EQ(jsonInt(json, "cnp_ignored"), -1);
+  CHECK_EQ(jsonInt(json, "local_ack_timeout_err"), -1);
+  /* No such interface, so ethtool counters stay N/A. */
+  CHECK_EQ(jsonInt(json, "pfc_rx_pause_frames"), -1);
+  rcclTelemetrySysRoot = "/sys";
+}
+
 int main(void) {
   std::printf("net_telemetry unit tests\n");
   testBlockIndex();
@@ -942,6 +1070,8 @@ int main(void) {
   testSamplingCounters();
   testSamplingDefaultIsIdentity();
   testConcurrent();
+  testEthtoolFallbackOrder();
+  testThor2SysfsNames(); /* flushes: keep last */
 
   if (g_failures == 0) {
     std::printf("ALL PASSED\n");
