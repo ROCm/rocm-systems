@@ -2641,7 +2641,8 @@ TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
     InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
+    // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
+    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32);
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
 }
@@ -3096,11 +3097,86 @@ TEST(RcclDdaTierThresholds, RankScalingOnlyOnGfx1250)
 // gfx1250 (AICOMRCCL-2876).
 TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
 {
+    for (const char* arch : {"gfx1250", "gfx950", "gfx942"})
+    {
+        ASSERT_NE(rcclGetArchThresholds(arch), nullptr) << arch;
+    }
     EXPECT_FALSE(rcclGetArchThresholds("gfx1250")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx950")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
+// Pins the gfx1250 rank-scaled and Ring / Tree entries; gfx942 and gfx950 leave every one of them at 0.
+TEST(RcclDdaTierThresholds, Gfx1250RankScaledEntriesOnlyOnGfx1250)
+{
+    constexpr size_t KiB = 1024, MiB = 1024 * KiB;
+    const rcclArchThresholds* t = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->rankScaledMinRanks, 8);
+    EXPECT_EQ(t->rankScaledMaxBytes, 256 * MiB);
+    EXPECT_EQ(t->ddaArVmmFirstMinRanks, 32);
+    EXPECT_EQ(t->ddaArVmmFirstMinBytes, 2 * MiB);
+    EXPECT_EQ(t->ddaArVmmFirstMaxPerRank, 512 * KiB);
+    EXPECT_EQ(t->ddaVmmBlockBudget, 2048);
+    EXPECT_EQ(t->ddaVmmMinBlocks, 32);
+    EXPECT_EQ(t->ddaVmmMaxBlocks, 128);
+    EXPECT_EQ(t->arRingLL128MaxPerRank, 32 * MiB);
+    EXPECT_TRUE(t->arTreeLL128Unlimited);
+    EXPECT_EQ(t->arTreeMaxPerRank, 1 * MiB);
+    EXPECT_EQ(t->arTreeLLMaxPerRank, 32 * KiB);
+    EXPECT_EQ(t->agRingLL128MaxPerRank, 64 * MiB);
+    EXPECT_EQ(t->rsRingLL128MinPerRank, 512 * KiB);
+    EXPECT_EQ(t->rsRingLL128MaxPerRank, 8 * MiB);
+    EXPECT_EQ(t->rsRingLL128MaxPerRank1B, 32 * MiB);
+    EXPECT_EQ(t->rsRingSimpleCappedMaxPerRank, 32 * MiB);
+    EXPECT_EQ(t->rsRingSimpleCappedChannels, 128);
+
+    for (const char* arch : {"gfx942", "gfx950"})
+    {
+        const rcclArchThresholds* o = rcclGetArchThresholds(arch);
+        ASSERT_NE(o, nullptr) << arch;
+        for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i)
+        {
+            EXPECT_EQ(o->ddaLLMaxPerRank[i], 0u) << arch << " func " << i;
+            EXPECT_EQ(o->ddaLL128MaxPerRank[i], 0u) << arch << " func " << i;
+            EXPECT_EQ(o->ddaVmmMaxPerRank[i], 0u) << arch << " func " << i;
+        }
+        EXPECT_EQ(o->rankScaledMinRanks, 0) << arch;
+        EXPECT_EQ(o->rankScaledMaxBytes, 0u) << arch;
+        EXPECT_EQ(o->ddaArVmmFirstMinRanks, 0) << arch;
+        EXPECT_EQ(o->ddaArVmmFirstMinBytes, 0u) << arch;
+        EXPECT_EQ(o->ddaArVmmFirstMaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->ddaVmmBlockBudget, 0) << arch;
+        EXPECT_EQ(o->ddaVmmMinBlocks, 0) << arch;
+        EXPECT_EQ(o->ddaVmmMaxBlocks, 0) << arch;
+        EXPECT_EQ(o->arRingLL128MaxPerRank, 0u) << arch;
+        EXPECT_FALSE(o->arTreeLL128Unlimited) << arch;
+        EXPECT_EQ(o->arTreeMaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->arTreeLLMaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->agRingLL128MaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->rsRingLL128MinPerRank, 0u) << arch;
+        EXPECT_EQ(o->rsRingLL128MaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->rsRingLL128MaxPerRank1B, 0u) << arch;
+        EXPECT_EQ(o->rsRingSimpleCappedMaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->rsRingSimpleCappedChannels, 0) << arch;
+    }
+}
+
+// Fabric scratch is sized from the DDA totals, so no rank-scaled cap may exceed the largest of them.
+TEST(RcclDdaTierThresholds, RankScaledMaxBytesWithinLargestDdaTotal)
+{
+    for (const char* arch : {"gfx1250", "gfx950", "gfx942"})
+    {
+        const rcclArchThresholds* t = rcclGetArchThresholds(arch);
+        ASSERT_NE(t, nullptr) << arch;
+        size_t largestTotal = 0;
+        for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i)
+        {
+            largestTotal = std::max({largestTotal, t->ddaLLMax[i], t->ddaLL128Max[i], t->ddaVmmMax[i]});
+        }
+        EXPECT_LE(t->rankScaledMaxBytes, largestTotal) << arch;
+    }
+}
 
 TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
 {

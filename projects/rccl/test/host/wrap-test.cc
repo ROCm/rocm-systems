@@ -316,12 +316,7 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// ENABLE_LL128's state depends on the build configuration; both arms are
-// written so whichever compiles in is exercised. The OCI cluster build has
-// ENABLE_LL128 defined, so *_LL128_AccGatesOutGfx90a and its siblings are the
-// ones that compile and run there; a local ROCm-7.0.0 build does not define
-// it, which is what compiles and runs *_LL128_DisabledAtCompileTime instead --
-// both arms are now verified, one per build.
+// rccl-UnitTestsMicro compiles ENABLE_LL128, as production librccl does; the #else arm covers a build that omits it.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -1324,6 +1319,20 @@ const rcclArchThresholds* Gfx1250Table() {
   return &table;
 }
 
+// gfx942 / gfx950 shape: the same DDA totals, every rank-scaled and Ring / Tree entry 0, CE-Scratch forced.
+const rcclArchThresholds* UnscaledTable() {
+  static const rcclArchThresholds table = [] {
+    const rcclArchThresholds scaled = MakeRankScaledTable();
+    rcclArchThresholds t{};
+    std::copy(std::begin(scaled.ddaLLMax), std::end(scaled.ddaLLMax), t.ddaLLMax);
+    std::copy(std::begin(scaled.ddaLL128Max), std::end(scaled.ddaLL128Max), t.ddaLL128Max);
+    std::copy(std::begin(scaled.ddaVmmMax), std::end(scaled.ddaVmmMax), t.ddaVmmMax);
+    t.forceCeScratch = true;
+    return t;
+  }();
+  return &table;
+}
+
 // gfx1250 single-node comm carrying the arch table and tuning_model_11's AllReduce,
 // AllGather and ReduceScatter LL / LL128 ranges.
 constexpr uint64_t kGfx1250ArLL128Max = 16777216;
@@ -1398,10 +1407,10 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250TreeAllReduceLLScale
       });
 }
 
-// The LL128 overrides sit inside rcclUpdateCollectiveProtocol's ENABLE_LL128 arm, so
-// these only compile where that arm does (see the IsArchSupportedForFunc_LL128_* pair
-// above for the same split).
-#if defined(ENABLE_LL128)
+// The LL128 overrides sit inside rcclUpdateCollectiveProtocol's ENABLE_LL128 arm, which production always builds.
+#if !defined(ENABLE_LL128)
+#error "rccl-UnitTestsMicro must compile ENABLE_LL128 so rcclUpdateCollectiveProtocol's LL128 arm is in this binary"
+#endif
 // AICOMRCCL-2874: on gfx1250 Tree LL128 beats Tree Simple at every size, so a Tree
 // AllReduce far past the model's LL128 ceiling stays on LL128. Ring at the same size,
 // and Tree on a two-node comm, are the controls: they still drop to Simple.
@@ -1447,7 +1456,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250RingAllReduceLL128Sc
       });
 }
 
-// Other arches keep the model ceiling for both algorithms.
+// Other arches, and a table whose AllReduce LL128 entries are 0, keep the model ceiling for both algorithms.
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTableLL128Ceiling",
@@ -1464,6 +1473,13 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_NonGfx1250AllReduceKeepsTab
         EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_TREE, kGfx1250ArLL128Max + 1));
         EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max + 1));
         EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max));
+        DeleteCommWithArch(comm);
+        // Single node with the gfx942 / gfx950 table shape: the arm runs and reads the 0 entries.
+        comm = MakeGfx1250ProtocolComm(16);
+        comm->archThresholds = UnscaledTable();
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_TREE, kGfx1250ArLL128Max + 1)) << "unscaled table";
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max + 1)) << "unscaled table";
+        EXPECT_EQ(NCCL_PROTO_LL128, ArProtocol(comm, NCCL_ALGO_RING, kGfx1250ArLL128Max)) << "unscaled table";
         DeleteCommWithArch(comm);
       });
 }
@@ -1525,20 +1541,6 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250ReduceScatterRingRan
         DeleteCommWithArch(comm);
       });
 }
-#else
-TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime) {
-  RUN_ISOLATED_TEST(
-      "Wrap_UpdateCollectiveProtocol_Gfx1250AllReduceLL128_DisabledAtCompileTime",
-      []() {
-        SetMicroEnvAbsent("NCCL_PROTO");
-        ncclComm* comm = MakeGfx1250ProtocolComm(16);
-        for (int algorithm : {NCCL_ALGO_TREE, NCCL_ALGO_RING}) {
-          EXPECT_EQ(NCCL_PROTO_SIMPLE, ArProtocol(comm, algorithm, 64 * kMiB)) << "algorithm=" << algorithm;
-        }
-        DeleteCommWithArch(comm);
-      });
-}
-#endif  // ENABLE_LL128
 
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
@@ -5019,6 +5021,21 @@ ncclComm* MakeCeScratchComm(const char* arch, const rcclArchThresholds* table, u
   return comm;
 }
 
+template <typename F>
+struct HookSig;
+template <typename Sig>
+struct HookSig<std::function<Sig>> {
+  using type = Sig;
+};
+template <typename Slot>
+using HookFor = ScopedHook<typename HookSig<Slot>::type>;
+
+// The CE-Scratch probe says yes for the life of this object.
+struct CeScratchProbeTrue {
+  HookFor<decltype(g_ceScratchAvailable)> hook{
+      g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; }};
+};
+
 int SelectAllGatherAlgo(ncclComm* comm) {
   rcclCollDecision decision{};
   EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, /*sendcount=*/8, ncclFloat32,
@@ -5042,8 +5059,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TableWithoutForceCeScratchDoesNotFor
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_TableWithoutForceCeScratchDoesNotForce",
       []() {
-        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                       ncclSymRegType_t) { return true; });
+        CeScratchProbeTrue ceScratch;
         rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
@@ -5061,8 +5077,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CtaZeroKeepsCeScratch) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_CtaZeroKeepsCeScratch",
       []() {
-        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                       ncclSymRegType_t) { return true; });
+        CeScratchProbeTrue ceScratch;
         const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
@@ -5083,8 +5098,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_ForceCeScratchTableOrNoTableForces) 
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_ForceCeScratchTableOrNoTableForces",
       []() {
-        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                       ncclSymRegType_t) { return true; });
+        CeScratchProbeTrue ceScratch;
         const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
         for (const rcclArchThresholds* t : {&table, static_cast<const rcclArchThresholds*>(nullptr)}) {
           for (const char* arch : {"gfx942", "gfx950"}) {
@@ -5108,8 +5122,7 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchFollowsForceCeScratchResolve
   RUN_ISOLATED_TEST(
       "Wrap_SelectAlltoAll_CeScratchFollowsForceCeScratchResolver",
       []() {
-        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                       ncclSymRegType_t) { return true; });
+        CeScratchProbeTrue ceScratch;
         rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
@@ -5294,38 +5307,38 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
 }
 
 namespace {
-int SelectAllReduceDdaAlgo(ncclComm* comm, size_t bytes) {
+rcclCollDecision SelectAllReduceDda(ncclComm* comm, size_t bytes) {
   rcclCollDecision decision{};
   EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, ncclSum,
                                               /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
                                               &decision));
-  return decision.algo;
+  return decision;
 }
-
-template <typename F>
-struct HookSig;
-template <typename Sig>
-struct HookSig<std::function<Sig>> {
-  using type = Sig;
-};
-template <typename Slot>
-using HookFor = ScopedHook<typename HookSig<Slot>::type>;
+int SelectAllReduceDdaAlgo(ncclComm* comm, size_t bytes) {
+  return SelectAllReduceDda(comm, bytes).algo;
+}
 
 // AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
 struct ArDdaHooks {
   HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
-      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; }};
+      g_allReduceShouldTakeDdaPath,
+      [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; }};
   HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
-      g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+      g_allReduceDdaFabricLLEligible,
+      [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
 };
 struct ArVmmEligible {
   HookFor<decltype(g_allReduceDdaFabricEligible)> vmmEligible{
-      g_allReduceDdaFabricEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
+      g_allReduceDdaFabricEligible,
+      [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
 };
-ncclComm* MakeArDdaComm(int nRanks) {
-  ncclComm* comm = MakeCommWithArch("gfx1250");
+
+// Single-node comm on `arch`: gfx1250 gets its rank-scaled table, any other arch the gfx942 / gfx950 shape.
+ncclComm* MakeTuningComm(int nRanks, const char* arch = "gfx1250") {
+  ncclComm* comm = MakeCommWithArch(arch);
   comm->nRanks = nRanks;
-  comm->archThresholds = Gfx1250Table();
+  comm->nNodes = 1;
+  comm->archThresholds = std::strcmp(arch, "gfx1250") == 0 ? Gfx1250Table() : UnscaledTable();
   return comm;
 }
 }  // namespace
@@ -5338,11 +5351,14 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
       []() {
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(32);
+        ncclComm* comm = MakeTuningComm(32);
         const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
         const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 2 * kMiB));
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 2 * kMiB + 16));
+        // The fakes' block counts name the launcher that sized each pick: VMM 112, LL 113.
+        EXPECT_EQ(112u, SelectAllReduceDda(comm, 2 * kMiB + 16).nMaxChannels);
+        EXPECT_EQ(113u, SelectAllReduceDda(comm, 2 * kMiB).nMaxChannels);
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 16 * kMiB + 16));
         comm->nRanks = 64;
@@ -5365,7 +5381,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {
           *out = ncclSymSendNonregRecvReg;
           return ncclSuccess;
         });
-        ncclComm* comm = MakeArDdaComm(32);
+        ncclComm* comm = MakeTuningComm(32);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -5379,7 +5395,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToLLThresholdEn
         g_loadParam = ForceParam("RCCL_DDA_LL_THRESHOLD", int64_t(64) << 20);
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeTuningComm(64);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -5393,7 +5409,35 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToVmmThresholdE
         g_loadParam = ForceParam("RCCL_DDA_THRESHOLD", int64_t(64) << 20);
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeTuningComm(64);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ... or RCCL_DDA_LL128_THRESHOLD ...
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToLL128ThresholdEnv) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToLL128ThresholdEnv",
+      []() {
+        g_loadParam = ForceParam("RCCL_DDA_LL128_THRESHOLD", int64_t(64) << 20);
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeTuningComm(64);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// ... or a two-shot ceiling.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToTwoShotThresholdEnv) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToTwoShotThresholdEnv",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "16777216");
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        ncclComm* comm = MakeTuningComm(64);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -5404,7 +5448,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible) {
       "Wrap_SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible",
       []() {
         ArDdaHooks hooks;  // g_allReduceDdaFabricEligible left at its default (false)
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeTuningComm(64);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -5418,7 +5462,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250RankScaledVmm) {
       []() {
         ScopedHook vmmEligible(g_reduceScatterDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
-        ncclComm* comm = MakeArDdaComm(16);
+        ncclComm* comm = MakeTuningComm(16);
         auto algo = [&](size_t totalBytes) {
           rcclCollDecision decision{};
           EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr,
@@ -5443,7 +5487,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_Gfx1250RankScaledLL128) {
       []() {
         ScopedHook ll128Eligible(g_allGatherDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
-        ncclComm* comm = MakeArDdaComm(16);
+        ncclComm* comm = MakeTuningComm(16);
         auto algo = [&](size_t totalBytes) {
           rcclCollDecision decision{};
           EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr,
@@ -5468,8 +5512,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_ExplicitForceCeForcesCeScratch) {
       "Wrap_SelectAllGather_ExplicitForceCeForcesCeScratch",
       []() {
         SetMicroEnv("RCCL_FORCE_CE", "1");
-        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                       ncclSymRegType_t) { return true; });
+        CeScratchProbeTrue ceScratch;
         const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
@@ -5483,27 +5526,22 @@ namespace {
 struct CostTable {
   float t[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
   CostTable() {
-    for (auto& row : t)
-      for (float& v : row) v = 2.0f;
+    for (auto& row : t) {
+      for (float& v : row) {
+        v = 2.0f;
+      }
+    }
   }
 };
 
-int AlgoAfterUpdate(ncclComm* comm, ncclFunc_t func, size_t nBytes, CostTable& table) {
+int AlgoAfterUpdate(ncclComm* comm, ncclFunc_t func, size_t nBytes, CostTable& table,
+                    int algorithm = NCCL_ALGO_RING) {
   ncclTaskColl info{};
   info.func = func;
-  info.algorithm = NCCL_ALGO_RING;
+  info.algorithm = algorithm;
   info.protocol = NCCL_PROTO_LL128;
   rcclUpdateCollectiveAlgorithm(comm, nBytes, &info, table.t);
   return info.algorithm;
-}
-
-// Single-node comm on `arch`; gfx1250 gets the arch table.
-ncclComm* MakeTuningComm(int nRanks, const char* arch = "gfx1250") {
-  ncclComm* comm = MakeCommWithArch(arch);
-  comm->nRanks = nRanks;
-  comm->nNodes = 1;
-  if (std::strcmp(arch, "gfx1250") == 0) comm->archThresholds = Gfx1250Table();
-  return comm;
 }
 }  // namespace
 
@@ -5527,6 +5565,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_Gfx1250SmallAllReduceTakes
 
 // Each guard on its own: below 8 ranks, more than one node, no arch table, another
 // arch, another collective, or Tree LL / LL128 missing from the cost table all keep Ring.
+// A non-Ring pick stays as it is.
 TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHolds) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHolds",
@@ -5545,6 +5584,8 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHold
         EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no arch table";
         comm->archThresholds = Gfx1250Table();
         EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllGather, 1024, table)) << "AllGather";
+        EXPECT_EQ(NCCL_ALGO_COLLNET_DIRECT,
+                  AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table, NCCL_ALGO_COLLNET_DIRECT)) << "CollNet seeded";
         table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = NCCL_ALGO_PROTO_IGNORE;
         EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no Tree LL";
         table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 2.0f;
@@ -5585,13 +5626,42 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_NcclProtoEnvKeepsRing) {
       });
 }
 
+// The algorithm hook then the protocol hook, as topoGetAlgoInfo runs them, on an 8-rank comm:
+// Tree LL to 256 KiB, Tree LL128 to 8 MiB, Ring LL128 to 256 MiB, Ring Simple above.
+TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithmThenProtocol_Gfx1250AllReduceBoundaries) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveAlgorithmThenProtocol_Gfx1250AllReduceBoundaries",
+      []() {
+        SetMicroEnvAbsent("NCCL_ALGO");
+        SetMicroEnvAbsent("NCCL_PROTO");
+        CostTable table;
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        auto pick = [&](size_t nBytes) {
+          ncclTaskColl info{};
+          info.func = ncclFuncAllReduce;
+          info.algorithm = NCCL_ALGO_RING;
+          info.protocol = NCCL_PROTO_SIMPLE;
+          info.datatype = ncclFloat32;
+          rcclUpdateCollectiveAlgorithm(comm, nBytes, &info, table.t);
+          rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+          return std::make_pair(int(info.algorithm), int(info.protocol));
+        };
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_TREE, NCCL_PROTO_LL), pick(256 * kKiB));
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_TREE, NCCL_PROTO_LL128), pick(256 * kKiB + 1));
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_TREE, NCCL_PROTO_LL128), pick(8 * kMiB));
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_RING, NCCL_PROTO_LL128), pick(8 * kMiB + 1));
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_RING, NCCL_PROTO_LL128), pick(256 * kMiB));
+        EXPECT_EQ(std::make_pair(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE), pick(256 * kMiB + 1));
+        DeleteCommWithArch(comm);
+      });
+}
+
 namespace {
-int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank) {
+int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank, int nc = 192) {
   ncclTaskColl info{};
   info.func = func;
   info.algorithm = NCCL_ALGO_RING;
   info.protocol = proto;
-  int nc = 192;
   rcclUpdateCollectiveChannels(comm, perRank * (size_t)comm->nRanks, &info, nc);
   return nc;
 }
@@ -5610,6 +5680,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_ReduceScatterSimpleBand) {
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB + 16));
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_LL128, 16 * kMiB)) << "LL128";
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncAllGather, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "AllGather";
+        EXPECT_EQ(96, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB, 96)) << "below the cap";
         comm->nNodes = 2;
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "2 nodes";
         comm->nNodes = 1;
@@ -5635,6 +5706,32 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_UserChannelCountTurnsItOff)
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
         g_paramMinNchannels = -2;
         EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "control";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The comm's minCTAs wins: a cap below it leaves nc alone, a cap at it still applies.
+TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_NeverCapsBelowMinCtas) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveChannels_NeverCapsBelowMinCtas",
+      []() {
+        ncclComm* comm = MakeTuningComm(16);
+        comm->config.minCTAs = 129;
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
+        comm->config.minCTAs = 128;
+        EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_CHANNEL_TUNING_ENABLE=0 turns the cap off, as it does rcclOverrideChannels.
+TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_ChannelTuningDisabledTurnsItOff) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveChannels_ChannelTuningDisabledTurnsItOff",
+      []() {
+        g_loadParam = ForceParam("RCCL_CHANNEL_TUNING_ENABLE", int64_t(0));
+        ncclComm* comm = MakeTuningComm(16);
+        EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB));
         DeleteCommWithArch(comm);
       });
 }

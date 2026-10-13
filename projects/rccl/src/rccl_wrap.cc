@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -163,10 +163,12 @@ static bool rcclEnvIsSet(const char* name) {
   return v != nullptr && v[0] != '\0';
 }
 
-// The user restricted the protocol set via NCCL_PROTO. Cached like rcclNcclAlgoEnvIsSet().
+// The user restricted the protocol set via NCCL_PROTO (env or nccl.conf); read once, like rcclNcclAlgoEnvIsSet().
 static bool rcclNcclProtoEnvIsSet() {
   static int cached = -1;
-  if (cached == -1) cached = getenv("NCCL_PROTO") != nullptr ? 1 : 0;
+  if (cached == -1) {
+    cached = ncclGetEnv("NCCL_PROTO") != nullptr ? 1 : 0;
+  }
   return cached == 1;
 }
 
@@ -174,10 +176,16 @@ static bool rcclNcclProtoEnvIsSet() {
 // so they apply only when nNodes == 1; the rank-scaled ones also need
 // rankScaledMinRanks ranks. Null when they do not apply.
 static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, bool rankScaled) {
-  if (comm->nNodes != 1) return nullptr;
+  if (comm->nNodes != 1) {
+    return nullptr;
+  }
   const rcclArchThresholds* t = extAlgoArchTable(comm);
-  if (t == nullptr) return nullptr;
-  if (rankScaled && (t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks)) return nullptr;
+  if (t == nullptr) {
+    return nullptr;
+  }
+  if (rankScaled && (t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks)) {
+    return nullptr;
+  }
   return t;
 }
 
@@ -185,7 +193,9 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
-  if (t == nullptr) return;
+  if (t == nullptr) {
+    return;
+  }
   const uint64_t nRanks = (uint64_t)comm->nRanks;
   if (info->func == ncclFuncAllReduce && info->algorithm == NCCL_ALGO_TREE && t->arTreeLLMaxPerRank != 0) {
     llMax = std::max<uint64_t>(llMax, nRanks * t->arTreeLLMaxPerRank);
@@ -204,14 +214,21 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
                                    float table[][NCCL_NUM_PROTOCOLS]) {
   // With NCCL_PROTO set, rcclUpdateCollectiveProtocol leaves the protocol alone, so a
   // switch to Tree would keep the protocol picked for Ring.
-  if (rcclNcclAlgoEnvIsSet() || rcclNcclProtoEnvIsSet()) return;
-  if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) return;
+  if (rcclNcclAlgoEnvIsSet() || rcclNcclProtoEnvIsSet()) {
+    return;
+  }
+  if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) {
+    return;
+  }
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
-  if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) return;
+  if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) {
+    return;
+  }
   // rcclUpdateCollectiveProtocol then picks Tree LL or LL128, so both must be on offer.
   if (table[NCCL_ALGO_TREE][NCCL_PROTO_LL] == NCCL_ALGO_PROTO_IGNORE ||
-      table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] == NCCL_ALGO_PROTO_IGNORE)
+      table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] == NCCL_ALGO_PROTO_IGNORE) {
     return;
+  }
   info->algorithm = NCCL_ALGO_TREE;
 }
 
@@ -334,15 +351,28 @@ extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc) {
-  if (info->func != ncclFuncReduceScatter || info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE)
+  if (info->func != ncclFuncReduceScatter || info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE) {
     return;
+  }
+  if (!rcclParamChannelTuningEnable()) {
+    return;
+  }
   // A user channel count (NCCL_MIN/MAX_NCHANNELS) wins.
-  if (ncclParamMaxNchannels() > 0 || ncclParamMinNchannels() > 0) return;
+  if (ncclParamMaxNchannels() > 0 || ncclParamMinNchannels() > 0) {
+    return;
+  }
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
-  if (t == nullptr || t->rsRingSimpleCappedChannels <= 0) return;
+  if (t == nullptr || t->rsRingSimpleCappedChannels <= 0) {
+    return;
+  }
+  // The comm's minCTAs wins, as in rcclOverrideChannels; the cap only lowers nc, so maxCTAs still holds.
+  if (t->rsRingSimpleCappedChannels < comm->config.minCTAs) {
+    return;
+  }
   const size_t perRank = nBytes / (size_t)comm->nRanks;
-  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank)
+  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank) {
     nc = std::min(nc, t->rsRingSimpleCappedChannels);
+  }
 }
 
 ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
@@ -943,9 +973,15 @@ bool rcclForceCeAllReduceEnabled(const ncclComm* comm) {
 bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   static const bool envSet = rcclEnvIsSet("RCCL_FORCE_CE");
   const int64_t param = rcclParamForceCe();
-  if (param == 0) return false;
-  if (envSet) return true;
-  if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) return true;
+  if (param == 0) {
+    return false;
+  }
+  if (envSet) {
+    return true;
+  }
+  if (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) {
+    return true;
+  }
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   return table == nullptr || table->forceCeScratch;
 }
@@ -1003,6 +1039,7 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
 // whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
 // otherwise the env var's default applies.
+// On those rank-scaled comms a user-set RCCL_DDA_LL_THRESHOLD is the tier cap, so it also bounds two-shot.
 inline size_t rcclDdaLLTwoShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
   static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
   if (!envSet && rcclDdaRankScaled(table, nRanks) &&
@@ -1065,22 +1102,38 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func) {
 
 // AllReduce DDA VMM ahead of the LL tier (see rcclArchThresholds::ddaArVmmFirst*).
 // Measured on unregistered buffers only; registered ones keep the tier order and
-// the R2 cap. Env thresholds turn it off so RCCL_DDA_*_THRESHOLD keep their meaning.
+// the R2 cap. A user-set RCCL_DDA_{,LL_,LL128_}THRESHOLD or RCCL_DDA_{LL,LL128}_TWOSHOT_THRESHOLD turns it off.
 inline bool rcclDdaArVmmFirstTab(const rcclArchThresholds* table, int nRanks, size_t msgBytes,
                                  ncclSymRegType_t winRegType) {
-  if (table == nullptr || table->ddaArVmmFirstMinRanks <= 0 || nRanks < table->ddaArVmmFirstMinRanks) return false;
-  if (winRegType != ncclSymSendNonregRecvNonreg) return false;
-  size_t unused;
-  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &unused) || ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused))
+  if (table == nullptr || table->ddaArVmmFirstMinRanks <= 0 || nRanks < table->ddaArVmmFirstMinRanks) {
     return false;
+  }
+  if (winRegType != ncclSymSendNonregRecvNonreg) {
+    return false;
+  }
+  size_t unused;
+  if (ddaThresholdFromEnv(rcclParamDdaThreshold(), &unused) ||
+      ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &unused) ||
+      ddaThresholdFromEnv(rcclParamDdaLL128Threshold(), &unused)) {
+    return false;
+  }
+  static const bool twoShotEnvSet =
+    rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD") || rcclEnvIsSet("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
+  if (twoShotEnvSet) {
+    return false;
+  }
   return msgBytes > table->ddaArVmmFirstMinBytes && msgBytes <= (size_t)nRanks * table->ddaArVmmFirstMaxPerRank;
 }
 
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
-  if (comm == nullptr) return 0;
+  if (comm == nullptr) {
+    return 0;
+  }
   const int cap = comm->ddaFabricMaxBlocks;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
-  if (!rcclDdaRankScaled(table, comm->nRanks) || table->ddaVmmBlockBudget <= 0) return cap;
+  if (!rcclDdaRankScaled(table, comm->nRanks) || table->ddaVmmBlockBudget <= 0) {
+    return cap;
+  }
   const int want =
     std::min(table->ddaVmmMaxBlocks, std::max(table->ddaVmmMinBlocks, table->ddaVmmBlockBudget / comm->nRanks));
   return std::min(cap, want);
@@ -1133,7 +1186,7 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm) {
 
   // All table entries are total message bytes; the selector compares totalBytes
   // directly (rccl_wrap.cc rcclSelectReduceScatter). Rank-scaled caps are clipped to
-// rankScaledMaxBytes, which the table keeps within these totals.
+  // rankScaledMaxBytes, which the table keeps within these totals.
   for (int i = 0; i < RCCL_DDA_FUNC_COUNT; ++i) {
     bump(table->ddaLLMax[i]);
     bump(table->ddaLL128Max[i]);
@@ -1867,15 +1920,21 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const bool agCeNonRegWindow = agCeNonRegMax > 0 &&
                                      totalBytes >= agCeNonRegMin &&
                                      totalBytes <= agCeNonRegMax;
-      if ((rcclForceCeScratchEnabled(comm) || agCeNonRegWindow) && ceScratch &&
+      const bool forceCeScratch = rcclForceCeScratchEnabled(comm);
+      if ((forceCeScratch || agCeNonRegWindow) && ceScratch &&
           winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
           comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
         decision->algo = RCCL_CE_SCRATCH;
         return ncclSuccess;
       }
-      if (!query) INFO(NCCL_TUNING, "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu forceCeScratch=%d agCeNonRegWindow=%d",
-           (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes, (int)rcclForceCeScratchEnabled(comm), (int)agCeNonRegWindow);
+      if (!query) {
+        INFO(NCCL_TUNING,
+             "AG CE-scratch disqualified: ceScratch=%d hasSysmem=%d ddaScratch=%p totalBytes=%zu ddaScratchBytes=%zu "
+             "forceCeScratch=%d agCeNonRegWindow=%d",
+             (int)ceScratch, (int)hasSysmemSegment, comm->ddaScratch, totalBytes, (size_t)comm->ddaScratchBytes,
+             (int)forceCeScratch, (int)agCeNonRegWindow);
+      }
       // Branch #3: CE via registered symmetric windows. Taken when symk is not
       // eligible and the size is within ceRegMax, or when CTAPolicy=ZERO forces
       // CE for every size.

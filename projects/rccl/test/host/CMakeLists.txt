@@ -815,6 +815,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON); wrap-test.cc's LL128 tests need it.
+    ENABLE_LL128
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"

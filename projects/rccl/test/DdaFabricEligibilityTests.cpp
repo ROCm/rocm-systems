@@ -756,22 +756,6 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
-{
-    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
-    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
-    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
-}
-
-TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PastThresholdRejected)
-{
-    constexpr size_t totalCap = 64u * 1024u * 1024u;
-    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
-    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
-        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
-}
-
 // ---------------------------------------------------------------------------
 // AllReduce
 // ---------------------------------------------------------------------------
@@ -1239,7 +1223,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
 }
 
-// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
+// ncclAllReduceDdaFabricLL128Eligible: an in-range size and an unaligned shard.
 // These call the shape-eligibility function directly, which applies the one-shot and
 // two-shot ceilings but not the tier's ddaLL128Max. 32 MiB was gfx1250's
 // ddaLL128Max[AllReduce] when these were written; the probe size is kept as an
@@ -1251,9 +1235,9 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
         mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricEligibilityTest, AllReduceLL128_PastCapRejected)
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_UnalignedShardRejected)
 {
-    // 8388610 * 4 = 33554440 bytes = 32 MiB + 8 bytes; %8 == 0
+    // 32 MiB + 8 bytes: past the one-shot ceiling, and its 8-rank shard is not a whole number of 16B chunks
     EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 8388610, ncclFloat32, ncclSum));
 }
@@ -1554,7 +1538,9 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
 {
-    const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
+    // gfx1250 at 8 ranks: 128 MiB
+    mockComm_.comm.nRanks = 8;
+    constexpr size_t totalCap = 128u * 1024u * 1024u;
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
