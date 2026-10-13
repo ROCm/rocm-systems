@@ -64,6 +64,10 @@ FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
         min_version=libpyrocpd.schema_version(3, 0, 4),
         max_version=None,
     ),
+    "replay_pass": FeatureVersionRange(
+        min_version=libpyrocpd.schema_version(3, 0, 5),
+        max_version=None,
+    ),
 }
 
 
