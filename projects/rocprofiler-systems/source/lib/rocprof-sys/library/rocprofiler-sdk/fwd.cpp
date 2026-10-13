@@ -124,14 +124,11 @@ rocprofiler_tool_counter_info_t::rocprofiler_tool_counter_info_t(
 void
 client_data::initialize()
 {
-    buffered_tracing_info = rocprofiler::sdk::get_buffer_tracing_names();
-    callback_tracing_info = rocprofiler::sdk::get_callback_tracing_names();
-
     set_agents();
 }
 
 void
-client_data::initialize_event_info()
+client_data::initialize_counter_info()
 {
     auto const& agent_mngr = get_agent_manager_instance();
 
@@ -147,118 +144,6 @@ client_data::initialize_event_info()
     if(agent_counter_info.size() != gpu_agents.size())
     {
         agent_counter_info = get_agent_counter_info(gpu_agents);
-    }
-
-    try
-    {
-        using qualifier_t     = tim::hardware_counters::qualifier;
-        using qualifier_vec_t = std::vector<qualifier_t>;
-
-        for(const auto& aitr : gpu_agents)
-        {
-            auto        _dev_index = aitr.device_id;
-            const auto& _agent_id  = rocprofiler_agent_id_t{ aitr.agent->handle };
-            auto const  _device_qualifier_sym = fmt::format(":device={}", _dev_index);
-            auto const  _device_qualifier =
-                tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
-                                                   _device_qualifier_sym,
-                                                   fmt::format("Device {}", _dev_index) };
-
-            // Check if agent info is available ( i.e., counters are supported)
-            auto const agent_info_it = agent_counter_info.find(_agent_id);
-            if(agent_info_it == agent_counter_info.end())
-            {
-                LOG_WARNING("Skipping GPU device {} ({}, handle=0x{:X}) due to "
-                            "counter not found for the specified architecture",
-                            _dev_index, aitr.agent->name, aitr.agent->handle);
-                continue;
-            }
-
-            auto _counter_info = agent_info_it->second;
-            std::ranges::sort(_counter_info,
-                              [](const rocprofiler_tool_counter_info_t& lhs,
-                                 const rocprofiler_tool_counter_info_t& rhs) {
-                                  if(lhs.is_constant && rhs.is_constant)
-                                  {
-                                      return lhs.id < rhs.id;
-                                  }
-                                  if(lhs.is_constant)
-                                  {
-                                      return true;
-                                  }
-                                  if(rhs.is_constant)
-                                  {
-                                      return false;
-                                  }
-
-                                  if(!lhs.is_derived && !rhs.is_derived)
-                                  {
-                                      return lhs.id < rhs.id;
-                                  }
-                                  if(!lhs.is_derived)
-                                  {
-                                      return true;
-                                  }
-                                  if(!rhs.is_derived)
-                                  {
-                                      return false;
-                                  }
-
-                                  return lhs.id < rhs.id;
-                              });
-
-            for(const auto& ditr : _counter_info)
-            {
-                auto const _long_desc = std::string{ ditr.description };
-                auto const _units     = std::string{};
-                auto const _pysym     = std::string{};
-                if(ditr.is_constant)
-                {
-                    continue;
-                }
-                if(ditr.is_derived)
-                {
-                    auto const _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
-                    auto const _short_desc =
-                        fmt::format("Derived counter: {}", ditr.expression);
-                    events_info.emplace_back(hardware_counter_info(
-                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
-                        _sym, _pysym, _short_desc, _long_desc, _units,
-                        qualifier_vec_t{ _device_qualifier }));
-                }
-                else
-                {
-                    auto _dim_info = std::vector<std::string>{};
-
-                    for(const auto& itr : ditr.dimension_info)
-                    {
-                        auto const _info =
-                            (itr.instance_size > 1)
-                                ? fmt::format("{}[0:{}]", itr.name, itr.instance_size - 1)
-                                : std::string{};
-                        if(!_info.empty())
-                        {
-                            _dim_info.emplace_back(_info);
-                        }
-                    }
-
-                    auto const _sym = fmt::format("{}:device={}", ditr.name, _dev_index);
-                    auto       _short_desc =
-                        fmt::format("{} on device {}", ditr.name, _dev_index);
-                    if(!_dim_info.empty())
-                    {
-                        _short_desc += fmt::format("{}", fmt::join(_dim_info, ". "));
-                    }
-                    events_info.emplace_back(hardware_counter_info(
-                        true, tim::hardware_counters::api::rocm, events_info.size(), 0,
-                        _sym, _pysym, _short_desc, _long_desc, _units,
-                        qualifier_vec_t{ _device_qualifier }));
-                }
-            }
-        }
-    } catch(std::exception& _e)
-    {
-        LOG_WARNING("Constructing ROCm event info failed: {}", _e.what());
     }
 }
 

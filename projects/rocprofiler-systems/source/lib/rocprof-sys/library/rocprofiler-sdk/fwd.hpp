@@ -25,7 +25,6 @@
 
 namespace rocprofsys::rocprofiler_sdk
 {
-using hardware_counter_info = ::tim::hardware_counters::info;
 
 using rocprofsys_agent_t = agent;
 
@@ -91,22 +90,21 @@ struct client_data
     using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
     using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
 
-    rocprofiler_client_id_t*           client_id                 = nullptr;
-    rocprofiler_client_finalize_t      client_fini               = nullptr;
-    rocprofiler_context_id_t           counter_ctx               = { 0 };
-    rocprofiler_buffer_id_t            counter_collection_buffer = { 0 };
-    std::vector<tool_agent>            cpu_agents;
-    std::vector<tool_agent>            gpu_agents;
-    std::vector<hardware_counter_info> events_info;
-    agent_counter_id_map_t             agent_events;
-    agent_counter_info_map_t           agent_counter_info;
-    agent_counter_profile_map_t        agent_counter_profiles;
-    buffer_name_info_t                 buffered_tracing_info = {};
-    callback_name_info_t               callback_tracing_info = {};
-    backtrace_operation_map_t          backtrace_operations;
+    rocprofiler_client_id_t*      client_id                 = nullptr;
+    rocprofiler_client_finalize_t client_fini               = nullptr;
+    rocprofiler_context_id_t      counter_ctx               = { 0 };
+    rocprofiler_buffer_id_t       counter_collection_buffer = { 0 };
+    std::vector<tool_agent>       cpu_agents;
+    std::vector<tool_agent>       gpu_agents;
+    agent_counter_id_map_t        agent_events;
+    agent_counter_info_map_t      agent_counter_info;
+    agent_counter_profile_map_t   agent_counter_profiles;
+    buffer_name_info_t            buffered_tracing_info = {};
+    callback_name_info_t          callback_tracing_info = {};
+    backtrace_operation_map_t     backtrace_operations;
 
     void                      initialize();
-    void                      initialize_event_info();
+    void                      initialize_counter_info();
     void                      set_agents();
     context_id_vec_t          get_counter_contexts() const;
     buffer_id_vec_t           get_buffers() const;

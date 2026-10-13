@@ -1021,7 +1021,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     _data->initialize();
     if(!_counter_events.empty())
     {
-        _data->initialize_event_info();
+        _data->initialize_counter_info();
     }
 
     // Insert the default stream and queue info to ensure that the default entry exists
