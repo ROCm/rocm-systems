@@ -5110,7 +5110,8 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.x or v3.0),
+ *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
+ *  v3.0; v2.0 is not supported),
  *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
  *  This pointer is invalidated by ANY subsequent call to
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
@@ -5120,7 +5121,11 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
+ *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
+ *  metrics revision this library does not model, and
+ *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
+ *  the size its header declares.
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -5145,7 +5150,8 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.x or v3.0),
+ *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
+ *  v3.0; v2.0 is not supported),
  *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
  *  This pointer is invalidated by ANY subsequent call to
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
@@ -5155,7 +5161,11 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
+ *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
+ *  metrics revision this library does not model, and
+ *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
+ *  the size its header declares.
  */
 amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
                                                       amdsmi_gpu_metrics_t* pgpu_metrics);

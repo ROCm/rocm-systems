@@ -415,7 +415,10 @@ AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
      << " | Translation Tbl: " << join_metrics_version(metrics_header) << " | Metric Version: "
      << stringfy_metrics_header(metrics_header, is_partition_metrics, file_path)
      << " | Returning = " << static_cast<AMDGpuMetricVersionFlagId_t>(version_id) << " |";
-  LOG_ERROR(ss);
+  // A revision this library does not model is a property of the device, not a
+  // library error. The only caller reports the same failure with the device and
+  // status attached, so logging it as an error here just repeats it louder.
+  LOG_DEBUG(ss);
   return version_id;
 }
 
@@ -5293,6 +5296,21 @@ auto get_casted_value(const AMDGpuDynamicMetricsValue_t& metrics_value) {
   return static_cast<ValueType_t>(metrics_value.m_value);
 }
 
+namespace {
+
+// A metrics revision this library does not model is a property of the device,
+// not a library fault, and every call on that device would repeat the lines.
+// Keep it at debug so a supported device's real faults still stand out.
+void log_by_metrics_status(std::ostringstream& ss, rsmi_status_t status_code) {
+  if (status_code == rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    LOG_DEBUG(ss);
+    return;
+  }
+  LOG_ERROR(ss);
+}
+
+}  // namespace
+
 auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoTypes type)
     -> rsmi_status_t {
   std::ostringstream ss;
@@ -5324,7 +5342,7 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
                                   gpu_metrics_path)
        << " | Cause: Couldn't get a valid metric object"
        << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
-    LOG_ERROR(ss);
+    log_by_metrics_status(ss, status_code);
     return status_code;
   }
 
@@ -5449,7 +5467,7 @@ auto Device::dev_copy_internal_to_external_metrics(DevInfoTypes type)
                                   gpu_metrics_path)
        << " | Cause: Couldn't get a valid metric object"
        << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
-    LOG_ERROR(ss);
+    log_by_metrics_status(ss, status_code);
     return std::make_tuple(status_code, AMGpuMetricsPublicLatest_t());
   }
 
@@ -5490,7 +5508,7 @@ auto Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_count
                                   gpu_metrics_path)
        << " | Cause: Couldn't get a valid metric object"
        << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
-    LOG_ERROR(ss);
+    log_by_metrics_status(ss, status_code);
     return status_code;
   }
 
