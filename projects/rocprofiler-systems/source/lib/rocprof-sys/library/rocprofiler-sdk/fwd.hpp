@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "core/agent_manager.hpp"
 #include "core/timemory.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -26,8 +25,6 @@
 namespace rocprofsys::rocprofiler_sdk
 {
 
-using rocprofsys_agent_t = agent;
-
 struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
 {
     using this_type            = rocprofiler_tool_counter_info_t;
@@ -48,12 +45,6 @@ struct rocprofiler_tool_counter_info_t : rocprofiler_counter_info_v0_t
 
     rocprofiler_agent_id_t                           agent_id = {};
     std::vector<rocprofiler_record_dimension_info_t> dimension_info;
-};
-
-struct tool_agent
-{
-    std::uint64_t             device_id = 0;
-    const rocprofsys_agent_t* agent     = nullptr;
 };
 
 struct timing_interval
@@ -94,8 +85,6 @@ struct client_data
     rocprofiler_client_finalize_t client_fini               = nullptr;
     rocprofiler_context_id_t      counter_ctx               = { 0 };
     rocprofiler_buffer_id_t       counter_collection_buffer = { 0 };
-    std::vector<tool_agent>       cpu_agents;
-    std::vector<tool_agent>       gpu_agents;
     agent_counter_id_map_t        agent_events;
     agent_counter_info_map_t      agent_counter_info;
     agent_counter_profile_map_t   agent_counter_profiles;
@@ -103,13 +92,9 @@ struct client_data
     callback_name_info_t          callback_tracing_info = {};
     backtrace_operation_map_t     backtrace_operations;
 
-    void                      initialize();
-    void                      initialize_counter_info();
-    void                      set_agents();
-    context_id_vec_t          get_counter_contexts() const;
-    buffer_id_vec_t           get_buffers() const;
-    const rocprofsys_agent_t* get_agent(rocprofiler_agent_id_t _id) const;
-    const tool_agent*         get_gpu_tool_agent(rocprofiler_agent_id_t id) const;
+    void                                   initialize_counter_info();
+    context_id_vec_t                       get_counter_contexts() const;
+    buffer_id_vec_t                        get_buffers() const;
     const rocprofiler_tool_counter_info_t* get_tool_counter_info(
         rocprofiler_agent_id_t _agent_id, rocprofiler_counter_id_t _counter_id) const;
 };
@@ -126,26 +111,6 @@ client_data::get_buffers() const
     return buffer_id_vec_t{
         counter_collection_buffer,
     };
-}
-
-inline const rocprofsys_agent_t*
-client_data::get_agent(rocprofiler_agent_id_t _id) const
-{
-    const auto& agent = get_agent_manager_instance().get_agent_by_handle(_id.handle);
-    return &agent;
-}
-
-inline const tool_agent*
-client_data::get_gpu_tool_agent(rocprofiler_agent_id_t id) const
-{
-    for(const auto& itr : gpu_agents)
-    {
-        if(id.handle == itr.agent->handle)
-        {
-            return &itr;
-        }
-    }
-    return nullptr;
 }
 
 inline const rocprofiler_tool_counter_info_t*

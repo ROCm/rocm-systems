@@ -518,8 +518,6 @@ struct external_dependencies
 std::shared_ptr<domain_service<production_backend, external_dependencies>>
     g_domain_service;
 
-using tool_agent_vec_t = std::vector<tool_agent>;
-
 std::atomic<bool> tool_fini_done{ false };
 std::atomic<bool> tool_init_done{ false };
 
@@ -539,10 +537,7 @@ thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 std::vector<rocprofiler_counter_id_t>
 create_agent_profile(rocprofiler_agent_id_t          agent_id,
                      const std::vector<std::string>& counters,
-                     //  const tool_agent_vec_t&         gpu_agents,
-                     //  const agent_counter_info_map_t& counters_info,
-                     //  agent_counter_profile_map_t&    data)
-                     client_data* data = g_tool_data)
+                     client_data*                    data = g_tool_data)
 {
     using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 
@@ -552,11 +547,12 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         return counter_vec_t{};
     }
 
-    auto        profile      = std::optional<rocprofiler_profile_config_id_t>{};
-    auto        expected_v   = counters.size();
-    auto        found_v      = std::vector<std::string_view>{};
-    auto        counters_v   = counter_vec_t{};
-    const auto* tool_agent_v = data->get_gpu_tool_agent(agent_id);
+    auto        profile    = std::optional<rocprofiler_profile_config_id_t>{};
+    auto        expected_v = counters.size();
+    auto        found_v    = std::vector<std::string_view>{};
+    auto        counters_v = counter_vec_t{};
+    const auto& agent_v    = get_agent_manager_instance().get_agent_by_handle(
+        agent_id.handle, agent_type::gpu);
 
     // Check if agent info is available (may not be for unsupported architectures)
     auto const agent_info_it = data->agent_counter_info.find(agent_id);
@@ -564,7 +560,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
     {
         LOG_WARNING("Skipping GPU agent {} (device {}) due to unsupported "
                     "architecture or missing counter info",
-                    agent_id.handle, tool_agent_v->device_id);
+                    agent_id.handle, agent_v.device_type_index);
 
         data->agent_counter_profiles.emplace(agent_id, profile);
         return counter_vec_t{};
@@ -594,11 +590,11 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             auto dev_id_v = std::stoul(dev_id_s);
 
             LOG_DEBUG("tool agent device id={}, name={}, device_id={}",
-                      tool_agent_v->device_id, name_v, dev_id_v);
+                      agent_v.device_type_index, name_v, dev_id_v);
 
             // skip this counter if the counter is for a specific device id (which
             // doesn't this agent's device id)
-            if(dev_id_v != tool_agent_v->device_id)
+            if(dev_id_v != agent_v.device_type_index)
             {
                 --expected_v;  // is not expected
                 continue;
@@ -614,11 +610,11 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         if(name_v != _old_name_v)
         {
             LOG_DEBUG("tool agent device id={}, old_name={}, name={}",
-                      tool_agent_v->device_id, _old_name_v, name_v);
+                      agent_v.device_type_index, _old_name_v, name_v);
         }
         else if(name_v == itr)
         {
-            LOG_DEBUG("tool agent device id={}, name={}", tool_agent_v->device_id,
+            LOG_DEBUG("tool agent device id={}, name={}", agent_v.device_type_index,
                       name_v);
         }
 
@@ -652,9 +648,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
                     "Requested: {}. Found: {}. Missing: {}. Continuing with "
                     "available counters.",
-                    tool_agent_v->agent->node_id, tool_agent_v->device_id,
-                    tool_agent_v->agent->name, requested_counters, found_counters,
-                    missing_counters_str);
+                    agent_v.node_id, agent_v.device_type_index, agent_v.name,
+                    requested_counters, found_counters, missing_counters_str);
     }
 
     if(!counters_v.empty())
@@ -842,17 +837,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     {
         if(!_agent_counter_storage->at(_agent_id).contains(itr.first))
         {
-            const auto* agent = g_tool_data->get_gpu_tool_agent(_agent_id);
-            const auto* info  = g_tool_data->get_tool_counter_info(_agent_id, itr.first);
+            const auto* info = g_tool_data->get_tool_counter_info(_agent_id, itr.first);
 
-            if(!agent)
-            {
-                LOG_CRITICAL("unable to find tool agent for agent (id={})",
-                             _agent_id.handle);
-                ::rocprofsys::state::process::set(
-                    ::rocprofsys::state::process::Finalized);
-                ::std::abort();
-            }
             if(!info)
             {
                 LOG_CRITICAL("unable to find counter info for counter (id={}) on "
@@ -863,15 +849,14 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                 ::std::abort();
             }
 
-            auto        _dev_id = static_cast<std::uint32_t>(agent->device_id);
             const auto& _agent_mgr_entry =
                 get_agent_manager_instance().get_agent_by_handle(_agent_id.handle);
             auto _dev_type_index =
                 static_cast<std::uint32_t>(_agent_mgr_entry.device_type_index);
 
             _agent_counter_storage->at(_agent_id).emplace(
-                itr.first,
-                counter_storage{ g_tool_data, _dev_id, _dev_type_index, 0, info->name });
+                itr.first, counter_storage{ g_tool_data, _dev_type_index, _dev_type_index,
+                                            0, info->name });
         }
 
         auto const _event =
@@ -1018,7 +1003,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     auto* _data        = as_client_data(user_data);
     _data->client_fini = fini_func;
 
-    _data->initialize();
     if(!_counter_events.empty())
     {
         _data->initialize_counter_info();
@@ -1360,9 +1344,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     if(!_counter_events.empty())
     {
         // Resolve counter names to counter IDs per agent
-        for(const auto& itr : _data->gpu_agents)
+        for(const auto& itr :
+            get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
         {
-            const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
+            const auto& _agent_id = rocprofiler_agent_id_t{ itr->handle };
             _data->agent_events.emplace(
                 _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
         }
@@ -1385,7 +1370,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
 #if ROCPROFILER_VERSION >= 600
     const auto gpu_perf_counters_setting = get_gpu_perf_counters();
-    if(!gpu_perf_counters_setting.empty() && !_data->gpu_agents.empty())
+    if(!gpu_perf_counters_setting.empty() &&
+       get_agent_manager_instance().get_gpu_agents_count() > 0)
     {
         pmc::register_gpu_perf_counter_source(
             get_agent_manager_instance().get_agents_by_type(agent_type::gpu));

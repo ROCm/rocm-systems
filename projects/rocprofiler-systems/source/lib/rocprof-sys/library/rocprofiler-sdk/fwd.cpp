@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include "core/agent_manager.hpp"
 #include "core/state.hpp"
 
 #include "logger/debug.hpp"
 
 #include <algorithm>
 #include <exception>
+#include <memory>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/fwd.h>
@@ -21,7 +23,7 @@ namespace rocprofsys::rocprofiler_sdk
 {
 namespace
 {
-using tool_agent_vec_t = std::vector<tool_agent>;
+using agent_vec_t = std::vector<std::shared_ptr<agent>>;
 
 rocprofiler_status_t
 dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
@@ -71,13 +73,13 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
 }
 
 agent_counter_info_map_t
-get_agent_counter_info(const tool_agent_vec_t& _agents)
+get_agent_counter_info(const agent_vec_t& _agents)
 {
     auto _data = agent_counter_info_map_t{};
 
-    for(auto const itr : _agents)
+    for(const auto& itr : _agents)
     {
-        const auto& _agent_id = rocprofiler_agent_id_t{ itr.agent->handle };
+        const auto& _agent_id = rocprofiler_agent_id_t{ itr->handle };
 
         auto status = rocprofiler_iterate_agent_supported_counters(
             _agent_id, counters_supported_callback, &_data);
@@ -122,46 +124,14 @@ rocprofiler_tool_counter_info_t::rocprofiler_tool_counter_info_t(
 {}
 
 void
-client_data::initialize()
-{
-    set_agents();
-}
-
-void
 client_data::initialize_counter_info()
 {
-    auto const& agent_mngr = get_agent_manager_instance();
-
-    if(agent_mngr.get_agents().empty())
-    {
-        initialize();
-    }
-    else if(gpu_agents.empty() && cpu_agents.empty())
-    {
-        set_agents();
-    }
+    auto const gpu_agents =
+        get_agent_manager_instance().get_agents_by_type(agent_type::gpu);
 
     if(agent_counter_info.size() != gpu_agents.size())
     {
         agent_counter_info = get_agent_counter_info(gpu_agents);
     }
-}
-
-void
-client_data::set_agents()
-{
-    auto& agent_mngr = get_agent_manager_instance();
-
-    auto const fill_agents = [&](agent_type type, std::vector<tool_agent>& out) {
-        const auto& _agents = agent_mngr.get_agents_by_type(type);
-        for(const auto& agent : _agents)
-        {
-            out.emplace_back(tool_agent{ .device_id = agent->device_type_index,
-                                         .agent     = agent.get() });
-        }
-    };
-
-    fill_agents(agent_type::gpu, gpu_agents);
-    fill_agents(agent_type::cpu, cpu_agents);
 }
 }  // namespace rocprofsys::rocprofiler_sdk
