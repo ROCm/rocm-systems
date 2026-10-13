@@ -38,12 +38,11 @@ Ubuntu 20.04 / 22.04 / 24.04 (Debian-based, apt)
         --package-manager apt \
         --os-label Ubuntu22
 
-Debian 10
+Debian 12 / 13 (apt)
 ------------------------------------
     sudo python3 run_amdsmi_build.py \
         --package-manager apt \
-        --debian10-sources \
-        --os-label Debian10
+        --os-label Debian13
 
 RHEL 8 / 9 (dnf)
 -----------------
@@ -192,6 +191,7 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -349,8 +349,7 @@ def detect_os_profile(os_release: Optional[Path] = None) -> dict:
     """Parse /etc/os-release and return a dict of derived runner settings.
 
     Returned keys:
-      os_label, package_manager, package_format,
-      debian10_sources, qa_rpaths,
+      os_label, package_manager, package_format, qa_rpaths,
       skip_setuptools_upgrade, install_more_itertools
     Returns an empty dict if /etc/os-release is missing/unrecognized.
 
@@ -372,7 +371,6 @@ def detect_os_profile(os_release: Optional[Path] = None) -> dict:
     major = version_id.split(".", 1)[0] if version_id else ""
 
     profile = {
-        "debian10_sources": False,
         "qa_rpaths": False,
         "skip_setuptools_upgrade": False,
         "install_more_itertools": False,
@@ -387,8 +385,6 @@ def detect_os_profile(os_release: Optional[Path] = None) -> dict:
         profile["package_manager"] = "apt"
         profile["package_format"] = "deb"
         profile["os_label"] = f"Debian{major}" if major else "Debian"
-        if major == "10":
-            profile["debian10_sources"] = True
     # RHEL family -----------------------------------------------------------
     elif os_id in ("rhel", "redhat", "redhatenterpriseserver"):
         profile["package_manager"] = "dnf"
@@ -434,21 +430,37 @@ def package_glob(package_format: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_prereqs_present() -> bool:
+    """True if every tool the build needs is already on the image.
+
+    cmake/make/gcc alone are not enough: a missing pkg-config, git, libdrm
+    header or rpmbuild only surfaces much later, at cmake configure, at
+    FetchContent's clone, or inside `make package`.
+    """
+    if not all(shutil.which(t) for t in ("cmake", "make", "pkg-config", "git", "rpmbuild")):
+        return False
+    if not (shutil.which("gcc") or shutil.which("cc")):
+        return False
+    return (
+        subprocess.call(
+            ["pkg-config", "--exists", "libdrm"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        == 0
+    )
+
+
 def install_build_prereqs(cfg: "RunnerConfig") -> None:
-    """Ensure cmake + a basic build toolchain are installed.
+    """Install the build toolchain when the image does not already carry it.
 
     Several ROCm base images (notably rhel-9.x-bld, rhel-10.x-bld) do not
-    ship cmake on PATH. This step installs cmake/gcc/g++/make on demand so
-    the cmake-configure step doesn't die with FileNotFoundError.
+    ship cmake on PATH, and the official Debian images ship none of it.
     """
-    if (
-        shutil.which("cmake")
-        and shutil.which("make")
-        and (shutil.which("gcc") or shutil.which("cc"))
-    ):
+    if build_prereqs_present():
         return
 
-    print("Installing build prerequisites (cmake/gcc/make)...")
+    print("Installing build prerequisites...")
     if cfg.package_manager == "apt":
         run_command(
             ["apt-get", "update"],
@@ -465,6 +477,16 @@ def install_build_prereqs(cfg: "RunnerConfig") -> None:
                 "cmake",
                 "build-essential",
                 "git",
+                "pkg-config",
+                # libdrm: pkg_check_modules in CMakeLists.txt. rpm: cpack runs
+                # its RPM generator even on a deb distro. ca-certificates:
+                # FetchContent clones esmi_ib_library over https. libgtest-dev:
+                # without it the tests link a FetchContent-built libgtest.so
+                # that the tests package does not ship.
+                "libdrm-dev",
+                "rpm",
+                "ca-certificates",
+                "libgtest-dev",
             ],
             name="apt-install-prereqs",
             retries=cfg.retries,
@@ -593,12 +615,50 @@ def install_more_itertools(log_dir: Path, retries: int) -> None:
     )
 
 
-def upgrade_setuptools(log_dir: Path, retries: int) -> None:
+def is_externally_managed() -> bool:
+    """True if the system Python is PEP 668 externally-managed.
+
+    Debian 12+ and Ubuntu 24.04+ ship an EXTERNALLY-MANAGED marker; pip then
+    refuses to install into the system interpreter, so setuptools/wheel and
+    cmake have to come from distro packages instead of pip.
+    """
+    return (Path(sysconfig.get_path("stdlib")) / "EXTERNALLY-MANAGED").exists()
+
+
+def upgrade_setuptools(cfg: "RunnerConfig") -> None:
+    # On PEP 668 systems the pip upgrade is refused outright, and the distro
+    # may preinstall neither pip nor setuptools (Debian 12/13), which the
+    # wheel build needs for `pip wheel` and setuptools.build_meta. Use apt.
+    if is_externally_managed() and cfg.package_manager == "apt":
+        print("System Python is externally managed; installing setuptools/wheel via apt")
+        if cfg.refresh_apt:
+            run_command(
+                ["apt-get", "update"],
+                name="apt-update-setuptools",
+                retries=cfg.retries,
+                log_dir=cfg.log_dir,
+            )
+        run_command(
+            [
+                "apt-get",
+                "install",
+                "-y",
+                "--no-install-recommends",
+                "python3-pip",
+                "python3-setuptools",
+                "python3-wheel",
+            ],
+            name="apt-install-setuptools",
+            retries=cfg.retries,
+            log_dir=cfg.log_dir,
+        )
+        return
+
     run_command(
         ["python3", "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
         name="pip-upgrade",
-        retries=retries,
-        log_dir=log_dir,
+        retries=cfg.retries,
+        log_dir=cfg.log_dir,
     )
 
 
@@ -610,6 +670,10 @@ def repair_cmake(log_dir: Path) -> None:
     'cmake'``).  This function detects the breakage and force-reinstalls
     the cmake package so the wrapper works again.
     """
+    if is_externally_managed():
+        # pip cannot install into this interpreter; install_build_prereqs
+        # provides cmake from the distro packages instead.
+        return
     try:
         subprocess.run(
             ["cmake", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
@@ -622,47 +686,6 @@ def repair_cmake(log_dir: Path) -> None:
             retries=1,
             log_dir=log_dir,
         )
-
-
-def update_debian10_sources(log_dir: Path, retries: int) -> None:
-    # buster-backports provides newer linux-libc-dev (kernel >= 5.10) which
-    # supplies <linux/time_types.h> that ualoe_lib requires. Without it the
-    # build dies on Debian 10's 4.19-based headers.
-    content = (
-        "deb http://archive.debian.org/debian buster main\n"
-        "deb http://archive.debian.org/debian-security buster/updates main\n"
-        "deb http://archive.debian.org/debian buster-backports main\n"
-    )
-    sources_list = Path("/etc/apt/sources.list")
-    print("Updating sources.list for Debian10 (archived repos + backports)")
-    sources_list.write_text(content, encoding="utf-8")
-    Path("/etc/apt/apt.conf.d/99-disable-check-valid-until").write_text(
-        'Acquire::Check-Valid-Until "false";\n', encoding="utf-8"
-    )
-    run_command(["apt", "update"], name="apt-update", retries=retries, log_dir=log_dir)
-
-
-def install_debian10_kernel_headers(log_dir: Path, retries: int) -> None:
-    """Pull linux-libc-dev from buster-backports for newer UAPI headers.
-
-    Required so that ualoe_lib (which unconditionally includes
-    <linux/time_types.h>, added to UAPI in kernel 5.1) builds on Debian 10.
-    """
-    print("Installing linux-libc-dev from buster-backports for newer UAPI headers")
-    run_command(
-        [
-            "apt-get",
-            "install",
-            "-y",
-            "--no-install-recommends",
-            "-t",
-            "buster-backports",
-            "linux-libc-dev",
-        ],
-        name="apt-install-linux-libc-dev-backports",
-        retries=retries,
-        log_dir=log_dir,
-    )
 
 
 def _mark_safe_git_dir(path: Path) -> None:
@@ -801,6 +824,7 @@ def install_package(cfg: "RunnerConfig", package_path: Path) -> None:
             [
                 "dnf",
                 "install",
+                "python3-pip",
                 "python3-setuptools",
                 "python3-wheel",
                 "-y",
@@ -912,8 +936,15 @@ def verify_wheel_site_packages(cfg: "RunnerConfig") -> None:
     wheel = wheels[0]
     print(f"Found wheel: {wheel}")
 
+    install_cmd = ["python3", "-m", "pip", "install", "--force-reinstall", str(wheel)]
+    if is_externally_managed():
+        # This check is specifically about the wheel landing in site-packages,
+        # so a venv would defeat it and there is no distro package to use
+        # instead. The runner is a disposable container, so overriding PEP 668
+        # is safe here.
+        install_cmd.append("--break-system-packages")
     run_command(
-        ["python3", "-m", "pip", "install", "--force-reinstall", str(wheel)],
+        install_cmd,
         name="pip-install-wheel",
         retries=1,
         log_dir=cfg.log_dir,
@@ -1085,7 +1116,6 @@ class RunnerConfig:
     jobs: int
     os_label: str
     refresh_apt: bool
-    debian10_sources: bool
     skip_setuptools_upgrade: bool
     install_more_itertools: bool
     qa_rpaths: bool
@@ -1119,9 +1149,6 @@ def parse_args() -> RunnerConfig:
     parser.add_argument("--os-label", default="local", help="Label used in log/result dir names")
     parser.add_argument(
         "--no-apt-update", action="store_true", help="Do not run apt update before install"
-    )
-    parser.add_argument(
-        "--debian10-sources", action="store_true", help="Rewrite apt sources for Debian10 archive"
     )
     parser.add_argument(
         "--skip-setuptools-upgrade",
@@ -1189,7 +1216,6 @@ def parse_args() -> RunnerConfig:
         jobs=max(1, args.jobs),
         os_label=os_label,
         refresh_apt=not args.no_apt_update,
-        debian10_sources=args.debian10_sources or profile.get("debian10_sources", False),
         skip_setuptools_upgrade=args.skip_setuptools_upgrade
         or profile.get("skip_setuptools_upgrade", False),
         install_more_itertools=args.install_more_itertools
@@ -1370,34 +1396,27 @@ def main() -> None:
     print(f"Package manager: {cfg.package_manager} (format {cfg.package_format})")
     print(f"OS label: {cfg.os_label}")
 
-    # 1. Debian10 archived repos
-    if cfg.debian10_sources and cfg.package_manager != "apt":
-        print("Warning: --debian10-sources ignored because package manager is not apt")
-    if cfg.debian10_sources:
-        update_debian10_sources(cfg.log_dir, cfg.retries)
-        install_debian10_kernel_headers(cfg.log_dir, cfg.retries)
-
-    # 2. Install more_itertools if requested (e.g. AzureLinux3)
+    # 1. Install more_itertools if requested (e.g. AzureLinux3)
     if cfg.install_more_itertools:
         install_more_itertools(cfg.log_dir, cfg.retries)
 
-    # 3. Upgrade setuptools (skip on AzureLinux3)
+    # 2. Upgrade setuptools (skip on AzureLinux3)
     if not cfg.skip_setuptools_upgrade:
-        upgrade_setuptools(cfg.log_dir, cfg.retries)
+        upgrade_setuptools(cfg)
 
-    # 3b. Repair cmake if the pip wrapper broke during setuptools upgrade (SLES)
+    # 2b. Repair cmake if the pip wrapper broke during setuptools upgrade (SLES)
     repair_cmake(cfg.log_dir)
 
-    # 4. Clean stale ROCm Python artifacts from Docker image
+    # 3. Clean stale ROCm Python artifacts from Docker image
     clean_stale_artifacts(cfg.log_dir)
 
-    # 4b. Ensure cmake + toolchain exist (some base images ship without cmake)
+    # 3b. Ensure cmake + toolchain exist (some base images ship without cmake)
     install_build_prereqs(cfg)
 
-    # 4c. Install libnl-3 / libmnl headers required by amdsmi's CMake config.
+    # 3c. Install libnl-3 / libmnl headers required by amdsmi's CMake config.
     install_netlink_deps(cfg)
 
-    # 5. Build
+    # 4. Build
     if not cfg.skip_build:
         try:
             build_amdsmi(cfg)
@@ -1414,7 +1433,7 @@ def main() -> None:
     print(f"Build artifact: {artifact}")
     _write_result(cfg.test_results_dir, "build_result.txt", f"BUILD PASSED\nArtifact: {artifact}")
 
-    # 5b. Package ships the module on an import path (no install needed)
+    # 4b. Package ships the module on an import path (no install needed)
     try:
         verify_cpack_paths(cfg, artifact)
     except CommandError as exc:
@@ -1427,7 +1446,7 @@ def main() -> None:
         report_and_raise("CPACK PATH CHECK", exc)
     _write_result(cfg.test_results_dir, "cpack_path_result.txt", "CPACK PATH CHECK PASSED")
 
-    # 5c. Loader behaves identically across supported Python versions
+    # 4c. Loader behaves identically across supported Python versions
     try:
         verify_python_versions(cfg)
     except CommandError as exc:
@@ -1440,7 +1459,7 @@ def main() -> None:
         report_and_raise("PYTHON VERSIONS", exc)
     _write_result(cfg.test_results_dir, "python_versions_result.txt", "PYTHON VERSIONS PASSED")
 
-    # 5d. Upgrade/downgrade from a prior package (only when one is provided).
+    # 4d. Upgrade/downgrade from a prior package (only when one is provided).
     # Deliberately ahead of the install/wheel stages: `pip install` puts the
     # wheel under /usr/local, which precedes the deb/rpm site-packages path for
     # `import amdsmi`, so running this afterwards would verify the wheel on
@@ -1460,7 +1479,7 @@ def main() -> None:
             cfg.test_results_dir, "upgrade_downgrade_result.txt", "UPGRADE/DOWNGRADE PASSED"
         )
 
-    # 6. Install
+    # 5. Install
     if not cfg.skip_install:
         try:
             install_package(cfg, artifact)
@@ -1476,7 +1495,7 @@ def main() -> None:
             cfg.test_results_dir, "install_result.txt", f"INSTALL PASSED\nPackage: {artifact}"
         )
 
-    # 7. Verify wheel in site-packages
+    # 6. Verify wheel in site-packages
     if not cfg.skip_install:
         try:
             verify_wheel_site_packages(cfg)
@@ -1490,7 +1509,7 @@ def main() -> None:
             report_and_raise("VERIFY WHEEL", exc)
         _write_result(cfg.test_results_dir, "verify_wheel_result.txt", "VERIFY WHEEL PASSED")
 
-    # 8. SONAME distinctness (system vs wheel library)
+    # 7. SONAME distinctness (system vs wheel library)
     if not cfg.skip_install:
         try:
             verify_soname_distinct(cfg)
@@ -1504,7 +1523,7 @@ def main() -> None:
             report_and_raise("SONAME CHECK", exc)
         _write_result(cfg.test_results_dir, "pkg_conflict_result.txt", "SONAME CHECK PASSED")
 
-    # 9. Dual-copy drift guard (system package installs the module twice)
+    # 8. Dual-copy drift guard (system package installs the module twice)
     if not cfg.skip_install:
         try:
             verify_dual_copy(cfg)

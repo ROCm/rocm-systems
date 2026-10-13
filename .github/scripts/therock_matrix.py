@@ -8,6 +8,8 @@ subtree_to_project_map = {
     "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
+    "projects/hrr": "hrr",
+
     "projects/cuid": "rdc",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
@@ -85,13 +87,27 @@ project_map = {
         "projects_to_test": "",  # rocshmem testing to be enabled in a future PR
     },
     "storage_libs": {
-        "cmake_options": ["-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_STORAGE_LIBS=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_STORAGE_LIBS=ON",
+            "-DTHEROCK_ENABLE_ROCPROFV3=ON",
+        ],
         "projects_to_test": "",  # hipfile testing to be enabled in a future PR
     },
     # Also test rocr-debug-agent and rocgdb since those depend on runtimes.
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile",
+    },
+    # HRR changes require a blocking build of the runtime and HRR test binaries,
+    # but GPU execution is handled separately on datacenter/nightly runners.
+    "hrr": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_BUILD_TESTING=ON",
+        ],
+        "projects_to_test": "",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],

@@ -83,9 +83,12 @@
  * - 1.29 - hsa_amd_image_create_v2, hsa_amd_interop_map_buffer_with_size
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
+ * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
+ * - 1.34 - hsa_amd_vmem_get_vmem_info
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 31
+#define HSA_AMD_INTERFACE_VERSION_MINOR 34
 
 #ifdef __cplusplus
 extern "C" {
@@ -990,6 +993,18 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Returns the last value set by
+   * HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, default 0.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE = 0xA125,
+  /**
+   * Returns the maximum supported persisting L2 cache size on this HW in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
+
 } hsa_amd_agent_info_t;
 
 /**
@@ -1958,18 +1973,22 @@ typedef enum hsa_amd_memory_pool_flag_s {
    * Allocates fine grain memory type where memory ordering is per point to point
    * connection. Atomic memory operations on these memory buffers are not
    * guaranteed to be visible at system scope.
+   * Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_PCIE_FLAG = (1 << 0),
   /**
-   *  Allocates physically contiguous memory
+   *  Allocates physically contiguous memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = (1 << 1),
   /**
-   *  Allocates executable memory
+   *  Allocates executable memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
   /**
-   *  Allocates uncached memory
+   *  Allocates uncached memory. Honored by ::hsa_amd_memory_pool_allocate and
+   *  ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
@@ -4288,6 +4307,37 @@ hsa_status_t HSA_API hsa_amd_svm_discard_batch_async(void** ptrs, size_t* sizes,
                                                      const hsa_signal_t* dep_signals,
                                                      hsa_signal_t completion_signal);
 
+/**
+ * @brief Discards a batch of SVM memory ranges and prefetches them to a GPU agent.
+ * Combines discard and prefetch into a single operation.
+ *
+ * @param[in] ptrs            Array of @p count SVM range pointers to discard and prefetch.
+ *                            Must not be NULL.
+ * @param[in] sizes           Array of @p count range sizes in bytes. Must not be NULL.
+ * @param[in] count           Number of ranges. Must not be 0.
+ * @param[in] dst_agents      Array of @p num_dst_agents destination GPU agents.
+ *                            Must not be NULL. All entries must be valid GPU agents.
+ * @param[in] num_dst_agents  Number of entries in @p dst_agents. Must not be 0.
+ * @param[in] num_dep_signals Number of dependency signals. Can be 0.
+ * @param[in] dep_signals     Dependency signals to wait on before starting. Can be NULL
+ *                            when @p num_dep_signals is 0.
+ * @param[in] completion_signal Signal decremented on completion. May be null.
+ *
+ * @retval ::HSA_STATUS_SUCCESS Operation scheduled successfully.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED HSA runtime not initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT An entry in @p dst_agents is not a valid
+ *         GPU agent.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p ptrs, @p sizes, @p dst_agents
+ *         is NULL; @p count or @p num_dst_agents is 0; @p dep_signals and @p num_dep_signals are
+ *         inconsistent; or a pointer was not allocated with hsa_amd_vmem_address_reserve.
+ * @retval ::HSA_STATUS_ERROR_XNACK_DISABLED XNACK is not enabled on this system.
+ */
+hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
+    void** ptrs, size_t* sizes, uint32_t count,
+    const hsa_agent_t* dst_agents, uint32_t num_dst_agents,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
+    hsa_signal_t completion_signal);
+
 /** @} */
 
 /** \addtogroup profile Profiling
@@ -4346,6 +4396,25 @@ hsa_status_t hsa_amd_spm_release(hsa_agent_t preferred_agent);
 hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t size_in_bytes,
                                          uint32_t* timeout, uint32_t* size_copied, void* dest,
                                          bool* is_data_loss);
+
+
+/** @} */
+
+/** \addtogroup hsa agent attribute
+ *  @{
+ */
+typedef enum hsa_amd_agent_attribute_s {
+  /**
+   * Requested persisting L2 cache size in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE,
+
+} hsa_amd_agent_attribute_t;
+
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                 hsa_amd_agent_attribute_t attribute,
+                                                 void* value);
 
 /** @} */
 
@@ -4566,7 +4635,10 @@ typedef enum {
  * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
- * @param[in] flags - currently unsupported
+ * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t allocation
+ * directives. ::HSA_AMD_MEMORY_POOL_PCIE_FLAG,
+ * ::HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, ::HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+ * and ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG are honored.
  * @param[out] memory_handle - handle for the allocation
  *
  * @retval ::HSA_STATUS_SUCCESS memory allocated successfully
@@ -4704,7 +4776,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
  *
  * @param[out] dmabuf_fd shareable handle
  * @param[in] handle previously allocated virtual memory handle
- * @param[in] flags Currently unsupported
+ * @param[in] flags Bitmask of hsa_amd_dma_buf_mapping_type_t flags.
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
@@ -4759,6 +4831,14 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
  *
  * Returns the allocation properties of an existing handle
  *
+ * For a handle obtained from ::hsa_amd_vmem_import_shareable_handle, the
+ * returned pool identifies placement class only -- host versus device -- and is
+ * not the pool the exporting process allocated from. A shareable handle carries
+ * neither a NUMA node nor an allocation grain, so a host-resident import names
+ * the canonical fine-grained system region regardless of the node or grain of
+ * the original allocation. Consumers must not treat the returned pool as the
+ * source pool, and must not infer NUMA placement from it.
+ *
  * @param[in] memory_handle memory handle to be queried
  * @param[out] pool memory pool that owns this handle
  * @param[out] memory type
@@ -4770,6 +4850,64 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type);
+
+/**
+ * @brief Information about a virtual memory allocation handle.
+ *
+ * Within a ROCr major version this structure can only grow: members are
+ * appended, never reordered or resized. @p size lets ROCr fill only the members
+ * present in the layout the caller was compiled against, so a newer ROCr stays
+ * compatible with an older caller and vice versa.
+ */
+typedef struct hsa_amd_vmem_handle_info_s {
+  /**
+   * Size of this structure in bytes, as compiled by the caller. Must be set to
+   * sizeof(hsa_amd_vmem_handle_info_t) prior to the call. ROCr writes only the
+   * members that fit within this many bytes and leaves the rest untouched. If
+   * ROCr supports an older version of this structure then size will be smaller
+   * on return; members starting after the returned size are not updated.
+   */
+  size_t size;
+  /**
+   * Size of the allocation in bytes.
+   */
+  size_t alloc_size;
+  /**
+   * Agent on which the allocation resides: a CPU agent for host-resident
+   * memory, the owning GPU agent for device-resident memory. For an imported
+   * handle this identifies placement class only -- see the NUMA and grain
+   * caveats on ::hsa_amd_vmem_get_alloc_properties_from_handle.
+   */
+  hsa_agent_t agent;
+} hsa_amd_vmem_handle_info_t;
+
+/**
+ * @brief Returns information about an allocation handle
+ *
+ * Supports handles created locally by ::hsa_amd_vmem_handle_create, and handles
+ * from ::hsa_amd_vmem_import_shareable_handle whose placement and size the
+ * kernel driver was able to describe.
+ *
+ * An imported handle whose properties could not be recovered -- a fabric handle
+ * from ::hsa_amd_vmem_import_fabric_handle, a POSIX dma-buf on a kernel without
+ * GET_DMABUF_INFO support, or a thunk lacking the query -- reports
+ * ::HSA_STATUS_ERROR_INVALID_ALLOCATION rather than succeeding with a zero
+ * size, so callers can distinguish an unrecoverable handle from a genuinely
+ * empty allocation.
+ *
+ * @param[in] memory_handle memory handle to be queried
+ * @param[in,out] info handle information, with @p info->size set by the caller
+ *
+ * @retval ::HSA_STATUS_SUCCESS
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p info is NULL, or @p info->size
+ * is too small to hold any member
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle, or an
+ * imported handle whose properties could not be recovered
+ */
+hsa_status_t hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info);
 
 /**
  * @brief 128-bit globally unique identifier for a ROCr shared memory

@@ -15,9 +15,18 @@ enabled_formats_t
 make_with(bool rocpd_enabled, bool perfetto_enabled, bool unified_memory_enabled = false)
 {
     return enabled_formats_t{ std::vector<format_t>{
-        { format_kind::rocpd, true, rocpd_enabled, "rocpd" },
-        { format_kind::perfetto, false, perfetto_enabled, "perfetto" },
-        { format_kind::unified_memory, false, unified_memory_enabled, "unified_memory" },
+        { .kind             = format_kind::rocpd,
+          .process_parallel = true,
+          .enabled          = rocpd_enabled,
+          .name             = "rocpd" },
+        { .kind             = format_kind::perfetto,
+          .process_parallel = false,
+          .enabled          = perfetto_enabled,
+          .name             = "perfetto" },
+        { .kind             = format_kind::unified_memory,
+          .process_parallel = false,
+          .enabled          = unified_memory_enabled,
+          .name             = "unified_memory" },
     } };
 }
 }  // namespace

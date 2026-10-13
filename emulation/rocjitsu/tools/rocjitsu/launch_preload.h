@@ -31,6 +31,9 @@ std::string find_loaded_tsan_runtime();
 
 void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path);
 
+void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
+                                          const std::string &hooks_path);
+
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment);
 
 } // namespace rocjitsu::cli

@@ -13,7 +13,6 @@
 
 namespace rocprofsys
 {
-class output_file_registry;
 class track_registry;
 
 namespace trace_cache
@@ -29,8 +28,8 @@ namespace core
 class cached_perfetto_session
 {
 public:
-    cached_perfetto_session(output_file_registry& registry, pid_t root_pid,
-                            bool combine_traces, const std::vector<int>& source_pids,
+    cached_perfetto_session(pid_t root_pid, bool combine_traces,
+                            const std::vector<int>&      source_pids,
                             trace_cache::post_processor& processor);
     ~cached_perfetto_session() noexcept;
 
@@ -40,8 +39,11 @@ public:
     cached_perfetto_session& operator=(cached_perfetto_session&&)      = delete;
 
 private:
+    // m_sink must outlive m_engine: the engine only holds a weak_ptr to it (see
+    // trace_sink.hpp) but still drains into it from its own destructor if
+    // stop() was never called explicitly, so it must be destroyed first.
+    std::shared_ptr<trace_sink_interface>   m_sink;
     std::unique_ptr<cached_perfetto_engine> m_engine;
-    std::unique_ptr<trace_sink>             m_sink;
     std::unique_ptr<track_registry>         m_tracks;
     bool                                    m_started{ false };
 };

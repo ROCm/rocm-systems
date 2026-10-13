@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "rocjitsu/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/code/analysis/indirect_branch_discovery.h"
 #include "rocjitsu/code/rj_code.h"
 
 namespace rocjitsu {
@@ -236,6 +236,11 @@ struct KernelTextLayout {
   /// direct transfer window.
   std::vector<IndirectCallFixup> recovered_builder_fixups;
 };
+
+/// @brief Alignment of a kernel entry address: hardware takes it shifted right
+///        by 8. A launch stub placed at the source entry's residue modulo this
+///        is as aligned as the source entry.
+inline constexpr uint64_t kKernelEntryAlignment = 256;
 
 void append_words(std::vector<uint8_t> &text, std::span<const uint32_t> words);
 

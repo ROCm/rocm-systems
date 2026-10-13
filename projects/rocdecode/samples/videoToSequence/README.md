@@ -14,11 +14,31 @@ The VideoToSequence sample illustrates decoding a single packetized video stream
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir video_decode_sample && cd video_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir video_decode_sample && cd video_decode_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> Add the rocDecode and FFmpeg DLL directories to your PATH before configuring — CMake
+> locates FFmpeg by probing PATH — and keep them there when running:
+> ```bat
+> set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;<path-to-ffmpeg>\bin;%PATH%
+> ```
+> If FFmpeg is installed somewhere CMake cannot discover, pass
+> `-DFFMPEG_ROOT=<path-to-ffmpeg>` to the configure step.
 
 ## Run
 

@@ -64,21 +64,20 @@ class DetectOsProfileTests(unittest.TestCase):
         self.assertEqual(prof["package_manager"], "apt")
         self.assertEqual(prof["package_format"], "deb")
         self.assertEqual(prof["os_label"], "Ubuntu22")
-        self.assertFalse(prof["debian10_sources"])
         self.assertFalse(prof["qa_rpaths"])
 
-    def test_debian10_sets_archive_sources(self):
+    def test_debian13(self):
         osr = _make_osr(
             self.tmp,
             """
             ID=debian
-            VERSION_ID="10"
+            VERSION_ID="13"
             """,
         )
         prof = rab.detect_os_profile(osr)
-        self.assertEqual(prof["os_label"], "Debian10")
-        self.assertTrue(prof["debian10_sources"])
+        self.assertEqual(prof["os_label"], "Debian13")
         self.assertEqual(prof["package_manager"], "apt")
+        self.assertEqual(prof["package_format"], "deb")
 
     def test_rhel10_sets_qa_rpaths(self):
         osr = _make_osr(

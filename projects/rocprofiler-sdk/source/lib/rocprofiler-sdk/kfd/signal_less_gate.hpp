@@ -39,6 +39,12 @@ namespace kfd
 bool
 signal_less_feature_enabled();
 
+// Populate every env-backed knob's first-use cache from ONE serialized thread,
+// before any worker/producer exists. Call sites read `environ` via
+// common::get_env*, which is unsafe against a concurrent setenv. Idempotent.
+void
+signal_less_prime_env();
+
 // True if the loss policy deliberately leaked this id, in which case
 // correlation_id_finalize() must NOT force-retire it: its kernel may still be
 // running and its references were intentionally not dropped.
@@ -75,6 +81,7 @@ enum class signal_less_counter
     finalizer_emitted,     // RESULT_READY: record emitted with KFD timestamps
     finalizer_no_timing,   // COMPLETED_NO_TIMING: retired, no record
     register_refused,      // hub refused a batch eligibility had accepted; id retired here
+    cap_evicted,           // closed-window entry evicted under the per-GPU hub cap (D9)
     kCount
 };
 
@@ -102,22 +109,6 @@ signal_less_abandon_in_child();
 // True in a process that inherited signal-less state across a fork.
 bool
 signal_less_child_stale();
-
-// Per-SKU gate. Signal-less window creation is allowed ONLY on a SKU whose GPU
-// clock domain has been validated. On an unvalidated SKU the firmware<->KFD clock
-// offset is bounded but unscreened, so a record could be silently mis-windowed (a
-// wrong-dispatch outcome, not just coverage loss); such an agent takes the signal
-// path instead. Adding a SKU requires validating its clock domain first -- a
-// matching gfx_target_version is not sufficient evidence on its own.
-inline bool
-tclk_validated_sku(uint32_t gfx_target_version)
-{
-    switch(gfx_target_version)
-    {
-        case 90500: return true;  // gfx950 (MI350) -- validated
-        default: return false;    // every other SKU: validate, then add it here
-    }
-}
 
 }  // namespace kfd
 }  // namespace rocprofiler

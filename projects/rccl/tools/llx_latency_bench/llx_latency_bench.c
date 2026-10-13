@@ -162,11 +162,11 @@ typedef const uint64_t __attribute__((address_space(1)))* cgptr64;
 
 __device__ __forceinline__
 uint64_t sys_load64(cgptr64 p)
-{ return __hip_atomic_load(p, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
+{ return __scoped_atomic_load_n(p, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM); }
 
 __device__ __forceinline__
 void sys_store64(gptr64 p, uint64_t v)
-{ __hip_atomic_store(p, v, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM); }
+{ __scoped_atomic_store_n(p, v, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM); }
 
 // Payload hash: nonzero for any (grp, lane, flag) where flag >= 1 — keeps a
 // freshly-zeroed buffer from passing verify by accident.

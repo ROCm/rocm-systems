@@ -8,9 +8,6 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -54,7 +51,7 @@ struct perfetto_policy
     {
         for(const auto& entry : device_entries)
         {
-            auto idx                         = entry.device->get_index();
+            auto const idx                   = entry.device->get_index();
             detail::get_perfetto_data()[idx] = {
                 std::make_unique<std::vector<detail::gpu_perf_counter_perfetto_sample>>(),
                 {}
@@ -65,14 +62,18 @@ struct perfetto_policy
     static void setup_counter_tracks(size_t                               device_index,
                                      const std::vector<counter_metadata>& counter_meta)
     {
-        auto it = detail::get_perfetto_data().find(device_index);
-        if(it == detail::get_perfetto_data().end()) return;
+        auto const it = detail::get_perfetto_data().find(device_index);
+        if(it == detail::get_perfetto_data().end())
+        {
+            return;
+        }
 
         for(const auto& meta : counter_meta)
         {
-            auto qname      = make_qualified_name(meta);
-            auto track_name = format_track_name(device_index, qname);
-            auto track_id   = counter_track::emplace(device_index, track_name, "count");
+            auto const qname      = make_qualified_name(meta);
+            auto       track_name = format_track_name(device_index, qname);
+            auto const track_id =
+                counter_track::emplace(device_index, track_name, "count");
             it->second.counter_tracks[meta.counter_id] = track_id;
             LOG_DEBUG("Created Perfetto counter track: {}", track_name);
         }
@@ -81,35 +82,50 @@ struct perfetto_policy
     static void store_sample(size_t device_index, const metrics& metric_values,
                              std::uint64_t timestamp)
     {
-        auto it = detail::get_perfetto_data().find(device_index);
-        if(it == detail::get_perfetto_data().end()) return;
+        auto const it = detail::get_perfetto_data().find(device_index);
+        if(it == detail::get_perfetto_data().end())
+        {
+            return;
+        }
 
-        it->second.samples->emplace_back(
-            detail::gpu_perf_counter_perfetto_sample{ timestamp, metric_values });
+        it->second.samples->emplace_back(detail::gpu_perf_counter_perfetto_sample{
+            .timestamp = timestamp, .values = metric_values });
     }
 
     static void post_process(const enabled_metrics& /*enabled*/)
     {
         const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info) return;
+        if(!thread_info)
+        {
+            return;
+        }
 
         for(const auto& entry : detail::get_perfetto_data())
         {
             const auto  device_index = entry.first;
             const auto& data         = entry.second;
-            if(!data.samples) continue;
+            if(!data.samples)
+            {
+                continue;
+            }
 
             LOG_DEBUG("Post-processing {} samples for device {}", data.samples->size(),
                       device_index);
 
             for(const auto& sample : *data.samples)
             {
-                if(!thread_info->is_valid_time(sample.timestamp)) continue;
+                if(!thread_info->is_valid_time(sample.timestamp))
+                {
+                    continue;
+                }
 
                 for(const auto& cv : sample.values)
                 {
                     auto track_it = data.counter_tracks.find(cv.counter_id);
-                    if(track_it == data.counter_tracks.end()) continue;
+                    if(track_it == data.counter_tracks.end())
+                    {
+                        continue;
+                    }
 
                     TRACE_COUNTER("rocm_counter_collection",
                                   counter_track::at(device_index, track_it->second),

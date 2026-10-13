@@ -47,6 +47,8 @@ Parallelism API support
 * Kokkos-Tools (KokkosP)
 * OpenMP-Tools (OMPT)
 
+.. _rocprof-sys-feature-gpu-metrics:
+
 GPU metrics
 ========================================
 
@@ -71,6 +73,8 @@ GPU metrics
   .. note::
 
     The availability of VCN, JPEG, XGMI, and PCIe metrics depends on device support and system topology. If unsupported, values will be reported as ``N/A`` in the output of ``amd-smi metric --usage``.
+
+.. _rocprof-sys-feature-cpu-metrics:
 
 CPU metrics
 ========================================

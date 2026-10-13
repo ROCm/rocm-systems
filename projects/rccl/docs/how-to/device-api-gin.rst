@@ -10,9 +10,16 @@ Use the RCCL device API and GIN
 The experimental RCCL device API lets GPU kernels communicate through a
 device communicator (``ncclDevComm``). GPU-initiated networking (GIN) extends
 that API with one-sided puts, signals, counters, and barriers across nodes.
-RCCL 2.30.4 incorporates Device API and GIN enhancements from upstream
-NCCL 2.30.3. This page describes those APIs and the limits of the AMD
+RCCL 2.31 incorporates Device API and GIN enhancements from upstream
+NCCL 2.31.2. This page describes those APIs and the limits of the AMD
 host-proxy backend.
+
+To supply a GIN backend rather than consume one, see
+:ref:`using-rccl-gin-plugin`.
+
+``NCCL_GIN_TYPE`` values for AMD backends are **not compatible with 2.30.7**:
+rocSHMEM GDA moved from 5 to 6 and Anvil SDMA from 6 to 7 because NCCL 2.31
+placed EFA GDA at 5. The IB proxy remains ``NCCL_GIN_TYPE=2``.
 
 Requirements
 ============
@@ -87,10 +94,17 @@ request; use the value returned in ``devComm.ginContextCount`` when assigning
 work to contexts.
 
 ``ginTrafficClass`` overrides the host communicator traffic class for this
-device communicator. ``NCCL_IB_SL`` independently overrides the InfiniBand
-service level, and ``NCCL_IB_TC`` independently overrides the RoCE traffic
-class. Set ``reqs.ginTrafficClass`` only when the fabric administrator provides
-an appropriate value.
+device communicator. The service level of the GIN connections comes from
+``NCCL_IB_SL`` when it is set, otherwise from ``ginTrafficClass`` or the host
+communicator. Their RoCE traffic class comes from ``NCCL_GIN_IB_TC`` when it is
+set, then from ``NCCL_IB_TC``, and only then from ``ginTrafficClass`` or the
+host communicator. Setting ``NCCL_GIN_IB_TC`` moves GIN traffic to its own RoCE
+traffic class while the collective and point-to-point connections keep
+``NCCL_IB_TC``. InfiniBand link layers don't carry the traffic class, so
+``NCCL_GIN_IB_TC`` has no effect there; GIN traffic can be separated only
+through the service level, by setting ``ginTrafficClass`` and leaving
+``NCCL_IB_SL`` unset. Set these values only when the fabric administrator
+provides appropriate values.
 
 Device code creates an ``ncclGin`` object for one returned context:
 
@@ -110,7 +124,7 @@ For example, a CTA can issue a put and wait for local queue completion:
        gin.put(ncclTeamWorld(devComm), peer,
                destination, /*destinationOffset=*/0,
                source, /*sourceOffset=*/0, bytes,
-               ncclGin_SignalInc{/*signal=*/0});
+               ncclGin_WeakSignalInc{/*signal=*/0});
      }
      gin.flush(ncclCoopCta());
    }
@@ -123,6 +137,63 @@ the destination bytes.
 ``NCCL_GIN_RESOURCE_SHARING_CTA`` limits sharing to a CTA. These modes select
 resource-sharing behavior on direct device backends. The AMD GIN host-proxy
 backend uses the same proxy queue behavior for both modes.
+
+Choose strong or weak signal semantics
+======================================
+
+Explicit signal types state which earlier puts become visible when a peer
+observes the signal:
+
+* A **weak signal** guarantees visibility of only the put carrying that signal.
+  Use it for independent per-operation completion, as in the example above. It
+  makes no guarantee about earlier puts, although a backend can order them.
+* A **strong signal** also guarantees visibility of every preceding put issued
+  to the same peer through the same GIN context. Use it as a publication point
+  for a sequence of puts.
+
+For example, one strong signal can publish two buffers without attaching a
+signal to the first put:
+
+.. code-block:: cpp
+
+   if (threadIdx.x == 0) {
+     auto team = ncclTeamWorld(devComm);
+     gin.put(team, peer, destination, 0, source, 0, firstBytes,
+             ncclGin_None{});
+     gin.put(team, peer, destination, secondOffset,
+             source, secondOffset, secondBytes,
+             ncclGin_StrongSignalInc{/*signal=*/0});
+   }
+   gin.flush(ncclCoopCta());
+
+After the peer's ``waitSignal`` returns, both puts are visible. This ordering is
+limited to the same peer and GIN context. A strong signal does not publish puts
+issued through another context or to another peer.
+
+The explicit indexed actions are ``ncclGin_StrongSignalInc``,
+``ncclGin_StrongSignalAdd``, ``ncclGin_WeakSignalInc``, and
+``ncclGin_WeakSignalAdd``. Equivalent ``StrongVASignal`` and ``WeakVASignal``
+actions target a window and offset; their window must be registered with
+``NCCL_WIN_STRICT_ORDERING``.
+
+``ginStrongSignalsRequired`` defaults to ``true`` in
+``NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER``. The runtime rejects device
+communicator creation if the selected backend cannot provide strong signals.
+A kernel that uses only weak signals can set the field to ``false`` to permit
+such a backend:
+
+.. code-block:: cpp
+
+   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+   reqs.ginSignalCount = 1;
+   reqs.ginStrongSignalsRequired = false; // Kernel issues only weak signals.
+
+Do not issue a strong action from a device communicator created with
+``ginStrongSignalsRequired=false``; that usage is undefined. The older
+``ncclGin_SignalInc``, ``ncclGin_SignalAdd``, and VA equivalents are
+deprecated. Their strength is selected globally by
+``ginStrongSignalsRequired``; new code should use an explicit type.
 
 Use world-team barriers and timeouts
 ====================================
@@ -137,10 +208,16 @@ without manually allocating a barrier handle:
 
    ncclResult_t result = barrier.sync(
        ncclCoopCta(), cuda::memory_order_acq_rel,
-       ncclGinFenceLevel::Relaxed, timeoutCycles);
+       ncclGinFenceLevel::None, timeoutCycles);
 
 The timeout overload returns ``ncclTimeout`` if all team members don't arrive
-within ``timeoutCycles``. Barrier resources for ``ncclGinBarrierSession``,
+within ``timeoutCycles``. ``ncclGinFenceLevel`` is a bitmask: ``None`` is arrival
+only, ``Put`` makes inbound (and self) puts visible, ``Get`` drains local gets,
+and omitting the fence argument is ``Put | Get``. ``Relaxed`` is a deprecated
+alias for ``None``. Pass ``ncclGinAllContexts(devComm)`` instead of a single
+``ncclGin`` when puts or gets were issued on more than one GIN context.
+
+Barrier resources for ``ncclGinBarrierSession``,
 ``ncclLsaBarrierSession``, and ``ncclBarrierSession`` are separate. Reserve
 ``barrierCount`` for generic ``ncclBarrierSession`` objects; use
 ``lsaBarrierCount``, ``railGinBarrierCount``, or ``worldGinBarrierCount`` for
@@ -166,9 +243,21 @@ Version and backend notes
 
 ``ncclDevComm`` is versioned. The upstream NCCL 2.30.3 and 2.30.4 release notes
 require applications using GIN APIs to be rebuilt with the matching release.
-RCCL accepts compatible layouts within the 2.30 family, but applications using
-pre-2.30 GIN device code must be rebuilt with compatible RCCL headers. The
-runtime rejects pre-2.30 requirements that request indexed GIN resources.
+The upstream NCCL 2.30.7 release notes describe explicit Strong and Weak
+signals and add ``ncclGinFenceLevel`` semantics for GIN barriers (``None``,
+``Put``, ``Get``, default ``Put | Get``). The explicit signal API is marked
+available since NCCL 2.30.5. RCCL accepts compatible layouts within the 2.30
+family, but applications using pre-2.30 GIN device code must be rebuilt with
+compatible RCCL headers. The runtime rejects pre-2.30 requirements that request
+indexed GIN resources.
+
+``NCCL_GIN_IB_TC``, added in upstream NCCL 2.30.7, applies to the connections
+of the IB proxy backend (``NCCL_GIN_TYPE=2``). The one-sided host RMA
+operations run on the same backend and use the same traffic class. The
+rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) doesn't read ``NCCL_GIN_IB_TC``,
+``NCCL_IB_TC``, or ``ginTrafficClass``; its queue pairs take their traffic
+class from ``ROCSHMEM_GDA_TRAFFIC_CLASS``. Anvil SDMA (``NCCL_GIN_TYPE=7``)
+moves data within a node without a NIC, so traffic class doesn't apply to it.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

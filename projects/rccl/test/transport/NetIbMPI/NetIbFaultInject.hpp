@@ -14,10 +14,8 @@
  * internal headers. Using the same headers in both the library and the tests
  * guarantees that the ABI can never silently diverge.
  *   - net_ib_fault_inject.h        : CAST transport (src/transport/net_ib_cast)
- *   - net_ib_flush_fault_inject.h  : base GDR flush   (src/transport/net_ib)
  */
 #include "net_ib_fault_inject.h"
-#include "net_ib/net_ib_flush_fault_inject.h"
 
 #endif /* MPI_TESTS_ENABLED && ENABLE_FAULT_INJECTION */
 

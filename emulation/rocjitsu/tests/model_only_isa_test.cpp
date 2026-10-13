@@ -26,6 +26,12 @@ TEST(ModelOnlyIsaTest, DecodesWithoutExecutionCallback) {
   ASSERT_EQ(registry.targets().size(), 1u);
   EXPECT_EQ(registry.targets()[0].id, "cdna5");
   EXPECT_FALSE(registry.targets()[0].supports_execution);
+  const IsaGpuTargetDescription *gfx1250 = registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1250);
+  const IsaGpuTargetDescription *gfx1251 = registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1251);
+  ASSERT_NE(gfx1250, nullptr);
+  ASSERT_NE(gfx1251, nullptr);
+  EXPECT_FALSE(gfx1250->capabilities.execution_implemented);
+  EXPECT_FALSE(gfx1251->capabilities.execution_implemented);
 
   std::unique_ptr<Decoder> decoder = Decoder::create(registry, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_NE(decoder, nullptr);

@@ -61,6 +61,9 @@ EXCLUDE_PREFIX = (
     # keeps the rest of the pre-commit suite off this code.
     "include/ualoe_lib/",
     "src/ualoe_lib/",
+    # Agent tooling, not shipped source: nothing under here is compiled,
+    # installed or distributed, so the header convention does not apply.
+    ".claude/",
 )
 EXCLUDE_EXACT = frozenset(
     {
