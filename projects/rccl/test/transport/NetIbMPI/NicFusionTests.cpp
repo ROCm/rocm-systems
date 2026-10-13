@@ -1882,6 +1882,24 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     std::vector<RCCLTestGuards::HostBufferAutoGuard> bufGuards;
     std::vector<void*> bufs(kNumOutstanding, nullptr);
     std::vector<void*> mrs(kNumOutstanding, nullptr);
+    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
+    std::vector<void*> sendReqs(kNumOutstanding, nullptr);
+    auto mrGuard = RCCLTestGuards::makeScopeGuard([&]() {
+        for (int i = 0; i < kNumOutstanding; i++) {
+            const bool pending = (rank == 0) ? recvReqs[i] != nullptr : sendReqs[i] != nullptr;
+            if (pending) {
+                // A failed wait does not cancel this request; retain both
+                // resources until the isolated test process exits.
+                mrs[i] = nullptr;
+                bufGuards[i].release();
+                continue;
+            }
+            if (mrs[i]) {
+                (void)DeregisterMemory(comm, mrs[i]);
+                mrs[i] = nullptr;
+            }
+        }
+    });
     for (int i = 0; i < kNumOutstanding; i++) {
         bufs[i] = malloc(kLargeBufferSize);
         ASSERT_NE(bufs[i], nullptr);
@@ -1919,16 +1937,13 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     //   Sender (rank 1):
     //     (idle)
     //     Phase 2: sleep 50ms, then fill bufs + PostSend 0..7,
-    //              then IMMEDIATELY overwrite all bufs with 0xFF + launch GPU work
+    //              wait for all send completions, then overwrite bufs with 0xFF + launch GPU work
     //     Phase 3: verify GPU work
     //
     // What we're testing:
-    //   After PostSend, sender overwrites the send buffers with garbage (0xFF).
-    //   If RDMA has already read the original data before the overwrite,
-    //   receiver sees correct data. If RDMA reads after overwrite → corruption.
+    //   The sends are outstanding concurrently, but their buffers are not reused
+    //   until completion confirms the NIC has consumed them.
     // =========================================================================
-
-    std::vector<void*> recvReqs(kNumOutstanding, nullptr);
 
     // ===================== Phase 1: Receiver posts ALL recvs =====================
     if (rank == 0) {
@@ -1944,31 +1959,38 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
         }
     }
 
-    // ===================== Phase 2: Sender sleeps, sends, then corrupts =====================
+    // ===================== Phase 2: Sender sleeps, sends, then completes =====================
     if (rank == 1) {
         // Deliberate delay
         usleep(kSendDelayUs);
 
-        // Fill each buffer with a unique pattern and post send
+        // Fill each buffer with a unique pattern and post every send before
+        // waiting, preserving the outstanding-send coverage.
         for (int i = 0; i < kNumOutstanding; i++) {
             int seed = kTagBase + i;
             fillHostBufferWithPattern<uint8_t>(bufs[i], kLargeBufferSize, makeBytePattern(seed));
 
-            void* sendReq = nullptr;
-            ASSERT_EQ(PostSend(pair.sendComm, bufs[i], kLargeBufferSize,
-                               kTagBase + i, mrs[i], &sendReq), ncclSuccess)
-                << "PostSend failed for op " << i;
-            // Don't care about sendReq — we verify via recv completions
+            PostSendWithRetry(pair.sendComm, bufs[i], kLargeBufferSize,
+                              kTagBase + i, mrs[i], &sendReqs[i]);
         }
 
-        // IMMEDIATELY overwrite all send buffers with garbage.
-        // This is the critical test: if RDMA hasn't finished reading the
-        // buffer yet, receiver will see 0xFF instead of the pattern.
+        // A send buffer remains owned by the caller until the request completes.
+        // Waiting after all posts retains concurrency while making reuse safe.
+        for (int i = 0; i < kNumOutstanding; i++) {
+            int sizes[1] = {0};
+            ASSERT_EQ(WaitForCompletion(sendReqs[i], sizes, kLargeTransferTimeoutMs),
+                      ncclSuccess)
+                << "Send " << i << " timed out";
+            sendReqs[i] = nullptr;
+        }
+
+        // Completion permits reuse; keeping this overwrite catches a future
+        // completion path that reports done before the NIC has consumed data.
         for (int i = 0; i < kNumOutstanding; i++) {
             memset(bufs[i], 0xFF, kLargeBufferSize);
         }
 
-        // Also launch async GPU work — overlaps with RDMA completion
+        // Also launch independent async GPU work after the network requests complete.
         for (int i = 0; i < 10; i++) {
             HIP_TEST_CHECK_GTEST_FAIL(
                 hipMemcpyAsync(gpuB, gpuA, kLargeBufferSize,
@@ -1987,6 +2009,7 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
             ASSERT_EQ(WaitForCompletion(recvReqs[i], csz, kLargeTransferTimeoutMs),
                       ncclSuccess)
                 << "Recv " << i << " timed out";
+            recvReqs[i] = nullptr;
             EXPECT_EQ(csz[0], (int)kLargeBufferSize) << "Size mismatch recv op " << i;
         }
 
@@ -2039,7 +2062,9 @@ TEST_F(NetIbMPITest, MultipleOutstandingSendRecv) {
     // ===================== Cleanup =====================
     // MR deregistration must happen before bufGuards free the underlying memory.
     for (int i = 0; i < kNumOutstanding; i++) {
-        if (mrs[i]) DeregisterMemory(comm, mrs[i]);
+        if (!mrs[i]) continue;
+        ASSERT_EQ(DeregisterMemory(comm, mrs[i]), ncclSuccess);
+        mrs[i] = nullptr;
     }
     // bufGuards, gpuAGuard, gpuBGuard, gpuStreamGuard clean up automatically.
 }
