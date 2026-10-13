@@ -292,6 +292,15 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``NCCL_TREE_COMPACT``
+        | Builds the inter-node trees with a half-interleave node remapping
+          that keeps the tree spine in the first half of the nodes and moves
+          the hops to the second half to the leaves. Intended for jobs whose
+          nodes are ordered by network domain. All ranks in a communicator
+          must use the same value; initialization fails otherwise.
+      - | ``0``: Standard double binary tree (default)
+        | ``1``: Compact tree
+
 Network and topology
 ====================
 

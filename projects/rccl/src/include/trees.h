@@ -18,6 +18,7 @@ ncclResult_t ncclGetDtree(int nranks, int rank, int* u0, int* d0_0, int* d0_1, i
 // Uses half-interleave remapping to keep spine in first half of ranks and push
 // cross-domain hops to leaf level where they execute in parallel.
 // Enable via NCCL_TREE_COMPACT=1
-ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1, int* parentChildType0, int* s1, int* d1_0, int* d1_1, int* parentChildType1);
+ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1, int* parentChildType0, int* s1,
+                                 int* d1_0, int* d1_1, int* parentChildType1);
 
 #endif
