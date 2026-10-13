@@ -190,6 +190,14 @@ declare -A TEST_NUMBERS=(
   ["tile_get_wave_rowmajor_start_coord"]="180"
   ["tile_put_wg_rowmajor_start_coord"]="181"
   ["tile_get_wg_rowmajor_start_coord"]="182"
+  ["tile_put_3d"]="183"
+  ["tile_get_3d"]="184"
+  ["tile_put_wg_3d"]="185"
+  ["tile_get_wg_3d"]="186"
+  ["tile_put_4d"]="187"
+  ["tile_get_4d"]="188"
+  ["tile_put_wg_4d"]="189"
+  ["tile_get_wg_4d"]="190"
 )
 
 # Detect which runtime to use
@@ -1096,6 +1104,15 @@ TestTiles() {
   ExecTest  "tile_get_wave_rowmajor_start_coord"  2       1            $WAVE_SIZE
   ExecTest  "tile_put_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
   ExecTest  "tile_get_wg_rowmajor_start_coord"    2       1            $((WAVE_SIZE * 16))
+  # 3D/4D N-dimensional tile tests (thread, wave, and workgroup scopes)
+  ExecTest  "tile_put_3d"                         2       1            1
+  ExecTest  "tile_get_3d"                         2       1            1
+  ExecTest  "tile_put_wg_3d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_3d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_put_4d"                         2       1            1
+  ExecTest  "tile_get_4d"                         2       1            1
+  ExecTest  "tile_put_wg_4d"                      2       4            $((WAVE_SIZE * 16))
+  ExecTest  "tile_get_wg_4d"                      2       4            $((WAVE_SIZE * 16))
   ExecTest  "tile_broadcast"            2       1            1            1048576
   ExecTest  "tile_broadcast"            4       1            1            1048576
   # tile_broadcast_wave: each wave uses its own context; set MAX_NUM_CONTEXTS = NUM_WGS * NUM_WF

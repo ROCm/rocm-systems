@@ -80,6 +80,7 @@
 #include "tile_broadcast_tester.hpp"
 #include "tile_allgather_tester.hpp"
 #include "tile_reduce_tester.hpp"
+#include "tile_nd_rma_tester.hpp"
 #include "reduce_on_stream_tester.hpp"
 #include "host_ctx_create_tester.hpp"
 #include "team_split_2d_tester.hpp"
@@ -1008,6 +1009,38 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case TileGetWGRowMajorStartCoordTestType:
       test_name = "Tile Get WG Row-Major (non-zero start_coord)";
       testers.push_back(new TileRMATester(args));
+      break;
+    case TilePut3DTestType:
+      test_name = "Tile Put 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet3DTestType:
+      test_name = "Tile Get 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG3DTestType:
+      test_name = "Tile Put WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG3DTestType:
+      test_name = "Tile Get WG 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePut4DTestType:
+      test_name = "Tile Put 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGet4DTestType:
+      test_name = "Tile Get 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWG4DTestType:
+      test_name = "Tile Put WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWG4DTestType:
+      test_name = "Tile Get WG 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
