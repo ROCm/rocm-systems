@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -448,6 +448,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_kernel_dispatch_data_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+    ROCP_SDK_SAVE_DATA_FIELD(pipe_id);
 }
 
 template <typename ArchiveT>
@@ -826,6 +827,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_kernel_dispatch_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
+    ROCP_SDK_SAVE_DATA_FIELD(pipe_id);
 }
 
 template <typename ArchiveT>

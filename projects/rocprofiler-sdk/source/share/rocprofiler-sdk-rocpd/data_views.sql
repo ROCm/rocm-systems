@@ -304,6 +304,7 @@ SELECT
     K.queue_id,
     K.graph_exec_id,
     K.graph_node_id,
+    K.pipe_id,
     Q.name AS queue,
     ST.name AS stream,
     K.start,

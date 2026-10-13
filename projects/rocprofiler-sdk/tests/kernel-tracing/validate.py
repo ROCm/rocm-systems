@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -325,6 +325,43 @@ def test_kernel_dispatch_ids(input_data):
     assert len(bf_seq_ids) == num_dispatches
     assert len(bf_seq_ids_uniq) == num_dispatches
     assert len(cb_seq_ids_uniq) == num_dispatches
+
+
+def test_kernel_dispatch_pipe_ids(input_data, signal_less_summary):
+    data = input_data
+    sdk_data = data["rocprofiler-sdk-json-tool"]
+
+    pipe_id_none = -1  # ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE
+    max_pipes = 8  # kMaxRegions in kfd/dlog_drain.hpp
+    enqueue_op = 1  # ROCPROFILER_KERNEL_DISPATCH_ENQUEUE
+
+    # the pipe is only known at completion, and only through signal-less completion
+    cb_pipe_ids = {}
+    for itr in sdk_data["callback_records"]["kernel_dispatch"]:
+        pipe_id = itr["payload"]["pipe_id"]
+        if itr["operation"] == enqueue_op:
+            assert pipe_id == pipe_id_none, f"{itr}"
+        else:
+            assert pipe_id_none <= pipe_id < max_pipes, f"{itr}"
+            cb_pipe_ids[itr["payload"]["dispatch_info"]["dispatch_id"]] = pipe_id
+
+    bf_pipe_ids = []
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
+        pipe_id = itr["pipe_id"]
+        assert pipe_id_none <= pipe_id < max_pipes, f"{itr}"
+        dispatch_id = itr["dispatch_info"]["dispatch_id"]
+        if dispatch_id in cb_pipe_ids:
+            assert pipe_id == cb_pipe_ids[dispatch_id], f"{itr}"
+        bf_pipe_ids.append(pipe_id)
+
+    # Whether signal-less completion engages depends on the KFD and the firmware, so the
+    # records are checked against what the tool reports it completed: exactly the
+    # dispatches it emitted know their pipe
+    emitted = 0 if signal_less_summary is None else signal_less_summary["emitted"]
+    num_known = len([itr for itr in bf_pipe_ids if itr != pipe_id_none])
+    assert num_known == emitted, f"summary: {signal_less_summary}"
+    if emitted == 0:
+        assert all(itr == pipe_id_none for itr in cb_pipe_ids.values())
 
 
 def test_async_copy_direction(input_data):

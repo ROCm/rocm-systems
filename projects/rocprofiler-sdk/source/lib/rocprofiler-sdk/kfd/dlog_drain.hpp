@@ -136,6 +136,7 @@ struct drained_record
 {
     uint32_t doorbell_off = 0;
     uint32_t dispatch_id  = 0;
+    uint32_t region       = 0;  // ring region the EOP arrived on == hardware pipe
     uint64_t start_ticks  = 0;
     uint64_t end_ticks    = 0;
     bool     start_known  = false;
@@ -418,6 +419,7 @@ pair_records(const copied_record* records,
             auto out         = drained_record{};
             out.doorbell_off = rec.doorbell_off;
             out.dispatch_id  = rec.dispatch_id;
+            out.region       = records[w.idx].region;
             out.end_ticks    = ts;
             out.start_known  = false;
             on_record(out);
@@ -452,6 +454,7 @@ pair_records(const copied_record* records,
             auto out         = drained_record{};
             out.doorbell_off = rec.doorbell_off;
             out.dispatch_id  = rec.dispatch_id;
+            out.region       = records[w.idx].region;
             out.end_ticks    = ts;
             out.start_ticks  = it->second.start_ticks;
             out.start_known  = true;
