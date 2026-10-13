@@ -100,7 +100,7 @@ pop_count()
 struct category_stack
 {
     std::int32_t profile = 0;  // use signed so compiler doesn't have to
-    std::int32_t tracing = 0;  // account for underflow/overflow
+                               // account for underflow/overflow
 };
 
 template <typename CategoryT>
@@ -109,13 +109,6 @@ get_category_stack()
 {
     static thread_local auto _v = category_stack{};
     return _v;
-}
-
-template <typename CategoryT>
-auto&
-get_tracing_stack()
-{
-    return get_category_stack<CategoryT>().tracing;
 }
 
 template <typename CategoryT>
@@ -144,15 +137,7 @@ auto
 category_pop_disabled()
 {
     return !trait::runtime_enabled<CategoryT>::get() &&
-           (get_profile_stack<CategoryT>() + get_tracing_stack<CategoryT>()) <= 0;
-}
-
-template <typename CategoryT>
-auto
-tracing_pop_disabled()
-{
-    return !trait::runtime_enabled<CategoryT>::get() &&
-           get_tracing_stack<CategoryT>() <= 0;
+           get_profile_stack<CategoryT>() <= 0;
 }
 
 template <typename CategoryT>

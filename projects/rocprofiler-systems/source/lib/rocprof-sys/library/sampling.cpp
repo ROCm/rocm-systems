@@ -1011,8 +1011,6 @@ store_sampling_data_in_cache(std::int64_t                               _tid,
                              const std::vector<timer_sampling_data>&    _timer_data,
                              const std::vector<overflow_sampling_data>& _overflow_data);
 
-auto static_strings = std::set<std::string>{};
-
 struct pause_interval_t
 {
     std::uint64_t pause_ts  = 0;

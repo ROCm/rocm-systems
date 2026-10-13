@@ -175,13 +175,11 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
                     metric_name);
     }
 
-    {
-        track_name = fmt::format("GPU {} [{}]", _metric_name, device_id);
+    track_name = fmt::format("GPU {} [{}]", _metric_name, device_id);
 
-        metadata_initialize_counter_category();
-        metadata_initialize_counters_pmc(device_id, track_name, metric_description);
-        metadata_initialize_counter_track(track_name.c_str());
-    }
+    metadata_initialize_counter_category();
+    metadata_initialize_counters_pmc(device_id, track_name, metric_description);
+    metadata_initialize_counter_track(track_name.c_str());
 }
 
 void

@@ -433,9 +433,6 @@ get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 bool&
 get_use_perfetto() ROCPROFSYS_HOT;
 
-bool
-get_merge_perfetto_files();
-
 struct tmp_file
 {
     tmp_file(std::string);

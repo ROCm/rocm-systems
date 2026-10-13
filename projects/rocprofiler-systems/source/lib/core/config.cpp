@@ -3382,14 +3382,6 @@ get_use_tmp_files()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_merge_perfetto_files()
-{
-    static auto const _v =
-        get_config()->find(std::string{ env_vars::MERGE_PERFETTO_FILES });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 std::string
 get_tmpdir()
 {
