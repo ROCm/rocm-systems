@@ -85,4 +85,15 @@ TEST_F(RomeModelsParseGraphLightMicrotest, EmptyString_ProducesEmptyTreeBase) {
   EXPECT_EQ(graph()->treeBase[0][0], 0);
 }
 
+// The numbers of one segment are accumulated into a fixed NCCL_TOPO_MAX_NODES-entry
+// array before being transcribed, so a segment holding more of them than the topology
+// can ever contain must be refused rather than written past the end of that array.
+TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRejected) {
+  std::string tooManyNumbers;
+  for (int i = 0; i <= NCCL_TOPO_MAX_NODES; i++) tooManyNumbers += "(0)";
+
+  EXPECT_EQ(parseGraphLight(tooManyNumbers.c_str(), system(), graph(), nullptr),
+            ncclInvalidUsage);
+}
+
 }  // namespace

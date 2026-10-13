@@ -3975,6 +3975,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
     if (digit >= 0 && digit <= 9) {
       switch (status) {
       case 0:
+        if (gpu >= NCCL_TOPO_MAX_NODES) {
+          WARN("Too many GPUs in one tree (max %d), ignoring user-defined trees", NCCL_TOPO_MAX_NODES);
+          return ncclInvalidUsage;
+        }
         gpus[gpu] = digit;
         status = 1;
         break;
