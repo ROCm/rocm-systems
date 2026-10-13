@@ -196,6 +196,7 @@ WORKLOAD_CONFIGS = {
         # Megatron emits both names with different meanings, and widening the
         # global table would score Llama-3.1-70B on its final iteration again.
         "metric_aliases": {"tok_per_s_per_gpu"},
+        "tflops_aliases": {"TFLOPS_per_gpu"},
         "multiple_results": "primus_perf_output.csv",
         "training_precision": "fp8",
         "primus_config": "examples/maxtext/configs/MI355X/llama3.1_405B-fp8-pretrain.yaml",
@@ -683,14 +684,26 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
     kpack_block = ""
     if kpack:
         # Generalises what the SDK-venv branch does for two known directories:
-        # every directory that received a library gets the kpack files too. A
-        # kpack librccl looks for them relative to its own location and we do
-        # not know which copy the runtime will load.
+        # every directory that received a library gets the archives too, since
+        # we do not know which copy the runtime will load.
+        #
+        # ONE LEVEL ABOVE the library, not beside it. TheRock's packer puts the
+        # archives at the artifact root and embeds `../.kpack` in a library that
+        # sits under `lib/`, so a copy at `<x>/lib/librccl.so.1` resolves them
+        # at `<x>/.kpack`. The two hardcoded paths elsewhere in this file agree
+        # -- both name `_rocm_sdk_libraries/.kpack` for a library in
+        # `_rocm_sdk_libraries/lib/` -- as does the artifact-side search, which
+        # looks in `rccl_lib.parent.parent`. Writing `$d/.kpack` instead leaves
+        # the device code where nothing looks for it, and nothing fails until
+        # the library is actually loaded.
         kpack_block = (
             '    if ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\\n'
-            '      for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname | sort -u); do \\\n'
+            '      for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
+            '                 | xargs -r -n1 dirname | sort -u); do \\\n'
             '        mkdir -p "$d/.kpack" && cp /tmp/rccl_ci/.kpack/*.kpack "$d/.kpack/"; \\\n'
             '      done; \\\n'
+            '      echo "kpack staged into: $(cut -f2 /opt/RCCL_PRESWAP.txt \\\n'
+            '            | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u | tr "\\\\n" " ")"; \\\n'
             '    fi; \\\n'
         )
     return f"""\
@@ -820,13 +833,23 @@ def build_maxtext_baseline_image(
     two images differ by the librccl swap alone, which is exactly the variable
     the ratio is supposed to isolate.
     """
-    tag = f"{base_image}-primus-{PRIMUS_REF}"
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
     _stage_primus_context(ctx_dir, primus_dir)
 
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
-    dockerfile.write_text(f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
+    recipe = f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}"
+    dockerfile.write_text(recipe)
+
+    # The tag carries the recipe's identity, not just the Primus ref. These
+    # runners are long-lived and the tag is the only thing `docker image
+    # inspect` matches on, so a tag that stayed fixed across changes to the
+    # payload -- or to PRIMUS_REF -- would let a node reuse an image built from
+    # a different prefix while the candidate, keyed by RCCL commit, is rebuilt.
+    # The A/B would then differ by more than RCCL, which is the one invariant
+    # this pair exists to hold.
+    digest = hashlib.sha256(recipe.encode()).hexdigest()[:8]
+    tag = f"{base_image}-primus-{PRIMUS_REF}-{digest}"
 
     exists = subprocess.run(
         ["docker", "image", "inspect", tag], capture_output=True
@@ -835,8 +858,10 @@ def build_maxtext_baseline_image(
         log.info("MaxText baseline image already present: %s", tag)
     else:
         log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
+        # --pull so a mutable base tag cannot silently pin the baseline to an
+        # older layer than the candidate, which pulls on its own build.
         subprocess.run(
-            ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
+            ["docker", "build", "--pull", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
             check=True,
         )
         log.info("MaxText baseline image built: %s", tag)
@@ -1551,6 +1576,7 @@ def collect_phase_results(
     run_dir: Path,
     metric_key: str,
     extra_aliases: set[str] | None = None,
+    extra_tflops_aliases: set[str] | None = None,
 ) -> list[dict]:
     """Per-precision metrics for one phase.
 
@@ -1598,10 +1624,15 @@ def collect_phase_results(
             log.info("Structured result: %s %s = %.1f (status=%s)",
                      precision, metric_key, val, row_status)
 
-        # Attach TFLOPS from companion rows, keyed by precision.
+        # Attach TFLOPS from companion rows, keyed by precision. Same
+        # per-workload widening as the throughput metric above, and for the
+        # same reason: this extractor writes `TFLOPS_per_gpu` where Megatron
+        # writes `TFLOPS_per_gpu_avg`, so without it every MaxText row records
+        # a null and the report simply omits TFLOPS.
+        accepted_tflops = set(_TFLOPS_METRICS) | set(extra_tflops_aliases or ())
         tflops_by_precision: dict[str, float] = {}
         for row in perf_results:
-            if row.get("metric") not in _TFLOPS_METRICS:
+            if row.get("metric") not in accepted_tflops:
                 continue
             prec = (row.get("training_precision")
                     or row.get("multi_results", {}).get("precision", ""))
@@ -2065,6 +2096,7 @@ def main() -> None:
         phase_results[phase] = collect_phase_results(
             run_dir, metric_key,
             extra_aliases=workload_config.get("metric_aliases"),
+            extra_tflops_aliases=workload_config.get("tflops_aliases"),
         )
 
         # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
@@ -2138,8 +2170,11 @@ def main() -> None:
         "nodelist": allocation["nodelist"],
         "slurm_job_id": allocation["job_id"],
     }
+    # baseline_image, not workload_config["base_image"]: for maxtext the
+    # baseline is a locally built Primus image, and recording the stock tag
+    # would put a provenance in the datastore that was never run.
     phase_images = {
-        BASELINE: workload_config["base_image"],
+        BASELINE: baseline_image,
         CANDIDATE: overlay_image,
     }
     if all_rows:
