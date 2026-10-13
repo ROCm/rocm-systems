@@ -1296,19 +1296,10 @@ class GraphExecSegmented : public GraphExecBase {
   void RoundRobinStreamAssignment();
   //! DFS stream assignment: preserves chain continuity across segment DAG branches
   void DFSStreamAssignment();
-  //! Select stream assignment algorithm based on graph complexity
+  //! Select the stream assignment algorithm from DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING
   void SelectStreamAssignment();
-  //! Recompute each segment's needs_completion_signal flag from its current
-  //! stream assignment. Called after the initial assignment and again if
-  //! BuildSyncPlan's collapse pass reassigns segments to a single stream.
+  //! Compute each segment's needs_completion_signal flag from its stream assignment.
   void ComputeCompletionSignalFlags();
-  //! Barrier-ROI heuristic: decide whether the segment graph should be collapsed
-  //! onto a single stream because the cross-stream barriers multi-stream would
-  //! cost outweigh the work that could actually overlap. Returns true to collapse.
-  bool ShouldCollapseToSingleStream() const;
-  //! Apply mode-0 collapse before packet materialization. Child graphs collapse
-  //! onto their inherited absolute parent stream rather than local stream zero.
-  void ApplyCollapseSelection();
   //! Get the parallel streams map for synchronization before destruction
   const std::unordered_map<int, std::vector<hip::Stream*>>& GetParallelStreams() const {
     return parallel_streams_;
@@ -1465,8 +1456,8 @@ class GraphExecSegmented : public GraphExecBase {
   //! Return whether any level-0 segment runs on a stream other than the child graph node's
   //! execution stream and therefore needs a parent-entry wait.
   bool HasOffStreamRoots(int exec_stream_id) const;
-  //! Recursively assign child segments absolute IDs in the shared parent stream pool, apply
-  //! collapse selection, and mark child graph nodes whose off-stream roots need an entry signal.
+  //! Recursively assign child segments absolute IDs in the shared parent stream pool and
+  //! mark child graph nodes whose off-stream roots need an entry signal.
   void AssignNestedChildStreamPlans();
 
   //! Absolute stream in the parent pool for this child graph node (-1 = root exec).
@@ -1966,14 +1957,6 @@ class GraphKernelNode : public GraphNode {
   GraphKernelNode& operator=(const GraphKernelNode&) = delete;
 
   GraphNode* clone() const override { return new GraphKernelNode(*this); }
-
-  // Total threads this launch would dispatch (grid blocks * threads per block).
-  // Used as a static, instantiate-time work proxy by the single-stream gate.
-  size_t GetLaunchThreadCount() const {
-    const dim3& g = kernelParams_.gridDim;
-    const dim3& b = kernelParams_.blockDim;
-    return static_cast<size_t>(g.x) * g.y * g.z * static_cast<size_t>(b.x) * b.y * b.z;
-  }
 
   bool HasSameParams(const GraphNode* node) const override {
     const GraphKernelNode* other = static_cast<const GraphKernelNode*>(node);
