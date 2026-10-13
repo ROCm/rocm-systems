@@ -57,6 +57,10 @@ table ComputeUnitState {
   // before per-CU execution controls were serialized.
   functional_quantum: uint32;
   functional_quantum_present: bool;
+  // Preserve each CU's effective diagnostic policies. Absent legacy fields
+  // retain the native defaults; false explicitly disables the corresponding check.
+  memory_wait_checks: bool = null;
+  xcnt_checks: bool = null;
 }
 
 /// Serialized state of a command processor.

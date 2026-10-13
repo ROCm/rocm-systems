@@ -104,8 +104,8 @@ public path also verifies prospective and concrete directional cache pairs,
 reads PM4-written VRAM through a WC host mapping, and copies CPU-written VRAM
 with PM4. Both use explicit host cache transitions and conservative PM4 GCR
 barriers. Sixteen checked iterations and four or eight ring wraps passed in
-each native lifetime. Queue consumption and application completion are checked
-separately. This qualifies only one owner on GFX1201; LOCAL peers remain
+each driver context lifetime. Queue consumption and application completion are
+checked separately. This qualifies only one owner on GFX1201; LOCAL peers remain
 unqualified on this host.
 
 ## SDMA registered-host copy
@@ -259,8 +259,9 @@ LD_LIBRARY_PATH=/tmp/rocddi-cmake/lib /tmp/device-producer aql instance
 
 Each mode passed five fresh runs of 64 published packets on the current
 GFX1201 source. SDMA reused its target ring eight times and AQL four times.
-This qualifies same-device device production in both native lifetimes;
-peer-device publication still needs a second GPU and a qualified route.
+This qualifies same-device device production under both driver context
+lifetimes; peer-device publication still needs a second GPU and a qualified
+route.
 
 ## Fault observation
 
