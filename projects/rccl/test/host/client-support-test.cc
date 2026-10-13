@@ -297,8 +297,8 @@ static_assert(NCCL_NUM_FUNCTIONS + 4 == 9, "Update the ncclFuncStr fixture when 
 // misc/socket.cc externs (only rasClientInitSocket needs these).
 // ---------------------------------------------------------------------------
 
-const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, const int) {
-  buf[0] = '\0';
+const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, size_t bufLen, const int) {
+  if (bufLen > 0) buf[0] = '\0';
   return buf;
 }
 
