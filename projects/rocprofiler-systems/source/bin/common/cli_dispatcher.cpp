@@ -3,6 +3,7 @@
 
 #include "common/cli_dispatcher.hpp"
 
+#include <fmt/base.h>
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -177,12 +178,12 @@ make_forwarded_argv(int argc, char** argv, forward_options options)
 void
 print_help(std::ostream& out, std::string_view program)
 {
-    constexpr auto name_column = subcommand_name_column();
+    constexpr auto k_name_column = subcommand_name_column();
     std::string    subcommands;
     for(const auto& spec : k_subcommands)
     {
         subcommands +=
-            fmt::format("  {:<{}}{}\n", spec.name, name_column, spec.description);
+            fmt::format("  {:<{}}{}\n", spec.name, k_name_column, spec.description);
     }
 
     out << fmt::format(
