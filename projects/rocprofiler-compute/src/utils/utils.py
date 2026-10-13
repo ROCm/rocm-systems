@@ -582,7 +582,7 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
             result["Agent_Id"].dtype
         )
     )
-    if result["Agent_Id"].dtype == "object":
+    if pd.api.types.is_string_dtype(result["Agent_Id"]):
         # Apply the function to the 'Agent_Id' column and store it as int64
         try:
             result["Agent_Id"] = (
