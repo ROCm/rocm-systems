@@ -225,7 +225,7 @@ impl AllocationState {
                 driver_instance,
                 origin,
                 devices,
-                |device| device.linux_kfd().ok().map(|(_, state)| state),
+                |device| device.driver_state.linux_kfd().ok().map(|(_, state)| state),
             ),
         }
     }
@@ -375,7 +375,7 @@ impl DeviceDriverState {
         match self {
             Self::LinuxKfd { driver, state } => {
                 let states = origin.peer_states_for(peers, kind.get(), driver, state, |peer| {
-                    peer.linux_kfd().ok()
+                    peer.driver_state.linux_kfd().ok()
                 })?;
                 let inner = driver.allocate_owned(
                     state,
@@ -414,7 +414,7 @@ impl DeviceDriverState {
                     },
                     driver,
                     state,
-                    |peer| peer.linux_kfd().ok(),
+                    |peer| peer.driver_state.linux_kfd().ok(),
                 )?;
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, states.as_slice(), request)? };

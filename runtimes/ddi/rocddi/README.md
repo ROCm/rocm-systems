@@ -20,7 +20,9 @@ discovery, activation, context policy, metadata allocation, and shutdown. Its
 associated device-state type retains each activated endpoint's dependencies.
 `GpuDriver` is the complete GPU backend interface. It requires allocation and
 virtual-memory operations, creates both direct and kernel-mediated queues, and
-provides GPU presentation, cache control, timing, traps, and stream monitoring.
+provides cache control, timing, traps, and stream monitoring. The common
+`Driver` contract queries optional endpoint details without activation; a
+driver with no additional source returns empty details.
 `AllocationOperations` and `VirtualMemoryOperations` describe mechanisms that
 can also be implemented by a non-GPU driver. A created queue implements either
 `UserQueueResource` or `KernelQueueResource`; these resource contracts define

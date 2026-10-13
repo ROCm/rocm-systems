@@ -8,7 +8,7 @@
 //! remain in `memory`; family-specific services live below this module.
 
 use crate::Error;
-use crate::driver::{self, DeviceDriverState};
+use crate::driver::DeviceDriverState;
 use crate::host_storage::Shared;
 use crate::topology::Endpoint;
 
@@ -60,14 +60,6 @@ pub struct Device {
 }
 
 impl Device {
-    /// Borrows the KFD driver instance and state for a service implemented by KFD.
-    /// Other driver families cannot enter KFD-specific operations.
-    pub(crate) fn linux_kfd(
-        &self,
-    ) -> Result<(&Shared<driver::KfdDriver>, &driver::KfdDeviceState), Error> {
-        self.driver_state.linux_kfd()
-    }
-
     /// Returns the endpoint snapshot accepted at activation. This is a borrowed
     /// metadata view with no native observation or freshness guarantee.
     #[must_use]
@@ -100,7 +92,7 @@ impl Device {
     ///
     /// # Errors
     /// Returns `Unsupported` when the endpoint is not a GPU or its driver has
-    /// no GPU capability view. The current view is implemented by Linux KFD.
+    /// no GPU capability view.
     pub fn gpu(&self) -> Result<crate::device::gpu::GpuDevice<'_>, Error> {
         let info = self.endpoint.gpu().ok_or(Error::Operation {
             kind: crate::ErrorKind::Unsupported,

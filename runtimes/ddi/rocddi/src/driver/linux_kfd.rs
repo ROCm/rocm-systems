@@ -42,7 +42,7 @@ use crate::memory::{
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails, EndpointDetailsKind};
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
@@ -548,6 +548,16 @@ impl Driver for LinuxKfdDriver {
             sysfs::open_endpoint(Self::TOPOLOGY_ROOT, Self::DRM_ROOT, id, self.allocator)?;
         endpoint.driver_instance = self.driver_instance;
         Ok(endpoint)
+    }
+    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        self.ensure_open()?;
+        if endpoint.gpu().is_none() {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "the Linux KFD driver reports only GPU endpoints",
+            ));
+        }
+        Ok(operations::query_endpoint_details(endpoint))
     }
     fn activate(&self, endpoint: &Endpoint) -> Result<DeviceState, Error> {
         if endpoint.gpu().is_none() {
