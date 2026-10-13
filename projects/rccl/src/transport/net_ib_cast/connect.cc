@@ -637,8 +637,6 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
       // Never program a route with a zero SGID — it causes source-unconstrained
       // lookups that break same-host traffic.
       int nRoutes = std::min(nLocalPips, nPips);
-      // Save the original dgid so we can restore it if route programming fails.
-      union ibv_gid origDgid = qpAttr.ah_attr.grh.dgid;
       for (int i = 0; i < nRoutes; i++) {
         struct ionic_dv_puec_route route = {};
         route.dgid = pipGids[i];
@@ -650,10 +648,7 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
         route.flags = 0;
         ncclResult_t puecRet = wrap_ionicdv_qp_set_puec_plane_route(qp->qp, i, &route);
         if (puecRet != ncclSuccess) {
-          // Restore original dgid so the QP isn't left with a loopback address
-          // and no valid PUEC routes — that would silently loop traffic locally.
-          qpAttr.ah_attr.grh.dgid = origDgid;
-          WARN("Multiplane: PUEC route programming failed for plane %d, restoring non-multiplane path", i);
+          WARN("Multiplane: PUEC route programming failed for plane %d", i);
           break;
         }
       }
