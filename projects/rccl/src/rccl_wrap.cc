@@ -2480,8 +2480,7 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     case ncclUnrollWrongArch:
       WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
            "arch %s and dispatching to it would crash. "
-           "Rebuild with install.sh --all_unrolls (-DBUILD_ALL_UNROLLS=ON) to compile it for every target, or select a "
-           "different one.",
+           "Select a different unroll factor.",
            comm->unroll, (1 << comm->unroll), ncclDevFuncUnrollArch[comm->unroll], comm->archName);
       return ncclInvalidArgument;
     case ncclUnrollUsable:
