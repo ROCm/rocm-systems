@@ -68,9 +68,6 @@ foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fa
   rccl_assert_source_line("${_path_cc}" "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \
 \"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};" "fakes/topo_stubs.cc: topoPathTypeStr")
 endforeach()
-# The GIN GDA factory only builds with ENABLE_ROCSHMEM_GIN (default OFF), so no test covers its dlopen flags.
-rccl_assert_source_line("${_rccl_src_root}/gin/gin_rocshmem_gda_factory.cc"
-  "return dlopen(path, RTLD_LAZY | RTLD_NODELETE)" "gin_dv_dlopen() and this check")
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.

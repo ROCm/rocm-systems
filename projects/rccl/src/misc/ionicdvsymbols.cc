@@ -6,6 +6,7 @@
 /* ionicdv dynamic loading mode. Symbols are loaded from shared objects. */
 #include <dlfcn.h>
 #include "core.h"
+#include "dv_dlopen.h"
 
 // IONICDV Library versioning
 #define IONIC_VERSION "IONIC_1.0"
@@ -15,11 +16,9 @@ ncclResult_t buildIonicdvSymbols(struct ncclIonicdvSymbols* ionicdvSymbols) {
   void* tmp;
   void** cast;
 
-  // libionic is also a libibverbs provider: loading it registers a driver with
-  // libibverbs that can never be unregistered, so it must never be unmapped.
-  ionicdvhandle = dlopen("libionic.so", RTLD_NOW | RTLD_NODELETE);
+  ionicdvhandle = ncclDvDlopen("libionic.so", RTLD_NOW);
   if (!ionicdvhandle) {
-    ionicdvhandle = dlopen("libionic.so.1", RTLD_NOW | RTLD_NODELETE);
+    ionicdvhandle = ncclDvDlopen("libionic.so.1", RTLD_NOW);
     if (!ionicdvhandle) {
       INFO(NCCL_INIT, "Failed to open libionic.so[.1]");
       goto teardown;

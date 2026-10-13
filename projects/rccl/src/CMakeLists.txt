@@ -220,6 +220,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
   include/git_version.h
