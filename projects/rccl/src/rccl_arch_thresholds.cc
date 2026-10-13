@@ -356,7 +356,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
-    kThreshUnlimited,     // [8] AlltoAll
+    0,                    // [8] AlltoAll        -- not yet measured
   },
   // symMaxR2: kThreshUnlimited = symk not suppressed by size on gfx950.
   .symMaxR2 = {
@@ -505,7 +505,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [5] SendRecv        -- not used
     0,                    // [6] Send            -- not used
     0,                    // [7] Recv            -- not used
-    kThreshUnlimited,     // [8] AlltoAll
+    0,                    // [8] AlltoAll        -- not yet measured
   },
   // symMaxR2: kThreshUnlimited = symk not suppressed by size on gfx942.
   .symMaxR2 = {
