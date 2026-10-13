@@ -239,7 +239,8 @@ template <class S> class symbol_section_accessor_template {
       return false;
     }
     const char* data = hash_section->get_data();
-    if (data == nullptr || index >= hash_section->get_size() / sizeof(Elf_Word)) {
+    const Elf_Xword data_size = hash_section->get_size();
+    if (data == nullptr || !fits_in_size_t(data_size) || index >= data_size / sizeof(Elf_Word)) {
       return false;
     }
 
