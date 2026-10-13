@@ -7,6 +7,7 @@
 #include "buffer.h"
 #include "configuration.h"
 #include "context.h"
+#include "device-guard.h"
 #include "fallback.h"
 #include "file.h"
 #include "hip.h"
@@ -35,42 +36,6 @@ using namespace hipFile;
 using std::min;
 using std::shared_ptr;
 using std::unique_ptr;
-
-namespace {
-
-// Makes the buffer's GPU current for the lifetime of the guard (hipMemcpy operates on the current
-// device's context) and restores the caller's device on scope exit, including during exceptions.
-class DeviceGuard {
-public:
-    explicit DeviceGuard(int buffer_device) : prev_device_{Context<Hip>::get()->hipGetDevice()}
-    {
-        if (buffer_device != prev_device_) {
-            Context<Hip>::get()->hipSetDevice(buffer_device);
-            switched_ = true;
-        }
-    }
-    ~DeviceGuard()
-    {
-        if (switched_) {
-            try {
-                Context<Hip>::get()->hipSetDevice(prev_device_);
-            }
-            catch (...) {
-                Context<Sys>::get()->syslog(LOG_CRIT, "Unable to restore the caller's HIP device.");
-            }
-        }
-    }
-    DeviceGuard(const DeviceGuard &)            = delete;
-    DeviceGuard &operator=(const DeviceGuard &) = delete;
-    DeviceGuard(DeviceGuard &&)                 = delete;
-    DeviceGuard &operator=(DeviceGuard &&)      = delete;
-
-private:
-    int  prev_device_;
-    bool switched_{false};
-};
-
-} // namespace
 
 int
 Fallback::score(const std::shared_ptr<IFile> &file, const std::shared_ptr<IBuffer> &buffer, size_t size,

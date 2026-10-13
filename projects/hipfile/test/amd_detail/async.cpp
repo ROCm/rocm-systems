@@ -324,6 +324,32 @@ TEST_F(HipFileAsyncOp, async_run_io_reports_invalid_value_on_bad_params)
     ASSERT_EQ(bytes, -hipFileInvalidValue);
 }
 
+TEST_F(HipFileAsyncOp, async_run_io_switches_to_stream_device_for_backend_io)
+{
+    auto    backend       = std::make_shared<StrictMock<MBackend>>();
+    auto    copy_stream   = reinterpret_cast<hipStream_t>(0x1234);
+    size_t  size          = 100;
+    hoff_t  file_offset   = 0;
+    hoff_t  buffer_offset = 0;
+    ssize_t bytes         = 0;
+    auto    op            = std::make_shared<AsyncOp>(IoType::Read, file, buffer, stream, &size, &file_offset,
+                                                      &buffer_offset, &bytes);
+    op->backend           = backend;
+
+    EXPECT_CALL(*stream, getHipDevice).WillRepeatedly(Return(1));
+    EXPECT_CALL(*stream, copyStream).WillRepeatedly(Return(copy_stream));
+
+    ::testing::InSequence seq;
+    EXPECT_CALL(mhip, hipGetDevice).WillOnce(Return(0));
+    EXPECT_CALL(mhip, hipSetDevice(1));
+    EXPECT_CALL(*backend, io(IoType::Read, _, _, size, file_offset, buffer_offset, copy_stream))
+        .WillOnce(Return(64));
+    EXPECT_CALL(mhip, hipSetDevice(0));
+
+    async_run_io(op.get());
+    ASSERT_EQ(bytes, 64);
+}
+
 static auto
 hipfileFlagsPowerSet()
 {

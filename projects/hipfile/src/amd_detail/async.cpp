@@ -7,6 +7,7 @@
 #include "backend.h"
 #include "buffer.h"
 #include "context.h"
+#include "device-guard.h"
 #include "hip.h"
 #include "hipfile.h"
 #include "io.h"
@@ -108,6 +109,7 @@ async_run_io(void *userargs)
     }
     else {
         try {
+            DeviceGuard device_guard{op->stream->getHipDevice()};
             *op->bytes_transferred =
                 op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
         }
