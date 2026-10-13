@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "common/cli_dispatcher.hpp"
+#include "common/common_utils.hpp"
 #include "common/defines.h"
+#include "common/path.hpp"
 #include "common/tool_runner.hpp"
 
 #include <timemory/utility/argparse.hpp>
@@ -17,7 +19,6 @@
 #include <string_view>
 #include <system_error>
 #include <unistd.h>
-#include <vector>
 
 namespace
 {
@@ -33,22 +34,9 @@ exit_with_version(std::string_view program)
 
     auto flag = std::string{ "--version" };
     auto argv = std::array<char*, 2>{ name.data(), flag.data() };
+    // enable_version's action calls exit(EXIT_SUCCESS) from parse_args.
     parser.parse_args(2, argv.data());
     std::exit(EXIT_FAILURE);
-}
-
-// Pointers aim into @p args and stay valid for the life of that vector.
-[[nodiscard]] std::vector<char*>
-c_argv(std::vector<std::string>& args)
-{
-    std::vector<char*> pointers;
-    pointers.reserve(args.size() + 1);
-    for(auto& arg : args)
-    {
-        pointers.push_back(arg.data());
-    }
-    pointers.push_back(nullptr);
-    return pointers;
 }
 
 [[nodiscard]] std::string
@@ -61,9 +49,9 @@ executable_directory()
     const auto      canon = std::filesystem::canonical("/proc/self/exe", error);
     if(error)
     {
-        return std::filesystem::path{ "/proc/self/exe" }.parent_path().string();
+        return {};
     }
-    return canon.parent_path().string();
+    return rocprofsys::common::path::parent_path(canon.string());
 }
 
 [[nodiscard]] int
@@ -76,7 +64,7 @@ dispatch_in_process(int argc, char** argv, const rocprofsys::cli::dispatch_resul
     auto forwarded = rocprofsys::cli::make_forwarded_argv(
         argc, argv,
         rocprofsys::cli::forward_options{ .strip_subcommand = parsed.strip_subcommand });
-    auto pointers = c_argv(forwarded);
+    auto pointers = rocprofsys::common_utils::to_c_argv(forwarded);
     return rocprofsys::common_utils::run_tool(static_cast<int>(forwarded.size()),
                                               pointers.data(), *parsed.spec->mode);
 }
@@ -91,16 +79,23 @@ dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& par
     }
     const auto& spec      = *parsed.spec;
     const auto  directory = executable_directory();
-    const auto  path = (std::filesystem::path{ directory } / spec.binary_name).string();
-    auto        forwarded = rocprofsys::cli::make_forwarded_argv(
+    if(directory.empty())
+    {
+        std::cerr << program << ": failed to resolve install directory\n";
+        return k_exec_failure_status;
+    }
+    const auto path = (std::filesystem::path{ directory } / spec.binary_name).string();
+    auto       forwarded = rocprofsys::cli::make_forwarded_argv(
         argc, argv,
         rocprofsys::cli::forward_options{ .strip_subcommand = parsed.strip_subcommand,
-                                                 .argv0_override = spec.binary_name,
-                                                 .extra_flag     = spec.extra_flag });
-    auto pointers = c_argv(forwarded);
-    execvp(path.c_str(), pointers.data());
+                                                .argv0_override = spec.binary_name,
+                                                .extra_flag     = spec.extra_flag });
+    auto pointers = rocprofsys::common_utils::to_c_argv(forwarded);
+    // path is absolute (sibling of this binary); no PATH search.
+    execv(path.c_str(), pointers.data());
+    const int exec_error = errno;
     std::cerr << program << ": failed to execute '" << path
-              << "': " << std::strerror(errno) << '\n';
+              << "': " << std::strerror(exec_error) << '\n';
     return k_exec_failure_status;
 }
 }  // namespace
@@ -108,12 +103,7 @@ dispatch_exec(int argc, char** argv, const rocprofsys::cli::dispatch_result& par
 int
 main(int argc, char** argv)
 {
-    const char* invoked = "rocsys";
-    if(argc > 0)
-    {
-        invoked = argv[0];
-    }
-    const auto program = std::filesystem::path{ invoked }.filename().string();
+    const auto program = std::filesystem::path{ argv[0] }.filename().string();
     const auto parsed  = rocprofsys::cli::parse_dispatch(argc, argv, program);
 
     switch(parsed.kind)

@@ -116,6 +116,3 @@ Enable call-stack sampling while profiling with ``--sample``:
 
    rocsys --sample -- ./my_app
    rocsys profile --sample -- ./my_app
-
-For a sampling-only run, use ``rocprof-sys-sample`` directly. See
-:doc:`sampling-call-stack`.

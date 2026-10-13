@@ -80,14 +80,14 @@ inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
     },
     {
         .name         = "instrument",
-        .description  = "Runtime instrumentation (Dyninst)",
+        .description  = "Runtime instrumentation profiling",
         .binary_name  = "rocprof-sys-instrument",
         .requires_app = true,
         .extra_flag   = {},
     },
     {
         .name         = "rewrite",
-        .description  = "Binary rewrite (Dyninst)",
+        .description  = "Binary rewrite application",
         .binary_name  = "rocprof-sys-instrument",
         .requires_app = true,
         .extra_flag   = "-o",

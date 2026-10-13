@@ -7,26 +7,39 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <iterator>
 #include <ostream>
 #include <string>
 #include <string_view>
-#include <utility>
 #include <vector>
 
 namespace rocprofsys::cli
 {
 namespace
 {
-constexpr std::string_view k_program_fallback = "rocsys";
-constexpr std::string_view k_output_short     = "-o";
-constexpr std::string_view k_output_long      = "--output";
-constexpr std::string_view k_output_long_eq   = "--output=";
-constexpr std::string_view k_output_short_eq  = "-o=";
-constexpr std::size_t      k_name_column      = 14;
+constexpr std::string_view k_help_short      = "-h";
+constexpr std::string_view k_help_alt_short  = "-?";
+constexpr std::string_view k_help_long       = "--help";
+constexpr std::string_view k_help_long_eq    = "--help=";
+constexpr std::string_view k_version_long    = "--version";
+constexpr std::string_view k_output_short    = "-o";
+constexpr std::string_view k_output_long     = "--output";
+constexpr std::string_view k_output_long_eq  = "--output=";
+constexpr std::string_view k_output_short_eq = "-o=";
+constexpr std::size_t      k_min_name_column = 14;
 constexpr std::string_view k_docs_url =
     "https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/";
-constexpr int k_index_after_verb = 2;
+
+// One column width for every help row so descriptions stay aligned.
+[[nodiscard]] constexpr std::size_t
+subcommand_name_column() noexcept
+{
+    auto width = k_min_name_column;
+    for(const auto& spec : k_subcommands)
+    {
+        width = std::max(width, spec.name.size() + 1);
+    }
+    return width;
+}
 
 [[nodiscard]] std::string
 make_usage(std::string_view program)
@@ -41,44 +54,43 @@ help_hint(std::string_view program)
                        make_usage(program), program);
 }
 
-[[nodiscard]] std::string_view
-arg_at(int argc, char** argv, int index) noexcept
-{
-    if(index < 0 || index >= argc || argv == nullptr || argv[index] == nullptr)
-    {
-        return {};
-    }
-    return argv[index];
-}
-
 [[nodiscard]] constexpr int
 payload_index(bool strip_subcommand) noexcept
 {
-    constexpr int k_after_argv0 = 1;
+    constexpr int k_after_argv0      = 1;
+    constexpr int k_index_after_verb = 2;
     return strip_subcommand ? k_index_after_verb : k_after_argv0;
 }
 
-dispatch_result
-make_error(std::string message)
+[[nodiscard]] bool
+is_help_flag(std::string_view token) noexcept
 {
-    dispatch_result result;
-    result.kind          = dispatch_kind::error;
-    result.error_message = std::move(message);
-    return result;
+    return token == k_help_short || token == k_help_alt_short || token == k_help_long ||
+           token.starts_with(k_help_long_eq);
 }
 
-// True when the payload already contains @p flag, or an -o / --output alias
-// when @p flag is "-o". Stops at "--" or an empty argument.
-[[nodiscard]] bool
-payload_contains_flag(int argc, char** argv, int start, std::string_view flag)
+[[nodiscard]] dispatch_kind
+tool_kind(const subcommand_spec& spec) noexcept
 {
-    if(flag.empty() || argv == nullptr)
-    {
-        return false;
-    }
+    return spec.mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
+}
+
+[[nodiscard]] dispatch_result
+make_tool_result(const subcommand_spec* spec, bool strip_subcommand) noexcept
+{
+    return { .kind             = tool_kind(*spec),
+             .spec             = spec,
+             .strip_subcommand = strip_subcommand };
+}
+
+// Scan the tool's own options (tokens after argv0 / the verb, before "--").
+// When @p flag is "-o", also treat --output, --output=…, and -o=… as present.
+[[nodiscard]] bool
+option_present_before_separator(int argc, char** argv, int start, std::string_view flag)
+{
     for(int idx = start; idx < argc; ++idx)
     {
-        const auto arg = arg_at(argc, argv, idx);
+        const auto arg = std::string_view{ argv[idx] };
         if(arg.empty() || arg == "--")
         {
             return false;
@@ -101,91 +113,63 @@ payload_contains_flag(int argc, char** argv, int start, std::string_view flag)
 dispatch_result
 parse_dispatch(int argc, char** argv, std::string_view program)
 {
-    if(argc <= 1)
+    if(argc <= 1 || is_help_flag(argv[1]))
     {
-        dispatch_result result;
-        result.kind = dispatch_kind::show_help;
-        return result;
+        return { .kind = dispatch_kind::show_help };
     }
 
-    const auto first = arg_at(argc, argv, 1);
-    if(first == "-h" || first == "-?" || first == "--help" ||
-       first.starts_with("--help="))
+    const auto first = std::string_view{ argv[1] };
+    if(first == k_version_long)
     {
-        dispatch_result result;
-        result.kind = dispatch_kind::show_help;
-        return result;
-    }
-    if(first == "--version")
-    {
-        dispatch_result result;
-        result.kind = dispatch_kind::show_version;
-        return result;
+        return { .kind = dispatch_kind::show_version };
     }
 
     const auto found = std::ranges::find(k_subcommands, first, &subcommand_spec::name);
     if(found != k_subcommands.end())
     {
-        const auto*    spec         = found;
-        constexpr bool k_strip_verb = true;
-        if(spec->requires_app && argc <= payload_index(k_strip_verb))
+        // argv = { rocsys, <verb>, ... }: requires_app needs a token after the verb.
+        if(found->requires_app && argc < 3)
         {
-            return make_error(fmt::format("error: missing application argument\n{}",
-                                          help_hint(program)));
+            return { .kind          = dispatch_kind::error,
+                     .error_message = fmt::format(
+                         "error: missing application argument\n{}", help_hint(program)) };
         }
-        dispatch_result result;
-        result.spec = spec;
-        result.kind =
-            spec->mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
-        result.strip_subcommand = k_strip_verb;
-        return result;
+        return make_tool_result(found, true);
     }
 
-    if(first.empty() || first.front() != '-')
+    if(!first.starts_with('-'))
     {
-        return make_error(
-            fmt::format("error: unknown subcommand '{}'\n{}", first, help_hint(program)));
+        return { .kind          = dispatch_kind::error,
+                 .error_message = fmt::format("error: unknown subcommand '{}'\n{}", first,
+                                              help_hint(program)) };
     }
 
-    // Implicit default: first token is a flag or "--".
-    constexpr bool  k_keep_leading_flag = false;
-    const auto&     chosen              = k_subcommands.front();
-    dispatch_result result;
-    result.spec = &chosen;
-    result.kind =
-        chosen.mode.has_value() ? dispatch_kind::in_process : dispatch_kind::exec_tool;
-    result.strip_subcommand = k_keep_leading_flag;
-    return result;
+    // Implicit default: first token is a flag or "--". Keep it in the forwarded argv.
+    const auto* chosen = &k_subcommands.front();
+    return make_tool_result(chosen, false);
 }
 
 std::vector<std::string>
 make_forwarded_argv(int argc, char** argv, forward_options options)
 {
     std::vector<std::string> args;
-    const int                start   = payload_index(options.strip_subcommand);
-    const auto               invoked = arg_at(argc, argv, 0);
+    const int                start = payload_index(options.strip_subcommand);
     if(!options.argv0_override.empty())
     {
         args.emplace_back(options.argv0_override);
     }
-    else if(!invoked.empty())
-    {
-        args.emplace_back(invoked);
-    }
     else
     {
-        args.emplace_back(k_program_fallback);
+        args.emplace_back(argv[0]);
     }
     if(!options.extra_flag.empty() &&
-       !payload_contains_flag(argc, argv, start, options.extra_flag))
+       !option_present_before_separator(argc, argv, start, options.extra_flag))
     {
         args.emplace_back(options.extra_flag);
     }
-    if(argc > 0 && argv != nullptr)
+    if(start < argc)
     {
-        const auto payload = argv + std::min(start, argc);
-        std::copy_if(payload, argv + argc, std::back_inserter(args),
-                     [](const char* arg) { return arg != nullptr; });
+        args.insert(args.end(), argv + start, argv + argc);
     }
     return args;
 }
@@ -193,32 +177,36 @@ make_forwarded_argv(int argc, char** argv, forward_options options)
 void
 print_help(std::ostream& out, std::string_view program)
 {
-    out << "Usage:\n"
-        << "  " << make_usage(program) << '\n'
-        << "\n"
-        << "ROCm Systems Profiler.\n"
-        << "Experimental: This is a preview of the rocsys command-line tool.\n"
-        << "Commands and workflows are subject to change.\n"
-        << "\n"
-        << "Subcommands:\n";
-
+    constexpr auto name_column = subcommand_name_column();
+    std::string    subcommands;
     for(const auto& spec : k_subcommands)
     {
-        const auto width = std::max(spec.name.size() + 1, k_name_column);
-        out << fmt::format("  {:<{}}{}\n", spec.name, width, spec.description);
+        subcommands +=
+            fmt::format("  {:<{}}{}\n", spec.name, name_column, spec.description);
     }
 
-    out << "\n"
-        << "Examples:\n"
-        << "  " << program << " -- ./app\n"
-        << "  " << program << " profile -- ./app\n"
-        << "  " << program << " instrument -- ./app\n"
-        << "  " << program << " rewrite -- ./app\n"
-        << "\n"
-        << "Use '" << program
-        << " <subcommand> --help' for subcommand-specific options.\n"
-        << "\n"
-        << "Documentation: " << k_docs_url << "\n";
+    out << fmt::format(
+        R"(Usage:
+  {usage}
+
+ROCm Systems Profiler.
+Experimental: This is a preview of the rocsys command-line tool.
+Commands and workflows are subject to change.
+
+Subcommands:
+{subcommands}
+Examples:
+  {program} -- ./app
+  {program} profile -- ./app
+  {program} instrument -- ./app
+  {program} rewrite -- ./app
+
+Use '{program} <subcommand> --help' for subcommand-specific options.
+
+Documentation: {docs}
+)",
+        fmt::arg("usage", make_usage(program)), fmt::arg("subcommands", subcommands),
+        fmt::arg("program", program), fmt::arg("docs", k_docs_url));
 }
 
 }  // namespace rocprofsys::cli
