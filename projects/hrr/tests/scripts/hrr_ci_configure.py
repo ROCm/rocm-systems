@@ -42,8 +42,6 @@ CPU_PATHS = (
     "projects/hip/include/hip/hip_runtime_api.h",
     ".github/workflows/hrr-ci.yml",
     ".github/workflows/hrr-gpu.yml",
-    ".github/scripts/hrr_",
-    ".github/scripts/tests/hrr_",
 )
 
 # hrr-skills.yml covers these.
@@ -68,11 +66,11 @@ CAPTURE_PATHS = (
     "projects/hrr/tests/scripts/run_catch2.py",
     "projects/hrr/tests/scripts/hrr_test_config.py",
     "projects/hrr/tests/scripts/summarize_junit.py",
+    "projects/hrr/tests/scripts/hrr_capture_build.py",
+    "projects/hrr/tests/scripts/hrr_ci_configure.py",
+    "projects/hrr/tests/scripts/hrr_ci_report.py",
     ".github/workflows/hrr-ci.yml",
     ".github/workflows/hrr-gpu.yml",
-    ".github/scripts/hrr_capture_build.py",
-    ".github/scripts/hrr_ci_configure.py",
-    ".github/scripts/hrr_ci_report.py",
 )
 
 # TheRock family keys the HRR fat binary covers (HRR_ARCHS in hrr-gpu.yml).

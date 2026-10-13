@@ -1,15 +1,15 @@
-# Copyright Advanced Micro Devices, Inc.
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 """Tests for hrr_ci_configure.py."""
 
-import os
 import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import hrr_ci_configure as cfg
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import hrr_ci_configure as cfg  # noqa: E402
 
 MATRIX = {
     "gfx94x": {

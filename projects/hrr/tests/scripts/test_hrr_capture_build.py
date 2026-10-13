@@ -1,6 +1,6 @@
-# Copyright Advanced Micro Devices, Inc.
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 """Tests for hrr_capture_build.py."""
 
 import argparse
@@ -11,8 +11,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import hrr_capture_build as cb
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import hrr_capture_build as cb  # noqa: E402
 
 FINDER_FOUND = {
     "status": "found",

@@ -1,7 +1,8 @@
 # HRR CI: generated-source checks, the HRR helper-script tests and the host
 # unit suite, plus the GPU capture/replay suite (hrr-gpu.yml) for changes that
-# touch capture or replay. .github/scripts/hrr_ci_configure.py decides what
-# runs; "HRR CI Summary" reports every platform and GPU family in one table.
+# touch capture or replay. projects/hrr/tests/scripts/hrr_ci_configure.py
+# decides what runs; "HRR CI Summary" reports every platform and GPU family in
+# one table.
 
 name: HRR CI
 
@@ -54,7 +55,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: projects/hrr/tests/scripts/hrr_ci_configure.py
+          sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock family matrix
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -94,7 +96,7 @@ jobs:
           IS_FORK: ${{ github.event.pull_request.head.repo.fork || false }}
           FAMILIES: ${{ inputs.families }}
         run: >-
-          python .github/scripts/hrr_ci_configure.py
+          python projects/hrr/tests/scripts/hrr_ci_configure.py
           --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
           --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
           --is-fork "${IS_FORK}" --families "${FAMILIES}"
@@ -114,7 +116,6 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           sparse-checkout: |
-            .github/scripts
             projects/hrr
             projects/hip/include
             projects/clr/hipamd/include
@@ -130,7 +131,7 @@ jobs:
       - name: Check generated sources, API IDs and the API matrix
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: python .github/scripts/hrr_check_sources.py all --base-sha "${BASE_SHA}"
+        run: python projects/hrr/tools/hrr_check_sources.py all --base-sha "${BASE_SHA}"
 
   scripts:
     name: HRR script tests
@@ -145,7 +146,6 @@ jobs:
           # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
           # which gen_hrr_api_args.py reads on import.
           sparse-checkout: |
-            .github/scripts
             .github/workflows/hrr-gpu.yml
             projects/hrr
             projects/clr/hipamd/src/hrr
@@ -165,7 +165,7 @@ jobs:
           --workflow .github/workflows/hrr-gpu.yml
 
       - name: Run tests
-        run: python -m pytest projects/hrr/tests/scripts .github/scripts/tests/hrr_*_test.py
+        run: python -m pytest projects/hrr/tests/scripts
 
   unit:
     name: Unit (${{ matrix.os }})
@@ -284,7 +284,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            .github/scripts/hrr_ci_report.py
+            projects/hrr/tests/scripts/hrr_ci_report.py
             projects/hrr/tests/scripts/summarize_junit.py
           sparse-checkout-cone-mode: false
 
@@ -310,6 +310,6 @@ jobs:
           RUN_GPU: ${{ needs.configure.outputs.run_gpu }}
           FAMILIES: ${{ needs.configure.outputs.families }}
         run: >-
-          python3 .github/scripts/hrr_ci_report.py
+          python3 projects/hrr/tests/scripts/hrr_ci_report.py
           --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
           --results-dir results --base-json base/base.json

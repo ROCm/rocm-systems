@@ -125,9 +125,11 @@ PyYAML (used by the api-matrix tools), not ROCm:
 python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 ```
 
-They cover `run_catch2.py`, `summarize_junit.py`, and `hrr_test_config.py`, plus
-the tools in `../tools`: the HRR API ID compatibility check, the playback-handler default
-in the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
+They cover `run_catch2.py`, `summarize_junit.py`, `hrr_test_config.py`, and the
+HRR CI scripts (`hrr_ci_configure.py`, `hrr_capture_build.py`, `hrr_ci_report.py`),
+plus the tools in `../tools`: the HRR API ID compatibility check, the
+generated-source checks (`hrr_check_sources.py`), the playback-handler default in
+the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
 
 ## Configuring where a case runs
 

@@ -1,18 +1,18 @@
-# Copyright Advanced Micro Devices, Inc.
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 """Tests for hrr_check_sources.py."""
 
 import contextlib
 import io
-import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import hrr_check_sources as chk
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+
+import hrr_check_sources as chk  # noqa: E402
 
 
 def write(path: Path, text: str) -> None:

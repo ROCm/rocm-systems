@@ -8,7 +8,7 @@ The summary has three parts:
   * why this run tested what it did, and which base build the GPU suite used;
   * the conclusion of every unit, build and GPU job, so a job that never
     produced results (cancelled, timed out, still queued) still has a row;
-  * the per-suite results table from projects/hrr's summarize_junit.py.
+  * the per-suite results table from summarize_junit.py.
 
 Exits 1 when any HRR job failed or was cancelled, or a results file could not
 be read.
@@ -17,13 +17,14 @@ be read.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+import summarize_junit
 
 JOB_PATTERNS = (
     ("Generated sources", re.compile(r"^Generated sources$")),
@@ -90,13 +91,6 @@ def overall_ok(rows: list[dict], missing: list[str]) -> bool:
     return not missing and not any(r["conclusion"] in BAD_CONCLUSIONS for r in rows)
 
 
-def load_summarize_junit(path: Path):
-    spec = importlib.util.spec_from_file_location("summarize_junit", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def list_jobs(repo: str, run_id: str, attempt: str) -> list[dict]:
     out = subprocess.run(
         [
@@ -125,11 +119,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--families", default="[]")
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
     parser.add_argument("--base-json", type=Path)
-    parser.add_argument(
-        "--summarize-junit",
-        type=Path,
-        default=Path("projects/hrr/tests/scripts/summarize_junit.py"),
-    )
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
@@ -147,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     markdown = render_header(args.reason, run_gpu, families, base) + render_jobs(rows, missing)
     errors: list[str] = []
     args.results_dir.mkdir(parents=True, exist_ok=True)
-    markdown += load_summarize_junit(args.summarize_junit).render(args.results_dir, errors)
+    markdown += summarize_junit.render(args.results_dir, errors)
 
     sys.stdout.write(markdown)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

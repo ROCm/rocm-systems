@@ -1,17 +1,20 @@
-# Copyright Advanced Micro Devices, Inc.
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-
 """Tests for hrr_ci_report.py."""
 
+import contextlib
+import io
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
-import hrr_ci_report as rpt
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+import hrr_ci_report as rpt  # noqa: E402
 
 JOBS = [
     {"name": "Configure", "conclusion": "success", "html_url": "u0"},
@@ -79,11 +82,14 @@ class RenderTest(unittest.TestCase):
         self.assertIn("| Integration | gfx950 | [cancelled](u5) |", text)
         self.assertIn("| Integration | gfx110x | _did not run_ |", text)
 
-    def test_summarize_junit_loads(self):
-        module = rpt.load_summarize_junit(
-            REPO_ROOT / "projects/hrr/tests/scripts/summarize_junit.py"
-        )
-        self.assertTrue(callable(module.render))
+    def test_main_appends_results_table(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=JOBS[:3]), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--reason", "why", "--results-dir", tmp])
+        self.assertEqual(rc, 0)
+        self.assertIn("## HRR results by platform", out.getvalue())
 
 
 if __name__ == "__main__":

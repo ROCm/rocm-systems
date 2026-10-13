@@ -3,9 +3,9 @@
 #
 # Called by hrr-ci.yml, which decides when this runs and on which families.
 #
-# Interim: the build job and .github/scripts/hrr_capture_build.py exist only
-# until TheRock provides an hrr-capture build variant. After that, this file
-# calls TheRock's multi-arch workflows with that variant instead.
+# Interim: the build job and projects/hrr/tests/scripts/hrr_capture_build.py
+# exist only until TheRock provides an hrr-capture build variant. After that,
+# this file calls TheRock's multi-arch workflows with that variant instead.
 
 name: HRR GPU
 
@@ -42,7 +42,6 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            .github/scripts
             projects/clr
             projects/hip
             projects/hrr
@@ -67,13 +66,13 @@ jobs:
       - name: Install base ROCm artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/hrr_capture_build.py fetch-base
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py fetch-base
 
       - name: Build
-        run: python3 .github/scripts/hrr_capture_build.py build
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
 
       - name: Verify
-        run: python3 .github/scripts/hrr_capture_build.py verify
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py verify
 
       - name: Upload base build record
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -131,7 +130,6 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            .github/scripts
             projects/hrr/tests/config
             projects/hrr/tests/scripts
 
@@ -162,7 +160,7 @@ jobs:
           path: build
 
       - name: Install base ROCm artifacts and the capture-enabled amdhip64
-        run: python .github/scripts/hrr_capture_build.py install-base
+        run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
 
       - name: Run integration suite
         env:
