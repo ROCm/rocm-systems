@@ -204,7 +204,7 @@ impl Device {
     /// and platform dependencies. A host CPU represented by an activated endpoint uses
     /// this same device interface when its driver supports the placement;
     /// host-only storage remains available through
-    /// [`Session::allocate_host`](crate::session::Session::allocate_host).
+    /// [`HostAllocation::allocate`](crate::memory::host::HostAllocation::allocate).
     ///
     /// # Errors
     /// Rejects unsupported permissions or placement and invalid extents before

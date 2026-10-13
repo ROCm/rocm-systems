@@ -87,7 +87,7 @@ pub enum MemoryKind {
     /// established in the activated address space. The native platform memory
     /// manager owns the physical backing; rocddi owns its returned allocation
     /// and persistent host mapping. Host-only allocations instead use
-    /// [`Session::allocate_host`](crate::session::Session::allocate_host).
+    /// [`HostAllocation::allocate`](crate::memory::host::HostAllocation::allocate).
     System,
     /// rocddi-owned host pages made accessible to the device at the same host
     /// and device virtual address. The backend may pin, register, or otherwise

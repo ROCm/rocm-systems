@@ -200,34 +200,30 @@ impl Drop for HostAllocation {
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::memory::host::{host_cache_control, host_cache_line_size, host_page_size};
+    use crate::memory::host::{
+        HostAllocation as PublicHostAllocation, host_cache_control, host_cache_line_size,
+        host_page_size,
+    };
     use crate::os::linux::errno;
     use crate::session::{DriverContextLifetime, Session};
     #[test]
-    fn cpu_storage_supports_both_lifetimes() {
-        for policy in [
-            DriverContextLifetime::Session,
-            DriverContextLifetime::Process,
-        ] {
-            let mut session = Session::new(policy).unwrap();
-            let page = host_page_size().unwrap();
-            let size = page * 2;
-            let alignment = page * 16;
-            let mut allocation = session.allocate_host(size, alignment).unwrap();
-            assert_eq!(allocation.info().host_address as u64 % alignment, 0);
-            assert_eq!(allocation.info().size, size);
-            if let Ok(line) = host_cache_line_size() {
-                // SAFETY: The newly allocated extent remains mapped.
-                unsafe {
-                    host_cache_control(allocation.info().host_address, size, line).unwrap();
-                }
+    fn cpu_storage_remains_available_after_session_shutdown() {
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        session.destroy().unwrap();
+        let page = host_page_size().unwrap();
+        let size = page * 2;
+        let alignment = page * 16;
+        let mut allocation = PublicHostAllocation::allocate(size, alignment).unwrap();
+        assert_eq!(allocation.info().host_address as u64 % alignment, 0);
+        assert_eq!(allocation.info().size, size);
+        if let Ok(line) = host_cache_line_size() {
+            // SAFETY: The newly allocated extent remains mapped.
+            unsafe {
+                host_cache_control(allocation.info().host_address, size, line).unwrap();
             }
-            allocation.free().unwrap();
-            allocation.free().unwrap();
-            drop(allocation);
-            session.destroy().unwrap();
-            assert!(session.allocate_host(page, page).is_err());
         }
+        allocation.free().unwrap();
+        allocation.free().unwrap();
     }
     #[test]
     fn failed_host_free_preserves_the_mapping_and_retries_only_remaining_work() {

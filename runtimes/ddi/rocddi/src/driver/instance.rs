@@ -157,16 +157,16 @@ impl DeviceDriverState {
         }
     }
 
-    /// Checks the exact installed driver owner of an activated device.
+    /// Checks whether two activated devices retain the same driver instance.
     /// A matching numeric endpoint identity alone cannot establish ownership.
-    pub(crate) fn belongs_to(&self, instance: &DriverInstance) -> bool {
-        match (self, instance) {
-            (Self::LinuxKfd { driver, .. }, DriverInstance::LinuxKfd(installed)) => {
-                Shared::ptr_eq(driver, installed)
+    pub(crate) fn shares_driver_instance(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::LinuxKfd { driver: left, .. }, Self::LinuxKfd { driver: right, .. }) => {
+                Shared::ptr_eq(left, right)
             }
             #[cfg(test)]
-            (Self::Test { driver, .. }, DriverInstance::Test(installed)) => {
-                Shared::ptr_eq(driver, installed)
+            (Self::Test { driver: left, .. }, Self::Test { driver: right, .. }) => {
+                Shared::ptr_eq(left, right)
             }
             #[cfg(test)]
             _ => false,
@@ -199,28 +199,17 @@ impl DeviceDriverState {
     }
 
     pub(crate) fn shares_address_domain(&self, other: &Self) -> bool {
+        if !self.shares_driver_instance(other) {
+            return false;
+        }
         match (self, other) {
-            (
-                Self::LinuxKfd {
-                    driver: left,
-                    state: a,
-                },
-                Self::LinuxKfd {
-                    driver: right,
-                    state: b,
-                },
-            ) => Shared::ptr_eq(left, right) && AddressSpaceInfo::shares_address_domain(a, b),
+            (Self::LinuxKfd { state: a, .. }, Self::LinuxKfd { state: b, .. }) => {
+                AddressSpaceInfo::shares_address_domain(a, b)
+            }
             #[cfg(test)]
-            (
-                Self::Test {
-                    driver: left,
-                    state: a,
-                },
-                Self::Test {
-                    driver: right,
-                    state: b,
-                },
-            ) => Shared::ptr_eq(left, right) && AddressSpaceInfo::shares_address_domain(a, b),
+            (Self::Test { state: a, .. }, Self::Test { state: b, .. }) => {
+                AddressSpaceInfo::shares_address_domain(a, b)
+            }
             #[cfg(test)]
             _ => false,
         }

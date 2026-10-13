@@ -28,6 +28,8 @@ const INITIAL_RESET_EPOCH: u64 = 1;
 /// Cached host facts stay valid until destruction succeeds.
 pub(crate) struct Instance {
     pub native: session::Session,
+    /// Guards host-only ABI work that does not enter a native driver.
+    pub process_id: u32,
     pub children: AtomicU64,
     pub closing: bool,
     pub ids: AtomicU64,
@@ -587,6 +589,7 @@ pub(crate) unsafe extern "C" fn create(
         let host_cache_line = native_memory::host::host_cache_line_size().ok();
         let owner = slot.write(Instance {
             native,
+            process_id: std::process::id(),
             host_page_size,
             host_cache_line,
             children: AtomicU64::new(0),

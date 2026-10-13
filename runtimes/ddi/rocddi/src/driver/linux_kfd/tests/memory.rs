@@ -1776,8 +1776,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 #[test]
 #[allow(unsafe_code)]
 fn ambiguous_userptr_creation_retains_owned_host_pages() {
-    let mut host =
-        HostAllocation::allocate(desc().size, desc().alignment, std::process::id()).unwrap();
+    let mut host = HostAllocation::allocate(desc().size, desc().alignment).unwrap();
     let fixture = Fixture::with_devices_and_userptr_source(
         [Reply::Allocate(17, Some(errno::EFAULT))],
         uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE,

@@ -49,9 +49,17 @@ impl HostBackingLease {
 }
 
 impl HostAllocation {
-    /// Creates host backing using the selected platform implementation.
-    pub(crate) fn allocate(size: u64, alignment: u64, process: u32) -> Result<Self, Error> {
-        let inner = os::HostAllocation::create(size, alignment, process)?;
+    /// Allocates host-only storage without activating a device or opening a
+    /// driver context. `size` is a nonzero multiple of [`host_page_size`];
+    /// `alignment` is a power of two at least that large. The host service may
+    /// reserve a larger backing extent while preserving the requested range.
+    ///
+    /// # Errors
+    /// Rejects invalid extents and reports metadata exhaustion or native
+    /// mapping failure. The allocation retains its creating process identity
+    /// so inherited state cannot be released in a fork child.
+    pub fn allocate(size: u64, alignment: u64) -> Result<Self, Error> {
+        let inner = os::HostAllocation::create(size, alignment, std::process::id())?;
         let (host_address, size) = inner.extent();
         let info = HostAllocationInfo { host_address, size };
         Ok(Self { inner, info })

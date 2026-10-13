@@ -26,9 +26,8 @@ pub(crate) use device::{
     Allocation, AllocationDesc, AllocationInfo, AllocationLimits, DeviceAccess, DriverAllocation,
     DriverVirtualAddress, DriverVirtualDeviceMapping, DriverVirtualHostMapping,
     DriverVirtualMemory, HostCacheability, HostMappingPolicy, HostRegistration, MemoryKind,
-    VirtualAddress, VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo,
-    set_device_access_for,
+    VirtualAddressInfo, VirtualMapRequest, VirtualMemory, VirtualMemoryInfo, set_device_access_for,
 };
 #[cfg(test)]
 pub(crate) use device::{DeviceIntervals, HostIntervals};
-pub(crate) use host::{HostAllocation, host_page_size};
+pub(crate) use host::host_page_size;
