@@ -61,13 +61,11 @@ cases:
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
+  Unit_HRR_CaptureMovesEarlierArchiveAside: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
-  Unit_HRR_CaptureResumeCountsOnlyWholeRecords: {}
-  Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
-  Unit_HRR_CaptureTrimFails_Direct: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}

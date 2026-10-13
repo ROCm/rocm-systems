@@ -629,10 +629,9 @@ case "$VERB" in
       fi
     fi
 
-    # Capture resumes into an archive that is already there and leaves the
-    # other pid-* directories where they are, so a second run against the same
-    # --output silently merges two attempts into what reads afterwards as one
-    # multi-process capture.
+    # Capture adds this run's pid-* directories next to the ones already there,
+    # so a second run against the same --output silently merges two attempts
+    # into what reads afterwards as one multi-process capture.
     if compgen -G "$OUTPUT/pid-*" >/dev/null 2>&1; then
       if (( FORCE )); then
         log "$OUTPUT already holds a capture and --force was given: this run will be added"

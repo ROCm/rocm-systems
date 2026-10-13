@@ -133,7 +133,6 @@ What the archive holds, per process, and it is worth reading out to whoever has 
 - **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data.
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, PCI location and UUID.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
-- **`writer_state.json`**: the checkpoint cursor, present only while a capture is mid-flight.
 
 Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded.
 
