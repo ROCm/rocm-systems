@@ -53,6 +53,11 @@ struct CmdbufFrameRing {
   static constexpr uint64_t NextFrameReuseFence(uint64_t submitted, uint32_t frame_num) {
     return (submitted < frame_num) ? 0 : (submitted + 1 - frame_num);
   }
+
+  // The fence value that retires the most recent submission and every packet
+  // merged into it. Without platform atomics the CPU retires the completion
+  // signal of that submission's last packet, and this is what it waits for.
+  static constexpr uint64_t LastFenceValue(uint64_t submitted) { return submitted; }
 };
 
 }  // namespace thunk

@@ -1171,13 +1171,17 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
+      // A signalled packet ends its merge run, so it is the last packet of the submission
+      // just issued. The AQL write index is not a fence value: once dispatches share a
+      // submission it runs ahead of every value this syncobj will ever reach.
+      const uint64_t fence_value = CmdbufFrameRing::LastFenceValue(sync_point);
       constexpr int kFaultTimeoutMs = 30000;
       auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (*sync_addr < cmdbuf_aql_frame_write_index) {
-        if (!dxg_runtime->disable_wait_timeout_ &&
-            std::chrono::steady_clock::now() >= deadline) {
+      while (LoadSyncValue(sync_addr) < fence_value) {
+        if (!dxg_runtime->disable_wait_timeout_ && std::chrono::steady_clock::now() >= deadline) {
           pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+                 " expected=%" PRIu64 ")\n",
+                 kFaultTimeoutMs, LoadSyncValue(sync_addr), fence_value);
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
