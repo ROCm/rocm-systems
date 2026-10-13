@@ -22,6 +22,9 @@
 
 #include "nccl_device/utility.h"
 
+// bitops.h declares same-signature ::divUp, ::isPow2, ::add4G, ::idivRcp32 and more, so these
+// global-scope using-declarations become ill-formed if it ever reaches this TU; qualify the calls
+// instead if a new include pulls it in (test/BitOpsTests.cpp records the same trap for add4G).
 using nccl::utility::acquireOrderOf;
 using nccl::utility::add4G;
 using nccl::utility::alignDown;
@@ -189,8 +192,8 @@ TEST(NcclUtilityMicrotest, ImulRcp32_HandlesZeroReciprocalShortCircuitsAndMatche
 
   // x=3, y=5 is chosen (rather than some arbitrary pair) because it's one of
   // the smallest inputs that actually drives the `if (x*y <= rem) rcp += 1;`
-  // rounding correction true -- an arbitrary pair like (6,7) can land on the
-  // false side and leave that correction untested.
+  // rounding correction true: rcp comes back as 0x11111110, rem == 16, and
+  // 15 <= 16. Pairs like the (2,2) case below land on the false side instead.
   uint32_t x = 3, y = 5;
   uint32_t got = imulRcp32(x, idivRcp32(x), y, idivRcp32(y));
   EXPECT_EQ(got, idivRcp32(x * y));
