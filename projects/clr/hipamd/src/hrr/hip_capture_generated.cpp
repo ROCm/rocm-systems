@@ -2961,10 +2961,8 @@ static hipError_t capture_hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* de
     a.ret         = static_cast<int32_t>(r);
     a.handle = reinterpret_cast<uint64_t>(handle);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
-    if (handle) {
-      hrr_cap::writer::digest_into(a.handle_bytes, sizeof(a.handle_bytes), handle, sizeof(hipIpcMemHandle_t));
-      a.handle_present = 1;
-    }
+    // *handle is a capability and is not recorded.
+    if (handle) a.handle_present = 1;
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCGETMEMHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -2976,7 +2974,7 @@ static hipError_t capture_hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHa
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenEventHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    hrr_cap::writer::digest_into(a.handle_bytes, sizeof(a.handle_bytes), &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     if (event) a.event = reinterpret_cast<uint64_t>(*event);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENEVENTHANDLE, &a.hdr, sizeof(a));
   }
@@ -2989,7 +2987,7 @@ static hipError_t capture_hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t h
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenMemHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    hrr_cap::writer::digest_into(a.handle_bytes, sizeof(a.handle_bytes), &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (devPtr) a.devPtr = reinterpret_cast<uint64_t>(*devPtr);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENMEMHANDLE, &a.hdr, sizeof(a));
