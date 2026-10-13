@@ -46,6 +46,20 @@ TEST_F(NcclCoreMicrotest, TeamWorld_ReturnsCommNRanksAndRankWithStrideOne) {
   EXPECT_EQ(team.stride, 1);
 }
 
+TEST_F(NcclCoreMicrotest, TeamWorldAndRankToWorld_IgnoreAFailingInitOnce) {
+  // The only two of the seven that don't gate on ncclDevrInitOnce: with it
+  // failing, both must still return real values rather than a zeroed/-1 answer.
+  g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
+  comm->nRanks = 4;
+  comm->rank = 2;
+  ncclTeam_t world = ncclTeamWorld(comm);
+  EXPECT_EQ(world.nRanks, 4);
+  EXPECT_EQ(world.rank, 2);
+  EXPECT_EQ(world.stride, 1);
+  ncclTeam_t team{/*nRanks=*/4, /*rank=*/2, /*stride=*/3};
+  EXPECT_EQ(ncclTeamRankToWorld(comm, team, team.rank + 1), 5);  // 2 + (3 - 2) * 3
+}
+
 TEST_F(NcclCoreMicrotest, TeamLsa_SuccessPath_ReadsLsaSizeAndSelfFromDevrState) {
   comm->devrState.lsaSize = 8;
   comm->devrState.lsaSelf = 3;

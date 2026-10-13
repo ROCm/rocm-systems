@@ -251,9 +251,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroNcclDeviceCore`**: `src/nccl_device/core.cc` (via
   `CORE_CC_PATH`, from `nccl-core-test.cc`); suite `NcclCoreMicrotest.*`. Its
   own binary because `rccl-UnitTestsMicro`'s `fakes/dev_runtime_micro_fakes.cc`
-  (`ncclTeamWorld`/`ncclTeamRail`/`ncclTeamCft`/`ncclTeamCftMultimem`),
-  `fakes/devcomm_fakes.cc` (`ncclTeamLsa`), and `gin-host-test.cc`
-  (`ncclTeamRankToWorld`) between them fake 6 of this file's 7 functions.
+  (`ncclTeamWorld`/`ncclTeamRail`/`ncclTeamCft`/`ncclTeamCftMultimem`) and
+  `fakes/devcomm_fakes.cc` (`ncclTeamLsa`) fake 5 of this file's 7 functions, and
+  `gin-host-test.cc` fakes `ncclTeamWorld`/`ncclTeamRail`/`ncclTeamRankToWorld`
+  for `rccl-UnitTestsMicroGinHost`.
   Links the lightweight `fakes/dev_runtime_fakes.cc` (hookable
   `ncclDevrInitOnce`, default `ncclSuccess`) rather than the real
   `dev_runtime.cc` -- core.cc only calls `ncclDevrInitOnce` itself, so the full

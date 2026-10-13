@@ -294,10 +294,11 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroNcclDeviceCore -- src/nccl_device/core.cc. Its own binary:
-  # dev_runtime_micro_fakes.cc (ncclTeamWorld/ncclTeamRail/ncclTeamCft/ncclTeamCftMultimem),
-  # devcomm_fakes.cc (ncclTeamLsa), and gin-host-test.cc (ncclTeamRankToWorld) between them
-  # fake 6 of this file's 7 functions for rccl-UnitTestsMicro's sake; this target compiles
-  # core.cc as the real thing under test, so none of those three can share a binary with it.
+  # dev_runtime_micro_fakes.cc (ncclTeamWorld/ncclTeamRail/ncclTeamCft/ncclTeamCftMultimem)
+  # and devcomm_fakes.cc (ncclTeamLsa) fake 5 of this file's 7 for rccl-UnitTestsMicro,
+  # and gin-host-test.cc fakes ncclTeamWorld/ncclTeamRail/ncclTeamRankToWorld for
+  # rccl-UnitTestsMicroGinHost; this target compiles core.cc as the real thing under
+  # test, so none of those three can share a binary with it.
   set(TEST_MICRO_NCCL_DEVICE_CORE_SOURCE_FILES
     nccl-core-test.cc
     fakes/bootstrap_stubs.cc

@@ -114,6 +114,8 @@ test_categories:
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # nccl_device/core.cc (rccl-UnitTestsMicroNcclDeviceCore)
+      - "NcclCoreMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
