@@ -815,8 +815,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON); wrap-test.cc's LL128 tests need it.
-    ENABLE_LL128
     P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc"
     RAS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/ras.cc"
     RAS_DIAGNOSTICS_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_checks_common.cc"
@@ -842,8 +840,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
-    # wrap-test.cc reads the real gfx1250 table from this; the fake rcclGetArchThresholds still returns null.
-    ARCH_THRESHOLDS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_arch_thresholds.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
     RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR

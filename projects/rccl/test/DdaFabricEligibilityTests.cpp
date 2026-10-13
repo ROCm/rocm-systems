@@ -756,6 +756,22 @@ TEST_F(DdaFabricEligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_AtThresholdEligible)
+{
+    constexpr size_t totalCap = 64u * 1024u * 1024u;  // DDA_LL128_THRESHOLD default
+    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllGatherLL128_PastThresholdRejected)
+{
+    constexpr size_t totalCap = 64u * 1024u * 1024u;
+    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
 // ---------------------------------------------------------------------------
 // AllReduce
 // ---------------------------------------------------------------------------
@@ -1223,7 +1239,7 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
 }
 
-// ncclAllReduceDdaFabricLL128Eligible: an in-range size and an unaligned shard.
+// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
 // These call the shape-eligibility function directly, which applies the one-shot and
 // two-shot ceilings but not the tier's ddaLL128Max. 32 MiB was gfx1250's
 // ddaLL128Max[AllReduce] when these were written; the probe size is kept as an
@@ -1235,9 +1251,9 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
         mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
 }
 
-TEST_F(DdaFabricEligibilityTest, AllReduceLL128_UnalignedShardRejected)
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_PastCapRejected)
 {
-    // 32 MiB + 8 bytes: past the one-shot ceiling, and its 8-rank shard is not a whole number of 16B chunks
+    // 8388610 * 4 = 33554440 bytes = 32 MiB + 8 bytes; %8 == 0
     EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, 8388610, ncclFloat32, ncclSum));
 }
@@ -1261,19 +1277,15 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_CeilingFromArchTable)
         mockComm_.get(), sendbuff_, recvbuff_, 16777248, ncclFloat32, ncclSum));
 }
 
-// The rank-scaled VMM block count is 128 blocks at 8 ranks and 64 at 32 from a 256-block init cap,
-// and the AllReduce launch uses the clique-agreed count stored at init for a message that fills every block.
+// The VMM AllReduce launch uses the rank-scaled block count: 128 blocks at 8 ranks and
+// 64 at 32 for a message large enough to fill every block, from a 256-block init cap.
 TEST_F(DdaFabricEligibilityTest, AllReduceVmm_BlocksFollowRankBudget)
 {
     const size_t count = 64u * 1024u * 1024u;  // 256 MiB of float32
-    const int maxBlocks = mockComm_.comm.ddaFabricMaxBlocks;
-    ASSERT_GE(maxBlocks, 128);
+    ASSERT_GE(mockComm_.comm.ddaFabricMaxBlocks, 128);
     mockComm_.comm.nRanks = 8;
-    EXPECT_EQ(rcclDdaFabricLocalVmmBlocks(mockComm_.get(), maxBlocks), 128);
     EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 128u);
     mockComm_.comm.nRanks = 32;
-    EXPECT_EQ(rcclDdaFabricLocalVmmBlocks(mockComm_.get(), maxBlocks), 64);
-    mockComm_.comm.ddaFabricVmmBlocks = 64;
     EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 64u);
 }
 
@@ -1542,9 +1554,7 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
 
 TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
 {
-    // gfx1250 at 8 ranks: 128 MiB
-    mockComm_.comm.nRanks = 8;
-    constexpr size_t totalCap = 128u * 1024u * 1024u;
+    const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));

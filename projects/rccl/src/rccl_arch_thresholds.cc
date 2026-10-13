@@ -20,7 +20,7 @@
 //              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
 // All collectives compare total message bytes against the table values.
 
-// gfx1250 table. The rank-scaled and Ring / Tree entries below come from the 8 to 64 rank sweep.
+// gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
 // Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
@@ -213,7 +213,6 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
   .ddaArVmmFirstMaxPerRank = 512ULL*1024,
-  .ddaArVmmFirstMaxBytes = 32ULL*1024*1024,       // the largest swept window top (64 ranks)
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
@@ -227,8 +226,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
   .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
   .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
-  // 128 channels beat 192 by 1.1-1.3x in (8M, 32M] for 2/4-byte types; fp8 stays on LL128 there, so its band is empty.
-  .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,
+  .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,// 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
   .rsRingSimpleCappedChannels = 128,
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).

@@ -20,7 +20,6 @@
 
 #include <cuda_runtime.h>
 
-#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -108,22 +107,18 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
          parsedOverride.requested, localBlocksMax, localBlocksMax);
   }
 
-  struct BlockCaps {
-    int maxBlocks;
-    int vmmBlocks;
-  };
-  std::vector<BlockCaps> blockCaps(nRanks, BlockCaps{0, 0});
-  blockCaps[comm->rank] = {localBlocksMax, rcclDdaFabricLocalVmmBlocks(comm, localBlocksMax)};
+  std::vector<int> blockCaps(nRanks, 0);
+  blockCaps[comm->rank] = localBlocksMax;
   // Fabric cliques are normally homogeneous, but harvested or disabled CUs
   // can produce different local caps. Every rank must launch the same number
   // of blocks because the barrier pairs participants by blockIdx.
-  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(BlockCaps)));
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
 
-  int nBlocksMax = blockCaps[comm->rank].maxBlocks;
-  int nVmmBlocks = blockCaps[comm->rank].vmmBlocks;
+  int nBlocksMax = localBlocksMax;
   for (int rank = 0; rank < nRanks; ++rank) {
-    nBlocksMax = std::min(nBlocksMax, blockCaps[rank].maxBlocks);
-    nVmmBlocks = std::min(nVmmBlocks, blockCaps[rank].vmmBlocks);
+    if (blockCaps[rank] < nBlocksMax) {
+      nBlocksMax = blockCaps[rank];
+    }
   }
 
   const size_t eagerVmmAr = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
@@ -208,7 +203,6 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaPeerPtrsHost = peerHost;
   comm->ddaFabricBarrierState = barrierState;
   comm->ddaFabricMaxBlocks = nBlocksMax;
-  comm->ddaFabricVmmBlocks = nVmmBlocks;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
   INFO(NCCL_INIT,
@@ -218,8 +212,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
        nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
        (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
   INFO(NCCL_INIT,
-       "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d, VMM blocks=%d",
-       comm->cuCount, localBlocksMax, nBlocksMax, nVmmBlocks);
+       "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
+       comm->cuCount, localBlocksMax, nBlocksMax);
   return ncclSuccess;
 
 fail:

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -153,8 +153,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
 void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
                                    float table[][NCCL_NUM_PROTOCOLS]);
 // Arch-table channel cap for Ring Simple ReduceScatter
-// (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS and
-// RCCL_CHANNEL_TUNING_ENABLE=0 turn it off, and it never caps below the comm's minCTAs.
+// (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
 void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
@@ -267,10 +266,6 @@ bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
 // RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
 // the arch table's forceCeScratch decides.
 bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
-// taskAppend's CE-Scratch route for collectives no selector decides, such as Gather and Scatter: CE-Scratch
-// is forced, the scratch probe passed, no sysmem segment, NCCL_ALGO unset, and the receive fits ddaScratch.
-bool rcclTaskAppendCeScratch(const struct ncclComm* comm, ncclFunc_t coll, bool ceScratchAvailable,
-                             bool hasSysmemSegment, size_t recvBytes);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
@@ -355,10 +350,8 @@ size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
-// This rank's DDA VMM AllReduce / ReduceScatter block count: maxBlocks, lowered on
-// large comms per rcclArchThresholds::ddaVmmBlockBudget. Fabric init min-reduces it across the clique.
-int rcclDdaFabricLocalVmmBlocks(const ncclComm* comm, int maxBlocks);
-// Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the clique-agreed count from fabric init.
+// Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
+// lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
