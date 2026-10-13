@@ -310,6 +310,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroRocmwrap`** — `src/misc/rocmwrap.cc` (via
+  `ROCMWRAP_CC_PATH`, from `rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`.
+  Covers the kernel-version probe, the cuMem VMM functional probe and its
+  cleanup, the capability gates behind `ncclIsCuMemSupported` /
+  `ncclCuMemRuntimeSupported`, and `rocmLibraryInit`'s ROCr version and
+  DMA-BUF setup. Its own binary because `fakes/rocmwrap_fakes.cc` and
+  `fakes/nccl_fakes.cc` define `rocmLibraryInit`, `ncclCuMemEnable` and
+  `ncclCuMemHandleType`. The test TU defines `ncclDebugLog`, `g_loadParam`,
+  `hsa_system_get_info` and `hsa_init`, and seams `uname`, `fopen`,
+  `hipDriverGetVersion`, `hipDeviceGet`, the kernel-config reader and the weak
+  `hsa_amd_portable_export_dmabuf` symbol inside `rocmwrap.cc` only;
+  `kernel_config.cc` and `archinfo.cc` are compiled for real. The
+  `NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)` arms of `ncclCuMemEnable` and
+  `ncclCuMemHostEnable` compile only on ROCm 7.12+ (or the 7.0.2.x backport),
+  so on 7.1/7.2 the tests pin the out-of-window arm. See
+  `test_categories_micro_rocmwrap.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -829,6 +845,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroRocmwrap`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -869,6 +886,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
