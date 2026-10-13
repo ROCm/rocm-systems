@@ -3972,6 +3972,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int x = 0;
   // Longest segment transcription that still leaves room for the terminating 0.
   const int maxTreeBaseLen = (int)sizeof(graph->treeBase[0]) - 1;
+  // Most trees that still leave a row for the terminating empty one.
+  const int maxTrees = (int)(sizeof(graph->treeBase) / sizeof(graph->treeBase[0])) - 1;
   do {
     int digit = str[offset] - '0';
     if (digit >= 0 && digit <= 9) {
@@ -3998,6 +4000,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
       }
       status = 0;
       if (str[offset] == '|' || str[offset] == 0) {
+        if (x >= maxTrees) {
+          WARN("Too many trees in user-defined trees (max %d), ignoring user-defined trees", maxTrees);
+          return ncclInvalidUsage;
+        }
         int r = 0, y = 0;
         while (start_offset < offset) {
         // for (int r=0; r<gpu; r++) {

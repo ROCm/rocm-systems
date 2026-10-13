@@ -110,6 +110,22 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
             ncclInvalidUsage);
 }
 
+// Each '|'-separated segment claims the next treeBase row, and one more row is used to
+// terminate the list, so a string carrying more segments than there are rows must be
+// refused. treeBase is the last member of ncclTopoGraph, so this one runs off the end
+// of the graph itself rather than into a neighbouring row.
+TEST_F(RomeModelsParseGraphLightMicrotest, MoreSegmentsThanTreeBaseRows_IsRejected) {
+  // Exactly one segment too many: with one segment per row there is no row left to
+  // terminate the list, so this is the smallest input that must be refused and it pins
+  // the limit itself rather than merely being somewhere beyond it.
+  const size_t rows = sizeof(graph()->treeBase) / sizeof(graph()->treeBase[0]);
+  std::string tooManySegments = "(0)";
+  for (size_t i = 1; i < rows; i++) tooManySegments += "|(0)";
+
+  EXPECT_EQ(parseGraphLight(tooManySegments.c_str(), system(), graph(), nullptr),
+            ncclInvalidUsage);
+}
+
 // Each number is accumulated a digit at a time into an int. A number too wide for an
 // int must be refused, not wrapped: 4294967299 wraps to 3, which would otherwise be
 // silently accepted as a well-formed tree naming a GPU the string never asked for.
@@ -131,8 +147,12 @@ TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsReject
   // digits of "14" land beyond it. The trailing ')' keeps the number's end-of-token scan
   // inside the string.
   const std::string endsInNumber = std::string(rowLen - 1, '(') + "14)";
+  // Overruns on a digit that is the last thing written to the row: the number's
+  // end-of-token scan runs past the '|' to find the next segment's '(', so no closing
+  // parenthesis follows it onto this row to be caught by the check above.
+  const std::string endsInDigit = std::string(rowLen - 1, '(') + "1|(2)";
 
-  for (const std::string& tooLong : {parens, endsInNumber}) {
+  for (const std::string& tooLong : {parens, endsInNumber, endsInDigit}) {
     SCOPED_TRACE("segment length " + std::to_string(tooLong.size()));
     const char sentinel = 'Z';
     graph()->treeBase[1][0] = sentinel;
