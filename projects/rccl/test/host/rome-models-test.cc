@@ -181,6 +181,15 @@ TEST_F(RomeModelsParseGraphLightMicrotest, GpuNumbersAreTranslatedThroughGpuMap)
   EXPECT_STREQ(graph()->treeBase[0], "(0(15))");
 }
 
+// A GPU number is matched against the device numbers the system actually reports, and a
+// tree naming one that is absent is refused. Reported as an internal error, unlike the
+// invalid-usage results above; that predates this work and is left as it was.
+TEST_F(RomeModelsParseGraphLightMicrotest, GpuNotInTheSystem_IsRejected) {
+  const std::string absentGpu = "(" + std::to_string(kGpus + 4) + ")";
+
+  EXPECT_EQ(parseGraphLight(absentGpu.c_str(), system(), graph(), nullptr), ncclInternalError);
+}
+
 // A GPU number is used directly as an index into the caller's remap table, which is only
 // as long as the system has GPUs, so a number naming a GPU the system does not have reads
 // past the end of that table. Callers inside this file pass built-in trees, but the
