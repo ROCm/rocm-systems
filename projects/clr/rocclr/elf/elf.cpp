@@ -405,7 +405,12 @@ unsigned int Elf::getSymbolNum() const {
     return 0;  // No SYMTAB
   }
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
-  auto num = symbol_reader.get_symbols_num() - 1;  // Exclude the first dummy symbol
+  auto total = symbol_reader.get_symbols_num();
+  if (total == 0) {
+    logElfError(" failed: empty or malformed SYMTAB");
+    return 0;
+  }
+  auto num = total - 1;  // Exclude the first dummy symbol
   LogElfInfo(": num=%lu", num);
   return num;
 }
