@@ -6488,11 +6488,6 @@ protected:
   wave_disable_traps (wave_t &wave,
                       os_wave_launch_trap_mask_t mask) const override final;
 
-  std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
-  scratch_memory_region (
-    const agent_t &agent, uint32_t compute_tmpring_size_register,
-    const architecture_t::cwsr_record_t &cwsr_record) const override;
-
   amd_dbgapi_size_t
   scratch_memory_size (uint32_t compute_tmpring_size_register) const override;
 };
@@ -7615,34 +7610,6 @@ gfx12_architecture_t::is_sequential (const instruction_t &instruction) const
     && !is_sop1_encoding<72, 73> (instruction)
     /* s_call_b64  */
     && !is_sopk_encoding<20> (instruction);
-}
-
-std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
-gfx12_architecture_t::scratch_memory_region (
-  const agent_t &agent, uint32_t compute_tmpring_size_register,
-  const architecture_t::cwsr_record_t &cwsr_record) const
-{
-  /* Total size of allocated scratch memory in number of waves.  */
-  amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
-  /* Amount of space in bytes used by each wave.  */
-  amd_dbgapi_size_t wavesize
-    = scratch_memory_size (compute_tmpring_size_register);
-
-  /* The number of waves is per shader engine instead of total.  */
-  amd_dbgapi_size_t offset = (waves * cwsr_record.shader_engine_id ()
-                              + cwsr_record.scratch_scoreboard_id ())
-                             * wavesize;
-
-  auto shader_engine_count = utils::narrow<uint32_t> (
-    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
-
-  /* The scratch memory is evenly divided between all XCCs, so each XCC has its
-     own scratch base.  */
-  amd_dbgapi_size_t xcc_scratch_base
-    = waves * shader_engine_count * wavesize * cwsr_record.xcc_id ();
-
-  return { xcc_scratch_base + offset, wavesize };
 }
 
 amd_dbgapi_size_t
