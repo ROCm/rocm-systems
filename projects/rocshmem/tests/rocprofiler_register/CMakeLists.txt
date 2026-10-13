@@ -26,12 +26,15 @@
 #
 # Verifies that ROCSHMEM_ROCPROFILER_REGISTER=1 was set at compile time by:
 #   (a) Link-time: fails if rocprofiler_register_import_rocshmem is missing
-#       from librocshmem.a.
+#       from librocshmem.a.  The executable is always built so this check
+#       fires even when CTest registration is disabled (BUILD_CTESTS=OFF).
 #   (b) Runtime:   calls the function and asserts the returned version equals
 #       the version in rocshmem_config.h.
 #
 # No MPI or GPU required.
 
+# Always build the executable: the link step itself is the first regression
+# guard — a missing symbol causes a build failure regardless of BUILD_CTESTS.
 add_executable(rocshmem-rocprofiler-register-import-test
     test_import.cpp
 )
@@ -42,12 +45,24 @@ target_link_libraries(rocshmem-rocprofiler-register-import-test
         rocprofiler-register::rocprofiler-register
 )
 
-add_test(
-    NAME    rocshmem-rocprofiler-register-import
-    COMMAND rocshmem-rocprofiler-register-import-test
-)
+# Register with CTest and apply tier labels only when CTest is enabled.
+# Mirrors the pattern used by functional_tests and unit_tests.
+if(BUILD_CTESTS)
+    add_test(
+        NAME    rocshmem-rocprofiler-register-import
+        COMMAND rocshmem-rocprofiler-register-import-test
+    )
 
-set_tests_properties(rocshmem-rocprofiler-register-import
-    PROPERTIES
-        LABELS "rocprofiler-register;quick"
-)
+    set_tests_properties(rocshmem-rocprofiler-register-import
+        PROPERTIES
+            LABELS "rocprofiler-register;quick"
+    )
+
+    # Apply YAML-based tier labels so this test appears in CI tier filters
+    # (e.g. ctest -L pre-commit, ctest -L nightly).
+    set(_rocp_reg_categories_yaml "${CMAKE_SOURCE_DIR}/tests/test_categories.yaml")
+    include(${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake OPTIONAL)
+    if(COMMAND apply_ctest_category_labels AND EXISTS "${_rocp_reg_categories_yaml}")
+        apply_ctest_category_labels("${_rocp_reg_categories_yaml}")
+    endif()
+endif()

@@ -52,6 +52,9 @@ test_categories:
 # Unit tests
       - "unit_tests_n4"
 
+      # rocprofiler-register integration (no MPI or GPU required)
+      - "rocshmem-rocprofiler-register-import"
+
     labels:
       - "smoke"
       - "pre-commit"
