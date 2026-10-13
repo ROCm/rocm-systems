@@ -44,7 +44,6 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
    * latency is flat across 1..32B, so there is no reason to cap below InlineMax.
    */
   static constexpr size_t InlineThreshold = InlineMax;
-  static_assert(InlineThreshold <= InlineMax);
 };
 
 class QueuePairIONIC : public QueuePairDevice<QueuePairIONIC> {

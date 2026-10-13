@@ -319,30 +319,7 @@ public:
    * discarded at compile time, so a provider never emits copy code for widths it
    * cannot inline. Non-power-of-two sizes fall back to a correct byte copy.
    */
-  static __device__ __forceinline__ void copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size) {
-    constexpr size_t kMax = Traits::InlineThreshold;
-    static_assert(kMax <= 32, "inline payload fast-path only covers widths up to 32B");
-    const uint8_t* src = reinterpret_cast<const uint8_t*>(laddr);
-
-    // Fast path: exact power-of-two width -> one native load/store (the hot case,
-    // e.g. aligned 4B/8B scalar _p). Arms wider than kMax are pruned at compile time.
-    if constexpr (kMax >= 1)  { if (size == 1)  { __builtin_memcpy(dst, src, 1);  return; } }
-    if constexpr (kMax >= 2)  { if (size == 2)  { __builtin_memcpy(dst, src, 2);  return; } }
-    if constexpr (kMax >= 4)  { if (size == 4)  { __builtin_memcpy(dst, src, 4);  return; } }
-    if constexpr (kMax >= 8)  { if (size == 8)  { __builtin_memcpy(dst, src, 8);  return; } }
-    if constexpr (kMax >= 16) { if (size == 16) { __builtin_memcpy(dst, src, 16); return; } }
-    if constexpr (kMax >= 32) { if (size == 32) { __builtin_memcpy(dst, src, 32); return; } }
-
-    // Residual (non-power-of-two) sizes: cover with two overlapping constant-width
-    // copies of the first and last K bytes (K = largest power of two < size). Both
-    // widths are compile-time constant -> single wide ops, never a byte loop, and
-    // the overlap stays within [0, size) so nothing is read past the source.
-    if constexpr (kMax >= 16) { if (size > 16) { __builtin_memcpy(dst, src, 16); __builtin_memcpy(dst + size - 16, src + size - 16, 16); return; } }
-    if constexpr (kMax >= 8)  { if (size > 8)  { __builtin_memcpy(dst, src, 8);  __builtin_memcpy(dst + size - 8,  src + size - 8,  8);  return; } }
-    if constexpr (kMax >= 4)  { if (size > 4)  { __builtin_memcpy(dst, src, 4);  __builtin_memcpy(dst + size - 4,  src + size - 4,  4);  return; } }
-    if constexpr (kMax >= 2)  { if (size > 2)  { __builtin_memcpy(dst, src, 2);  __builtin_memcpy(dst + size - 2,  src + size - 2,  2);  return; } }
-    __builtin_memcpy(dst, src, 1);  // size == 1 remainder
-  }
+  static __device__ __forceinline__ void copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size);
 
   /**
    * @brief Convert value to ProviderEndianness, byteswapping if necessary.
@@ -360,6 +337,34 @@ public:
 };
 
 
+
+template <typename Provider>
+__device__ __forceinline__ void
+QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size) {
+  constexpr size_t kMax = Traits::InlineThreshold;
+  static_assert(kMax <= 32, "inline payload fast-path only covers widths up to 32B");
+  const uint8_t* src = reinterpret_cast<const uint8_t*>(laddr);
+
+  // Fast path: exact power-of-two width -> one native load/store (the hot case,
+  // e.g. aligned 4B/8B scalar _p). Arms wider than kMax are pruned at compile time.
+  // __builtin_memcpy_inline guarantees inline expansion (never a libcall/loop).
+  if constexpr (kMax >= 1)  { if (size == 1)  { __builtin_memcpy_inline(dst, src, 1);  return; } }
+  if constexpr (kMax >= 2)  { if (size == 2)  { __builtin_memcpy_inline(dst, src, 2);  return; } }
+  if constexpr (kMax >= 4)  { if (size == 4)  { __builtin_memcpy_inline(dst, src, 4);  return; } }
+  if constexpr (kMax >= 8)  { if (size == 8)  { __builtin_memcpy_inline(dst, src, 8);  return; } }
+  if constexpr (kMax >= 16) { if (size == 16) { __builtin_memcpy_inline(dst, src, 16); return; } }
+  if constexpr (kMax >= 32) { if (size == 32) { __builtin_memcpy_inline(dst, src, 32); return; } }
+
+  // Residual (non-power-of-two) sizes: cover with two overlapping constant-width
+  // copies of the first and last K bytes (K = largest power of two < size). Both
+  // widths are compile-time constant -> single wide ops, never a byte loop, and
+  // the overlap stays within [0, size) so nothing is read past the source.
+  if constexpr (kMax >= 16) { if (size > 16) { __builtin_memcpy_inline(dst, src, 16); __builtin_memcpy_inline(dst + size - 16, src + size - 16, 16); return; } }
+  if constexpr (kMax >= 8)  { if (size > 8)  { __builtin_memcpy_inline(dst, src, 8);  __builtin_memcpy_inline(dst + size - 8,  src + size - 8,  8);  return; } }
+  if constexpr (kMax >= 4)  { if (size > 4)  { __builtin_memcpy_inline(dst, src, 4);  __builtin_memcpy_inline(dst + size - 4,  src + size - 4,  4);  return; } }
+  if constexpr (kMax >= 2)  { if (size > 2)  { __builtin_memcpy_inline(dst, src, 2);  __builtin_memcpy_inline(dst + size - 2,  src + size - 2,  2);  return; } }
+  __builtin_memcpy_inline(dst, src, 1);  // size == 1 remainder
+}
 
 template <typename Provider>
 __device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
