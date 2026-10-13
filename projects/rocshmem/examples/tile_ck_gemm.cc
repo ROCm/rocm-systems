@@ -98,8 +98,8 @@ struct Tensor2D {
     __host__ __device__ T*  data_handle() const { return data; }
     __host__ __device__ int stride(int dim) const { return (dim == 0) ? row_stride : col_stride; }
 
-    __host__ __device__ T&       operator()(int i, int j)       { return data[i * row_stride + j]; }
-    __host__ __device__ const T& operator()(int i, int j) const { return data[i * row_stride + j]; }
+    __host__ __device__ T&       operator()(int i, int j)       { return data[i * row_stride + j * col_stride]; }
+    __host__ __device__ const T& operator()(int i, int j) const { return data[i * row_stride + j * col_stride]; }
 };
 
 struct Coord2D {
@@ -188,36 +188,42 @@ using GemmKernel   = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpil
  * @param pr        Row index of this PE in the process grid
  * @param step      Current SUMMA step (0..Pc-1); root for A is col=step, root for B is row=step
  */
+// summa_broadcast_kernel launches 2 workgroups; status[0] holds WG0's return
+// value (A broadcast), status[1] holds WG1's return value (B broadcast).
+// The host checks both before proceeding to GEMM.
 __global__ void summa_broadcast_kernel(Tensor2D<float> a_panel,
                                         Tensor2D<float> b_panel,
                                         Tensor2D<float> a_src,
                                         Tensor2D<float> b_src,
                                         rocshmem_team_t row_team,
                                         rocshmem_team_t col_team,
-                                        int pc, int pr, int step)
+                                        int pc, int pr, int step,
+                                        int* status)
 {
     __shared__ rocshmem_ctx_t ctx;
     rocshmem_wg_ctx_create(ROCSHMEM_CTX_WG_PRIVATE, &ctx);
 
     Coord2D start(0, 0);
+    int rc;
 
     if (blockIdx.x == 0) {
         // Broadcast A panel along this PE's row team.
         // Root is the PE at column index `step` in this row.
-        // The src tensor is meaningful only on the root; all PEs provide the a_panel dst buffer.
         //
         // NOTE: gap — A non-blocking broadcast (rocshmem_tile_broadcast_nbi_wg) would allow
         // WG0 to post the A broadcast and immediately return while WG1 posts the B broadcast,
         // then both could be waited on together. Currently we must block until complete.
         Coord2D boundary(a_panel.rows, a_panel.cols);
-        rocshmem_ctx_tile_broadcast_wg(ctx, row_team, a_panel, a_src,
-                                       start, boundary, /*pe_root=*/step, 0);
+        rc = rocshmem_ctx_tile_broadcast_wg(ctx, row_team, a_panel, a_src,
+                                             start, boundary, /*pe_root=*/step, 0);
+        if (threadIdx.x == 0) status[0] = rc;
     } else {
         // Broadcast B panel along this PE's column team.
         // Root is the PE at row index `step` in this column.
         Coord2D boundary(b_panel.rows, b_panel.cols);
-        rocshmem_ctx_tile_broadcast_wg(ctx, col_team, b_panel, b_src,
-                                       start, boundary, /*pe_root=*/step, 0);
+        rc = rocshmem_ctx_tile_broadcast_wg(ctx, col_team, b_panel, b_src,
+                                             start, boundary, /*pe_root=*/step, 0);
+        if (threadIdx.x == 0) status[1] = rc;
     }
 
     rocshmem_wg_ctx_destroy(&ctx);
@@ -327,14 +333,17 @@ int main(int argc, char* argv[])
     int n_pes = rocshmem_n_pes();
 
     // Require a perfect-square number of PEs for the 2D process grid.
-    int Pr = static_cast<int>(std::round(std::sqrt(static_cast<double>(n_pes))));
-    int Pc = n_pes / Pr;
-    if (Pr * Pc != n_pes) {
+    // Using Pr = Pc = P ensures the SUMMA loop root indices (0..Pc-1) are
+    // always valid within both the row team (size Pc) and column team (size Pr).
+    int P  = static_cast<int>(std::round(std::sqrt(static_cast<double>(n_pes))));
+    if (P * P != n_pes) {
         if (my_pe == 0)
             std::cerr << "n_pes (" << n_pes << ") must be a perfect square\n";
         rocshmem_finalize();
         return 1;
     }
+    int Pr = P;
+    int Pc = P;
 
     // This PE's coordinates in the Pr×Pc process grid.
     int pr = my_pe / Pc;
@@ -413,10 +422,15 @@ int main(int argc, char* argv[])
     float* d_scratch = nullptr;
     CHECK_HIP(hipMalloc(&d_scratch, M_local * N_local * sizeof(float)));
 
+    // Status buffer for the broadcast kernel: status[0]=A broadcast rc, status[1]=B broadcast rc.
+    int* d_bcast_status = nullptr;
+    CHECK_HIP(hipMalloc(&d_bcast_status, 2 * sizeof(int)));
+
     if (!d_A_local || !d_B_local || !d_C_local || !d_A_panel || !d_B_panel) {
         std::cerr << "PE " << my_pe << ": rocshmem_malloc failed\n";
-        rocshmem_finalize();
-        return 1;
+        // rocshmem_global_exit terminates all PEs symmetrically, preventing
+        // other PEs from hanging in later collectives while this one exits.
+        rocshmem_global_exit(1);
     }
 
     // -------------------------------------------------------------------------
@@ -486,10 +500,27 @@ int main(int argc, char* argv[])
         // WG 0 handles A (root = PE at column `step` in this row).
         // WG 1 handles B (root = PE at row `step` in this column).
         // Both root and non-root PEs receive the tile in their panel buffers.
+        CHECK_HIP(hipMemset(d_bcast_status, 0, 2 * sizeof(int)));
         hipLaunchKernelGGL(summa_broadcast_kernel, /*gridDim=*/2, /*blockDim=*/256, 0, 0,
                            a_panel, b_panel, a_src, b_src,
-                           row_team, col_team, pc, pr, step);
+                           row_team, col_team, pc, pr, step, d_bcast_status);
         CHECK_HIP(hipStreamSynchronize(0));
+
+        // Check broadcast return values before proceeding to GEMM.
+        // On unsupported backends (e.g. reverse-offload) the broadcast returns
+        // ROCSHMEM_ERROR; continuing into GEMM with uninitialized panels would
+        // produce silent numerical garbage.
+        int h_bcast_status[2] = {0, 0};
+        CHECK_HIP(hipMemcpy(h_bcast_status, d_bcast_status, 2 * sizeof(int),
+                            hipMemcpyDeviceToHost));
+        if (h_bcast_status[0] != ROCSHMEM_SUCCESS ||
+            h_bcast_status[1] != ROCSHMEM_SUCCESS) {
+            std::cerr << "PE (" << pr << "," << pc << ") step " << step
+                      << ": tile_broadcast_wg failed"
+                      << " (A rc=" << h_bcast_status[0]
+                      << ", B rc=" << h_bcast_status[1] << ")\n";
+            rocshmem_global_exit(1);
+        }
 
         // Local GEMM: scratch = A_panel × B_panel  (M_local × N_local)
         // CK Tile writes to d_scratch so we can accumulate across SUMMA steps.
@@ -538,39 +569,50 @@ int main(int argc, char* argv[])
     std::vector<float> h_C_ref(M_local * N_local, 0.f);
     cpu_gemm(h_A_local, h_B_local, h_C_ref, M_local, N_local, K);
 
-    float max_err = 0.f;
+    // Element-wise atol + rtol * |ref| comparison.
+    // fp32 accumulation error grows with K; the absolute floor handles near-zero
+    // references where a pure relative check would be too strict.
+    constexpr float rtol = 1e-4f;
+    constexpr float atol = 1e-4f;
+    bool local_pass = true;
+    float max_rel_err = 0.f;
     for (int idx = 0; idx < M_local * N_local; idx++) {
-        float err = std::fabs(h_C_local[idx] - h_C_ref[idx]);
-        max_err = std::max(max_err, err);
+        float ref = h_C_ref[idx];
+        float err = std::fabs(h_C_local[idx] - ref);
+        float tol = atol + rtol * std::fabs(ref);
+        if (err > tol) {
+            local_pass = false;
+            max_rel_err = std::max(max_rel_err, err / (std::fabs(ref) + 1e-8f));
+        }
     }
 
-    // Use a relative tolerance based on K (accumulated fp32 rounding).
-    float tol = 1e-3f * static_cast<float>(K);
-    bool local_pass = (max_err <= tol);
-
     if (!local_pass) {
-        std::cerr << "PE (" << pr << "," << pc << "): FAILED — max_err=" << max_err
-                  << " tol=" << tol << "\n";
+        std::cerr << "PE (" << pr << "," << pc << "): FAILED — max relative error="
+                  << max_rel_err << " (rtol=" << rtol << ", atol=" << atol << ")\n";
     }
 
     // Reduce pass/fail count across all PEs.
     // rocSHMEM scalar reductions are device-side only, so we launch a one-thread kernel.
+    // Allocate symmetrically; treat either null as a global fatal error so that
+    // no PE skips the barrier/reduce and leaves others hanging.
     int local_flag  = local_pass ? 1 : 0;
     int global_flag = 0;
     int* d_flag_src = static_cast<int*>(rocshmem_malloc(sizeof(int)));
     int* d_flag_dst = static_cast<int*>(rocshmem_malloc(sizeof(int)));
-    if (d_flag_src && d_flag_dst) {
-        CHECK_HIP(hipMemcpy(d_flag_src, &local_flag, sizeof(int), hipMemcpyHostToDevice));
-        CHECK_HIP(hipMemset(d_flag_dst, 0, sizeof(int)));
-        rocshmem_barrier_all();
-        // One workgroup of 64 threads for the wg-collective reduce.
-        hipLaunchKernelGGL(int_sum_reduce_kernel, 1, 64, 0, 0, d_flag_dst, d_flag_src);
-        CHECK_HIP(hipStreamSynchronize(0));
-        rocshmem_barrier_all();
-        CHECK_HIP(hipMemcpy(&global_flag, d_flag_dst, sizeof(int), hipMemcpyDeviceToHost));
-        rocshmem_free(d_flag_src);
-        rocshmem_free(d_flag_dst);
+    if (!d_flag_src || !d_flag_dst) {
+        std::cerr << "PE " << my_pe << ": rocshmem_malloc failed for reduction flags\n";
+        rocshmem_global_exit(1);
     }
+    CHECK_HIP(hipMemcpy(d_flag_src, &local_flag, sizeof(int), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemset(d_flag_dst, 0, sizeof(int)));
+    rocshmem_barrier_all();
+    // One workgroup of 64 threads for the wg-collective reduce.
+    hipLaunchKernelGGL(int_sum_reduce_kernel, 1, 64, 0, 0, d_flag_dst, d_flag_src);
+    CHECK_HIP(hipStreamSynchronize(0));
+    rocshmem_barrier_all();
+    CHECK_HIP(hipMemcpy(&global_flag, d_flag_dst, sizeof(int), hipMemcpyDeviceToHost));
+    rocshmem_free(d_flag_src);
+    rocshmem_free(d_flag_dst);
 
     if (my_pe == 0) {
         bool all_pass = (global_flag == n_pes);
@@ -603,6 +645,7 @@ int main(int argc, char* argv[])
     rocshmem_free(d_A_panel);
     rocshmem_free(d_B_panel);
     CHECK_HIP(hipFree(d_scratch));
+    CHECK_HIP(hipFree(d_bcast_status));
 
     rocshmem_finalize();
     return (global_flag == n_pes) ? 0 : 1;
