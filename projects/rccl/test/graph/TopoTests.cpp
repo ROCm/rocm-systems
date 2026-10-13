@@ -1138,53 +1138,63 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
-TEST_F(TopoTest, CheckP2p_DisableOverridesIntelCpuDefault) {
+TEST_F(TopoTest, ComputePaths_CpxPeersUseLocalPath) {
+  RUN_ISOLATED_TEST(
+      "ComputePaths_CpxPeersUseLocalPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // The fixture builds two real CPX partitions under one PCI function.
+        // Path discovery must retain their local inter-partition connection.
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      });
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath) {
   // NCCL_P2P_DISABLE is cached process-wide. Isolate the test so it is the
   // first P2P policy lookup and cannot affect other topology tests.
   RUN_ISOLATED_TEST_WITH_ENV(
-      "CheckP2p_DisableOverridesIntelCpuDefault",
+      "ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath",
       [this]() {
         const uint64_t host = 0xe5;
-        struct ncclXmlNode* cpu = addSystemCpu(host);
-        struct ncclXmlNode* pciSwitch =
-            addPciBridge(cpu, "0000:0b:00.0");
-        addGpuPci(pciSwitch, "0000:0c:00.0", "gfx942",
-                  /*rank=*/0, /*dev=*/0);
-        addGpuPci(pciSwitch, "0000:0d:00.0", "gfx942",
-                  /*rank=*/1, /*dev=*/1);
-
-        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
         ASSERT_NE(built, nullptr);
         ASSERT_EQ(built->nodes[GPU].count, 2);
-        ASSERT_EQ(built->nodes[CPU].count, 1);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
 
-        // Reproduce the host policy that used to widen PATH_LOC (the value
-        // produced by NCCL_P2P_DISABLE=1) back to PATH_PXB.
-        built->nodes[CPU].nodes[0].cpu.arch = NCCL_TOPO_CPU_ARCH_X86;
-        built->nodes[CPU].nodes[0].cpu.vendor = NCCL_TOPO_CPU_VENDOR_INTEL;
-        // Pin the pair at the Intel default threshold. The old ordering
-        // accepted this path after overwriting the user's PATH_LOC.
-        built->nodes[GPU].nodes[0].paths[GPU][1].type = PATH_PXB;
-
-        int p2p = -1;
-        int read = -1;
-        int intermediateRank = -1;
-        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, &read,
-                                   &intermediateRank, nullptr, nullptr),
+        // Disabling P2P must not replace a GPU's zero-hop self path with a
+        // route through the CPU.
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        int selfP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 0, &selfP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
                   ncclSuccess);
-        EXPECT_EQ(p2p, 0);
+        EXPECT_EQ(selfP2p, 1);
 
-        // CPX partitions on one physical GPU can map distinct ranks to the
-        // same topology node, producing PATH_LOC between them. PATH_LOC is
-        // also the NCCL_P2P_DISABLE sentinel and must not enable P2P/IPC.
-        built->nodes[GPU].nodes[0].paths[GPU][1].type = PATH_LOC;
-        p2p = -1;
-        int cudaP2p = -1;
-        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, &read,
-                                   &intermediateRank, &cudaP2p, nullptr),
+        // NCCL_P2P_DISABLE must divert the local CPX peer path through the CPU.
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
                   ncclSuccess);
-        EXPECT_EQ(p2p, 0);
-        EXPECT_EQ(cudaP2p, 1);
+        EXPECT_EQ(peerP2p, 0);
 
         ncclTopoFree(built);
       },

@@ -401,8 +401,6 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // In general, use P2P whenever we can.
   int p2pLevel = PATH_SYS;
 
-  // Apply platform defaults before the user override. NCCL_P2P_DISABLE=1 is
-  // represented by PATH_LOC and must not be widened again by a CPU default.
   // Don't use P2P through ARM CPUs
   int arch, vendor, model;
   NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
@@ -424,7 +422,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // therefore also have a PATH_LOC path between distinct ranks.
   // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
   // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
-  if (p2pLevel != PATH_LOC && (mnnvl || path->type <= p2pLevel)) *p2p = 1;
+  if ((g1 == g2 || p2pLevel != PATH_LOC) && (mnnvl || path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   if (*p2p == 1) {
