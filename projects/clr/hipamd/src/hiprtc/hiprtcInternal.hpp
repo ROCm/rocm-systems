@@ -64,6 +64,20 @@ inline void PrintHiprtcPathOnce() {
   std::call_once(printed_flag, []() { amd::Os::PrintLibraryLocation(); });
 }
 
+inline bool IsComgrReady() {
+  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
+  return amd::Comgr::IsReady();
+}
+
+// init flags once
+inline bool InitFlagsOnce() {
+  static bool initialized = false;
+  if (!initialized) {
+    initialized = amd::Flag::init();
+  }
+  return initialized;
+}
+
 }  // namespace internal
 }  // namespace hiprtc
 
@@ -76,7 +90,7 @@ inline void PrintHiprtcPathOnce() {
 static amd::Monitor g_hiprtcInitlock{};
 #define HIPRTC_INIT_API_INTERNAL(...)                                                              \
   amd::ScopedLock lock(g_hiprtcInitlock);                                                          \
-  if (!amd::Flag::init()) {                                                                        \
+  if (!hiprtc::internal::InitFlagsOnce()) {                                                        \
     HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
   }                                                                                                \
   PRINT_HIPRTC_PATH();
@@ -91,6 +105,14 @@ static amd::Monitor g_hiprtcInitlock{};
   ClPrint(amd::LOG_INFO, amd::LOG_API, "%s: Returned %s", __func__,                                \
           hiprtcGetErrorString(hiprtc::tls.last_rtc_error_));                                      \
   return hiprtc::tls.last_rtc_error_;
+
+// Use this as entry point for creation APIs like CreateProgram.
+#define HIPRTC_INIT_API_COMGR(...)                                                                 \
+  HIPRTC_INIT_API(__VA_ARGS__)                                                                     \
+  if (!hiprtc::internal::IsComgrReady()) {                                                         \
+    LogError("COMGR is not available");                                                            \
+    HIPRTC_RETURN(HIPRTC_ERROR_INTERNAL_ERROR);                                                    \
+  }
 
 namespace hiprtc {
 
