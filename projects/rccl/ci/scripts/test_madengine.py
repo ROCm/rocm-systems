@@ -838,6 +838,7 @@ def build_maxtext_baseline_image(
     base_image: str,
     work_dir: Path,
     primus_dir: Path,
+    run_token: str,
 ) -> str:
     """Build the A/B baseline for the MaxText family: Primus, stock RCCL.
 
@@ -856,33 +857,29 @@ def build_maxtext_baseline_image(
     _stage_primus_context(ctx_dir, primus_dir)
 
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
-    recipe = f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}"
-    dockerfile.write_text(recipe)
+    dockerfile.write_text(f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
-    # The tag carries the recipe's identity, not just the Primus ref. These
-    # runners are long-lived and the tag is the only thing `docker image
-    # inspect` matches on, so a tag that stayed fixed across changes to the
-    # payload -- or to PRIMUS_REF -- would let a node reuse an image built from
-    # a different prefix while the candidate, keyed by RCCL commit, is rebuilt.
-    # The A/B would then differ by more than RCCL, which is the one invariant
-    # this pair exists to hold.
-    digest = hashlib.sha256(recipe.encode()).hexdigest()[:8]
-    tag = f"{base_image}-primus-{PRIMUS_REF}-{digest}"
-
-    exists = subprocess.run(
-        ["docker", "image", "inspect", tag], capture_output=True
-    ).returncode == 0
-    if exists:
-        log.info("MaxText baseline image already present: %s", tag)
-    else:
-        log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
-        # --pull so a mutable base tag cannot silently pin the baseline to an
-        # older layer than the candidate, which pulls on its own build.
-        subprocess.run(
-            ["docker", "build", "--pull", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
-            check=True,
-        )
-        log.info("MaxText baseline image built: %s", tag)
+    # Tagged per A/B run, with the same token the candidate uses, and built
+    # unconditionally.
+    #
+    # Hashing the recipe was not enough: the digest covered the Dockerfile text
+    # but not the mutable base tag or the Primus tree, and on a tag hit
+    # `docker image inspect` skips the build altogether -- so the `--pull` that
+    # was supposed to defend against a stale base never ran in exactly the case
+    # it was added for. A long-lived runner could then pair a fresh candidate
+    # against a baseline built weeks earlier, which breaks the one invariant
+    # this pair exists to hold: that the two differ by the RCCL swap alone.
+    #
+    # Rebuilding every run costs very little. The payload layers are shared with
+    # the candidate and come out of the local cache; a rebuild with everything
+    # cached measured 2 seconds on ruby.
+    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}"
+    log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
+    subprocess.run(
+        ["docker", "build", "--pull", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
+        check=True,
+    )
+    log.info("MaxText baseline image built: %s", tag)
     return tag
 
 
@@ -2006,6 +2003,9 @@ def main() -> None:
     if family == "maxtext":
         baseline_image = build_maxtext_baseline_image(
             workload_config["base_image"], work_dir, primus_dir,
+            # Same token the candidate tag carries, so the pair is unambiguously
+            # from one run.
+            run_token=rccl_commit,
         )
         baseline_pull_only = False
     else:

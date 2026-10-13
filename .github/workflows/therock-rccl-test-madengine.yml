@@ -20,19 +20,25 @@ on:
       nodes:
         type: string
         default: '2'
-      timeout_minutes:
-        # Budget for the whole step. The script is given 30 minutes less so it
-        # can write its report and append to the datastore before GitHub kills
-        # the step; a step GitHub kills reports nothing and reads as an
-        # infrastructure fault.
+      job_timeout_minutes:
+        # Budget for the WHOLE JOB, not just the workload step. GitHub caps a
+        # job at 360 minutes unless the job says otherwise, so a step asking
+        # for more than that was silently cut short at the job limit -- the
+        # step-level number alone bought nothing.
         #
-        # The script's budget has to cover the SLURM time_limit PLUS queueing,
-        # because the allocation is taken inside it. 360 leaves the 2-node
-        # workloads (4 h limit) 90 minutes of queue slack; anything with a
-        # longer time_limit must raise this by the same amount or it gets
-        # killed while still queued, reporting that neither phase ran.
+        # The script is given 60 minutes less: roughly 30 for the setup that
+        # runs before it (conda, TheRock deps, artifact fetch -- about 20
+        # minutes observed) and 30 after, so it can write its report and append
+        # to the datastore before the job is killed. A job GitHub kills reports
+        # nothing and reads as an infrastructure fault.
+        #
+        # The script's own budget covers the SLURM time_limit PLUS queueing,
+        # because the allocation is taken inside it. 390 leaves the 2-node
+        # workloads (4 h limit) 90 minutes of queue slack; a longer time_limit
+        # must raise this by the same amount or the job dies while still
+        # queued, reporting that neither phase ran.
         type: string
-        default: '360'
+        default: '390'
       notify_email:
         type: string
         default: ''
@@ -63,10 +69,10 @@ on:
         description: 'Number of SLURM nodes to allocate'
         type: string
         default: '2'
-      timeout_minutes:
-        description: 'Budget for the workload step; the script gets 30 min less'
+      job_timeout_minutes:
+        description: 'Budget for the whole job; the script gets 60 min less'
         type: string
-        default: '360'
+        default: '390'
       notify_email:
         description: 'Email address to send test summary report'
         type: string
@@ -83,6 +89,9 @@ jobs:
   test_madengine:
     name: 'Test MADEngine ${{ inputs.workload }} (${{ inputs.nodes }}N)'
     runs-on: ${{ inputs.test_runs_on }}
+    # Without this GitHub applies its 360-minute default and kills the job
+    # before a longer workload step can finish.
+    timeout-minutes: ${{ fromJSON(inputs.job_timeout_minutes) }}
     defaults:
       run:
         shell: bash
@@ -205,7 +214,6 @@ jobs:
 
       # Both A/B phases in one allocation, plus its queue wait.
       - name: Run MADEngine workload
-        timeout-minutes: ${{ fromJSON(inputs.timeout_minutes) }}
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
@@ -225,7 +233,7 @@ jobs:
           # a parse error that rejects the whole workflow file at dispatch.
           # (Do not write an empty expression in these comments either -- the
           # run block is scanned for expressions, comment lines included.)
-          SCRIPT_TIMEOUT=$(( ${{ inputs.timeout_minutes }} - 30 ))
+          SCRIPT_TIMEOUT=$(( ${{ inputs.job_timeout_minutes }} - 60 ))
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
