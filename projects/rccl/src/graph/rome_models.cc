@@ -4016,6 +4016,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
             y++;
             start_offset++;
           } else {
+            if (r >= gpu) {
+              WARN("Malformed tree in user-defined trees, ignoring user-defined trees");
+              return ncclInvalidUsage;
+            }
             int g = gpus[r];
             // remap if needed
             if (gpu_map) g = gpu_map[g];

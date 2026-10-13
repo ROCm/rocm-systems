@@ -110,6 +110,16 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
             ncclInvalidUsage);
 }
 
+// Transcription consumes one parsed number per token, but only digits are ever parsed
+// into numbers, so any other character is a token the parse never counted and its read
+// runs past the numbers this segment produced. gpus[] is not cleared between segments,
+// so such a read silently resolves to the previous segment's GPU rather than failing:
+// here the 'x' would become GPU 6. A segment with more tokens than numbers must be
+// refused.
+TEST_F(RomeModelsParseGraphLightMicrotest, MoreTokensThanNumbersParsed_IsRejected) {
+  EXPECT_EQ(parseGraphLight("(5)(6)|(0)(x)", system(), graph(), nullptr), ncclInvalidUsage);
+}
+
 // Each '|'-separated segment claims the next treeBase row, and one more row is used to
 // terminate the list, so a string carrying more segments than there are rows must be
 // refused. treeBase is the last member of ncclTopoGraph, so this one runs off the end
