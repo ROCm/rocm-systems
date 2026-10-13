@@ -146,7 +146,7 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   // Initialize rocshmem __constant__ device memory
   rocshmem_gin_init_constmem(rocshmem_gin_get_provider(cctx->qpSet), rank);
 
-  INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks)", nranks);
+  INFO(NCCL_INIT, "GIN rocshmem-gda: QPs created (%d ranks, tc=%d)", nranks, trafficClass);
   *collComm = cctx;
   return ncclSuccess;
 }
