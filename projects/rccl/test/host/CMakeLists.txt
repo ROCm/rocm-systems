@@ -299,7 +299,6 @@ function(rccl_define_micro_source_lists)
   # ncclCftBarrierCreateRequirement, which this target compiles as the real thing under test.
   set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
     nccl-device-requirements-test.cc
-    ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

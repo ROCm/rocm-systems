@@ -12,19 +12,21 @@
 // already have GPU-binary coverage in test/DeviceResourceRequirementTests.cpp
 // (AICOMRCCL-2446); this file ports those same goldens host-only rather than
 // duplicating the reasoning, since the functions under test are pure host
-// computation with no HIP/device calls.
+// computation with no HIP/device calls. Both copies are built and run today
+// (test/CMakeLists.txt, ci-precheckin.json) and have already drifted at a few
+// lines; retiring the GPU-binary copy once this suite has run clean in CI for
+// a while is tracked separately in AICOMRCCL-2912, not done here.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <vector>
-
-#include "../common/ProcessIsolatedTestRunner.hpp"
 
 // ncclDevResourceRequirements / ncclTeam live behind core_tmp.h, transitively included below.
 #include "nccl_device/impl/ll_a2a__types.h"
@@ -123,6 +125,10 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_DivUpRounding) {
 // output: that would hold for any maxElts * g(maxEltSize) shape, including a wrong g.
 TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_LinearInMaxElts) {
   EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/5, /*maxEltSize=*/8), 5);
+  // maxElts=2, maxEltSize=4: correct is maxElts * divUp(maxEltSize, 8) == 2 * 1 == 2; hoisting the
+  // divUp outside the multiply (divUp(maxElts * maxEltSize, 8) == divUp(8, 8)) would give 1 instead.
+  // The row above can't catch that: 5 * divUp(8,8) == divUp(5*8,8) == 5 either way.
+  EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/2, /*maxEltSize=*/4), 2);
 }
 
 // maxElts = 0 always yields 0 slots, independent of maxEltSize.
@@ -174,10 +180,10 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACreateRequirement_RoundTripWithCalcSl
 // ncclGinOutboxCreateRequirement / ncclGinInboxA2ACreateRequirement (src/nccl_device/gin_scratch.cc)
 // ---------------------------------------------------------------------------
 
-// The 128-byte floor: size_log2 below 7 clamps to 7, and outHandle reads back the clamped value.
-TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_FloorClampsSizeLog2Below7) {
-  const std::vector<int> belowFloor = {0, 5, 6, 7};
-  for (int sizeLog2 : belowFloor) {
+// The 128-byte floor: size_log2 at or below 7 clamps to 7, and outHandle reads back the clamped value.
+TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_FloorClampsSizeLog2AtOrBelow7) {
+  const std::vector<int> atOrBelowFloor = {0, 5, 6, 7};
+  for (int sizeLog2 : atOrBelowFloor) {
     ncclGinOutboxHandle handle = poisonedHandle<ncclGinOutboxHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclGinOutboxCreateRequirement(/*nBlocks=*/1, sizeLog2, &handle, &req), ncclSuccess)
@@ -284,12 +290,15 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
 
 // A 1-rank team makes nPeers = 0, and idivRcp32(0) (bitops.h) divides by zero at runtime: a real
 // defect, unreachable from any in-tree caller (src/sym_kernels.cc guards nRanks >= 2 via
-// computeLsaSize's GCD construction). A crash-containment pin, not an assertion on the exact
-// signal: ProcessIsolatedTestRunner's public API clears per-test results before executeAllTests()
-// returns, so nothing here can read back WTERMSIG. A gtest death test would pin SIGFPE precisely,
-// but this file compiles for both host and the gfx1151 device pass, which never defines __linux__,
-// so GTEST_HAS_DEATH_TEST is false there and EXPECT_EXIT does not exist (confirmed by a scratch
-// build). Verified empirically instead: the isolated child is killed by signal 8 today.
+// computeLsaSize's GCD construction). This binary (rccl-UnitTestsMicroNcclDevice) is always built
+// with --offload-host-only (cmake/RcclTargetHelpers.cmake:78), so __linux__ is defined and
+// GTEST_HAS_DEATH_TEST is true here; pin the exact signal with EXPECT_EXIT, same idiom as
+// init-test.cc's P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero.
+//
+// peers/handle/req are built from a volatile int so the divide stays real at -O2 too: with plain
+// automatic storage, inlining collapses ncclGinInboxA2ACreateRequirement's `idivRcp32(nPeers)` call
+// into a compile-time-zero divisor, which is undefined behaviour an optimising build is free to
+// fold away entirely rather than trap.
 //
 // x86_64-only: idivRcp32 is a runtime 64-bit divide, and only x86 raises #DE on divide-by-zero.
 // AArch64 UDIV is defined to return 0 without trapping, so the same call would return ncclSuccess
@@ -297,18 +306,22 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
 // src/proxy.cc:887. No aarch64 target exists in tools/scripts/test_runner/configs/ today.
 TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero) {
 #if defined(__x86_64__)
-  // Not RUN_ISOLATED_TEST (it EXPECT_TRUE's the run); no lambda assertion either, so a future fix
-  // that makes the call return normally flips executeAllTests() true and fails the EXPECT_FALSE below.
-  RcclUnitTesting::ProcessIsolatedTestRunner::registerTest("GinInboxA2A_SingleRankTeam_DivideByZero", [] {
-    DisableCoreDumpsForExpectedCrash();
-    ncclTeam_t peers{/*nRanks=*/1, /*rank=*/0, /*stride=*/1};
-    ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
-    ncclDevResourceRequirements_t req = poisonedRequirement();
-    // Never expected to return: SIGFPE fires inside idivRcp32 before this line completes.
-    ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
-  });
-  EXPECT_FALSE(RcclUnitTesting::ProcessIsolatedTestRunner::executeAllTests())
-    << "expected the isolated child to be killed by SIGFPE; if it now passes, the defect was fixed";
+  volatile int nRanksVolatile = 1;
+  // Field-by-field assignment, not a braced aggregate init: a braced-init-list's top-level commas
+  // are not protected by the macro's parens and split EXPECT_EXIT's own argument list instead.
+  EXPECT_EXIT(
+      {
+        DisableCoreDumpsForExpectedCrash();
+        ncclTeam_t peers;
+        peers.nRanks = nRanksVolatile;
+        peers.rank = 0;
+        peers.stride = 1;
+        ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
+        ncclDevResourceRequirements_t req = poisonedRequirement();
+        // Never expected to return: SIGFPE fires inside idivRcp32 before this line completes.
+        ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
+      },
+      ::testing::KilledBySignal(SIGFPE), "");
 #else
   GTEST_SKIP() << "divide-by-zero trap is x86_64-specific; AArch64 UDIV returns 0 without trapping";
 #endif
