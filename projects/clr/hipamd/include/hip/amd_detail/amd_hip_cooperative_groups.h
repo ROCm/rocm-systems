@@ -1322,10 +1322,10 @@ namespace impl {
 
 template <typename Group, typename Fn, typename... Args>
 __CG_QUALIFIER__ auto invoke_one_broadcast_impl(const Group& g, Fn&& fn, Args&&... args) ->
-    typename __hip_internal::remove_reference<decltype(forward<Fn>(fn)(
-        forward<Args>(args)...))>::type {
-  using ResultType = typename __hip_internal::remove_reference<decltype(forward<Fn>(fn)(
-      forward<Args>(args)...))>::type;
+    typename __hip_internal::remove_reference<decltype(impl::forward<Fn>(fn)(
+        impl::forward<Args>(args)...))>::type {
+  using ResultType = typename __hip_internal::remove_cvref<decltype(impl::forward<Fn>(fn)(
+      impl::forward<Args>(args)...))>::type;
   static_assert(__hip_internal::is_trivially_copyable<ResultType>::value,
                 "The return type of the invocable must be trivially copyable");
   static_assert(sizeof(ResultType) <= 32,
@@ -1334,10 +1334,15 @@ __CG_QUALIFIER__ auto invoke_one_broadcast_impl(const Group& g, Fn&& fn, Args&&.
   // The result is moved one 32-bit word at a time.
   constexpr unsigned int num_words =
       (sizeof(ResultType) + sizeof(unsigned int) - 1) / sizeof(unsigned int);
-  unsigned int words[num_words] = {};
 
+  struct ResultBytes {
+    unsigned char data[sizeof(ResultType)];
+  };
+
+  unsigned int words[num_words] = {};
   if (g.thread_rank() == 0) {
-    ResultType selected = forward<Fn>(fn)(forward<Args>(args)...);
+    ResultBytes selected =
+        __builtin_bit_cast(ResultBytes, impl::forward<Fn>(fn)(impl::forward<Args>(args)...));
     __builtin_memcpy(words, &selected, sizeof(ResultType));
   }
 
@@ -1345,9 +1350,9 @@ __CG_QUALIFIER__ auto invoke_one_broadcast_impl(const Group& g, Fn&& fn, Args&&.
     words[i] = g.shfl(words[i], 0);
   }
 
-  ResultType result;
+  ResultBytes result{};
   __builtin_memcpy(&result, words, sizeof(ResultType));
-  return result;
+  return __builtin_bit_cast(ResultType, result);
 }
 
 }  // namespace impl

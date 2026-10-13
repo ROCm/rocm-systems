@@ -50,6 +50,8 @@ struct Big32 {
   unsigned int words[8];
 };
 
+static constexpr unsigned int kInvalidRank = 0xFFFFFFFFu;
+
 // Only threads 5 and above take the branch, so the selected thread is not lane 0.
 static __global__ void invoke_one_broadcast_coalesced(unsigned int* out) {
   if (threadIdx.x >= 5) {
@@ -74,10 +76,9 @@ static __global__ void invoke_one_broadcast_big(unsigned int* out) {
     return v;
   });
 
-  const unsigned int selected = (threadIdx.x / 16) * 16;
-  unsigned int matches = 1;
-  for (unsigned int i = 0; i < 8; ++i) matches &= (value.words[i] == selected + i);
-  out[threadIdx.x] = matches;
+  unsigned int consistent = 1;
+  for (unsigned int i = 0; i < 8; ++i) consistent &= (value.words[i] == value.words[0] + i);
+  out[threadIdx.x] = consistent ? value.words[0] : kInvalidRank;
 }
 
 // Warp aggregated atomic. one atomic for the group, distinct for each thread.
@@ -100,7 +101,7 @@ static __global__ void invoke_one_broadcast_aggregated_atomic(unsigned int* coun
  *  - unit/cooperativeGrps/invoke_one.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 10.2
+ *  - HIP_VERSION >= 7.14
  */
 HIP_TEST_CASE(Unit_cg_invoke_one) {
   const unsigned int warp_size = static_cast<unsigned int>(getWarpSize());
@@ -171,7 +172,7 @@ HIP_TEST_CASE(Unit_cg_invoke_one) {
  *  - unit/cooperativeGrps/invoke_one.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 10.2
+ *  - HIP_VERSION >= 7.14
  */
 HIP_TEST_CASE(Unit_cg_invoke_one_broadcast) {
   const unsigned int warp_size = static_cast<unsigned int>(getWarpSize());
@@ -188,10 +189,14 @@ HIP_TEST_CASE(Unit_cg_invoke_one_broadcast) {
     invoke_one_broadcast_coalesced<<<1, block_size>>>(d_out);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
+    // The selected thread is unspecified, so every member must agree on one value that
+    // could only have come from a member of the group.
     for (unsigned int i = 5; i < block_size; ++i) {
       INFO("thread: " << i);
-      REQUIRE(out[i] == 100);
+      REQUIRE(out[i] == out[5]);
     }
+    REQUIRE(out[5] >= 100);
+    REQUIRE(out[5] < 100 + (block_size - 5));
   }
 
   SECTION("thread_block_tile<16>") {
@@ -199,8 +204,11 @@ HIP_TEST_CASE(Unit_cg_invoke_one_broadcast) {
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
     for (unsigned int i = 0; i < block_size; ++i) {
+      const unsigned int tile_base = (i / 16) * 16;
       INFO("thread: " << i);
-      REQUIRE(out[i] == (i / 16) * 16);
+      REQUIRE(out[i] == out[tile_base]);
+      REQUIRE(out[i] >= tile_base);
+      REQUIRE(out[i] < tile_base + 16);
     }
   }
 
@@ -209,8 +217,11 @@ HIP_TEST_CASE(Unit_cg_invoke_one_broadcast) {
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(out.data(), d_out, bytes, hipMemcpyDeviceToHost));
     for (unsigned int i = 0; i < block_size; ++i) {
+      const unsigned int tile_base = (i / 16) * 16;
       INFO("thread: " << i);
-      REQUIRE(out[i] == 1);
+      REQUIRE(out[i] == out[tile_base]);
+      REQUIRE(out[i] >= tile_base);
+      REQUIRE(out[i] < tile_base + 16);
     }
   }
 
