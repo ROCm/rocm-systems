@@ -14,9 +14,11 @@
 // g_loadParam (param_redirect.h routes rcclParamLogRoctx() through it on every
 // call instead of caching, so each test picks LOG_ROCTX independently).
 //
-// The host build never defines ROCTX_ENABLE, so roctxRangePushA/Pop compile out
-// and the scoped range's observable behaviour on this build is its WARN
-// fallback plus the payload alloc/free it performs around it.
+// The scoped range has two production arms. In-tree builds where roctracer is
+// found inherit ROCTX_ENABLE from the rccl target and call roctxRangePushA/Pop,
+// which this TU defines to record the messages pushed. The standalone build
+// has no ROCTX_ENABLE and falls back to one WARN per enter/exit. The range
+// tests are written to hold in either build.
 //
 // Every stringify() case here stays under MAX_MESSAGE_LENGTH on purpose: past
 // it, stringify() writes beyond its 1024-byte buffer (confirmed under ASan),
@@ -64,6 +66,26 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* 
 namespace {
 std::function<void*(size_t)> g_roctxMalloc;
 }  // namespace
+
+// In-tree builds inherit the rccl target's COMPILE_DEFINITIONS (test/CMakeLists.txt), so
+// ROCTX_ENABLE is defined here whenever roctracer was found, and roctx.cc then calls the real
+// roctracer entry points. Nothing on the micro-test link line provides them, so record the calls
+// instead; that also lets the range tests check the exact message pushed. The standalone build has
+// no ROCTX_ENABLE and exercises roctx.cc's WARN fallback instead.
+#ifdef ROCTX_ENABLE
+namespace {
+std::vector<std::string> g_roctxPushed;
+int g_roctxPops = 0;
+}  // namespace
+int roctxRangePushA(const char* message) {
+  g_roctxPushed.push_back(message ? message : "<null>");
+  return 0;
+}
+int roctxRangePop() {
+  ++g_roctxPops;
+  return 0;
+}
+#endif
 static void* RoctxTestMalloc(size_t n) { return g_roctxMalloc ? g_roctxMalloc(n) : std::malloc(n); }
 #define malloc(n) RoctxTestMalloc(n)
 #include ROCTX_CC_PATH
@@ -75,11 +97,40 @@ namespace {
 
 class RoctxMicrotest : public ::testing::Test {
 protected:
-  void SetUp() override { g_logged.clear(); }
+  void SetUp() override { ResetRecorders(); }
   void TearDown() override {
     g_loadParam = [](const char*, int64_t deftVal) { return deftVal; };
     g_roctxMalloc = nullptr;
+    ResetRecorders();
+  }
+
+  static void ResetRecorders() {
     g_logged.clear();
+#ifdef ROCTX_ENABLE
+    g_roctxPushed.clear();
+    g_roctxPops = 0;
+#endif
+  }
+
+  // Range enter/exit events, whichever form this build gives them: roctracer push/pop calls with
+  // ROCTX_ENABLE, one WARN each without it. With logging off there must be none either way.
+  static size_t RangeEvents() {
+#ifdef ROCTX_ENABLE
+    EXPECT_TRUE(g_logged.empty()) << "a ROCTX_ENABLE build must not fall back to WARN";
+    return g_roctxPushed.size() + static_cast<size_t>(g_roctxPops);
+#else
+    return WarnCount();
+#endif
+  }
+
+  // ROCTX_ENABLE builds can also check the message handed to roctracer; the fallback never sees it.
+  static void ExpectPushedMessage(const char* expected) {
+#ifdef ROCTX_ENABLE
+    ASSERT_EQ(g_roctxPushed.size(), 1u);
+    EXPECT_EQ(g_roctxPushed[0], expected);
+#else
+    (void)expected;
+#endif
   }
 
   // Lets the first `succeedFirst` roctx.cc mallocs through, then fails every one after.
@@ -378,38 +429,47 @@ TEST_F(RoctxMicrotest, ScopedRange_LoggingOff_DoesNothing) {
     roctx_scoped_range_in range("msg");
     roctx_scoped_range_in defaulted;
   }
+  EXPECT_EQ(RangeEvents(), 0u);
   EXPECT_TRUE(g_logged.empty());
 }
 
-// Without ROCTX_ENABLE each push and each pop falls back to a WARN, so one range is two WARNs.
-TEST_F(RoctxMicrotest, ScopedRange_LoggingOnWithoutRoctx_WarnsOnEnterAndExit) {
+// One range is one event on enter and one on exit: a roctracer push/pop with ROCTX_ENABLE,
+// otherwise the WARN that stands in for each.
+TEST_F(RoctxMicrotest, ScopedRange_LoggingOn_OneEventOnEnterAndOneOnExit) {
   SetLogRoctx(1);
   {
     roctx_scoped_range_in range("msg");
-    EXPECT_EQ(WarnCount(), 1u);
+    EXPECT_EQ(RangeEvents(), 1u);
+    ExpectPushedMessage("msg");
   }
-  EXPECT_EQ(WarnCount(), 2u);
+  EXPECT_EQ(RangeEvents(), 2u);
+#ifndef ROCTX_ENABLE
   for (const auto& m : g_logged) EXPECT_NE(m.text.find("ROCTX_ENABLE is not defined"), std::string::npos);
+#endif
 }
 
 TEST_F(RoctxMicrotest, ScopedRange_DefaultConstructorDelegatesToTheMessageConstructor) {
   SetLogRoctx(1);
-  { roctx_scoped_range_in range; }
-  EXPECT_EQ(WarnCount(), 2u);
+  {
+    roctx_scoped_range_in range;
+    ExpectPushedMessage("");
+  }
+  EXPECT_EQ(RangeEvents(), 2u);
 }
 
-// The payload constructor builds (and the destructor frees) the message even though it is
-// never pushed on this build; LeakSanitizer would flag a missing roctxFree.
-TEST_F(RoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOn_WarnsOnEnterAndExit) {
+// The payload constructor builds the message from the schema (pushed verbatim with ROCTX_ENABLE)
+// and the destructor frees it in both builds; LeakSanitizer would flag a missing roctxFree.
+TEST_F(RoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOn_PushesTheStringifiedPayload) {
   SetLogRoctx(1);
   MixedPayload payload{1, 2, ncclDevSum, ncclInt8};
   nvtxPayloadSchemaEntry_t schema[] = {Entry(NVTX_PAYLOAD_ENTRY_TYPE_INT, "n", offsetof(MixedPayload, i))};
   nvtxPayloadData_t data{0, sizeof(payload), &payload};
   {
     roctx_scoped_range_in range(schema, &data, 1, "RCCL_AllReduce");
-    EXPECT_EQ(WarnCount(), 1u);
+    EXPECT_EQ(RangeEvents(), 1u);
+    ExpectPushedMessage("{RCCL_AllReduce: n: 1}");
   }
-  EXPECT_EQ(WarnCount(), 2u);
+  EXPECT_EQ(RangeEvents(), 2u);
 }
 
 TEST_F(RoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOff_DoesNothing) {
@@ -418,6 +478,7 @@ TEST_F(RoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOff_DoesNothing)
   nvtxPayloadSchemaEntry_t schema[] = {Entry(NVTX_PAYLOAD_ENTRY_TYPE_INT, "n", 0)};
   nvtxPayloadData_t data{0, sizeof(value), &value};
   { roctx_scoped_range_in range(schema, &data, 1, "RCCL_AllReduce"); }
+  EXPECT_EQ(RangeEvents(), 0u);
   EXPECT_TRUE(g_logged.empty());
 }
 
