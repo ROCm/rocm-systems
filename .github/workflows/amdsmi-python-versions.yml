@@ -67,6 +67,7 @@ jobs:
           - { python-version: '3.12', debian: bookworm }
           - { python-version: '3.13', debian: bookworm }
           - { python-version: '3.14', debian: bookworm }
+          - { python-version: '3.15', debian: bookworm }
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
