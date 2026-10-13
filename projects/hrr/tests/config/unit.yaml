@@ -32,9 +32,16 @@ cases:
   Unit_HRR_Recovery_ImplausiblePayloadLength: {}
   Unit_HRR_Recovery_MultiProcessRootInfo: {}
   Unit_HRR_Recovery_NoTrailer: {}
+  Unit_HRR_Recovery_OversizeRecordBeforeTrailer: {}
+  Unit_HRR_Recovery_RecordAfterTrailer: {}
+  Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer: {}
   Unit_HRR_Recovery_RepairWritesProcessManifest: {}
+  Unit_HRR_Recovery_RootInfoChecksTrailerCount: {}
   Unit_HRR_Recovery_TornHeader: {}
+  Unit_HRR_Recovery_TornMiddleRecord: {}
   Unit_HRR_Recovery_TornPayload: {}
+  Unit_HRR_Recovery_TrailerCountMismatch: {}
+  Unit_HRR_Recovery_TrailerOvercounts: {}
   Unit_HRR_TranslatePtr_ExactMatch: {}
   Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
   Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}
