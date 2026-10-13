@@ -111,6 +111,17 @@ class ROHostContext : public Context {
 
   __host__ void getmem_nbi(void *dest, const void *source, size_t nelems, int pe);
 
+  // Blocking host signal ops: supported only on the verbs host transport (GDA);
+  // on RO these forward to HostInterface, which aborts for non-verbs windows.
+  __host__ void putmem_signal(void *dest, const void *source, size_t nelems,
+                              uint64_t *sig_addr, uint64_t signal, int sig_op,
+                              int pe);
+
+  __host__ uint64_t signal_fetch(const uint64_t *sig_addr);
+
+  __host__ void signal_wait_until(uint64_t *sig_addr, int cmp,
+                                  uint64_t cmp_value);
+
   template <typename T>
   __host__ void amo_add(void *dst, T value, int pe);
 

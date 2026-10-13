@@ -465,6 +465,16 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
           BackendType::GDA_BACKEND == backend_type)
         testers.push_back(new HostRmaTester(args));
       break;
+    case HostPutmemSignalTestType:
+      test_name = "Host_Putmem_Signal";
+      if (BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
+    case HostPutmemSignalAddTestType:
+      test_name = "Host_Putmem_Signal_Add";
+      if (BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
+      break;
     case HostCtxPutmemTestType:
       test_name = "Host_Ctx_Putmem";
       if (BackendType::IPC_BACKEND == backend_type)
@@ -1186,6 +1196,11 @@ bool Tester::peLaunchesKernel() {
     case TileReduceWGTestType:
     case QpPingPongTestType:
     case SdmaPingPongTestType:
+    // Host put-with-signal: PE 1 must run launchKernel too, to spin in
+    // signal_wait_until concurrently with PE 0's put_signal (genuine race, no
+    // barrier masking the arrival).
+    case HostPutmemSignalTestType:
+    case HostPutmemSignalAddTestType:
       is_launcher = true;
       break;
     case HostPutmemTestType:

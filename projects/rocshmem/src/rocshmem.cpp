@@ -1108,6 +1108,39 @@ __host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
   get_internal_ctx(ctx)->putmem(dest, source, nelems, pe);
 }
 
+__host__ void rocshmem_ctx_putmem_signal(rocshmem_ctx_t ctx, void *dest,
+                                         const void *source, size_t nelems,
+                                         uint64_t *sig_addr, uint64_t signal,
+                                         int sig_op, int pe) {
+  LOG_API("host::ctx_putmem_signal (ctx=%p, dest=%p, source=%p, nelems=%zd, "
+          "sig_addr=%p, sig_op=%d, pe=%d)",
+          ctx.ctx_opaque, dest, source, nelems, sig_addr, sig_op, pe);
+
+  get_internal_ctx(ctx)->putmem_signal(dest, source, nelems, sig_addr, signal,
+                                       sig_op, pe);
+}
+
+__host__ void rocshmem_putmem_signal(void *dest, const void *source,
+                                     size_t nelems, uint64_t *sig_addr,
+                                     uint64_t signal, int sig_op, int pe) {
+  rocshmem_ctx_putmem_signal(ROCSHMEM_HOST_CTX_DEFAULT, dest, source, nelems,
+                             sig_addr, signal, sig_op, pe);
+}
+
+__host__ uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr) {
+  LOG_API("host::signal_fetch (sig_addr=%p)", sig_addr);
+
+  return get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)->signal_fetch(sig_addr);
+}
+
+__host__ void rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp,
+                                         uint64_t cmp_value) {
+  LOG_API("host::signal_wait_until (sig_addr=%p, cmp=%d)", sig_addr, cmp);
+
+  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
+      ->signal_wait_until(sig_addr, cmp, cmp_value);
+}
+
 template <typename T>
 __host__ void rocshmem_p(rocshmem_ctx_t ctx, T *dest, T value, int pe) {
   LOG_API("host::p (ctx=%p, dest=%p, pe=%d)", ctx.ctx_opaque, dest, pe);

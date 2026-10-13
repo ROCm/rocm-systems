@@ -203,7 +203,9 @@
   X(QpPingPong,                158)  \
   X(QpPutNbi,                  159)  \
   X(SdmaPingPong,              160)  \
-  X(SdmaPutNbi,                161)
+  X(SdmaPutNbi,                161)  \
+  X(HostPutmemSignal,          162)  \
+  X(HostPutmemSignalAdd,       163)
 
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
