@@ -51,15 +51,7 @@
  *   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles:
  *     resuming an archive whose directories and events.bin are readable by
  *     others makes them private again, and a hard-linked blob found there is
- *     written again rather than trusted, and leaves the archive marked
- *     incomplete (POSIX).
- *
- *   Unit_HRR_CaptureResumeChecksBlobBytes:
- *     resuming an archive with a blob deleted, whose bytes no longer hash to
- *     its name, or that sits under the wrong blobs/<xx>, writes the blob again
- *     where it belongs and leaves the archive marked incomplete, as do a blob
- *     under a directory that is not a prefix, a stray file in blobs/ and a
- *     blobs/<xx> that is a link (POSIX).
+ *     written again rather than trusted (POSIX).
  *
  *   Unit_HRR_CaptureEventsWriteFails:
  *     a failed write, fsync or close of events.bin leaves the archive without
@@ -1052,9 +1044,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
  *     archive; the run then resumes that archive.
  *   - The archive is resumed (events.bin grows), its directories end up 0700
  *     and events.bin and manifest.json 0600, and the hard-linked blob is not
- *     trusted: it is written again, so neither name shares its inode any more,
- *     and the archive is marked incomplete, since events from the first run
- *     named bytes nothing vouches for.
+ *     trusted: it is written again, so neither name shares its inode any more.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
 #ifdef _WIN32
@@ -1108,117 +1098,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
   CHECK(fs::hard_link_count(archive / linked) == 1);
   CHECK(fs::hard_link_count(victim) == 1);
   CHECK(file_holds(victim, victim_contents));
-  CHECK(manifest_says_complete(archive, false));
-#endif
-}
-
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct, then either changes one byte of
- *     its largest blob, deletes it, before or after a clean resume, moves it,
- *     unchanged, under another blobs/<xx> or under blobs/zz, plants a stray
- *     file in blobs/, or plants a blobs/<xx> no blob uses as a link to a
- *     directory outside the archive, and copies the archive into the next
- *     run's pid-<pid>, which resumes it.
- *   - The file is gone, no longer hashes to its name, or is not where
- *     playback looks for it, so the resume does not trust it: the run writes
- *     that blob again where it belongs, and the archive is marked incomplete,
- *     since events from the first run named the bytes it lost. The stray file
- *     and the linked prefix are not read, and leave the archive marked
- *     incomplete as well, as does a first run whose manifest says incomplete.
- */
-HRR_TEST_CASE(Unit_HRR_CaptureResumeChecksBlobBytes) {
-#ifdef _WIN32
-  HRR_SKIP("POSIX paths");
-#else
-  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume_bytes"};
-  const fs::path first = work.path / "first";
-  const fs::path base = work.path / "capture";
-  fs::create_directories(base);
-  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
-  const fs::path first_archive = hrr_single_process_archive(first);
-  REQUIRE(manifest_says_complete(first_archive, true));
-
-  // The largest blob is a host buffer the workload copies on every run.
-  const std::vector<fs::path> blobs = archive_files(first_archive, "blobs", ".blob");
-  REQUIRE_FALSE(blobs.empty());
-  const fs::path changed = *std::max_element(
-      blobs.begin(), blobs.end(), [&](const fs::path& a, const fs::path& b) {
-        return fs::file_size(first_archive / a) < fs::file_size(first_archive / b);
-      });
-  const std::string original = read_text_file(first_archive / changed);
-  REQUIRE_FALSE(original.empty());
-  SECTION("a changed byte") {
-    std::string altered = original;
-    altered[0] = static_cast<char>(altered[0] ^ 0x5a);
-    std::ofstream out(first_archive / changed, std::ios::binary | std::ios::trunc);
-    out << altered;
-  }
-  SECTION("under the wrong prefix") {
-    const std::string other = changed.parent_path().filename().string() == "00" ? "01" : "00";
-    fs::create_directories(first_archive / "blobs" / other);
-    fs::rename(first_archive / changed, first_archive / "blobs" / other / changed.filename());
-  }
-  SECTION("deleted") {
-    fs::remove(first_archive / changed);
-  }
-  SECTION("deleted after a resume") {
-    // A clean resume first, whose manifest must still count every file.
-    fs::create_directories(work.path / "middle");
-    const PlantedRun middle = capture_after_planting(
-        work.path / "middle", work.path / "middle.sh",
-        "mkdir -p \"$HRR_TEST_BASE/pid-$$\"\n"
-        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n");
-    REQUIRE(middle.ret == 0);
-    const fs::path resumed = hrr_single_process_archive(work.path / "middle");
-    REQUIRE(manifest_says_complete(resumed, true));
-    fs::remove_all(first_archive);
-    fs::copy(resumed, first_archive, fs::copy_options::recursive);
-    fs::remove(first_archive / changed);
-  }
-  SECTION("after an incomplete run") {
-    std::string manifest = read_text_file(first_archive / "manifest.json");
-    const size_t at = manifest.find("\"complete\": true");
-    REQUIRE(at != std::string::npos);
-    write_text(first_archive / "manifest.json",
-               manifest.replace(at, 16, "\"complete\": false"));
-  }
-  SECTION("under a directory that is not a prefix") {
-    fs::create_directories(first_archive / "blobs" / "zz");
-    fs::rename(first_archive / changed, first_archive / "blobs" / "zz" / changed.filename());
-  }
-  SECTION("next to a stray file") {
-    write_text(first_archive / "blobs" / "stray", "not a blob directory\n");
-  }
-  SECTION("next to a prefix that is a link") {
-    // A prefix none of the first run's blobs uses, so only the resume meets it,
-    // linked to a directory outside the archive that holds a copy of the blob.
-    std::string unused;
-    for (int i = 0; i < 256 && unused.empty(); ++i) {
-      char prefix[3];
-      std::snprintf(prefix, sizeof(prefix), "%02x", i);
-      if (!fs::exists(fs::symlink_status(first_archive / "blobs" / prefix))) unused = prefix;
-    }
-    REQUIRE_FALSE(unused.empty());
-    const fs::path elsewhere = work.path / "elsewhere";
-    fs::create_directories(elsewhere);
-    fs::copy_file(first_archive / changed, elsewhere / changed.filename());
-    fs::create_directory_symlink(elsewhere, first_archive / "blobs" / unused);
-  }
-
-  const PlantedRun run = capture_after_planting(
-      base, work.path / "plant.sh",
-      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
-      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n");
-  INFO("Workload exit code: " << run.ret << "\n" << run.output);
-  REQUIRE(run.ret == 0);
-  const std::vector<fs::path> archives = hrr_process_archives(base);
-  REQUIRE(archives.size() == 1);
-  INFO("Changed blob: " << changed.string());
-  CHECK(file_holds(archives.front() / changed, original));
-  CHECK(manifest_says_complete(archives.front(), false));
 #endif
 }
 

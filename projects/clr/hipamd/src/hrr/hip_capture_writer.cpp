@@ -156,23 +156,15 @@ namespace writer {
 // FNV-1a 128-bit hash (same algorithm as out-of-tree writer)
 // ---------------------------------------------------------------------------
 
-static constexpr Hash128 kHashSeed = {0xcbf29ce484222325ULL, 0x100000001b3ULL};
-
-// Fold more bytes into `h`, so a file can be hashed a chunk at a time.
-static void hash_update(Hash128* h, const void* data, size_t len) {
-  uint64_t h1 = h->lo, h2 = h->hi;
+static Hash128 hash_buffer(const void* data, size_t len) {
+  uint64_t h1 = 0xcbf29ce484222325ULL;
+  uint64_t h2 = 0x100000001b3ULL;
   const auto* p = static_cast<const uint8_t*>(data);
   for (size_t i = 0; i < len; i++) {
     h1 ^= p[i]; h1 *= 0x100000001b3ULL;
     h2 ^= p[i]; h2 *= 0xcbf29ce484222325ULL;
   }
-  *h = {h1, h2};
-}
-
-static Hash128 hash_buffer(const void* data, size_t len) {
-  Hash128 h = kHashSeed;
-  hash_update(&h, data, len);
-  return h;
+  return {h1, h2};
 }
 
 static void hash_hex(Hash128 h, char buf[33]) {
@@ -765,120 +757,44 @@ static bool resumed_file_is_ours(const fs::path& p) {
 #endif
 }
 
-// Whether a file found on resume holds the bytes its name is the hash of.
-// Events already in the archive name a blob by that hash, and only a check of
-// the bytes shows the file still holds them. Reads the whole file.
-static bool resumed_file_matches(const fs::path& p, const std::string& hex) {
-#ifdef _WIN32
-  FILE* f = fopen(p.string().c_str(), "rb");
-#else
-  FILE* f = fopen_read_regular(p.string());
-#endif
-  if (!f) return false;
-  Hash128 h = kHashSeed;
-  std::vector<uint8_t> chunk(1u << 20);
-  size_t n;
-  while ((n = fread(chunk.data(), 1, chunk.size(), f)) > 0) hash_update(&h, chunk.data(), n);
-  const bool read_ok = !ferror(f);
-  fclose(f);
-  char name[33];
-  hash_hex(h, name);
-  return read_ok && hex == name;
-}
-
-// `expected` is how many blob and code object files the earlier run wrote.
-// Returns how many this run trusts.
-static uint64_t index_existing_blobs_locked(const std::string& output_dir, uint64_t expected) {
+static void index_existing_blobs_locked(const std::string& output_dir) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   g_written_blobs.clear();
   g_blob_claims.clear();  // as in the fresh-archive path of open()
-  size_t mismatched = 0;
-  // Not ours, holding other bytes than its name says, or filed under a
-  // blobs/<xx> that is not the first two digits of its name, where playback
-  // does not look: left unindexed, so the next write of that hash makes it
-  // again, and the archive is incomplete, since its events may name bytes
-  // nothing vouches for.
-  const auto trust = [&](const fs::path& p, const std::string& key, const std::string& hex,
-                         bool in_place) {
-    if (resumed_file_is_ours(p) && in_place && resumed_file_matches(p, hex))
-      g_written_blobs.insert(key);
-    else
-      ++mismatched;
-  };
 
   // error_code overloads throughout: a missing or unreadable directory only
   // means fewer blobs are known to exist, and a blob written twice is harmless.
-  // Only a file that is ours and matches its name counts; anything else is
-  // replaced.
-  // A blobs/<xx> prefix is claimed before its files are trusted: one that is
-  // not a directory or fails claim_private_dir is not read, counts like a file
-  // that is not ours, since playback would read the blobs in it, and
-  // write_blob refuses it later. Any other entry is never written by the
-  // capture: a stray file, or a directory holding blobs playback does not look
-  // for there, counts the same.
+  // Only a file resumed_file_is_ours() accepts counts; anything else is replaced.
+  // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
+  // claim_private_dir contributes nothing, and write_blob refuses it later.
   std::error_code ec;
   const fs::path blobs_root = output_dir + "/blobs";
   for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
     std::error_code entry_ec;
-    const bool is_dir = dit->symlink_status(entry_ec).type() == fs::file_type::directory;
-    const std::string name = dit->path().filename().string();
+    if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
 #ifndef _WIN32
+    const std::string name = dit->path().filename().string();
     const auto nibble = [](char c) -> int {
       return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
     };
-    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) {
-      bool holds_blobs = false;
-      if (is_dir) {
-        for (fs::directory_iterator it(dit->path(), entry_ec), end;
-             !entry_ec && it != end && !holds_blobs; it.increment(entry_ec))
-          holds_blobs = it->path().extension() == ".blob";
-      }
-      if (!is_dir || holds_blobs) ++mismatched;
-      continue;
-    }
-    if (!is_dir || !claim_private_dir(dit->path().string())) {
-      ++mismatched;
-      continue;
-    }
+    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
+    if (!claim_private_dir(dit->path().string())) continue;
     g_blob_prefix_claimed[(nibble(name[0]) << 4) | nibble(name[1])].store(
         true, std::memory_order_release);
-#else
-    if (!is_dir) continue;
 #endif
     for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
          it.increment(entry_ec)) {
-      if (it->path().extension() == ".blob") {
-        const std::string hex = it->path().stem().string();
-        trust(it->path(), hex, hex, hex.compare(0, 2, name) == 0);
-      }
+      if (it->path().extension() == ".blob" && resumed_file_is_ours(it->path()))
+        g_written_blobs.insert(it->path().stem().string());
     }
   }
 
   ec.clear();
   const fs::path co_root = output_dir + "/code_objects";
   for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
-    if (it->path().extension() == ".hsaco") {
-      const std::string hex = it->path().stem().string();
-      trust(it->path(), std::string("co:") + hex, hex, /*in_place=*/true);
-    }
+    if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
+      g_written_blobs.insert(std::string("co:") + it->path().stem().string());
   }
-
-  if (mismatched) {
-    LogPrintfWarning("[HRR capture] %zu blob or code object files or blob directories in %s "
-                     "are not ours, do not hold the bytes their names are the hash of, or are "
-                     "not where playback looks for them", mismatched, output_dir.c_str());
-    mark_incomplete_locked(
-        "a blob, code object or blob directory found on resume is not ours, or does not "
-        "match its hash or its place");
-  }
-  // Fewer files than the earlier run wrote: one its events name may be gone.
-  if (g_written_blobs.size() < expected) {
-    LogPrintfWarning("[HRR capture] %s holds %zu of the %llu blob and code object files its "
-                     "earlier run wrote", output_dir.c_str(), g_written_blobs.size(),
-                     static_cast<unsigned long long>(expected));
-    mark_incomplete_locked("blob or code object files of the earlier run are missing on resume");
-  }
-  return g_written_blobs.size();
 }
 
 static void reopen_after_fork() {
@@ -1444,7 +1360,7 @@ bool open(const char* output_dir) {
   }
 
   const bool exists = existing_size > 0;
-  uint64_t next_seq = 0, ev_count = 0, bl_count = 0, trusted = 0;
+  uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
   bool fast = false;
   ScanResult scan{};
   if (exists) {
@@ -1512,15 +1428,7 @@ bool open(const char* output_dir) {
       return open_failed(out_dir, created_pid_dir);
     }
 
-    // Whichever of writer_state.json and manifest.json is later knows more files.
-    // An earlier run that ended incomplete lost what no resume brings back.
-    ProcessManifestEntry prior{};
-    if (read_process_manifest(manifest_path, &prior) && !prior.complete) {
-      std::lock_guard<std::mutex> lk(g_blob_mu);
-      mark_incomplete_locked("the archive resumed here was already incomplete");
-    }
-    trusted = index_existing_blobs_locked(
-        out_dir, std::max<uint64_t>(fast ? bl_count : 0, prior.blob_count));
+    index_existing_blobs_locked(out_dir);
   } else {
     // Fresh per-process archive. Incomplete belongs to the archive, as in
     // atfork_child: a failure recorded against one closed earlier in this
@@ -1558,7 +1466,7 @@ bool open(const char* output_dir) {
     // Buffer/checkpoint state is reset here so it is consistent for this
     // process's pid-<pid> sub-archive. So is a failure of an earlier events.bin,
     // which a forked child inherits from its parent: it says nothing about this
-    // one. A failure the resume found is in g_capture_incomplete and stays.
+    // one.
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
@@ -1566,9 +1474,10 @@ bool open(const char* output_dir) {
     g_trailer_at        = -1;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
-    // On resume, the files already there that this run trusts; a later write
-    // of any other hash adds to it.
-    g_blob_count.store(trusted, std::memory_order_relaxed);
+    if (!exists)
+      g_blob_count.store(0, std::memory_order_relaxed);
+    else if (fast)
+      g_blob_count.store(bl_count, std::memory_order_relaxed);
     g_events_fd = fd;
     if (!exists) {
       // Pitched host copies record only their copied rows (hip_capture.cpp,

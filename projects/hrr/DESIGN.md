@@ -146,22 +146,14 @@ files. Per-process manifests carry `pid`, `parent_pid`, `complete`,
 Because the PID directory is always part of the archive path, a crashed process
 that is restarted with a new PID creates a new sub-archive rather than resuming
 the prior process's `events.bin`. Resuming still applies if the same process
-re-opens its own writer and finds an existing `pid-<pid>/events.bin`. A resume
-reuses a blob or code object file only when it is a single-link regular file
-owned by the effective user, hashes to its name and, for a blob, sits under the
-`blobs/<xx>` named by its first two digits, where playback looks for it; one
-that does not is written again when the run next records it, and the archive is
-marked incomplete, since events from the earlier run may name bytes nothing
-vouches for. A `blobs/<xx>` that is not a private directory of ours, a stray file
-in `blobs/`, and a directory there that is not a prefix but holds blobs mark it
-incomplete the same way.
+re-opens its own writer and finds an existing `pid-<pid>/events.bin`.
 
-A write, `fsync` or close of `events.bin` that fails marks the archive incomplete
-as well: the clean-shutdown trailer is omitted and `manifest.complete` is false.
-If closing the file fails after `flush()` wrote the trailer, `close()` cuts the
-trailer off again and rewrites the manifest. Where a trailer that claims nothing
-cannot be cut off, its magic is overwritten, so the reader does not take the
-file for a whole capture.
+A write, `fsync` or close of `events.bin` that fails marks the archive
+incomplete: the clean-shutdown trailer is omitted and `manifest.complete` is
+false. If closing the file fails after `flush()` wrote the trailer, `close()`
+cuts the trailer off again and rewrites the manifest. Where a trailer that
+claims nothing cannot be cut off, its magic is overwritten, so the reader does
+not take the file for a whole capture.
 
 **Playback note:** `hrr-playback --info <base>` prints the root process summary.
 Point `hrr-playback` at a specific `<base>/pid-<pid>/` for detailed event info or
