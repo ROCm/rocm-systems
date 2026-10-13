@@ -1042,6 +1042,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Tile Get WG 4D Contiguous";
       testers.push_back(new TileNDRMATester(args));
       break;
+    case TilePutWave3DTestType:
+      test_name = "Tile Put Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave3DTestType:
+      test_name = "Tile Get Wave 3D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TilePutWave4DTestType:
+      test_name = "Tile Put Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
+    case TileGetWave4DTestType:
+      test_name = "Tile Get Wave 4D Contiguous";
+      testers.push_back(new TileNDRMATester(args));
+      break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
       testers.push_back(new HostTeamSyncBarrierTester(args));
