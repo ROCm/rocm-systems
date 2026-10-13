@@ -62,11 +62,19 @@ typedef enum rocprofiler_thread_trace_parameter_type_t
                                                      ///< >= 3 enable the async copy pipeline and
                                                      ///< require a single shader engine.
     ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE,
+    ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE,
     ROCPROFILER_THREAD_TRACE_PARAMETER_LAST
 
     /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE
     /// @brief Chooses when the profiler should initialize thread trace resources.
     /// One of ::rocprofiler_thread_trace_resource_mode_t.
+    /// @var ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE
+    /// @brief Enable instruction-level exec mask population count tracking on gfx12.
+    /// Zero (default) disables tracking; nonzero enables it. Enabling on other architectures
+    /// returns ::ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED.
+    /// Requires instruction tracing (NO_DETAIL must be zero). The decoder returns changes in
+    /// rocprofiler_thread_trace_decoder_wave_t::execmask. Check the wave record's size before
+    /// accessing these fields, which are not present in older decoder libraries.
 } rocprofiler_thread_trace_parameter_type_t;
 
 /**
