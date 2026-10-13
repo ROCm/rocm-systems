@@ -247,7 +247,8 @@ void RdciHealthSubSystem::set_watches() const {
   result = rdc_health_set(rdc_handle_, group_id_, components_);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    // rdcd releases before ROCm 7.13 report a missing group as RDC_ST_NOT_FOUND.
+    if (result == RDC_ST_GROUP_NOT_FOUND || result == RDC_ST_NOT_FOUND) {
       error_msg = "Cannot find the group " + std::to_string(group_id_) + " or the field.";
     }
     throw RdcException(result, error_msg.c_str());
