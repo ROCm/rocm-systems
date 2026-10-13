@@ -40,7 +40,7 @@ Surrounding pieces, unchanged by this design:
 | Item | Why it is outside |
 |------|-------------------|
 | One pass for the whole chip | The contract is one pass per metric PMC set, not one pass for every counter on the device. |
-| Metric-library migration (MetricLibrary, Stage 4, an SDK collectables registry) | Layer 1.5 is the long-term home. 865 proves the same idea on today’s YAML. |
+| Metric-library migration (MetricLibrary, Stage 4, an SDK collectables registry) | This change uses today’s panel YAML; the metric-library migration comes later. |
 | Metrics with no profile PMCs | Nothing to pack. On gfx942 that is 34 of 408 YAML rows. |
 | Intentional values above 100% (VALU dual-issue) and hardware counter defects | Those are not packing bugs. This design does not add a silent analyze-time cap. |
 | Single-XCD L2 channel correction, SQG counter omission | Separate from pass placement and expression bind. |
