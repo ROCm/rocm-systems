@@ -26,7 +26,7 @@ rocprofiler_add_integration_execute_test(
             --no-color
     DEPENDS rocprofiler-sdk::rocprofv3 rocprofiler-sdk::rocprofv3-doctor
     TIMEOUT 120
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocprofv3-doctor"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "Summary:"
     DISABLED OFF)
@@ -37,7 +37,7 @@ rocprofiler_add_integration_execute_test(
             --list-checks
     DEPENDS rocprofiler-sdk::rocprofv3 rocprofiler-sdk::rocprofv3-doctor
     TIMEOUT 60
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocprofv3-doctor"
     PRELOAD "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION "install\\.rocm-root"
     DISABLED OFF)
@@ -60,8 +60,14 @@ get_target_property(_DOCTOR_EXE rocprofiler-sdk::rocprofv3-doctor IMPORTED_LOCAT
 # through a synthetic accessor. Registered through rocprofiler_sdk_pytest_discover_tests
 # rather than the validate-test macro so they carry the unittests label: they need no GPU
 # and no installed tool.
+#
+# Naming: the tier is in the label (unittests / integration-tests) and every doctor test
+# also carries the rocprofv3-doctor label, so `ctest -L rocprofv3-doctor` runs them all.
+# Each pytest function becomes one CTest test named rocprofv3-doctor.<function>, with the
+# repeated "test_doctor_" prefix trimmed, e.g. rocprofv3-doctor.checks_kfd_device_pass.
 rocprofiler_sdk_pytest_discover_tests(
-    rocprofv3-doctor-unit-tests
+    rocprofv3-doctor
+    TRIM_FROM_NAME "^test_doctor_"
     TEST_PATHS test_doctor_framework.py test_doctor_checks.py test_doctor_layout.py
                test_doctor_diagnose.py test_doctor_system.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -78,7 +84,7 @@ rocprofiler_sdk_pytest_discover_tests(
                --doctor-path
                ${_DOCTOR_EXE}
     PROPERTIES
-    LABELS "unittests"
+    LABELS "unittests;rocprofv3-doctor"
     TIMEOUT 120)
 
 rocprofiler_add_integration_validate_test(
@@ -91,5 +97,5 @@ rocprofiler_add_integration_validate_test(
          $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
     TIMEOUT 180
     PRELOAD "${PRELOAD_ENV}"
-    LABELS "integration-tests"
+    LABELS "integration-tests;rocprofv3-doctor"
     DISABLED OFF)
