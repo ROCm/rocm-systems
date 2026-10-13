@@ -103,6 +103,20 @@ TEST_F(RomeModelsParseGraphLightMicrotest, WellFormedTree_IsTranscribedToTreeBas
   EXPECT_EQ(graph()->treeBase[1][0], 0);
 }
 
+// Trees are separated by '|' and each claims its own row, in order, with an empty row
+// closing the list -- that empty row is how every reader of treeBase finds the end, so
+// it is part of the contract rather than an implementation detail.
+TEST_F(RomeModelsParseGraphLightMicrotest, MultipleSegments_ProduceOneTreeBaseRowEach) {
+  graph()->treeBase[3][0] = 'Z';  // the fixture zeroes the graph, so dirty the terminator
+
+  ASSERT_EQ(parseGraphLight("(1(2))|(3(4))|(5(6))", system(), graph(), nullptr), ncclSuccess);
+
+  EXPECT_STREQ(graph()->treeBase[0], "(1(2))");
+  EXPECT_STREQ(graph()->treeBase[1], "(3(4))");
+  EXPECT_STREQ(graph()->treeBase[2], "(5(6))");
+  EXPECT_EQ(graph()->treeBase[3][0], 0);
+}
+
 TEST_F(RomeModelsParseGraphLightMicrotest, EmptyString_ProducesEmptyTreeBase) {
   graph()->treeBase[0][0] = 'x';
 
