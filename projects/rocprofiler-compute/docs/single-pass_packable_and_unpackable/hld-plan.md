@@ -4,7 +4,7 @@
 
 **Scope:** Correct multi-pass ratio errors on the analysis YAML that ships today.
 
-The packing algorithm is in [Metric grouping (SPP / SPU)](lld-metrics-grouping-algorithm.md). This document states why the change exists, what it must do, and which decisions it locks. It does not walk the bucket loop.
+The packing algorithm is in [Metric grouping (SPP / SPU)](lld-metrics-grouping-algorithm.md). This document states why the change exists, what it must do, and which decisions it locks.
 
 **Related design:**
 
