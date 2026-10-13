@@ -17,9 +17,10 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 add_test(NAME sdma-copy-profiling COMMAND sdma-copy)
+add_test(NAME sdma-copy-profiling-counted COMMAND sdma-copy --completion-value 2)
+add_test(NAME sdma-copy-profiling-counted-64bit COMMAND sdma-copy --completion-value
+                                                        4294967297)
 set_tests_properties(
-    sdma-copy-profiling
-    PROPERTIES TIMEOUT 60
-               ENVIRONMENT "HSA_ENABLE_SDMA=1"
-               SKIP_RETURN_CODE 77
-               LABELS "integration-tests;sdma")
+    sdma-copy-profiling sdma-copy-profiling-counted sdma-copy-profiling-counted-64bit
+    PROPERTIES TIMEOUT 60 ENVIRONMENT "HSA_ENABLE_SDMA=1" SKIP_RETURN_CODE 77 LABELS
+               "integration-tests;sdma")

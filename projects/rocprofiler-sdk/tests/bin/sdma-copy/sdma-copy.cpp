@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -10,6 +32,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -40,13 +63,14 @@ check(hsa_status_t status)
 
 struct options
 {
-    size_t bytes      = 1 << 20;
-    size_t iterations = 64;
-    size_t threads    = 2;
-    bool   profiling  = true;
-    bool   peer       = false;
-    bool   blit       = false;
-    bool   benchmark  = false;
+    size_t             bytes            = 1 << 20;
+    size_t             iterations       = 64;
+    size_t             threads          = 2;
+    hsa_signal_value_t completion_value = 1;
+    bool               profiling        = true;
+    bool               peer             = false;
+    bool               blit             = false;
+    bool               benchmark        = false;
 };
 
 struct agents
@@ -97,7 +121,7 @@ struct buffer
         check(hsa_amd_agents_allow_access(access.size(), access.data(), nullptr, data));
     }
     ~buffer() { hsa_amd_memory_pool_free(data); }
-    buffer(const buffer&)            = delete;
+    buffer(const buffer&) = delete;
     buffer& operator=(const buffer&) = delete;
 };
 
@@ -174,10 +198,14 @@ std::atomic<uint64_t> timestamp_checks{0};
 std::atomic<uint64_t> elapsed_ns{0};
 
 void
-wait_and_check(hsa_signal_t signal, uint64_t timeout, bool timestamps)
+wait_and_check(hsa_signal_t       signal,
+               uint64_t           timeout,
+               bool               timestamps,
+               hsa_signal_value_t expected_value)
 {
     require(hsa_signal_wait_scacquire(
-                signal, HSA_SIGNAL_CONDITION_EQ, 0, timeout, HSA_WAIT_STATE_ACTIVE) == 0,
+                signal, HSA_SIGNAL_CONDITION_EQ, expected_value, timeout, HSA_WAIT_STATE_ACTIVE) ==
+                expected_value,
             "Copy completion timed out");
     if(timestamps)
     {
@@ -213,8 +241,9 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
     for(size_t iteration = 0; iteration < config.iterations; ++iteration)
     {
         std::memset(host_destination.data, 0, config.bytes);
-        for(auto signal : completion.values)
-            hsa_signal_store_screlease(signal, 1);
+        for(size_t index = 0; index < completion.values.size(); ++index)
+            hsa_signal_store_screlease(completion.values[index],
+                                       index == 0 ? 1 : config.completion_value);
         const auto start = std::chrono::steady_clock::now();
         submit(upload,
                device_source.data,
@@ -238,14 +267,20 @@ run(const options& config, const agents& devices, size_t worker, uint64_t timeou
                completion.values[config.peer ? 2 : 1],
                completion.values[3],
                config.blit);
-        require(hsa_signal_load_scacquire(completion.values[1]) > 0 &&
-                    hsa_signal_load_scacquire(completion.values[3]) > 0,
+        require(hsa_signal_load_scacquire(completion.values[1]) >= config.completion_value &&
+                    hsa_signal_load_scacquire(completion.values[3]) >= config.completion_value,
                 "Copy completed before its dependency was released");
         hsa_signal_store_screlease(completion.values[0], 0);
-        const bool timestamps = config.profiling && !config.benchmark;
-        wait_and_check(completion.values[1], timeout, timestamps);
-        if(config.peer) wait_and_check(completion.values[2], timeout, timestamps);
-        wait_and_check(completion.values[3], timeout, timestamps);
+        const bool timestamps     = config.profiling && !config.benchmark;
+        const auto expected_value = config.completion_value - 1;
+        wait_and_check(completion.values[1], timeout, timestamps, expected_value);
+        if(expected_value != 0) hsa_signal_store_screlease(completion.values[1], 0);
+        if(config.peer)
+        {
+            wait_and_check(completion.values[2], timeout, timestamps, expected_value);
+            if(expected_value != 0) hsa_signal_store_screlease(completion.values[2], 0);
+        }
+        wait_and_check(completion.values[3], timeout, timestamps, expected_value);
         elapsed_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::steady_clock::now() - start)
                           .count();
@@ -280,10 +315,14 @@ main(int argc, char** argv)
                     config.iterations = value;
                 else if(name == "--threads")
                     config.threads = value;
+                else if(name == "--completion-value" && value > 0 &&
+                        value <=
+                            static_cast<uint64_t>(std::numeric_limits<hsa_signal_value_t>::max()))
+                    config.completion_value = static_cast<hsa_signal_value_t>(value);
                 else if(name == "--profiling" && value <= 1)
                     config.profiling = value != 0;
                 else
-                    require(false, "Unknown option or invalid profiling flag");
+                    require(false, "Unknown option or invalid value");
             }
         }
     } catch(const std::exception& error)

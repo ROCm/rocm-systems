@@ -116,8 +116,9 @@ class BlitSdmaBase : public core::Blit {
   /// pre-incremented by num_copy_command - 1.
   /// When profiling is enabled, start/end SDMA timestamp commands are emitted
   /// around the copy packets (after dep polls and after copies respectively),
-  /// the packets carry no inline SIGNAL, and out_signal completes via an
-  /// atomic decrement after the end timestamp.
+  /// the packets carry no inline SIGNAL, and out_signal completes after the
+  /// end timestamp via an atomic decrement, or a 64-bit fence write when
+  /// platform atomics are unavailable.
   virtual hsa_status_t SubmitLinearCopyBodyWaitSignal(
       void* dst, const void* src, size_t size,
       const std::vector<core::Signal*>& dep_signals,
