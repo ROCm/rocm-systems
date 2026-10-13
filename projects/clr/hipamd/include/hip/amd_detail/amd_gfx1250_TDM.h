@@ -36,8 +36,6 @@ THE SOFTWARE.
 
 using __hip_uint32x4 = __NATIVE_VECTOR__(4, uint32_t);
 using __hip_uint32x8 = __NATIVE_VECTOR__(8, uint32_t);
-using __hip_int32x4 = __NATIVE_VECTOR__(4, int32_t);
-using __hip_int32x8 = __NATIVE_VECTOR__(8, int32_t);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wshift-count-overflow" // we're going to be using overflow on purpose
@@ -198,7 +196,7 @@ union gfx1250_TDM_GROUP1
             uint32_t m_sgpr7;
         };
     };
-    __hip_int32x8 m_bitfield;
+    __hip_uint32x8 m_bitfield;
 
     // setters for all fields
     void __device__ inline workgroupMask(uint32_t value)
@@ -302,7 +300,7 @@ union gfx1250_TDM_GROUP2
             uint32_t m_sgpr3;
         };
     };
-    __hip_int32x4 m_bitfield;
+    __hip_uint32x4 m_bitfield;
 
     void __device__ inline tensorDim2(uint32_t value)
     {
@@ -353,7 +351,7 @@ union gfx1250_TDM_GROUP3
         };
         uint32_t m_sgpr3_reserved;
     };
-    __hip_int32x4 m_bitfield;
+    __hip_uint32x4 m_bitfield;
 
     void __device__ inline tensorDim3Stride(uint64_t value)
     {
