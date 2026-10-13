@@ -25,11 +25,12 @@ These options apply on Linux and Windows.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `PROFILER_HUB_BUILD_TESTS` | ON | Build unit tests |
-| `PROFILER_HUB_BUILD_BENCHMARKS` | ON | Build performance benchmarks |
+| `PROFILER_HUB_BUILD_BENCHMARKS` | OFF | Build performance benchmarks |
 | `PROFILER_HUB_ENABLE_LOGGING` | OFF | Enable debug logging |
 | `PROFILER_HUB_ENABLE_COVERAGE` | OFF | Enable code coverage instrumentation (requires Debug build, gcov, and lcov or gcovr) |
 | `PROFILER_HUB_FETCH_DEPENDENCIES` | OFF | Download missing dependencies at configure time. Required on Windows when SQLite3 is not already on `CMAKE_PREFIX_PATH` |
-| `SQLITE3_AMALGAMATION_YEAR` | `2024` | sqlite.org release-year folder for the Windows amalgamation download when bumping `SQLITE3_GIT_TAG` |
+| `SQLITE3_AMALGAMATION_URL` | sqlite.org amalgamation zip for 3.45.3 | URL of the prebuilt amalgamation zip used on Windows |
+| `SQLITE3_AMALGAMATION_SHA256` | (pinned for 3.45.3) | Expected SHA256 of `SQLITE3_AMALGAMATION_URL`; bump together with the URL / `SQLITE3_GIT_TAG` |
 
 ## Linux
 
@@ -166,10 +167,11 @@ profiler-hub targets use distinct base names: `profiler-hub.lib` (import lib, pa
 ### Platform behavior
 
 - **SQLite3:** with `PROFILER_HUB_FETCH_DEPENDENCIES=ON`, Windows downloads the official
-  [amalgamation zip](https://www.sqlite.org/download.html) matching `SQLITE3_GIT_TAG`
-  (default `version-3.45.3`, year folder `SQLITE3_AMALGAMATION_YEAR`). It is built as
-  `profiler-hub-sqlite3.dll`, which exports the SQLite C API. Keep that DLL next to
-  `profiler-hub.dll` (or on `PATH`) at run time.
+  [amalgamation zip](https://www.sqlite.org/download.html) from `SQLITE3_AMALGAMATION_URL`
+  (default matches `SQLITE3_GIT_TAG` `version-3.45.3`), verifies
+  `SQLITE3_AMALGAMATION_SHA256` over TLS, and builds `profiler-hub-sqlite3.dll`, which
+  exports the SQLite C API. Keep that DLL next to `profiler-hub.dll` (or on `PATH`) at
+  run time.
 - **Dependencies:** fmt, spdlog, nlohmann_json, GoogleTest, and Google Benchmark are
   fetched via CMake `FetchContent` when not found on the system.
 - **Language standard:** library, tests, and benchmarks are built as **C++20**.

@@ -47,10 +47,11 @@ makedir(const std::string& path)
 
     namespace fs = std::filesystem;
 
-    // Collect the ancestors that don't exist yet so we can apply 0755 to each
-    // one we create, matching the previous mkdir(..., 0755) behavior on POSIX.
+    // Collect ancestors we create so we can tighten their mode after creation.
+    // Stop when parent_path() equals p: on Windows a missing drive root such as
+    // Z:/ is its own parent, so ascending forever would hang and grow created.
     std::vector<fs::path> created;
-    for(fs::path p = path; !p.empty(); p = p.parent_path())
+    for(fs::path p = path; !p.empty();)
     {
         std::error_code exists_ec;
         if(fs::exists(p, exists_ec))
@@ -58,6 +59,12 @@ makedir(const std::string& path)
             break;
         }
         created.push_back(p);
+        const fs::path parent = p.parent_path();
+        if(parent == p)
+        {
+            break;
+        }
+        p = parent;
     }
 
     std::error_code ec;
@@ -67,13 +74,16 @@ makedir(const std::string& path)
         return false;
     }
 
-    constexpr auto mode = fs::perms::owner_all | fs::perms::group_read |
-                          fs::perms::group_exec | fs::perms::others_read |
-                          fs::perms::others_exec;
+#if !defined(_WIN32)
+    // Keep the mode create_directories chose (it already applied umask).
+    // Only strip group/other write; do not force 0755, which would make
+    // private dirs (umask 0077 to 0700) world-readable again.
+    constexpr auto drop_write = fs::perms::group_write | fs::perms::others_write;
     for(const auto& p : created)
     {
-        fs::permissions(p, mode, ec);
+        fs::permissions(p, drop_write, fs::perm_options::remove, ec);
     }
+#endif
 
     return true;
 }

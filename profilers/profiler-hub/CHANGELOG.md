@@ -24,6 +24,9 @@ downstream consumer of the library.
 
 - Windows/MSVC build support. When SQLite is fetched, Windows downloads the
   official amalgamation zip instead of running `./configure`.
+### Changed
+
+- CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
 
 ## [0.2.0] - 2026-09-02
 
