@@ -91,7 +91,7 @@ Visit order: largest PMC sets first (M1, then HBM-like, M2, M3).
 2. **HBM-like = `{A, B}`** — open bucket1 = `{A, B}`.
 3. **M2 = `{A, F}`** — extend bucket1 → `{A, B, F}`.
 4. **M3 = `{B, D}`** — B is in bucket1 and D is in bucket0, and both buckets are full (3 counters each), so open bucket2 = `{B, D}` (B is now in bucket1 and bucket2).
-5. **First-fit / merge** — all packable PMCs placed.
+5. **First-fit / merge** — no profile PMC is still unplaced, and no two buckets fit together under the 3-counter cap, so the layout does not change.
 6. **Leftover SPU counters** — if an SPU metric only needs PMCs already in these buckets → +0 passes (gfx942 case). Only missing PMCs open new buckets.
 
 ---
