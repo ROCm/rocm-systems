@@ -15,13 +15,8 @@ Overlapping packable sets that cannot share one bucket are handled by
 duplicating counters into an additional bucket (additive passes). That
 differs from the legacy heuristic, which places each counter in at most one
 bucket.
-
-Disable with ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 (or
-ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0) to restore the priority
-coalesce + first-fit path.
 """
 
-import os
 from dataclasses import dataclass
 from itertools import combinations
 from typing import (
@@ -61,9 +56,7 @@ def try_allocate_single_pass_packable(
 ) -> Optional[Tuple[List[CounterFile], int, "SinglePassPackableStats"]]:
     """Allocate work_set with packable metrics forced into one bucket.
 
-    On success, clears work_set. The caller checks
-    single_pass_packable_enabled_from_env and skips this function when the
-    legacy heuristic is selected.
+    On success, clears work_set. The caller uses this path for every allocation.
 
     Returns:
         (files, file_count, stats) when every packable union has a full bucket.
@@ -143,30 +136,6 @@ def try_allocate_single_pass_packable(
 
     work_set.clear()
     return files, file_count, stats
-
-
-def single_pass_packable_enabled_from_env() -> bool:
-    """Return True when single-pass-packable is the active allocate path.
-
-    Default is on. Set ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 to use the
-    legacy heuristic. ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE=0 also
-    disables SPP for explicit A/B during migration.
-    """
-    if legacy_heuristic_enabled_from_env():
-        return False
-    raw = (
-        os.environ
-        .get("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "1")
-        .strip()
-        .lower()
-    )
-    return raw not in {"0", "false", "no", "off"}
-
-
-def legacy_heuristic_enabled_from_env() -> bool:
-    """Return True when the legacy coalesce / first-fit path is forced."""
-    raw = os.environ.get("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
 
 
 def collect_unique_packable_unions(
