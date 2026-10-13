@@ -64,12 +64,9 @@ When counters are being spread thin across many short operator kernels,
 `--iteration-multiplexing kernel` collects more per pass.
 
 Profile preserves each pass's raw marker and counter CSVs with the
-`ml_api_trace` prefix. Marker `Function` cells describe one call, with
-available arguments and thread correlation fields including `ltid`; they
-contain no repeated ancestor path. A Function whose first token is the
-legacy stacked shape (`:#` or `#n@file:line`) makes analyze exit during
-parse, before the tree. Re-profile with current `--torch-trace` or
-`--triton-trace`.
+`ml_api_trace` prefix. A Function whose first token is the legacy stacked
+shape (`:#` or `#n@file:line`) makes analyze exit during parse, before the
+tree. Re-profile with current `--torch-trace` or `--triton-trace`.
 
 ## 3. List the captured operators
 
