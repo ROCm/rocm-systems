@@ -83,6 +83,28 @@ typedef short shortx2_t __attribute__((ext_vector_type(2)));
 typedef short __attribute__((ext_vector_type(2))) __amd_shortx2_storage_t;
 typedef float float2_t __attribute__((ext_vector_type(2)));
 
+#if __HIP_DEVICE_COMPILE__ && (defined(__gfx1250__) || defined(__gfx1250_strict__))
+#define RCCL_FP8_HAS_PK8 1
+
+typedef unsigned int fp8x8_storage_t __attribute__((ext_vector_type(2)));
+typedef float float8_t __attribute__((ext_vector_type(8)));
+
+// The pk8 upcasts take an E8M0 biased exponent, so 127 is a scale of 1.0.
+#define RCCL_FP8_SCALE_ONE_E8M0 127u
+
+inline __device__ fp8x8_storage_t hadd8(fp8x8_storage_t x, fp8x8_storage_t y) {
+  float8_t a = __builtin_amdgcn_cvt_scale_pk8_f32_fp8(x, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  float8_t b = __builtin_amdgcn_cvt_scale_pk8_f32_fp8(y, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  return __builtin_amdgcn_cvt_scalef32_pk8_fp8_f32(a + b, 1.f);
+}
+
+inline __device__ fp8x8_storage_t hadd8_b(fp8x8_storage_t x, fp8x8_storage_t y) {
+  float8_t a = __builtin_amdgcn_cvt_scale_pk8_f32_bf8(x, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  float8_t b = __builtin_amdgcn_cvt_scale_pk8_f32_bf8(y, RCCL_FP8_SCALE_ONE_E8M0, 0);
+  return __builtin_amdgcn_cvt_scalef32_pk8_bf8_f32(a + b, 1.f);
+}
+#endif
+
 inline __device__ rccl_float8 hadd(rccl_float8 x, rccl_float8 y) {
 #if __HIP_DEVICE_COMPILE__ && defined(__gfx950__)
   half2_t v1;

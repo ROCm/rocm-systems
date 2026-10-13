@@ -482,6 +482,29 @@ SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
 
 #undef SPECIALIZE_REDUCE
 
+#if defined(RCCL_FP8_HAS_PK8)
+// gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
+// at once instead of letting Apply_Reduce recurse down to pairs.
+#define SPECIALIZE_REDUCE_PK8(T, hadd8_fn) \
+  template <> \
+  struct Apply_Reduce<FuncSum<T>, /*EltPerPack=*/8> { \
+    __device__ __forceinline__ static BytePack<8> reduce(FuncSum<T> fn, BytePack<8> a, BytePack<8> b) { \
+      fp8x8_storage_t x = {a.u32[0], a.u32[1]}; \
+      fp8x8_storage_t y = {b.u32[0], b.u32[1]}; \
+      fp8x8_storage_t r = hadd8_fn(x, y); \
+      BytePack<8> out; \
+      out.u32[0] = r.x; \
+      out.u32[1] = r.y; \
+      return out; \
+    } \
+  };
+
+SPECIALIZE_REDUCE_PK8(rccl_float8, hadd8)
+SPECIALIZE_REDUCE_PK8(rccl_bfloat8, hadd8_b)
+
+#undef SPECIALIZE_REDUCE_PK8
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
 // Apply_PreOp
 
