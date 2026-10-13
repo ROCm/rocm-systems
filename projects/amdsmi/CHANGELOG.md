@@ -178,6 +178,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed AMD SMI crashing when an AMD AI NIC reports text where a number is expected**.  
   - `amdsmi_init()` and `amd-smi` ended the process on a value such as `Unknown`. The value now reads as unknown, shown as `N/A` in `amd-smi`.
 
+- **Fixed AMD AI NIC values that can't be read showing as numbers**.  
+  - A port that is down showed carrier and link speed 0, and a NIC with no NUMA node showed node 255. Unknown AI NIC values are now the field's maximum value in the C API and `N/A` in `amd-smi` and the Python interface.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

@@ -287,4 +287,17 @@ TEST_F(NicUnit, PortIfindexThatIsNotANumberIsUnknown) {
   EXPECT_EQ(port.ifindex(), std::nullopt);
 }
 
+// The kernel refuses carrier and speed reads on a port that is down; an empty
+// or blank file reads nothing the same way and must give no value, not 0 or "0".
+TEST_F(NicUnit, PortFileWithNothingToReadIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/carrier", ""));
+  ASSERT_TRUE(WriteFile(dir.path() + "/address", " \n"));
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.carrier(), std::nullopt);
+  EXPECT_EQ(port.mac_address(), std::nullopt);
+}
+
 }  // namespace
