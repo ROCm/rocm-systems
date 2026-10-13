@@ -1133,6 +1133,14 @@ impl RuntimeRegistry {
         }
     }
 
+    /// Returns the generation of the currently published runtime.
+    pub(crate) fn active_generation(&self) -> Option<u64> {
+        match (self.phase, self.runtime.as_ref()) {
+            (LifecyclePhase::Active(generation), Some(_)) => Some(generation),
+            _ => None,
+        }
+    }
+
     /// Returns None after adding a reference to an already active runtime.
     pub(crate) fn begin_init(&mut self) -> Result<Option<u64>, Status> {
         match self.phase {
