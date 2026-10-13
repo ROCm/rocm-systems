@@ -48,6 +48,7 @@
 
 #include "util/atomic_helpers.h"
 #include "impl/wddm/cmdbuf_frame_ring.h"
+#include "impl/wddm/fence_wait.h"
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
 
@@ -1176,15 +1177,20 @@ hsa_status_t ComputeQueue::Process(void) {
       // submission it runs ahead of every value this syncobj will ever reach.
       const uint64_t fence_value = CmdbufFrameRing::LastFenceValue(sync_point);
       constexpr int kFaultTimeoutMs = 30000;
-      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (LoadSyncValue(sync_addr) < fence_value) {
-        if (!dxg_runtime->disable_wait_timeout_ && std::chrono::steady_clock::now() >= deadline) {
-          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n",
-                 kFaultTimeoutMs, LoadSyncValue(sync_addr), fence_value);
-          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      const FenceWaitPolicy policy{std::chrono::microseconds(200), std::chrono::microseconds(20),
+                                   std::chrono::microseconds(250),
+                                   std::chrono::milliseconds(kFaultTimeoutMs),
+                                   !dxg_runtime->disable_wait_timeout_};
+      const FenceWaitResult result = WaitForFence(
+          fence_value, policy, [this] { return LoadSyncValue(sync_addr); },
+          [] { return std::chrono::steady_clock::now().time_since_epoch(); },
+          [] { std::this_thread::yield(); },
+          [](std::chrono::nanoseconds interval) { std::this_thread::sleep_for(interval); });
+      if (result == FenceWaitResult::kTimedOut) {
+        pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+               " expected=%" PRIu64 ")\n",
+               kFaultTimeoutMs, LoadSyncValue(sync_addr), fence_value);
+        return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
       }
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
