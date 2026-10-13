@@ -43,8 +43,10 @@ namespace rocprofiler
 {
 namespace counters
 {
+namespace
+{
 void
-CounterController::check_power_performance_level()
+check_power_performance_level()
 {
     // Check if power_dpm_force_performance_level is set to profile_standard
     // for GPU agents that support counter collection. gfx1100 up to (but not
@@ -98,6 +100,7 @@ CounterController::check_power_performance_level()
                            perf_level);
     }
 }
+}  // namespace
 
 CounterController::CounterController()
 {
