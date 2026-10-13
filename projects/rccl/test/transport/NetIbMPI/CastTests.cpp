@@ -8,6 +8,7 @@
 #include "NetIbCastInspect.hpp"
 #include "multiplane.h"
 #include <initializer_list>
+#include <set>
 
 // ThreadedCastAgreedNqps returns this when the connection uses one queue pair: real,
 // but the scheduler then returns before split selection and token accounting, so the
@@ -2354,8 +2355,6 @@ TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
 // Test: CastUdmaPinningVerify
 //
 // Functional HW test: establishes a CAST connection, reads back per-QP UDMA
-// indices via ionic_dv_qp_get_udma_idx, and verifies that the round-robin
-// distribution matches expectations (each QP's UDMA index is within range and
 // indices via ionic_dv_qp_get_udma_idx, and verifies that every QP in this
 // single-channel connection reports the same in-range UDMA index.
 //
@@ -2405,8 +2404,10 @@ TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
     if (ncclIbCastGetUdmaState(myComm, &udma) != ncclSuccess) {
         udmaFail = 1;
     } else if (udma.nqps <= 0 || udma.udmaCount == 0) {
-        // No UDMA engines discovered — not an AINIC device.
-        udmaSkip = 1;
+        // When AINIC is active, udmaCount must be non-zero; a zero value
+        // means the discovery code in init.cc was broken or removed.
+        if (rcclUseAinic()) udmaFail = 1;
+        else                udmaSkip = 1;
     } else {
         // Check if any QP has a valid readback.
         bool anyQueryOk = false;
@@ -2538,7 +2539,8 @@ TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
     if (ncclIbCastGetUdmaState(myComm, &udma) != ncclSuccess) {
         udmaFail = 1;
     } else if (udma.nqps <= 0 || udma.udmaCount == 0) {
-        udmaSkip = 1;
+        if (rcclUseAinic()) udmaFail = 1;
+        else         udmaSkip = 1;
     } else {
         bool anyQueryOk = false;
         for (int i = 0; i < udma.nqps; i++) {
@@ -2554,12 +2556,27 @@ TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
             // With QP sharing the UDMA selector depends on group index
             // or QP index, so we verify range validity rather than a
             // specific round-robin sequence.
+            std::set<uint8_t> distinctEngines;
             for (int i = 0; i < udma.nqps; i++) {
                 if (!udma.queryOk[i]) continue;
                 EXPECT_LT(udma.udmaIdx[i], udma.udmaCount)
                     << "rank " << rank << " QP " << i
                     << " udmaIdx=" << (int)udma.udmaIdx[i]
                     << " exceeds udmaCount=" << (int)udma.udmaCount;
+                distinctEngines.insert(udma.udmaIdx[i]);
+            }
+
+            // When the NIC has more than 2 UDMA engines and the
+            // connection has enough QPs, verify that the sharing path
+            // actually spreads across more than 2 engines.  This
+            // catches a regression to the legacy "% 2" formula that
+            // would still pass the range check above.
+            if (udma.udmaCount > 2 && udma.nqps >= udma.udmaCount) {
+                EXPECT_GT(distinctEngines.size(), 2u)
+                    << "rank " << rank
+                    << " expected >2 distinct UDMA engines with udmaCount="
+                    << (int)udma.udmaCount << " and nqps=" << udma.nqps
+                    << ", but only saw " << distinctEngines.size();
             }
         }
     }
