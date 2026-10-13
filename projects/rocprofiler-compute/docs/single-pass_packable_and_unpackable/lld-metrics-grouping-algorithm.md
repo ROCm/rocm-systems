@@ -27,7 +27,7 @@ ACCUM charging happens when a counter is added to a bucket. A `*_ACCUM` counter 
 
 **Locked decisions** (from the high-level design):
 
-- The final tree has one allocator. No environment variable is in that tree. Phase 1 and Phase 2 still contain `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` and `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE` until cleanup PR #12848 deletes them. Those variables are not a rollback path.
+- The final tree has one allocator: SPP packing and same-pass bind.
 - Do **not** use `WEIGHTED_AVG` for metrics the old allocator split that now fit one pass. Packing covers them.
 - Priority policy YAML is not required for the packable guarantee.
 - After Phase 2 YAML, the gfx942 allocator gate is `packable_multi == 0`, passes == **14** (the shipping layout was 13), `slot_additional_passes == 0`, and `slot_limit_metrics == 0`. The 16 are `COLLECT_*` composite parents. A health PR before that Phase 2 YAML may still see `slot_limit_metrics == 16`. `packable_multi` counts SPP metrics whose PMC set is not fully inside one bucket. Panel 1805 stays one packing group (§4), so that gate includes it.
