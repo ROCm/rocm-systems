@@ -35,6 +35,12 @@ def _tests(config, name):
     return config["test_configurations"][name].get("tests", [])
 
 
+def _merged_env(proc, config_name, test):
+    """Group env from extends, then the test's own env. Same order as run_test."""
+    group = proc.combine_configs(config_name).get("env_variables") or {}
+    return {**group, **(test.get("env_variables") or {})}
+
+
 class Mi350pPcieConfigTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -61,11 +67,17 @@ class Mi350pPcieConfigTest(unittest.TestCase):
             self.func["paths"]["test_binary_dir"],
         )
 
+    def _plans(self):
+        return (
+            (self.func, self.func_proc),
+            (self.perf, self.perf_proc),
+        )
+
     def test_no_unselectable_tree_cells(self):
-        for doc in (self.func, self.perf):
+        for doc, proc in self._plans():
             for name, block in doc["test_configurations"].items():
                 for test in block.get("tests", []):
-                    env = test.get("env_variables") or {}
+                    env = _merged_env(proc, name, test)
                     algo = env.get("NCCL_ALGO")
                     proto = env.get("NCCL_PROTO")
                     self.assertFalse(
@@ -80,7 +92,10 @@ class Mi350pPcieConfigTest(unittest.TestCase):
                         self.assertNotIn("NCCL_PROTO", env, test["name"])
 
     def test_tree_ll_allreduce_is_kept(self):
-        names = [t["name"] for t in _tests(self.func, "allreduce_smoke")]
+        names = []
+        for suite in self.func["test_suites"]:
+            if suite.get("smoke"):
+                names.extend(t["name"] for t in _tests(self.func, suite["config"]))
         self.assertIn("AllReduce_LL_SHM_Tree_ch4", names)
         self.assertIn("AllReduce_LL_IPC_Tree_ch32", names)
 
@@ -90,24 +105,34 @@ class Mi350pPcieConfigTest(unittest.TestCase):
             for suite in self.func["test_suites"]
             if suite.get("smoke")
         }
-        self.assertIn("allreduce_smoke", smoke)
+        extra = {
+            suite["config"]
+            for suite in self.func["test_suites"]
+            if not suite.get("smoke")
+        }
+        self.assertIn("ar_simple_shm_ring_smoke", smoke)
         self.assertIn("mi350p_topo_unit", smoke)
-        self.assertNotIn("allreduce_extra", smoke)
+        self.assertIn("ar_simple_shm_ring_extra", extra)
+        self.assertTrue(all(not name.endswith("_extra") for name in smoke))
 
-        smoke_channels = set()
-        for test in _tests(self.func, "allreduce_smoke"):
-            smoke_channels.add(test["env_variables"]["NCCL_MIN_NCHANNELS"])
-        self.assertEqual(smoke_channels, {"1", "4", "32"})
+        def channels(configs):
+            found = set()
+            for name in configs:
+                for test in _tests(self.func, name):
+                    if not test["name"].startswith("AllReduce_"):
+                        continue
+                    found.add(_merged_env(self.func_proc, name, test)["NCCL_MIN_NCHANNELS"])
+            return found
 
-        extra_channels = set()
-        for test in _tests(self.func, "allreduce_extra"):
-            extra_channels.add(test["env_variables"]["NCCL_MIN_NCHANNELS"])
-        self.assertEqual(extra_channels, {"2", "8", "16", "64"})
+        self.assertEqual(channels(smoke), {"1", "4", "32"})
+        self.assertEqual(channels(extra), {"2", "8", "16", "64"})
 
     def test_ipc_requests_sys_p2p_and_shm_disables_p2p(self):
-        for suite in ("allreduce_smoke", "allreduce_extra"):
-            for test in _tests(self.func, suite):
-                env = test["env_variables"]
+        for name, block in self.func["test_configurations"].items():
+            if not (name.startswith("ar_") and name.endswith(("_smoke", "_extra"))):
+                continue
+            for test in block.get("tests", []):
+                env = _merged_env(self.func_proc, name, test)
                 if env["NCCL_P2P_DISABLE"] == "0":
                     self.assertEqual(env["NCCL_P2P_LEVEL"], "SYS", test["name"])
                     self.assertEqual(env["NCCL_SHM_DISABLE"], "1", test["name"])
@@ -124,6 +149,32 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         self.assertEqual(len(set(args.values())), 1, args)
         self.assertIn("-n 20", next(iter(args.values())))
         self.assertIn("-w 5", next(iter(args.values())))
+
+    def test_perf_allreduce_cells_share_env_without_pinning_auto(self):
+        auto = self.perf_proc.combine_configs("allreduce_perf")
+        self.assertEqual(auto["tests"][0]["name"], "AllReduce_auto")
+        self.assertEqual(auto["tests"][0].get("env_variables"), {})
+        self.assertFalse(auto.get("env_variables"))
+
+        cell_names = [
+            name
+            for name in self.perf["test_configurations"]
+            if name.startswith("ar_perf_")
+        ]
+        self.assertEqual(len(cell_names), 6)
+        self.assertEqual(
+            sum(len(self.perf_proc.combine_configs(name)["tests"]) for name in cell_names),
+            12,
+        )
+        for name in cell_names:
+            combined = self.perf_proc.combine_configs(name)
+            self.assertIn(combined["env_variables"]["NCCL_PROTO"], {"Simple", "LL"})
+            self.assertIn(combined["env_variables"]["NCCL_ALGO"], {"Ring", "Tree"})
+            for test in combined["tests"]:
+                self.assertEqual(
+                    set(test["env_variables"]),
+                    {"NCCL_MIN_NCHANNELS", "NCCL_MAX_NCHANNELS"},
+                )
 
     def test_topo_names_stay_tied(self):
         """A renamed TEST() must not leave the plan green with the suite gone."""
@@ -150,10 +201,44 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         )
 
     def test_extends_resolves_shared_ranks(self):
-        combined = self.func_proc.combine_configs("allreduce_smoke")
+        combined = self.func_proc.combine_configs("ar_simple_shm_ring_smoke")
         self.assertEqual(combined["num_ranks"], 8)
         self.assertEqual(combined["binary"], "all_reduce_perf")
-        self.assertGreaterEqual(len(combined["tests"]), 18)
+        self.assertEqual(len(combined["tests"]), 3)
+        self.assertEqual(combined["env_variables"]["NCCL_PROTO"], "Simple")
+        self.assertEqual(combined["env_variables"]["NCCL_ALGO"], "Ring")
+        merged = _merged_env(self.func_proc, "ar_simple_shm_ring_smoke", combined["tests"][0])
+        self.assertEqual(merged["NCCL_MIN_NCHANNELS"], "1")
+        self.assertEqual(merged["NCCL_P2P_DISABLE"], "1")
+
+    def test_ring_ch4_is_shared_and_alltoall_does_not_inherit_it(self):
+        leaves = [
+            name
+            for name in self.func["test_configurations"]
+            if name.startswith(("ag_", "rs_", "bc_"))
+        ]
+        self.assertEqual(len(leaves), 12)
+        transports = set()
+        for name in leaves:
+            combined = self.func_proc.combine_configs(name)
+            env = combined["env_variables"]
+            self.assertEqual(env["NCCL_MIN_NCHANNELS"], "4", name)
+            self.assertEqual(env["NCCL_MAX_NCHANNELS"], "4", name)
+            self.assertEqual(env["NCCL_ALGO"], "Ring", name)
+            self.assertIn(env["NCCL_PROTO"], {"Simple", "LL"}, name)
+            transports.add((
+                env["NCCL_PROTO"],
+                env["NCCL_SHM_DISABLE"],
+                env["NCCL_P2P_DISABLE"],
+                env.get("NCCL_P2P_LEVEL"),
+            ))
+            test = combined["tests"][0]
+            self.assertNotIn("env_variables", test, test["name"])
+            merged = _merged_env(self.func_proc, name, test)
+            self.assertEqual(merged["NCCL_ALGO"], "Ring", test["name"])
+        self.assertEqual(len(transports), 4)
+        alltoall = self.func_proc.combine_configs("alltoall_perf")
+        self.assertNotIn("NCCL_ALGO", alltoall.get("env_variables") or {})
 
 
 if __name__ == "__main__":

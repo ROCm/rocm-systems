@@ -55,7 +55,11 @@ jobs:
       group: mi350p-pcie-8gpu
       cancel-in-progress: false
     runs-on: [self-hosted, mi350p-pcie-8gpu]
-    timeout-minutes: 540
+    # plan=both on this 8-GPU host: a func case took 19s (56 cases) and a
+    # perf case took 33s (15 cases), about 27 minutes of sweeps. The Debug
+    # librccl compile took about 5 minutes. 60 leaves room for a slower build
+    # and for eight MPI ranks instead of the single-process timing run.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
