@@ -174,6 +174,18 @@ struct LivenessAnalysisOptions {
 /// registers the kernel is using.
 [[nodiscard]] uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks);
 
+/// @brief Whether any instruction in @p blocks is an `s_movrel*` form.
+///
+/// @details M0 displaces the encoded SGPR index at runtime, so the operand names
+/// one register and the hardware accesses another. Neither
+/// @ref explicit_ordinary_sgpr_bound nor LivenessAnalysis models that, so a
+/// caller relying on either for SGPR usage must reject a scope where this holds.
+///
+/// Matches by prefix: that covers the load, the store (`s_movreld_*`) and the
+/// RDNA `s_movrelsd_2_b32` pair form. Any other scalar indirection would need
+/// its own scan.
+[[nodiscard]] bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks);
+
 /// @brief Kernel-global register usage plus deferred backward CFG liveness.
 ///
 /// @details Construction eagerly resolves gfx1250 VGPR banks and scans global

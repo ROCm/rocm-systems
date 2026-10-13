@@ -19,7 +19,6 @@ mod cpu_cache;
 pub mod device;
 mod driver;
 mod error;
-pub mod host_storage;
 pub mod memory;
 mod os;
 pub mod session;

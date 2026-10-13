@@ -6,7 +6,8 @@
 //! mapping would violate the kernel contract. Compute queues also retain EOP
 //! and context-save storage; the process/device VM retains its doorbell slice.
 
-use crate::host_storage::{Buffer, Owned, Shared};
+use crate::memory::storage::TryPush;
+use crate::memory::storage::{Owned, Shared};
 use std::io;
 use std::mem::{offset_of, size_of};
 use std::sync::Mutex;
@@ -129,7 +130,7 @@ struct DoorbellMapping {
     gpu_id: u32,
     handle: Option<u64>,
     gpu_mapping: DoorbellGpuMapping,
-    peers: Buffer<DoorbellPeer>,
+    peers: Vec<DoorbellPeer>,
     uncertain: bool,
 }
 
@@ -536,7 +537,7 @@ impl Doorbells {
                 gpu_id: vm.gpu_id(),
                 handle: None,
                 gpu_mapping: DoorbellGpuMapping::Unmapped,
-                peers: Buffer::new(vm.allocator()),
+                peers: Vec::new(),
                 uncertain: false,
             });
         }
@@ -1461,7 +1462,7 @@ pub(crate) struct KfdQueue {
     vm: Shared<DeviceVm>,
     backing: [Option<Owned<KfdAllocation>>; 3],
     context: Option<QueueContext>,
-    peer_mappings: Mutex<Buffer<QueuePeerMapping>>,
+    peer_mappings: Mutex<Vec<QueuePeerMapping>>,
     read_offset: usize,
     write_offset: usize,
     aql: Option<AqlControl>,
@@ -1655,27 +1656,24 @@ impl KfdQueue {
             args.context_size = compute.context_size;
             args.control_stack_size = compute.control_stack_size;
         }
-        let allocator = vm.allocator();
-        let mut queue = Owned::new(
-            Self {
-                vm,
-                backing: [Some(ring), Some(pointers), eop],
-                context,
-                peer_mappings: Mutex::new(Buffer::new(allocator)),
-                read_offset,
-                write_offset,
-                aql: request.aql,
-                read_index_mask: request.pm4.map(|pm4| pm4.read_mask),
-                doorbell_offset: 0,
-                id: None,
-                active: true,
-                priority: request.priority,
-                destroying: false,
-                uncertain: false,
-                info,
-            },
-            allocator,
-        )?;
+
+        let mut queue = Owned::new(Self {
+            vm,
+            backing: [Some(ring), Some(pointers), eop],
+            context,
+            peer_mappings: Mutex::new(Vec::new()),
+            read_offset,
+            write_offset,
+            aql: request.aql,
+            read_index_mask: request.pm4.map(|pm4| pm4.read_mask),
+            doorbell_offset: 0,
+            id: None,
+            active: true,
+            priority: request.priority,
+            destroying: false,
+            uncertain: false,
+            info,
+        })?;
         let result = queue.vm.kfd().create_queue(&mut args);
         if result.is_ok() {
             // Zero is a valid native queue ID. Only successful CREATE transfers

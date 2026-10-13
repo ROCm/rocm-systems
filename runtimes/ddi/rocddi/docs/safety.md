@@ -154,8 +154,7 @@ The workspace-root shared image loads both public ABIs from one shared
 object. Sessions with `DriverContextLifetime::Process` share the primary KFD
 context, one Linux KFD connection, and the exact DRM VM bindings acquired for
 each GPU. A process owner allocated with the Rust system allocator retains
-these driver handles through process exit; no frontend callback allocator is
-captured by that owner. A session joins the process owner before any KFD call
+these driver handles through process exit. A session joins the process owner before any KFD call
 that might enable runtime state. The last joined session disables KFD runtime
 enablement under the owner's lock. Failure leaves the session joined so its
 destruction can be retried. The shared image is marked `NODELETE`, including
@@ -181,10 +180,9 @@ Most Linux descriptor and mapping calls and flags come from the `libc` crate.
 `src/os/linux/memory/reservation.rs` defines `MAP_FIXED_NOREPLACE`; the crate
 does not expose these for the supported GNU targets. KFD and DRM calls remain in
 `src/driver/linux_kfd/{sys,drm}.rs`.
-The AMDF and HSA frontends export C ABI entry points and invoke
-caller-provided callbacks. The core host allocator invokes AMDF
-caller-provided allocation callbacks. These ABI calls do not import a native
-library. HSA has no `libdrm_amdgpu` link and obtains
+The AMDF and HSA frontends export C ABI entry points and invoke documented
+caller-provided callbacks. These ABI calls do not import a native library.
+HSA has no `libdrm_amdgpu` link and obtains
 DRM facts from the Linux driver's raw ioctl implementation.
 The Rust standard library still gives the shared image `libc` and
 `libgcc_s` dependencies. This source organization describes where rocddi
@@ -207,7 +205,7 @@ The opt-in [GFX1201 C ABI probes](../tests/gpu/README.md) inject ambiguous
 CREATE and failed rollback through both frontends. HSA verifies that the
 separate inactive-signal and scratch KFD allocations remain live; AMDF
 verifies that its public scratch memory remains busy. These probes do not
-cover every native failure or allocator callback lifetime. Independent C/Rust
+cover every native failure or allocation failure path. Independent C/Rust
 ABI probes compare AMDF and HSA layouts, and the HSA probe calls the local
 versioned finalizer symbol.
 Focused Miri tests exercise the custom host owners and buffer, including
