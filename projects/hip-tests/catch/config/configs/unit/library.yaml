@@ -17,6 +17,12 @@ library:
   Unit_hipKernelGetAttribute_Positive_Basic:
     <<: *level_default
     tags: [module]
+  Unit_hipKernelSetCacheConfig_Positive:
+    <<: *level_2
+    tags: [module]
+  Unit_hipKernelSetCacheConfig_Negative:
+    <<: *level_2
+    tags: [module]
   Unit_hipKernelGetAttribute_Negative_Parameters:
     <<: *level_default
     tags: [module]
