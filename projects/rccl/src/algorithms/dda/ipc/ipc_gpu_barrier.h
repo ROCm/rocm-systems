@@ -102,7 +102,7 @@ public:
   __host__ IpcGpuBarrier() = default;
 
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, const uint32_t* abortFlag = nullptr);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, const uint32_t* abortFlag);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -124,16 +124,19 @@ public:
     }
     if (threadIdx.x < NRANKS) {
       auto peerRank = threadIdx.x;
+      bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        (void)allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, abortFlag_);
+        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, abortFlag_);
       } else {
-        (void)allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, abortFlag_);
+        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, abortFlag_);
       }
 
-      if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        (void)allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortFlag_);
-      } else {
-        (void)allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortFlag_);
+      if (signaled) {
+        if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
+          (void)allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortFlag_);
+        } else {
+          (void)allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortFlag_);
+        }
       }
     }
     if constexpr (hasSubsequentMemAccess) {

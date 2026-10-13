@@ -44,8 +44,7 @@ public:
   // Allocates this rank's flag buffer, exchanges peer flag-buffer pointers via
   // fabric shareable handles and builds a device-resident pointer table.
   static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
-    const uint32_t* abortFlag = nullptr);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, const uint32_t* abortFlag);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {

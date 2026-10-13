@@ -113,8 +113,7 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), flag, abortFlag, d0,
-                              f0, d1, f1)) {
+      if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
         break;
       }
       out[2 * pk] = d0;

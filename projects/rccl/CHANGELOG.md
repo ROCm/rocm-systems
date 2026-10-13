@@ -46,6 +46,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
 * Fixed `NCCL_P2P_DISABLE` and `NCCL_P2P_LEVEL` being ignored on Intel, ARM and Zhaoxin hosts, where the CPU-based default P2P level overwrote the user setting. On such hosts `NCCL_P2P_DISABLE=1` now falls back to SHM as documented, and `NCCL_P2P_LEVEL` is honored.
+* Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

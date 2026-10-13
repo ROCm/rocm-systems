@@ -102,8 +102,7 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), flag, abortFlag, d0,
-                              f0, d1, f1)) {
+      if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
         return;
       }
