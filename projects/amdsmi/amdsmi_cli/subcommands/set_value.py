@@ -1354,7 +1354,16 @@ class SetValueCommands:
                     amdsmi_interface.amdsmi_set_gpu_memory_partition_mode(
                         args.gpu, memory_partition
                     )
-                    out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
+                    if memory_dict["current"] == args.memory_partition:
+                        # The driver keeps a different mode set earlier staged: a
+                        # request for the current mode does not cancel it.
+                        out = (
+                            f"Memory partition is already {args.memory_partition}; nothing changed. "
+                            "If a different memory partition was set since the driver was loaded, "
+                            "the next driver reload still applies it."
+                        )
+                    else:
+                        out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
