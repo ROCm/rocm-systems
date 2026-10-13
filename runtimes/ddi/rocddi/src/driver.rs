@@ -23,7 +23,7 @@ mod tests;
 
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, KfdAllocation,
-    new_driver_instance,
+    KfdDeviceState, new_driver_instance,
 };
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
@@ -41,9 +41,9 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::ClockCounters;
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
-use crate::host_storage::{Allocator, Owned};
+use crate::memory::storage::Owned;
 use crate::memory::{
-    AllocationInfo, DeviceAccess, HostRegistration, OwnedMemoryKind, VirtualAddressInfo,
+    AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
     VirtualMemoryInfo,
 };
 use crate::session::DriverContextLifetime;
@@ -89,8 +89,6 @@ pub(crate) trait Driver: Send + Sync {
     type DeviceState: Clone + Send + Sync;
     fn driver_instance(&self) -> u64;
     fn context_lifetime(&self) -> DriverContextLifetime;
-    /// Allocator used for metadata retained by this driver and its resources.
-    fn allocator(&self) -> Allocator;
     fn shutdown(&mut self) -> Result<(), Error>;
     fn enumerate(
         &self,
@@ -116,6 +114,7 @@ pub(crate) trait AllocationOperations: Driver {
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
     fn check_allocation(allocation: &Self::Allocation) -> Result<(), Error>;
     fn allocation_is_device_local(allocation: &Self::Allocation) -> bool;
+    /// Replaces access using temporary metadata.
     fn set_allocation_access(
         _allocation: &mut Self::Allocation,
         _devices: &[&Self::DeviceState],
@@ -135,14 +134,16 @@ pub(crate) trait AllocationOperations: Driver {
         &self,
         device: &Self::DeviceState,
         peers: &[&Self::DeviceState],
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error>;
     /// # Safety
-    /// The caller keeps the complete host page cover mapped and synchronized
-    /// through successful free or, after ambiguous driver failure, process exit.
+    /// The caller keeps borrowed pages mapped through successful free or,
+    /// after ambiguous driver failure, process exit. When `request.backing` is
+    /// present, the driver instead takes that lease into its native owner and
+    /// retains it through uncertain cleanup.
     #[allow(unsafe_code)]
     unsafe fn register_host(
         &self,
@@ -179,7 +180,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
     fn create_virtual_memory(
         &self,
         device: &Self::DeviceState,
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         pinned: bool,
         uncached: bool,
@@ -206,7 +207,6 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: crate::host_storage::Allocator,
     ) -> Result<Owned<Self::VirtualHostMapping>, Error>;
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }

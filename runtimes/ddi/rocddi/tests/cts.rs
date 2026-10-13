@@ -22,8 +22,8 @@ use rocddi::device::gpu::queue::{
     QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
 use rocddi::device::gpu::{CopyRect, GpuCopySequence};
+use rocddi::memory::device::{DeviceAccess, HostMappingPolicy, MemoryKind};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
-use rocddi::memory::{DeviceAccess, HostMappingPolicy, MemoryKind};
 use rocddi::session::{DriverContextLifetime, Session};
 
 #[test]

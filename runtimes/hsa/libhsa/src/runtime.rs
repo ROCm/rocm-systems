@@ -29,7 +29,7 @@ use rocddi::device::event::{
     DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault,
     GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
-use rocddi::memory::Allocation;
+use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{Endpoint, EndpointDetailsKind, GpuInfo};
 
@@ -686,8 +686,9 @@ impl Runtime {
     }
 
     pub(crate) fn create() -> Result<Self, InitFailure> {
-        let host_page_size = usize::try_from(rocddi::memory::host_page_size().map_err(map_error)?)
-            .map_err(|_| ERROR)?;
+        let host_page_size =
+            usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
+                .map_err(|_| ERROR)?;
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }

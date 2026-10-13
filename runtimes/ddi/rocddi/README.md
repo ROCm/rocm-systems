@@ -126,11 +126,29 @@ The core source is organized by ownership domain:
   Cloned devices share family-specific service state, including the GPU copy
   pool. Linux KFD signal events live under `device/gpu/event/linux.rs` and are
   exposed through `device::gpu::event::linux`;
-- `memory.rs` and `memory/` own driver-generic allocation,
-  address-reservation, and mapping owners. A virtual-address reservation
-  verifies that every device uses the selected driver, intersects their
-  address apertures, and allocates mapping records before asking that driver
-  to reserve the native range. `memory::interop::linux` contains DMA-BUF,
+- `memory.rs` is the single memory namespace. `memory/storage.rs` and
+  `memory/storage/` provide fallible `Owned` and `Shared` storage for runtime
+  ownership records and fallible reservation of standard `Vec` values.
+  Production storage uses the system allocator; test hooks inject allocation
+  failures into native rollback paths. Owners can reserve storage before
+  acquiring native resources. `memory/host.rs` owns
+  host-only backing and cache operations
+  without activating an endpoint. `memory/device.rs` exposes memory qualified
+  for activated devices; its `memory/device/allocation.rs` implementation owns
+  native allocations and raw host registration.
+  `memory/device/registered_host.rs` composes rocddi-owned host backing with
+  safe per-driver registrations.
+  `memory/device/virtual_memory.rs` owns address reservations, detached backing,
+  and mappings. Device access is explicit even when a frontend represents the
+  host CPU as an HSA agent. `RegisteredHostMemory` owns one host allocation
+  and separate registrations with each device driver, so every driver can
+  report its own address and cleanup retains the backing. Raw registration of
+  caller-owned pages remains unsafe and leaves their lifetime with the caller.
+  A virtual-address reservation verifies that
+  every device uses the selected driver, intersects their address apertures,
+  and allocates mapping records before asking that driver to reserve the native
+  range.
+  `memory::interop::linux` contains DMA-BUF,
   KFD IPC, KFD SVM, and AIS file-transfer contracts used with Linux APIs and
   other processes;
 - `driver.rs` defines the private driver and resource interfaces;
@@ -153,7 +171,7 @@ The core source is organized by ownership domain:
   implementation supplies host allocation and page-size operations without
   exposing its native handle to the core.
   Host allocation reports a numeric extent and retains failed cleanup for
-  retry; `memory.rs` constructs the public information record. The core
+  retry; `memory/host.rs` constructs the public information record. The core
   host-memory API uses these services without activating a device.
   `topology::platform::linux` remains public endpoint metadata for runtime
   frontends; it does not own host services;

@@ -9,7 +9,7 @@
 
 use crate::Error;
 use crate::driver::DeviceDriverState;
-use crate::host_storage::Shared;
+use crate::memory::storage::Shared;
 use crate::topology::Endpoint;
 
 pub mod event;
@@ -35,10 +35,7 @@ impl DeviceResources {
         driver_state: &DeviceDriverState,
     ) -> Result<Self, Error> {
         if endpoint.gpu().is_some() && driver_state.is_gpu() {
-            return Ok(Self::Gpu(Shared::new(
-                gpu::GpuResources::default(),
-                driver_state.allocator(),
-            )?));
+            return Ok(Self::Gpu(Shared::new(gpu::GpuResources::default())?));
         }
         Ok(Self::None)
     }
