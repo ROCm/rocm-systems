@@ -82,6 +82,7 @@ typedef enum {
 
   RDC_ST_GROUP_NOT_FOUND,     //!< Specified group not found
   RDC_ST_FLDGROUP_NOT_FOUND,  //!< Specified field group not found
+  // Add new statuses here, and give each a string in rdc_status_string().
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
@@ -1702,6 +1703,7 @@ rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  if it is 0x0, then the health check not set for the group yet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             unsigned int* components);
@@ -1719,6 +1721,7 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  @param[inout] response  The detail results of the health.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
  */
 rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                               rdc_health_response_t* response);
@@ -1733,6 +1736,7 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  *  @param[in] group_id The GPU group id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
  */
 rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
