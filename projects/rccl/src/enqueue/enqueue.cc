@@ -353,6 +353,8 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+  plan->kernelArgs->devFlags = (ncclProfilerPluginLoaded() ? RCCL_DEV_FLAG_PROFILER : 0) |
+                               (comm->deviceCountersBlock != nullptr ? RCCL_DEV_FLAG_PROGRESS : 0);
 #ifdef ENABLE_WARP_SPEED
   plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
 #endif
