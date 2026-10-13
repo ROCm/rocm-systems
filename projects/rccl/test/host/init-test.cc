@@ -1424,6 +1424,7 @@ void FillParentConfig(ncclConfig_t& c) {
   c.numRmaSig = 6;
   c.rmaEagerInit = 1;
   c.hostCftMode = ncclHostCftEnable;
+  c.nvlsHostMode = ncclNvlsHostModeDisableTransport;
 }
 
 void FillChildConfig(ncclConfig_t& c) {
@@ -1452,11 +1453,12 @@ void FillChildConfig(ncclConfig_t& c) {
   c.numRmaSig = 7;
   c.rmaEagerInit = 0;
   c.hostCftMode = ncclHostCftFallback;
+  c.nvlsHostMode = ncclNvlsHostModeDisableSymmetricMultimem;
 }
 
 // TRIPWIRE: a new ncclConfig_t field must be added to both fills and to ExpectConfigFieldsEqual, or a
 // memcpy truncated just before it would go unnoticed. Update all four sites together.
-static_assert(sizeof(ncclConfig_t) == 112, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
+static_assert(sizeof(ncclConfig_t) == 120, "ncclConfig_t layout changed -- extend the copyCommConfig field checks");
 
 // Field-by-field so a failure names the field. netName by content: envConfigOverride re-mallocs it.
 void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) {
@@ -1486,6 +1488,7 @@ void ExpectConfigFieldsEqual(const ncclConfig_t& want, const ncclConfig_t& got) 
   EXPECT_EQ(want.numRmaSig, got.numRmaSig);
   EXPECT_EQ(want.rmaEagerInit, got.rmaEagerInit);
   EXPECT_EQ(want.hostCftMode, got.hostCftMode);
+  EXPECT_EQ(want.nvlsHostMode, got.nvlsHostMode);
 }
 
 // envConfigOverride always replaces config.netName with a fresh malloc; free it so the copy tests do not leak.
@@ -2528,6 +2531,7 @@ struct PeerSpec {
   int mloPart = -1;     // -1 == NCCL_TOPO_UNDEF, i.e. not an MLOPart GPU
   int nvmlDev = -1;     // -1 = its own device; equal values collide for the :1482 check
   int uuidTag = -1;     // -1 = its own UUID; equal values (>=1) make two peers the same GPU
+  int64_t busId = 0;    // equal values are the same PCI function, i.e. the same partition
   int compCap = -1;     // -1 = same as self
   ncclComm* comm = nullptr;  // only read for same-process peers (:1527, :1549)
 };
@@ -2567,6 +2571,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
       info[i].cuMemSupport = s.cuMemSupport;
       info[i].mloPart = s.mloPart;
       info[i].nvmlDev = s.nvmlDev < 0 ? 100 + i : s.nvmlDev;  // self is 0, so -1 never collides
+      info[i].busId = s.busId;  // defaults to 0, as does self's: fillInfo copies the zero-init comm->busId
       std::memset(&info[i].gpuUuid, 0, sizeof(info[i].gpuUuid));
       reinterpret_cast<unsigned char*>(&info[i].gpuUuid)[0] =
           static_cast<unsigned char>(s.uuidTag < 0 ? i + 1 : s.uuidTag);  // 1-based: never matches self's zeros
@@ -2733,6 +2738,61 @@ TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuidDifferentHosts_IsAllowe
   // the ncclRemoteError sentinel (proves :1576 was reached) and the exit: call count.
   EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
   EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// AICOMRCCL-2749. The CPX shape: one UUID, one bus/device, eight PCI functions. hipDeviceGetUuid
+// returns KFD's per-device unique_id, so every partition of an MI300X OAM reports the same UUID;
+// only the function nibble tells them apart. Measured on an MI300X node in CPX: 63
+// partitions, 8 distinct UUIDs and 63 distinct busIds. Dropping the busId conjunct
+// refuses this communicator, which is the whole bug -- one rank per partition is how CPX is run.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidDifferentPciFunctions_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b001;  // 0000:1b:00.1 and .2: two CPX partitions of the OAM at 0000:1b:00
+  specs[2].busId = 0x1b002;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));  // ran on to the topo seam
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);  // positive anchor: it really did reach exit:
+}
+
+// The conjunct narrows the guard, it does not disable it: a genuine two-ranks-on-one-partition
+// misconfiguration matches on busId too and is still refused. Without this, the fix would be
+// indistinguishable from the NCCL_MULTI_RANK_GPU_ENABLE=1 workaround it is meant to replace.
+// The sibling test above drives the same guard with a nonzero busId, so neither case is passing
+// only because the harness leaves busId at 0.
+TEST_F(InitMicrotest, InitTransportsRank_SameGpuUuidSamePciFunction_StillRefused) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].uuidTag = 9;
+  specs[2].uuidTag = 9;
+  specs[1].busId = 0x1b003;  // both ranks bound to 0000:1b:00.3
+  specs[2].busId = 0x1b003;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_TRUE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(0, g_ncclOsCpuCountCalls);  // the one return that skips exit:
+}
+
+// The NVIDIA MLOPart shape is the mirror image and must stay admitted: siblings share a BDF but
+// CUDA gives each partition its own UUID, so the UUID conjunct is what separates them there.
+TEST_F(InitMicrotest, InitTransportsRank_SamePciFunctionDifferentGpuUuids_IsAllowed) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  std::vector<PeerSpec> specs(4);
+  specs[1].busId = 0x1b000;  // same BDF, and uuidTag -1 leaves each peer its own UUID
+  specs[2].busId = 0x1b000;
+  InstallPeerInfoAllGather(c, specs);
+  const std::string log = RcclUnitTesting::CaptureLog([&] {
+    EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  });
+  EXPECT_FALSE(LogHas(log, "Multiple Ranks are using the same GPU/Partition")) << "actual log:\n" << log;
+  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_DuplicateGpuUuid_MultiRankGpuEnabled_Continues) {
@@ -5483,7 +5543,8 @@ TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   ncclResult_t ret = ncclSuccess;
   const std::string log = CaptureInfoLog([&] { ret = Teardown_RunDestroySync(c.get()); });
   EXPECT_EQ(ncclInternalError, ret);
-  EXPECT_TRUE(LogHas(log, "commDestroySync: comm")) << "actual log:\n" << log;
+  // NCCL 2.32 reworded this INFO without the "commDestroySync:" prefix.
+  EXPECT_TRUE(LogHas(log, "proxy stop error")) << "actual log:\n" << log;
 }
 
 TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
@@ -5538,7 +5599,8 @@ TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsR
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get())); });
   EXPECT_EQ(2, ran);
-  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed comm")) << "actual log:\n" << log;
+  // NCCL 2.32 wording: "... failed for comm 0x<hash> rank <r>".
+  EXPECT_TRUE(LogHas(log, "Legacy IPC cleanup callback failed for comm")) << "actual log:\n" << log;
   EXPECT_TRUE(ncclIntruQueueEmpty(&c.get()->legacyRegCleanupQueue));
 }
 
@@ -5651,8 +5713,8 @@ TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) 
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: comm")) << "actual log:\n" << log;
-  EXPECT_TRUE(LogHas(log, "in commDestroySync, error")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and reworded it: "comm 0x<hash> rank <r> commDestroySync error <e>".
+  EXPECT_TRUE(LogHas(log, "commDestroySync error")) << "actual log:\n" << log;
   for (int i = 0; i < kChainLength; ++i) EXPECT_EQ(1, members[i].rec.finalizeCalls);
 }
 
@@ -6033,18 +6095,32 @@ TEST_F(InitMicrotest, CommFree_SingleNodeComm_ReleasesBothSizeArraysAndNullsTheP
   ::free(comm);
 }
 
-TEST_F(InitMicrotest, CommFree_MultiNodeComm_LeavesTheSizeArraysAlone) {
+TEST_F(InitMicrotest, CommFree_MultiNodeComm_ReleasesBothSizeArraysAndNullsThePointers) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
   ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
   comm->nNodes = 2;
   int localSizes = 0;
+  long gatheredSizes = 0;
   comm->localSizes = &localSizes;
-  ScopedHook memFree(g_ncclMemFree, [](void*) { return ncclSuccess; });
+  comm->gatheredSizes = &gatheredSizes;
+  ASSERT_NE(comm->localSizes, comm->gatheredSizes);
 
+  std::vector<void*> released;
+  ScopedHook memFree(g_ncclMemFree, [&](void* p) {
+    released.push_back(p);
+    return ncclSuccess;
+  });
+
+  // commFree frees the comm struct. The spy keeps it alive so the pointer
+  // nulling below is still observable.
+  Teardown_DeviceFreeSpy spy(comm);
   EXPECT_EQ(ncclSuccess, commFree(comm));
-  EXPECT_EQ(0, memFree.calls);
+  EXPECT_EQ(std::vector<void*>({&localSizes, &gatheredSizes}), released);
+  EXPECT_EQ(nullptr, comm->localSizes);
+  EXPECT_EQ(nullptr, comm->gatheredSizes);
+  ::free(comm);
 }
 
 
@@ -6465,7 +6541,8 @@ TEST_F(InitMicrotest, CommReclaim_CommCleanupFails_WarnsAndStillCleansTheRestOfT
 
   const std::string log =
       CaptureInfoLog([&] { EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[1].comm)); });
-  EXPECT_TRUE(LogHas(log, "commReclaim: cleanup comm")) << "actual log:\n" << log;
+  // NCCL 2.32 raised this to ATTN and dropped the "commReclaim: " prefix.
+  EXPECT_TRUE(LogHas(log, "cleanup comm")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "failed in destroy/abort, error")) << "actual log:\n" << log;
   EXPECT_EQ(1, members[1].rec.finalizeCalls);
   members[0].comm->tuner = nullptr;
@@ -7348,8 +7425,9 @@ TEST_F(InitMicrotest, CommInitRankFunc_DevicePropertiesFail_ReturnsBeforeKernelI
   EXPECT_EQ(0, s.comm()->cuCount);
 }
 
-// LATENT BUG (init.cc:2669): a bare NCCLCHECK returns past the fail: free, leaking the archName strdup'd at :2661.
-TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenReturnsWithoutPublishing) {
+// NCCL 2.32 fixed the former latent bug here: kernel-init failure now goes through NCCLCHECKGOTO to fail:,
+// which records the error in initState and still publishes via exit:, instead of returning past both.
+TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemThenFailsThroughExit) {
   Rank_JobScene s(/*nranks=*/4, /*myrank=*/1);
   ScopedHook setDevice(g_hipSetDevice, Rank_SetDeviceOk);
   int seenArch = -1;
@@ -7367,8 +7445,8 @@ TEST_F(InitMicrotest, CommInitRankFunc_KernelInitFails_ForwardsArchAndSharedMemT
   EXPECT_EQ(Rank_kCudaArch, seenArch);
   EXPECT_EQ(Rank_kMaxSharedMem, seenSharedMem);
   EXPECT_EQ(1, kernels.calls);
-  EXPECT_EQ(nullptr, s.published()) << "a bare NCCLCHECK returns directly, skipping the exit: publish";
-  EXPECT_EQ(ncclSuccess, s.comm()->initState) << "and skipping the fail: initState store";
+  EXPECT_NE(nullptr, s.published()) << "NCCLCHECKGOTO reaches the exit: publish";
+  EXPECT_EQ(ncclInternalError, s.comm()->initState) << "and the fail: initState store";
 }
 
 TEST_F(InitMicrotest, CommInitRankFunc_KernelsWantStackSpace_RaisesTheDeviceStackLimitToThatSize) {
@@ -8793,7 +8871,7 @@ TEST_F(InitMicrotest, InitChildComm_Split_AllocatesChildAndLaunchesOnTheParent) 
   EXPECT_FALSE(r.isGrow);
   EXPECT_EQ(NCCL_MAGIC, child->startMagic);
   EXPECT_EQ(NCCL_MAGIC, child->endMagic);
-  EXPECT_EQ(ncclInternalError, child->initState);
+  EXPECT_EQ(ncclInProgress, child->initState);  // NCCL 2.32: was ncclInternalError until init succeeded
   EXPECT_FALSE(parent->shareResources);
   ASSERT_NE(nullptr, child->abortFlag);
   EXPECT_NE(parent->abortFlag, child->abortFlag);

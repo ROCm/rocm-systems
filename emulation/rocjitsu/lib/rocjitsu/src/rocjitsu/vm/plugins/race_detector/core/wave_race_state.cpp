@@ -184,8 +184,8 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
     return;
 
   // An instruction cannot issue if adding its counter token would overflow the
-  // finite counter. Immediately before it reads its operands, hardware has
-  // therefore established the same upper bound as an implicit partial wait.
+  // finite counter. Once participation is known, admission establishes the
+  // same upper bound as an implicit partial wait.
   applyCounterConstraint(type, capacity - increment, /*includeUnordered=*/false);
 }
 

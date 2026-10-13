@@ -64,10 +64,14 @@ ncclResult_t initChannel(struct ncclComm* comm, int channelid) {
 // "commFree entered" marker for commCleanup's ordering oracle and as the only knob that fails commFree.
 std::vector<std::string> g_cleanupCallOrder;
 ncclResult_t g_ncclCeFinalizeResult = ncclSuccess;
+// Omitted when RCCL_STUBS_OMIT_ncclCeFinalize is defined: the unit under test
+// defines this itself (ce_coll.cc:272).
+#ifndef RCCL_STUBS_OMIT_ncclCeFinalize
 ncclResult_t ncclCeFinalize(struct ncclComm* comm) {
   g_cleanupCallOrder.push_back("commFree");
   return g_ncclCeFinalizeResult;
 }
+#endif
 ncclResult_t ncclRmaCeFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
@@ -118,11 +122,20 @@ ncclResult_t ncclProfilerThreadDestroy(struct ncclComm* comm) { return g_ncclPro
 static bool DefaultProfilerPluginLoaded() { return false; }
 std::function<bool()> g_profilerPluginLoaded = DefaultProfilerPluginLoaded;
 bool ncclProfilerPluginLoaded(void) { return g_profilerPluginLoaded(); }
+// src/plugin/profiler.cc ncclProfilerDeviceMode (NCCL 2.32), mirrored so it follows
+// g_profilerPluginLoaded. Bit values are sym_kernels.h's ncclDevProfilerMode.
+uint8_t ncclProfilerDeviceMode(int eActivationMask) {
+  if (!ncclProfilerPluginLoaded()) return 0;
+  uint8_t mode = 0;
+  if (eActivationMask & ncclProfileKernelCh) mode |= 1u << 0;
+  if (eActivationMask & ncclProfileKernelPhase) mode |= (1u << 0) | (1u << 1);
+  return mode;
+}
 bool ncclProfilerProxyDiagEnabled(void) { return false; }
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclRunDiagnosticsPassive(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclRunDiagnosticsActive(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRegCleanup(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInit(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaInitFromParent(struct ncclComm* comm, struct ncclComm* parent) { return ncclSuccess; }
@@ -224,6 +237,8 @@ unsigned int g_rocmVersionMajor = 0;
 unsigned int g_rocmVersionMinor = 0;
 unsigned int g_rocmVersionPatch = 0;
 
+static ncclResult_t DefaultNcclMemAlloc(void**, size_t) { ::abort(); }
+std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc = DefaultNcclMemAlloc;
 static ncclResult_t DefaultNcclMemFree(void*) { return ncclSuccess; }
 std::function<ncclResult_t(void*)> g_ncclMemFree = DefaultNcclMemFree;
 
@@ -236,7 +251,7 @@ int getROCmVersion(unsigned int* major, unsigned int* minor, unsigned int* patch
   if (patch) *patch = g_rocmVersionPatch;
   return g_getROCmVersionResult;
 }
-ncclResult_t ncclMemAlloc(void** ptr, size_t size) { ::abort(); }
+ncclResult_t ncclMemAlloc(void** ptr, size_t size) { return g_ncclMemAlloc(ptr, size); }
 ncclResult_t ncclMemFree(void* ptr) { return g_ncclMemFree(ptr); }
 }
 
@@ -245,6 +260,7 @@ void ResetNcclStubs() {
   g_ncclInitKernelsForDevice = DefaultNcclInitKernelsForDevice;
 #endif
   g_ncclAsyncLaunch = DefaultNcclAsyncLaunch;
+  g_ncclMemAlloc = DefaultNcclMemAlloc;
   g_ncclMemFree = DefaultNcclMemFree;
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_ncclCommSplit = DefaultNcclCommSplit;

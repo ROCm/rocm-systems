@@ -121,34 +121,7 @@ WaitcheckTarget::maximum_dependency_wait(rj_code_arch_t arch, WaitCounterKind co
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
-  // LLVM caps a dependency score at the largest non-sentinel wait value.
-  // The all-ones encoding means "no wait", so the largest useful value is
-  // one less than the hardware counter mask.
-  switch (counter) {
-  case WaitCounterKind::Load:
-  case WaitCounterKind::Store:
-    return 62;
-  case WaitCounterKind::Ds:
-    return model.value() == WaitcntModel::LegacyNoVscnt ? 14 : 62;
-  case WaitCounterKind::Km:
-    return 30;
-  case WaitCounterKind::Sample:
-    return 62;
-  case WaitCounterKind::Bvh:
-  case WaitCounterKind::Exp:
-  case WaitCounterKind::VmVsrc:
-    return 6;
-  case WaitCounterKind::X:
-  case WaitCounterKind::Async:
-  case WaitCounterKind::Tensor:
-    return 62;
-  case WaitCounterKind::VaVdst:
-    return 14;
-  case WaitCounterKind::Depctr:
-  case WaitCounterKind::Count:
-    return std::numeric_limits<uint32_t>::max();
-  }
-  return std::numeric_limits<uint32_t>::max();
+  return maximum_dependency_wait(model.value(), counter);
 }
 
 [[nodiscard]] util::FailureOr<std::optional<uint32_t>>
@@ -452,6 +425,16 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
 
 [[nodiscard]] util::FailureOr<std::vector<ClassifiedEvent>>
 WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
+  std::vector<ClassifiedEvent> events;
+  if (classify_events_into(inst, arch, events).failed())
+    return util::Result::failure();
+  return events;
+}
+
+[[nodiscard]] util::Result
+WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t arch,
+                                      std::vector<ClassifiedEvent> &events) {
+  events.clear();
   const auto model = waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
@@ -462,7 +445,6 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     }
     return false;
   };
-  std::vector<ClassifiedEvent> events;
   const bool expert = supports_expert_scheduling(arch);
   const auto mnemonic = inst.mnemonic();
   auto add_xcnt_event = [&](WaitEventKind kind) {
@@ -488,7 +470,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     // waits. Their waits are derived from object-invisible ASYNCMARK pairs,
     // so conservatively check observable LDS consumers but not program end.
     add_xcnt_event(is_load ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "ds_atomic_async_barrier_arrive_b64") {
@@ -497,7 +479,24 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
                         /*check_defs=*/false, /*check_exec_defs=*/false, std::nullopt, std::nullopt,
                         /*check_memory_order=*/true,
                         /*check_program_end=*/false);
-    return events;
+    return util::Result::success();
+  }
+
+  if (uses_ds_wait_counter(mnemonic)) {
+    const uint32_t gds_bit = model.value() == WaitcntModel::LegacyNoVscnt ? 16u : 17u;
+    const bool gds = uses_legacy_waitcnt(model.value()) &&
+                     (mnemonic == "ds_ordered_count" || mnemonic == "ds_add_gs_reg_rtn" ||
+                      mnemonic == "ds_sub_gs_reg_rtn" || mnemonic.starts_with("ds_gws_") ||
+                      (inst.raw_encoding() != nullptr && inst.size() >= 8 &&
+                       (inst.raw_encoding()[0] & (1u << gds_bit)) != 0));
+    events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
+    if (gds)
+      events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
+                        false, true, true});
+    if (expert)
+      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
+                        TrackedRegisterSource::VectorUses, false, true});
+    return util::Result::success();
   }
 
   if (is_tensor_lds_load(mnemonic) || is_tensor_lds_store(mnemonic)) {
@@ -510,7 +509,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
                         /*check_memory_order=*/true, /*check_program_end=*/false);
     // AMDGPU::getEventsFor classifies tensor operations solely as
     // TENSOR_ACCESS, before the generic VMEM/X_CNT path.
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic.starts_with("flat_load")) {
@@ -522,7 +521,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatLoad,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::FlatLoad);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "global_inv" || mnemonic == "buffer_inv" || mnemonic == "buffer_wbl2") {
@@ -531,13 +530,13 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     // memory instruction a wait consumer.
     events.emplace_back(WaitCounterKind::Load, WaitEventKind::GlobalInv,
                         TrackedRegisterSource::None, false, false);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "global_wb" || mnemonic == "global_wbinv") {
     events.emplace_back(vmem_store_wait_counter(model.value()), WaitEventKind::GlobalWb,
                         TrackedRegisterSource::None, false, false);
-    return events;
+    return util::Result::success();
   }
 
   if (is_cdna4_mubuf_lds_load(inst, arch)) {
@@ -547,7 +546,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
                         /*check_memory_order=*/false,
                         /*check_program_end=*/false,
                         /*check_counter_parity_order=*/true);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic.starts_with("global_load") || mnemonic.starts_with("scratch_load") ||
@@ -558,7 +557,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemNoSamplerLoad,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::VmemNoSamplerLoad);
-    return events;
+    return util::Result::success();
   }
 
   if (is_image_atomic(mnemonic)) {
@@ -585,7 +584,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back(
           {WaitCounterKind::VmVsrc, kind, TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(kind);
-    return events;
+    return util::Result::success();
   }
 
   if (is_vmem_atomic(mnemonic)) {
@@ -607,7 +606,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.emplace_back(WaitCounterKind::VmVsrc, kind, TrackedRegisterSource::VectorUses,
                           /*check_uses=*/false, /*check_defs=*/true);
     add_xcnt_event(kind);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic.starts_with("flat_store")) {
@@ -619,7 +618,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::FlatStore,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::FlatStore);
-    return events;
+    return util::Result::success();
   }
 
   if (is_vmem_store(mnemonic)) {
@@ -629,30 +628,13 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::VmemStore,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::VmemStore);
-    return events;
-  }
-
-  if (uses_ds_wait_counter(mnemonic)) {
-    const uint32_t gds_bit = model.value() == WaitcntModel::LegacyNoVscnt ? 16u : 17u;
-    const bool gds = uses_legacy_waitcnt(model.value()) &&
-                     (mnemonic == "ds_ordered_count" || mnemonic == "ds_add_gs_reg_rtn" ||
-                      mnemonic == "ds_sub_gs_reg_rtn" || mnemonic.starts_with("ds_gws_") ||
-                      (inst.raw_encoding() != nullptr && inst.size() >= 8 &&
-                       (inst.raw_encoding()[0] & (1u << gds_bit)) != 0));
-    events.push_back({WaitCounterKind::Ds, gds ? WaitEventKind::Gds : WaitEventKind::Ds});
-    if (gds)
-      events.push_back({WaitCounterKind::Exp, WaitEventKind::Gds, TrackedRegisterSource::VectorUses,
-                        false, true, true});
-    if (expert)
-      events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Ds,
-                        TrackedRegisterSource::VectorUses, false, true});
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "ds_param_load" || mnemonic == "ds_direct_load" || mnemonic == "lds_param_load" ||
       mnemonic == "lds_direct_load") {
     events.push_back({WaitCounterKind::Exp, WaitEventKind::LdsDirect});
-    return events;
+    return util::Result::success();
   }
 
   if (is_scalar_memory_op(mnemonic)) {
@@ -665,7 +647,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     if (mnemonic != "s_memtime" && mnemonic != "s_memrealtime" &&
         mnemonic != "s_get_barrier_state" && mnemonic != "s_get_waveid_in_workgroup")
       add_xcnt_event(WaitEventKind::Smem);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "s_sendmsg" || mnemonic == "s_sendmsghalt" || mnemonic == "s_sendmsg_rtn_b32" ||
@@ -674,7 +656,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
     events.emplace_back(smem_wait_counter(model.value()), WaitEventKind::SqMessage,
                         returns_value ? TrackedRegisterSource::Defs : TrackedRegisterSource::None,
                         returns_value, returns_value);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
@@ -684,7 +666,7 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::Sample);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic.starts_with("image_bvh")) {
@@ -693,13 +675,13 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
                         TrackedRegisterSource::VectorUses, false, true});
     add_xcnt_event(WaitEventKind::Bvh);
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "export" || mnemonic == "exp") {
     events.push_back({WaitCounterKind::Exp, WaitEventKind::Export, TrackedRegisterSource::Uses,
                       false, true, true});
-    return events;
+    return util::Result::success();
   }
 
   if (mnemonic == "s_barrier_signal_isfirst") {
@@ -707,10 +689,10 @@ WaitcheckTarget::classify_events(const Instruction &inst, rj_code_arch_t arch) {
       events.push_back({WaitCounterKind::Km, WaitEventKind::SccWrite, TrackedRegisterSource::None,
                         true, true, false, RegisterRef{RegClass::SCC, 0, 1},
                         first_barrier_id(inst)});
-    return events;
+    return util::Result::success();
   }
 
-  return events;
+  return util::Result::success();
 }
 
 } // namespace waitcheck_detail

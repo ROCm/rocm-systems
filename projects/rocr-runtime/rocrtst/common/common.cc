@@ -145,6 +145,11 @@ bool SkipOnWsl(const char* reason) {
   return SkipCurrentTest(reason);
 }
 
+bool SkipIfNotWsl(const char* reason) {
+  if (isWslEnvironment()) return false;
+  return SkipCurrentTest(reason);
+}
+
 bool PlatformDetector::isFFMEnvironment() {
   static bool checked = false;
   static bool is_ffm = false;

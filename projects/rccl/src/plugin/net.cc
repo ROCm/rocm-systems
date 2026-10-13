@@ -19,6 +19,7 @@
 // #include <sys/stat.h>
 // #include <unistd.h>
 
+#if defined(NCCL_OS_LINUX)
 typedef ncclNet_t* getNcclNet_t(void* netPluginLib);
 typedef ncclCollNet_t* getNcclCollNet_t(void* netPluginLib);
 
@@ -47,7 +48,11 @@ getNcclNet_t* getNcclNet[NCCL_NET_VERSION_COUNT] = {getNcclNet_v12, getNcclNet_v
 getNcclCollNet_t* getNcclCollNet[NCCL_NET_VERSION_COUNT] = {getNcclCollNet_v12, getNcclCollNet_v11, getNcclCollNet_v10,
                                                             getNcclCollNet_v9,  getNcclCollNet_v8,  getNcclCollNet_v7,
                                                             getNcclCollNet_v6};
+#endif
 
+// Count only built-in transports registered below. Windows does not build the
+// real IB transport (only a failure stub is linked), so it registers
+// NetworkDirect and Socket instead.
 #define NCCL_NET_NUM_INTERNAL_PLUGINS 2
 
 typedef enum ncclNetPluginState {
@@ -80,6 +85,7 @@ netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
+#if defined(NCCL_OS_LINUX)
 static ncclResult_t ncclNetPluginUnload(netPluginLib_t* pluginLib) {
   if ((pluginLib->dlHandle) && ((pluginLib->ncclNetPluginRefCount) == 0)) {
     INFO(NCCL_DESTROY | NCCL_NET, "Unloading plugin %s", pluginLib->name);
@@ -112,8 +118,14 @@ static ncclResult_t ncclNetPluginLoad(netPluginLib_t* pluginLib) {
 
   // if we fail to find a net, exit
   if (pluginLib->ncclNet == nullptr) {
-    INFO(NCCL_INIT | NCCL_NET, "External network plugin %s is unsupported",
-         (ncclPluginLibPaths[ncclPluginTypeNet] ? ncclPluginLibPaths[ncclPluginTypeNet] : pluginLib->name));
+    const char* netPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
+    if (netPlugin) {
+      ATTN("External network plugin %s is unsupported",
+           (ncclPluginLibPaths[ncclPluginTypeNet] ? ncclPluginLibPaths[ncclPluginTypeNet] : pluginLib->name));
+    } else {
+      INFO(NCCL_INIT | NCCL_NET, "External network plugin %s is unsupported",
+           (ncclPluginLibPaths[ncclPluginTypeNet] ? ncclPluginLibPaths[ncclPluginTypeNet] : pluginLib->name));
+    }
     goto fail;
   }
 
@@ -141,6 +153,7 @@ fail:
   pluginLib->ncclCollNetPluginState = ncclNetPluginStateLoadFailed;
   goto exit;
 }
+#endif
 
 ncclResult_t ncclNetCheckDeviceVersion(struct ncclComm* comm, ncclNet_t* net, int dev) {
   ncclNetProperties_t props;
@@ -167,6 +180,14 @@ ncclResult_t ncclNetCheckDeviceVersion(struct ncclComm* comm, ncclNet_t* net, in
   return ncclSuccess;
 }
 
+static ncclProfilerCallback_t ncclNetGetProfilerCallback() {
+#if defined(NCCL_OS_LINUX)
+  return ncclProfilerCallback;
+#elif defined(NCCL_OS_WINDOWS)
+  return nullptr;
+#endif
+}
+
 static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* pluginLib) {
   int ndev;
   bool initCompleted = false;
@@ -175,8 +196,8 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
     ncclNetCommConfig_t commConfig = {};
     commConfig.trafficClass =
       comm->config.trafficClass == NCCL_CONFIG_UNDEF_INT ? NCCL_NET_TRAFFIC_CLASS_UNDEF : comm->config.trafficClass;
-    if (pluginLib->ncclNet->init(&comm->netContext, comm->commHash, &commConfig, ncclDebugLog, ncclProfilerCallback) !=
-        ncclSuccess)
+    if (pluginLib->ncclNet->init(&comm->netContext, comm->commHash, &commConfig, ncclDebugLog,
+                                 ncclNetGetProfilerCallback()) != ncclSuccess)
       goto fail;
     initCompleted = true;
   }
@@ -208,7 +229,7 @@ static ncclResult_t ncclNetPluginInit(struct ncclComm* comm, netPluginLib_t* plu
 exit:
   return ncclSuccess;
 fail:
-  INFO(NCCL_INIT | NCCL_NET, "Failed to initialize NET plugin %s", pluginLib->ncclNet->name);
+  ATTN("Failed to initialize NET plugin %s", pluginLib->ncclNet->name);
   if (initCompleted) pluginLib->ncclNet->finalize(comm->netContext);
   pluginLib->netPhysDevs = pluginLib->netVirtDevs = NCCL_UNDEF_DEV_COUNT;
   pluginLib->collNetPhysDevs = pluginLib->collNetVirtDevs = NCCL_UNDEF_DEV_COUNT;
@@ -254,17 +275,30 @@ static ncclResult_t ncclNetPluginDisableOtherExternal(int pluginIndex) {
   return ncclSuccess;
 }
 
+static void ncclNetPluginRegisterInternal(int* pluginCounter, ncclNet_t* net, int version) {
+  netPluginLib_t* pluginLib = &netPluginLibs[*pluginCounter];
+  pluginLib->ncclNet = net;
+  pluginLib->ncclNetVer = version;
+  pluginLib->ncclNetPluginState = ncclNetPluginStateInitReady;
+  pluginLib->ncclCollNetPluginState = ncclNetPluginStateDisabled;
+  pluginLib->netPhysDevs = NCCL_UNDEF_DEV_COUNT;
+  pluginLib->netVirtDevs = NCCL_UNDEF_DEV_COUNT;
+  pluginLib->collNetPhysDevs = NCCL_UNDEF_DEV_COUNT;
+  pluginLib->collNetVirtDevs = NCCL_UNDEF_DEV_COUNT;
+  (*pluginCounter)++;
+}
+
 static void initPluginLibsOnceFunc() {
+  int pluginCounter = 0;
+  memset(netPluginLibs, 0, NCCL_NET_MAX_PLUGINS * sizeof(netPluginLib_t));
+#if defined(NCCL_OS_LINUX)
   char* netPluginName = nullptr;
   const char* defaultNetPlugin = "librccl-net.so";
   const char* envNetPlugin = nullptr;
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
-  int pluginCounter = 0;
   // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
   bool extNetPluginRequested = false;
-
-  memset(netPluginLibs, 0, NCCL_NET_MAX_PLUGINS * sizeof(netPluginLib_t));
   envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
   if (envNetPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_NET_PLUGIN set by environment to %s", envNetPlugin);
@@ -311,19 +345,19 @@ static void initPluginLibsOnceFunc() {
     }
     if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
         (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
-      netPluginLibs[pluginCounter].ncclNet = &netIbCast;
-      netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+      ncclNetPluginRegisterInternal(&pluginCounter, &netIbCast, 0);
     } else {
 #endif
-      netPluginLibs[pluginCounter].ncclNet = &ncclNetIb;
-      netPluginLibs[pluginCounter].ncclNetPluginState = ncclNetPluginStateInitReady;
-      ++pluginCounter;
+      ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetIb, 0);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     }
   }
 #endif
-  netPluginLibs[pluginCounter].ncclNet = &ncclNetSocket;
-  netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;
+  ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetSocket, 0);
+#elif defined(NCCL_OS_WINDOWS)
+  ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetNd, 12);
+  ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetSocket, 12);
+#endif
   pluginCount = pluginCounter;
 }
 
@@ -333,9 +367,11 @@ static ncclResult_t ncclNetPluginFinalize(struct ncclComm* comm, int pluginIndex
       netPluginLibs[pluginIndex].ncclCollNetPluginState == ncclNetPluginStateEnabled)
     NCCLCHECK(netPluginLibs[pluginIndex].ncclCollNet->finalize(comm->collNetContext));
   netPluginLibs[pluginIndex].ncclNetPluginRefCount--;
+#if defined(NCCL_OS_LINUX)
   if (pluginIndex < (pluginCount - NCCL_NET_NUM_INTERNAL_PLUGINS)) {
     NCCLCHECK(ncclNetPluginUnload(&netPluginLibs[pluginIndex]));
   }
+#endif
   return ncclSuccess;
 }
 
@@ -345,13 +381,16 @@ ncclResult_t ncclNetInit(struct ncclComm* comm) {
     INFO(NCCL_NET, "Telemetry was requested but could not start; continuing without it");
   }
   bool ncclNetPluginInitialized = false;
+  comm->ncclCollNet = nullptr;
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(netPluginMutex);
   for (int pluginIndex = 0; pluginIndex < pluginCount; pluginIndex++) {
+#if defined(NCCL_OS_LINUX)
     if ((pluginIndex < (pluginCount - NCCL_NET_NUM_INTERNAL_PLUGINS)) &&
         (netPluginLibs[pluginIndex].ncclNetPluginState == ncclNetPluginStateLoadReady)) {
       NCCLCHECK(ncclNetPluginLoad(&netPluginLibs[pluginIndex]));
     }
+#endif
     if ((netPluginLibs[pluginIndex].ncclNetPluginState >= ncclNetPluginStateInitReady) &&
         (!comm->config.netName || (strcasecmp(comm->config.netName, netPluginLibs[pluginIndex].ncclNet->name) == 0))) {
       // plugin init must be done by all comms to setup the context, therefore we use ">="
@@ -382,6 +421,7 @@ ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* paren
   comm->ncclNet = parent->ncclNet;
   comm->ncclCollNet = parent->ncclCollNet;
   comm->netPluginIndex = parent->netPluginIndex;
+  comm->ncclNetVer = parent->ncclNetVer;
   if (comm->config.netName != NCCL_CONFIG_UNDEF_PTR && strcasecmp(comm->config.netName, parent->config.netName)) {
     WARN("Comm config netName (%s) does not match the parent (%s)", comm->config.netName, parent->config.netName);
     ret = ncclInvalidUsage;
