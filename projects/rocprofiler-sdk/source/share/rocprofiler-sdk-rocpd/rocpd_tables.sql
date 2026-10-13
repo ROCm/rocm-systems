@@ -129,8 +129,9 @@ CREATE TABLE IF NOT EXISTS
         "is_constant" INTEGER,
         "is_derived" INTEGER,
         "spm_support" INTEGER,
-        -- SPM location. NULL on the base counter row and for dimensions not
-        -- provided by the counter. Set on one row per agent and counter location.
+        -- SPM location. NULL on the base counter row. On a location row, xcc,
+        -- shader_engine, shader_array, and wgp are NULL when the counter does
+        -- not provide that dimension. instance is always set on a location row.
         "xcc" INTEGER,
         "shader_engine" INTEGER,
         "shader_array" INTEGER,
