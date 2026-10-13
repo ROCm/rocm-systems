@@ -110,6 +110,19 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
             ncclInvalidUsage);
 }
 
+// After consuming a number, transcription scans forward for the parenthesis that ends
+// it. A segment whose last token is a number has no such parenthesis, and the scan does
+// not stop at the end of the string, so it reads on through whatever follows the
+// environment variable in memory. Such a tree must be refused.
+TEST_F(RomeModelsParseGraphLightMicrotest, TrailingNumberWithNoClosingParen_IsRejected) {
+  // Long enough that std::string puts it on the heap, so the overread is a heap
+  // overflow ASan can see rather than an unremarkable read of adjacent stack.
+  const std::string truncatedTree = "(1)(2)(3)(4)(5)(6";
+
+  EXPECT_EQ(parseGraphLight(truncatedTree.c_str(), system(), graph(), nullptr),
+            ncclInvalidUsage);
+}
+
 // Transcription consumes one parsed number per token, but only digits are ever parsed
 // into numbers, so any other character is a token the parse never counted and its read
 // runs past the numbers this segment produced. gpus[] is not cleared between segments,
@@ -156,13 +169,14 @@ TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsReject
   // Overruns while copying a digit of a GPU number: the parentheses fill the row, so the
   // digits of "14" land beyond it. The trailing ')' keeps the number's end-of-token scan
   // inside the string.
+  // Note the row can never run out with a digit as its last written character: a number
+  // is only transcribed once its closing parenthesis has been found inside the segment,
+  // and that parenthesis is then written too. So the digit check cannot be the one that
+  // catches the final overrun, and only its presence is pinned here, not its exact
+  // boundary.
   const std::string endsInNumber = std::string(rowLen - 1, '(') + "14)";
-  // Overruns on a digit that is the last thing written to the row: the number's
-  // end-of-token scan runs past the '|' to find the next segment's '(', so no closing
-  // parenthesis follows it onto this row to be caught by the check above.
-  const std::string endsInDigit = std::string(rowLen - 1, '(') + "1|(2)";
 
-  for (const std::string& tooLong : {parens, endsInNumber, endsInDigit}) {
+  for (const std::string& tooLong : {parens, endsInNumber}) {
     SCOPED_TRACE("segment length " + std::to_string(tooLong.size()));
     const char sentinel = 'Z';
     graph()->treeBase[1][0] = sentinel;
