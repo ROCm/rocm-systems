@@ -567,9 +567,8 @@ struct ncclIbSendComm {
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  // Side table immediately after ctsFifo so one covering MR registers both.
-  // Receiver RDMA-writes a slot here only when that CTS slot has a
-  // multi-segment receive (NCCL_IB_CTS_NREQS_SIDE_TABLE set in its nreqs).
+  // RCCL: side table immediately after ctsFifo so one covering MR registers both.
+  // The receiver writes a slot only when NCCL_IB_CTS_NREQS_SIDE_TABLE is set.
   struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
@@ -684,7 +683,9 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
-  struct ncclIbRemSegLayout remSegLayout;
+  // RCCL: local source of the side-table write. Allocated only when the peer
+  // advertised NCCL_IB_CAP_MULTISEG.
+  struct ncclIbRemSegLayout* remSegLayout;
   uint32_t peerCaps;
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.

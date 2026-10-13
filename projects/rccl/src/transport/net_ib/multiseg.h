@@ -66,9 +66,8 @@ static inline bool ncclIbCtsHasSideTable(uint32_t nreqs) {
   return (nreqs & NCCL_IB_CTS_NREQS_SIDE_TABLE) != 0;
 }
 
-// A multi-segment registration is only usable if the peer can parse the
-// per-segment CTS side table. Single-segment buffers keep the legacy wire
-// format, so they are accepted whatever the peer advertised.
+// RCCL: a recv multi-segment registration is usable only if the peer can parse
+// the CTS side table. Single-segment buffers keep the legacy wire format.
 static inline bool ncclIbDeclineMultiSegRegistration(uint32_t peerCaps, int nSegments) {
   return nSegments > 1 && (peerCaps & NCCL_IB_CAP_MULTISEG) == 0;
 }
