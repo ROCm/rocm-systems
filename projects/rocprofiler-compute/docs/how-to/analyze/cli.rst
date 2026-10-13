@@ -910,7 +910,7 @@ matching is case-sensitive:
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
 
 ``--torch-operator`` / ``--triton-operator`` intersect analyze ``-k/--kernel``.
-Analyze ``-d/--dispatch`` is applied to kernel-top first.
+``-d/--dispatch`` composes with ``--*-operator``.
 
 .. code-block:: shell-session
 
