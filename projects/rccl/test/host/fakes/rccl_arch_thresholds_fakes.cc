@@ -15,3 +15,7 @@
 const rcclArchThresholds* rcclGetArchThresholds(const char* /*gcn*/) {
   return nullptr;
 }
+
+bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {
+  return maxBytes > 0 && totalBytes >= minBytes && totalBytes <= maxBytes;
+}
