@@ -112,10 +112,12 @@ static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
   if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
   if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
   fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
-                  "was built without that backend (compiled-in backend mask 0x%x). GIN types 6 "
-                  "(rocSHMEM GDA) and 7 (Anvil SDMA) need the CMake build with "
-                  "-DENABLE_ROCSHMEM_GIN=ON; the Makefile build (install.sh) does not support them.\n",
-          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL));
+                  "was built without that backend (compiled-in backend mask 0x%x). "
+                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need the CMake "
+                  "build with -DENABLE_ROCSHMEM_GIN=ON; the Makefile build (install.sh) does not "
+                  "support them.\n",
+          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
+          (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
   return testInvalidUsage;
 }
 #endif
