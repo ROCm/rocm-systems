@@ -3101,6 +3101,23 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
 }
 
+// RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, a copy of the SPX one until DPX
+// is tuned on its own; the other archs return one table for every mode.
+TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
+{
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    const rcclArchThresholds* dpx = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(spx, nullptr);
+    ASSERT_NE(dpx, nullptr);
+    EXPECT_EQ(spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX));
+    EXPECT_NE(spx, dpx);
+    EXPECT_EQ(0, std::memcmp(spx, dpx, sizeof(*spx))) << "the DPX table starts as a copy of SPX";
+    for (const char* arch : {"gfx950", "gfx942"})
+    {
+        EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
+    }
+}
+
 
 TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
 {

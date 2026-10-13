@@ -840,6 +840,19 @@ threshold table introduced for gfx1250.
         | ``1``: Ignore the table; fall back to pre-table compile-time constants.
           This matches the behavior before the arch table was introduced.
 
+    * - | ``RCCL_TUNING_PARTITION_MODE``
+        | Selects which gfx1250 per-architecture table (SPX or DPX) is used for
+          tuning thresholds. It only changes tuning, not results. A communicator
+          uses the DPX table only when every rank selects DPX; otherwise every rank
+          uses the SPX table. Other architectures have one table for every mode.
+          Has no effect when ``RCCL_IGNORE_ARCH_TABLE=1``.
+      - | ``auto`` (default): Follow the compute-partition mode the GPU reports.
+          ``DPX`` selects the DPX table; ``SPX``, ``CPX``, or no reported mode
+          selects the SPX table. Any other value is reported once and treated
+          as ``auto``.
+        | ``SPX``: Use the SPX table.
+        | ``DPX``: Use the DPX table.
+
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.
           Messages above this size exit DDA and fall through to Ring, CE, or the

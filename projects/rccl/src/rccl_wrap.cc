@@ -848,7 +848,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 namespace {
 // This comm's arch table, or NULL when the arch has no DDA tuning at all.
 // comm->archThresholds is populated at init; the lookup covers comms assembled
-// by hand (unit tests) so they resolve exactly like production ones.
+// by hand (unit tests) and resolves them like an SPX comm.
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   if (rcclParamIgnoreArchTable() && !IsArchMatch(comm->archName, "gfx942")
