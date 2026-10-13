@@ -156,12 +156,12 @@ TCC is a short-term note on this phase. An L2 channel map can change between rep
 
 ### Phase 2 — collectables for SPU
 
-**Cross-run rule.** Only addition, or scaling by a constant, may combine values from different passes. Subtraction, division, and multiplication require one pass. Otherwise the metric stays unset.
+**Cross-run rule.** Only addition, or scaling by a non-negative constant, may combine values from different passes. Subtraction, division, and multiplication require one pass. Otherwise the metric stays unset.
 
 An SPU parent cannot fit one pass. Split it. Each collectable is an ordinary SPP row bound to its own pass. The parent is an analyze-time composite, and it is published only when its operator obeys the cross-run rule.
 
 - `COLLECT_SUM` adds collectables. A positive `COLLECT_SUM` may add across passes. It is valid for absolute counts, bytes, and rates that are only added: VALU FLOPs, HBM bandwidth bytes, IPC issued pieces, Performance GFLOPs. A subtracted `COLLECT_SUM` must share the same bound pass. There is no denominator pass for `COLLECT_SUM`. A piece subtracted from another pass stays unset.
-- `WEIGHTED_AVG` rebuilds one ratio whose weights were split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight must come from the same pass as its sub-ratio. If that pass does not hold the weight, the parent stays unset.
+- `WEIGHTED_AVG` rebuilds one ratio whose weights were split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset.
 - `COLLECT_RATIO` divides summed numerator pieces by summed denominator pieces. A quotient whose numerator and denominator come from different passes is not a same-execution ratio. The parent stays unset unless every divided counter shares a pass.
 
 ```yaml
@@ -202,7 +202,7 @@ After Phase 2 YAML, the gfx942 allocator gate is `packable_multi == 0`, passes =
 | Same-pass bind ships with packing | A copied counter has several values. Merging them evaluates the ratio on different replays. `CPC Utilization` averages can sit far above 100% | Packing alone, or bind alone |
 | A failed bind leaves the metric unset | Values merged across passes are the error this design removes | Falling back to merged columns |
 | Phase 2 only for the 16 SPU parents | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for metrics whose set fits one pass |
-| Cross-run rule: only addition or constant scaling across passes | Subtraction, division, and multiplication of values from different replays do not describe one execution | A new operator that keeps the old number |
+| Cross-run rule: only addition or scaling by a non-negative constant across passes | Subtraction, division, and multiplication of values from different replays do not describe one execution | A new operator that keeps the old number |
 | Largest-first greedy placement | It meets the gfx942 gates (`packable_multi == 0`, 14 passes). A solver on the allocate path is harder to explain when a metric is split | CP-SAT as the production allocator (removed from allocate) |
 | Panel 1805 stays one packing group | The read, write, and atomic request columns are one execution. Bind uses the earliest stem that holds all three, not the `ATOMIC_LEVEL` pass. gfx942 stays at 14 passes | Splitting 1805 into three packing groups |
 
