@@ -174,6 +174,11 @@ differ by model:
 | QPX | 4 | ✅ 2 XCCs each | ❌ |
 | CPX | XCC count | ✅ 1 XCC each | ✅ 1 XCC each |
 
+```{note}
+This table describes hardware capability, not validated support. The
+configurations AMD validates are listed per GPU model and environment in {ref}`GPU partitioning support
+<rocm:release-gpu-partitioning-support>` in the ROCm release notes.
+
 Firmware also controls which modes are offered. Check the modes and partition counts on your system
 (including other models, such as MI350X/MI355X) with `sudo amd-smi partition --accelerator`.
 
