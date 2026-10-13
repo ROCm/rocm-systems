@@ -3241,6 +3241,39 @@ TEST_F(EnqueueMicrotest, FinishPlan_StampsChannelMaskAndStorageTypeIntoKernelArg
   // oversized-plan test below stamps a non-zero value and does check it.
 }
 
+namespace {
+// kernelArgs is zero-filled, so only the cases that set a bit can see a dropped
+// devFlags store; the all-off case pins that nothing else sets one.
+uint8_t devFlagsAfterFinishPlan(bool profilerLoaded, bool progressCounters) {
+  ScopedHook profiler(g_profilerPluginLoaded, [=] { return profilerLoaded; });
+  FinishComm f;
+  alignas(16) unsigned char countersBlock[16];
+  f.c()->deviceCountersBlock =
+      progressCounters ? reinterpret_cast<ncclProgressCountersBlock*>(countersBlock) : nullptr;
+  f.p()->workBytes = 64;
+  f.addBatches(0, 1, 100);
+  finishPlan(f.c(), f.p());
+  EXPECT_NE(nullptr, f.p()->kernelArgs);
+  return f.p()->kernelArgs ? f.p()->kernelArgs->devFlags : 0xff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_BothOff_IsZero) {
+  EXPECT_EQ(0, devFlagsAfterFinishPlan(false, false));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_ProfilerLoaded_SetsProfilerOnly) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROFILER, devFlagsAfterFinishPlan(true, false));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_CountersAllocated_SetsProgressOnly) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROGRESS, devFlagsAfterFinishPlan(false, true));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_BothOn_SetsBoth) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROFILER | RCCL_DEV_FLAG_PROGRESS, devFlagsAfterFinishPlan(true, true));
+}
+
 TEST_F(EnqueueMicrotest, FinishPlan_OneBatchPerChannel_LandsAtItsOwnSlot) {
   // The core layout contract: with one batch on each of channels 0..2, the first
   // batch of channel c must be at batchZero[c]. funcId identifies which is which.
