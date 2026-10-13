@@ -1,0 +1,188 @@
+# HRR GPU suite: build an amdhip64 with HRR capture compiled in, then run the
+# HRR capture/replay integration suite on each requested GPU family.
+#
+# Called by hrr-ci.yml, which decides when this runs and on which families.
+#
+# Interim: the build job and .github/scripts/hrr_capture_build.py exist only
+# until TheRock provides an hrr-capture build variant. After that, this file
+# calls TheRock's multi-arch workflows with that variant instead.
+
+name: HRR GPU
+
+on:
+  workflow_call:
+    inputs:
+      families:
+        description: JSON list of {family, runner, gfx_targets} from hrr_ci_configure.py
+        type: string
+        required: true
+      ignore_test_config:
+        description: Run the cases the suite config skips
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # Every architecture the integration binary is built for. Must match
+  # targets.arch in projects/hrr/tests/config/*.yaml (hrr_test_config.py lint).
+  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
+
+jobs:
+  build:
+    name: Build capture-enabled HIP and HRR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb # 2026-08-18
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            projects/clr
+            projects/hip
+            projects/hrr
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
+          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Install TheRock Python requirements
+        run: python3 -m pip install --no-cache-dir -r therock/requirements.txt
+
+      - name: Install base ROCm artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/hrr_capture_build.py fetch-base
+
+      - name: Build
+        run: python3 .github/scripts/hrr_capture_build.py build
+
+      - name: Verify
+        run: python3 .github/scripts/hrr_capture_build.py verify
+
+      - name: Upload base build record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-base-${{ github.sha }}
+          path: build/base.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hrr-capture-${{ github.sha }}
+          path: |
+            build/base.json
+            build/capture-lib/
+            build/hrr/playback/hrr-playback
+            build/hrr/tests/integration/hrr-integration-tests
+            build/hrr/tests/integration/*.so
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Integration (${{ matrix.family }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.families) }}
+    # The image and options TheRock's test_component.yml uses for GPU tests.
+    # Running in a container also gives this job the build job's workspace
+    # path, which the test binaries have compiled in.
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host
+        --user 0:0
+        --ulimit memlock=-1:-1
+        --ulimit nofile=1048576:1048576
+        --security-opt seccomp=unconfined
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        -e ROCR_VISIBLE_DEVICES
+        -e KUBE_CPU_REQUEST
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            projects/hrr/tests/config
+            projects/hrr/tests/scripts
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python requirements
+        run: python -m pip install --no-cache-dir -r therock/requirements.txt
+
+      - name: Download build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-capture-${{ github.sha }}
+          path: build
+
+      - name: Install base ROCm artifacts and the capture-enabled amdhip64
+        run: python .github/scripts/hrr_capture_build.py install-base
+
+      - name: Run integration suite
+        env:
+          FAMILY: ${{ matrix.family }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+          # --arch auto finds this machine's GPU with the installed rocminfo.
+          ROCM_SDK: ${{ github.workspace }}/dist
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "integration-${FAMILY}.xml"
+          --timeout 1200
+          --config projects/hrr/tests/config/integration.yaml
+          --os linux --arch auto
+          -- build/hrr/tests/integration/hrr-integration-tests
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          if-no-files-found: ignore
+          retention-days: 7
