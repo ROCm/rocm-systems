@@ -10,7 +10,7 @@
 
 #include <gtest/gtest.h>
 
-#include "transport/net_ib/gin.h"
+#include "transport/net_ib/rma_multiseg.h"
 
 namespace {
 
