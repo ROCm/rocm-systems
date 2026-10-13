@@ -1209,14 +1209,13 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
       ib_size(0),
       ib_start_addr(0) {
   needs_cwsr_ = false;
-  const bool env_native = dxg_runtime->sdma_user_queue_enabled_;
-  native_sdma_ = use_hws && device->IsSdmaSupported() && env_native;
-  gpu_poll_ = dxg_runtime->sdma_user_queue_gpu_poll_;
+  native_sdma_ = use_hws && device->IsSdmaSupported();
+  gpu_poll_ = dxg_runtime->sdma_gpu_poll_;
 
   // kmd_support is HWSInfo2Flags.SupportHsaSdmaQueue, logged separately from the decision so
-  // "the KMD cannot do this" is distinguishable from "HWS off or disabled by env".
-  pr_rocr_info("SDMA user queue: kmd_support=%d hws=%d env=%d -> %s, dependency polls: %s\n",
-               (int)device->IsSdmaSupported(), (int)use_hws, (int)env_native,
+  // "the KMD cannot do this" is distinguishable from "HWS is off".
+  pr_rocr_info("SDMA user queue: kmd_support=%d hws=%d -> %s, dependency polls: %s\n",
+               (int)device->IsSdmaSupported(), (int)use_hws,
                native_sdma_ ? "native user queue (WDDM HwQueue submit)"
                             : "legacy SWS translation thread",
                (native_sdma_ && gpu_poll_) ? "SDMA engine" : "host thread");

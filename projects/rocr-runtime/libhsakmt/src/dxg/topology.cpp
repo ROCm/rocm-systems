@@ -926,9 +926,7 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.Capability2.ui32.AqlEmulationPm4_ =
       (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
 
-  // Hardware/driver capability only -- the HSA_ENABLE_SDMA_USER_QUEUE policy is ANDed in by
-  // the producer. Mirrors SDMAQueue's own gate, which is per-engine; reported here for SDMA
-  // engine 0 on the assumption that HWS enablement is uniform across the SDMA engines.
+  // Hardware/driver capability is the whole decision.
   const bool native_sdma =
       device->IsSdmaSupported() && device->NumSdmaEngine() != 0 &&
       device->IsHwsEnabled(device->GetSdmaEngine(0));

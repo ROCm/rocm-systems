@@ -75,15 +75,8 @@
       - | 0: Disable
         | 1: Enable
 
-    * - | ``HSA_ENABLE_SDMA_USER_QUEUE``
-        | Windows only. Selects how SDMA copies are submitted: through a native WDDM hardware queue that the runtime writes to directly, or through the legacy software-scheduled translation thread.
-        | Ignored when the kernel-mode driver does not advertise SDMA user queue support, in which case the legacy path is always used.
-      - ``1``
-      - | 0: Use the legacy software-scheduled queue.
-        | 1: Use the native SDMA user queue when the driver supports it.
-
     * - | ``HSA_ENABLE_SDMA_GPU_POLL``
-        | Windows only, and only meaningful when the native SDMA user queue is in use. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
+        | Windows only, and only meaningful on a native SDMA user queue, which the device capability decides. Selects who executes the dependency ``POLL_REGMEM`` packets the copy writes into the ring: the SDMA engine, or a host thread in the thunk that waits the signals out, strips the packets, and only then submits the span.
         | Defaults to host-thread emulation. Set to 1 once the driver supports GPU-side polling.
       - ``0``
       - | 0: Emulate the polls on a host thread.

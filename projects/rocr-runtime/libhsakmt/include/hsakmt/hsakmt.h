@@ -466,17 +466,16 @@ hsaKmtQueueRingDoorbell(
 );
 
 /**
- * The runtime reads HSA_ENABLE_SDMA_USER_QUEUE and HSA_ENABLE_SDMA_GPU_POLL
- * and pushes them down.
+ * The runtime reads HSA_ENABLE_SDMA_GPU_POLL and pushes it down.
  *
- * @param[in] Config Policy bits; see HsaSdmaUserQueueConfig.
+ * @param[in] Config Policy bits; see HsaSdmaConfig.
  *
  * @returns HSAKMT_STATUS_SUCCESS on success
  */
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetSdmaUserQueueConfig(
-    HsaSdmaUserQueueConfig Config    //IN
+hsaKmtSetSdmaConfig(
+    HsaSdmaConfig Config    //IN
 );
 
 /**
