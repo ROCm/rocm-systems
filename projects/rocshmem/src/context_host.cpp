@@ -192,6 +192,28 @@ __host__ void Context::putmem_on_stream(void *dest, const void *source,
   HOST_DISPATCH(putmem_on_stream(dest, source, nelems, pe, stream));
 }
 
+__host__ void Context::putmem_signal(void *dest, const void *source,
+                                     size_t nelems, uint64_t *sig_addr,
+                                     uint64_t signal, int sig_op, int pe) {
+  if (nelems == 0) {
+    return;
+  }
+
+  ctxHostStats.incStat(NUM_HOST_PUT);
+
+  HOST_DISPATCH(
+      putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe));
+}
+
+__host__ uint64_t Context::signal_fetch(const uint64_t *sig_addr) {
+  HOST_DISPATCH_RET(signal_fetch(sig_addr));
+}
+
+__host__ void Context::signal_wait_until(uint64_t *sig_addr, int cmp,
+                                         uint64_t cmp_value) {
+  HOST_DISPATCH(signal_wait_until(sig_addr, cmp, cmp_value));
+}
+
 __host__ void Context::putmem_signal_on_stream(void *dest, const void *source,
                                                size_t nelems,
                                                uint64_t *sig_addr,
