@@ -1593,8 +1593,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ctaZero = comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO;
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-      ceAr2ShotEligible &&
-      (ctaZero || ((force || symReg) && twoShotWindow));
+      ceAr2ShotEligible && twoShotWindow && (ctaZero || force || symReg);
   if (!query)
     INFO(NCCL_TUNING,
          "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d"
