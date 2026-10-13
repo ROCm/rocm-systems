@@ -58,11 +58,6 @@ elseif(STERILE_BUILD)
         FATAL_ERROR
         "LibIberty not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT ROCPROFSYS_BUILD_LIBIBERTY)
-    rocprofiler_systems_message(
-        FATAL_ERROR
-        "LibIberty was not found. Either configure cmake to find LibIberty properly or set ROCPROFSYS_BUILD_LIBIBERTY=ON to download and build"
-    )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
     rocprofiler_systems_message(STATUS
@@ -168,7 +163,7 @@ rocprofiler_systems_message(STATUS "LibIberty libraries: ${LibIberty_LIBRARIES}"
 # When LibIberty is built from source, Dyninst's find_package(LibIberty) would fail
 # because the bundled LibIberty isn't installed in standard locations. Creating this
 # target causes Dyninst to skip find_package(LibIberty) and use the bundled dependency.
-if(ROCPROFSYS_BUILD_LIBIBERTY AND NOT TARGET Dyninst::LibIberty)
+if(IBERTY_BUILD AND NOT TARGET Dyninst::LibIberty)
     add_library(Dyninst::LibIberty INTERFACE IMPORTED)
     target_link_libraries(Dyninst::LibIberty INTERFACE ${LibIberty_LIBRARIES})
     target_include_directories(

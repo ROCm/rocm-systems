@@ -252,7 +252,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_EXAMPLES=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \

@@ -75,7 +75,6 @@ jobs:
         -DROCPROFSYS_USE_PYTHON=ON
         -DROCPROFSYS_BUILD_DYNINST=ON
         -DROCPROFSYS_BUILD_ELFUTILS=ON
-        -DROCPROFSYS_BUILD_LIBIBERTY=ON
         -DROCPROFSYS_MAX_THREADS=64
         -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
 
@@ -129,6 +128,10 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-systems/
         run: |
+          # libiberty for Dyninst: prefer the system copy over downloading binutils
+          crb enable
+          dnf install -y binutils-devel
+
           if [ "${{ matrix.os_major }}" = "10" ]; then
             dnf install -y --enablerepo=crb mpich mpich-devel
             echo "/usr/lib64/mpich/bin" >> $GITHUB_PATH
