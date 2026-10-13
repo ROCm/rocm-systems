@@ -1414,6 +1414,8 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
   // Map to track the last enqueued command for each segment for dependency tracking
   // This is critical for handling cross-level dependencies with stream reuse
   std::unordered_map<int, amd::Command*> segment_last_command;
+  // Updated in submission order, including same-level stream reuse.
+  std::unordered_map<hip::Stream*, amd::Command*> stream_last_command_map;
 
   // Process segments level by level using the pre-calculated max_dependency_level_
   for (int level = 0; level <= max_dependency_level_; ++level) {
@@ -1487,37 +1489,11 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
       accumulate->enqueue();
 
       segment_last_command[segment_id] = accumulate;
+      stream_last_command_map[current_stream] = accumulate;
     }
   }
 
   // Synchronize all streams with work back to launch_stream
-  // Build a map of stream to last command by collecting from the highest-level segment on each
-  // stream This is critical because unordered_map iteration order is undefined, so we must
-  // explicitly track dependency levels to ensure we wait on the last command (highest level) on
-  // each stream
-  std::unordered_map<hip::Stream*, amd::Command*> stream_last_command_map;
-  std::unordered_map<hip::Stream*, int> stream_max_level; // Track max dependency level per stream
-
-  for (const auto& pair : segment_last_command) {
-    int seg_id = pair.first;
-    amd::Command* cmd = pair.second;
-    auto stream_it = segment_to_stream.find(seg_id);
-    if (stream_it != segment_to_stream.end()) {
-      hip::Stream* stream = stream_it->second;
-      int seg_dependency_level = segments_[seg_id].dependency_level;
-
-      // Only update if this segment is at a strictly higher level
-      // Using strict > ensures deterministic behavior when multiple segments
-      // are at the same level on the same stream
-      auto level_it = stream_max_level.find(stream);
-      if (level_it == stream_max_level.end() ||
-          seg_dependency_level > level_it->second) {
-        stream_max_level[stream] = seg_dependency_level;
-        stream_last_command_map[stream] = cmd;
-      }
-    }
-  }
-
   amd::Command::EventWaitList final_wait_list;
   for (const auto& pair : stream_last_command_map) {
     hip::Stream* stream = pair.first;
