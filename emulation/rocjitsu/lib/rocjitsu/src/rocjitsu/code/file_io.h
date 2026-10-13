@@ -4,6 +4,8 @@
 #ifndef ROCJITSU_CODE_FILE_IO_H_
 #define ROCJITSU_CODE_FILE_IO_H_
 
+#include "util/result.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -12,7 +14,7 @@
 
 namespace rocjitsu::detail {
 
-std::vector<char> read_file_bytes(std::string_view path);
+util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path);
 
 bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit);
 
