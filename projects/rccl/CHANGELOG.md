@@ -15,6 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
+* Fixed communicator creation failing on every rank when a connection that fails the socket handshake (a peer with the wrong socket magic or encryption key, or another non-NCCL client) reached the bootstrap root before the ranks checked in. The root now drops the connection and keeps accepting.
 
 ### Known issues
 

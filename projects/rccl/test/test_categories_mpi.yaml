@@ -45,6 +45,7 @@ test_categories:
       # Short tier only: quick carries the smoke/precheck labels, and the three large rows each
       # validate a 2 MiB shard per rank over 64 steps. They stay covered by standard below.
       - "DtypeSizeCases/PersistentCommunicatorMPITest.*_short"
+      - "BootstrapStrayPeerMPITest.*"
     exclude_windows: &mpi_exclude_windows
       - "*"
     labels:
@@ -286,6 +287,7 @@ test_categories:
       - "PatLazyInitMPITest.*"
       - "PatSharedConnectionMPITest.*"
       - "DtypeSizeCases/PersistentCommunicatorMPITest.*"
+      - "BootstrapStrayPeerMPITest.*"
       - "DdaFabricSimple.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
