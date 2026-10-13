@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       os:
-        description: 'OS version to export'
+        description: 'OS version to export.'
         required: true
         default: 'ubuntu-22.04'
         type: choice
