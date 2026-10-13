@@ -216,5 +216,25 @@ profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
 // nullopt when the queue's doorbell signal is missing or is not a doorbell kind.
 std::optional<uint32_t>
 capture_doorbell_key(const hsa_queue_t* intercept_queue);
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+// Descriptor properties of an hsa_amd_queue_create compute queue that are not carried over
+// when the non-inline path replaces it with an InterceptQueue built via hsa_queue_create.
+struct amd_queue_desc_loss
+{
+    bool device_mem_ring_buf         = false;
+    bool device_mem_queue_descriptor = false;
+    bool priority                    = false;
+    bool cu_mask                     = false;
+
+    bool any() const
+    {
+        return device_mem_ring_buf || device_mem_queue_descriptor || priority || cu_mask;
+    }
+};
+
+amd_queue_desc_loss
+classify_amd_queue_desc_loss(const hsa_amd_queue_create_desc_t& desc);
+#endif
 }  // namespace hsa
 }  // namespace rocprofiler

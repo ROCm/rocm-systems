@@ -66,5 +66,75 @@ TEST(queue_controller, capture_doorbell_key)
         EXPECT_EQ(*e, want_slot) << tc.label;
     }
 }
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+// Only descriptor properties the replacement InterceptQueue cannot honor are reported;
+// a default (system-memory, normal-priority, unmasked) descriptor reports nothing.
+TEST(queue_controller, classify_amd_queue_desc_loss)
+{
+    const uint32_t cu_mask[2] = {0xffffffffu, 0x0000ffffu};
+
+    auto make_desc = [](uint32_t                 flags,
+                        hsa_amd_queue_priority_t priority,
+                        uint32_t                 cu_bits,
+                        const uint32_t*          mask) {
+        auto desc                         = hsa_amd_queue_create_desc_t{};
+        desc.version                      = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
+        desc.flags                        = static_cast<uint16_t>(flags);
+        desc.engine_type                  = HSA_AMD_QUEUE_ENGINE_COMPUTE;
+        desc.queue_size_bytes             = 4096 * 64;
+        desc.priority                     = priority;
+        desc.engine.compute.type          = HSA_QUEUE_TYPE_MULTI;
+        desc.engine.compute.cu_mask_count = cu_bits;
+        desc.engine.compute.cu_mask       = mask;
+        return desc;
+    };
+
+    constexpr uint32_t sysm = HSA_AMD_QUEUE_CREATE_SYSTEM_MEM;
+    constexpr uint32_t ring = HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF;
+    constexpr uint32_t qdsc = HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR;
+    constexpr auto     norm = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    constexpr auto     high = HSA_AMD_QUEUE_PRIORITY_HIGH;
+    constexpr auto     low  = HSA_AMD_QUEUE_PRIORITY_LOW;
+
+    struct tc
+    {
+        hsa_amd_queue_create_desc_t desc;
+        bool                        ring_lost;
+        bool                        qdsc_lost;
+        bool                        priority_lost;
+        bool                        cu_mask_lost;
+        const char*                 label;
+    };
+    const tc rows[] = {
+        {make_desc(sysm, norm, 0, nullptr), false, false, false, false, "default descriptor"},
+        {make_desc(ring, norm, 0, nullptr), true, false, false, false, "ring flag"},
+        {make_desc(qdsc, norm, 0, nullptr), false, true, false, false, "queue-descriptor flag"},
+        {make_desc(ring | qdsc, norm, 0, nullptr), true, true, false, false, "both flags"},
+        {make_desc(sysm, high, 0, nullptr), false, false, true, false, "high priority"},
+        {make_desc(sysm, low, 0, nullptr), false, false, true, false, "low priority"},
+        {make_desc(sysm, norm, 64, cu_mask), false, false, false, true, "CU mask"},
+        {make_desc(ring | qdsc, high, 64, cu_mask), true, true, true, true, "everything lost"},
+    };
+
+    for(const auto& row : rows)
+    {
+        const auto got = classify_amd_queue_desc_loss(row.desc);
+        EXPECT_EQ(got.device_mem_ring_buf, row.ring_lost) << row.label;
+        EXPECT_EQ(got.device_mem_queue_descriptor, row.qdsc_lost) << row.label;
+        EXPECT_EQ(got.priority, row.priority_lost) << row.label;
+        EXPECT_EQ(got.cu_mask, row.cu_mask_lost) << row.label;
+        EXPECT_EQ(got.any(),
+                  row.ring_lost || row.qdsc_lost || row.priority_lost || row.cu_mask_lost)
+            << row.label;
+    }
+
+    // Queue type and private segment size are carried over, so they are not reported.
+    auto other                                = make_desc(0, norm, 0, nullptr);
+    other.engine.compute.private_segment_size = 1024;
+    other.engine.compute.type                 = HSA_QUEUE_TYPE_SINGLE;
+    EXPECT_FALSE(classify_amd_queue_desc_loss(other).any());
+}
+#endif
 }  // namespace hsa
 }  // namespace rocprofiler

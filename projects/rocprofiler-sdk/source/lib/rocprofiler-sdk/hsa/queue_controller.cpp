@@ -201,21 +201,35 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
                 // then hand that back to the caller in place of the original queue.
                 //
                 // NOTE: the InterceptQueue is created via the classic hsa_queue_create path, so
-                // the descriptor's device-memory ring-buffer flag is not honored while a
+                // the descriptor's device-memory placement flags are not honored while a
                 // non-inline profiling context (e.g. --sys-trace / HIP graph tracing) is active;
-                // the queue falls back to a system-memory ring.
+                // the queue uses the runtime's default placement instead.
                 //
                 // Known limitation: the replacement InterceptQueue does not preserve the
                 // descriptor's priority or CU-mask settings. A CU-partitioned or high-priority
                 // stream may behave differently while profiled. Passing these attributes through
                 // (e.g. via SetPriority / SetCUMasking on the replacement queue) is deferred to a
                 // follow-up change.
-                ROCP_WARNING
-                    << "[queue-intercept] device-memory ring-buffer requested but profiling "
-                       "requires system-memory InterceptQueue; falling back to system-memory "
-                       "ring for agent "
-                    << agent.handle
-                    << " (priority and CU-mask from the descriptor are not preserved)";
+                const auto loss = classify_amd_queue_desc_loss(descs[desc_idx]);
+                if(loss.any())
+                {
+                    ROCP_WARNING << "[queue-intercept] profiling requires replacing the "
+                                    "hsa_amd_queue_create queue for agent "
+                                 << agent.handle
+                                 << " with an InterceptQueue; descriptor properties not preserved:"
+                                 << (loss.device_mem_ring_buf ? " device-memory ring-buffer" : "")
+                                 << (loss.device_mem_queue_descriptor
+                                         ? " device-memory queue-descriptor"
+                                         : "")
+                                 << (loss.priority ? " priority" : "")
+                                 << (loss.cu_mask ? " CU-mask" : "");
+                }
+                else
+                {
+                    ROCP_INFO << "[queue-intercept] registering hsa_amd_queue_create queue via "
+                                 "LEGACY InterceptQueue path for agent "
+                              << agent.handle;
+                }
 
                 const auto&    compute_params = descs[desc_idx].engine.compute;
                 const uint32_t ring_packets   = static_cast<uint32_t>(
@@ -1033,6 +1047,22 @@ capture_doorbell_key(const hsa_queue_t* intercept_queue)
     // mask is baked in -- no sysconf, no bind (open_window binds now).
     return kfd::doorbell_ptr_to_page_slot(hwptr);
 }
+
+#if defined(HSA_AMD_EXT_API_TABLE_STEP_VERSION) && HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x10
+amd_queue_desc_loss
+classify_amd_queue_desc_loss(const hsa_amd_queue_create_desc_t& desc)
+{
+    // The replacement queue is a classic hsa_queue_create queue: runtime-default memory
+    // placement, HSA_AMD_QUEUE_PRIORITY_NORMAL and no CU mask.
+    auto loss                = amd_queue_desc_loss{};
+    loss.device_mem_ring_buf = (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0;
+    loss.device_mem_queue_descriptor =
+        (desc.flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
+    loss.priority = desc.priority != HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    loss.cu_mask  = desc.engine.compute.cu_mask_count != 0;
+    return loss;
+}
+#endif
 
 }  // namespace hsa
 }  // namespace rocprofiler
