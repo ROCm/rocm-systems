@@ -11,7 +11,7 @@ argparse env handling, or conflict detection.
 from __future__ import annotations
 import json
 import pytest
-from conftest import RocprofsysTest, parse_metadata_settings, resolved_settings
+from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.tool_runner]
 
@@ -62,6 +62,30 @@ def parallel_overhead_args(workload: str) -> list[str]:
     return ["--", workload, *PARALLEL_OVERHEAD_ARGS]
 
 
+def _parse_metadata_settings(metadata_file) -> dict:
+    """Parse a metadata-*.json settings block into {KEY: resolved value}.
+
+    metadata.json records what each setting actually resolved to, so it catches
+    storage/serialization bugs the stdout echo might miss.
+    """
+    settings = json.loads(metadata_file.read_text())["rocprofiler-systems"]["metadata"][
+        "settings"
+    ]
+    return {
+        key: entry["value"]
+        for key, entry in settings.items()
+        if isinstance(entry, dict) and "value" in entry
+    }
+
+
+def _resolved_settings(result) -> dict:
+    """Find the run's metadata-*.json at the default output location and parse it."""
+    metadata_file = result.get_output_file("metadata*.json")
+    if metadata_file is None:
+        pytest.fail(f"No metadata*.json found under {result.output_dir}")
+    return _parse_metadata_settings(metadata_file)
+
+
 def _profile_has_label(result, needle: str) -> bool:
     """True if a function named `needle` was profiled in sampling_wall_clock.json.
 
@@ -105,7 +129,7 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
             fail_regex=[r"ROCPROFSYS_TRACE=\S*:\S*"],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE"] is False, (
             f"metadata.json still resolved ROCPROFSYS_TRACE to "
             f"{settings['ROCPROFSYS_TRACE']!r}"
@@ -179,7 +203,7 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE"] is True
         assert settings["ROCPROFSYS_USE_ROCPD"] is True
         assert settings["ROCPROFSYS_PROFILE"] is False
@@ -214,7 +238,7 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_USE_ROCPD"] is True
         assert settings["ROCPROFSYS_TRACE"] is False
         assert settings["ROCPROFSYS_PROFILE"] is False
@@ -253,7 +277,7 @@ class TestOutputFormatSelection(RocprofsysTest):
         # ROCPROFSYS_USE_ROCPD/TRACE/PROFILE are library defaults here (not
         # explicit env vars), so they do not appear in the env dump.  Verify
         # the resolved values from the metadata JSON instead.
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert (
             settings["ROCPROFSYS_USE_ROCPD"] is True
         ), "expected ROCPROFSYS_USE_ROCPD to default to true"
@@ -292,7 +316,7 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE"] is True
         assert settings["ROCPROFSYS_USE_ROCPD"] is False
         assert settings["ROCPROFSYS_PROFILE"] is False
@@ -333,7 +357,7 @@ class TestOutputFormatSelection(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE"] is True
         assert settings["ROCPROFSYS_PROFILE"] is False
         assert result.perfetto_file is not None, "expected a perfetto trace file"
@@ -419,7 +443,7 @@ class TestConfigOutput(RocprofsysTest):
             )
         self.assert_file_exists(metadata_file, description="Sample metadata output")
 
-        settings = parse_metadata_settings(metadata_file)
+        settings = _parse_metadata_settings(metadata_file)
         assert settings["ROCPROFSYS_CONFIG_FILE"] == str(empty_cfg)
         assert settings["ROCPROFSYS_OUTPUT_PATH"] == str(output_dir)
         assert settings["ROCPROFSYS_OUTPUT_PREFIX"] == output_prefix
@@ -511,7 +535,7 @@ class TestCliFlagEnvMapping(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         for key, expected in expected_settings.items():
             assert settings[key] == expected, (
                 f"{flag_args}: expected {key}={expected!r} in metadata.json, "
@@ -568,7 +592,7 @@ class TestWaitDuration(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE_DELAY"] == 1.5
         assert settings["ROCPROFSYS_SAMPLING_DELAY"] == 1.5
 
@@ -587,7 +611,7 @@ class TestWaitDuration(RocprofsysTest):
             ],
         )
 
-        settings = resolved_settings(result)
+        settings = _resolved_settings(result)
         assert settings["ROCPROFSYS_TRACE_DURATION"] == 2.5
         assert settings["ROCPROFSYS_SAMPLING_DURATION"] == 2.5
 
@@ -613,7 +637,7 @@ class TestTracePeriods(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
-        assert resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2"
+        assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2"
 
     def test_repeated_periods_are_space_joined(self, target, cpu_workload):
         result = self.run_test(
@@ -629,7 +653,7 @@ class TestTracePeriods(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2 3:2"])
-        assert resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2 3:2"
+        assert _resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2 3:2"
 
 
 # =============================================================================
@@ -666,7 +690,7 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
 
         # -D must set the device-sampling env var.
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_USE_AMD_SMI=true"])
-        assert resolved_settings(result)["ROCPROFSYS_USE_AMD_SMI"] is True
+        assert _resolved_settings(result)["ROCPROFSYS_USE_AMD_SMI"] is True
 
         assert (
             result.perfetto_file is not None
