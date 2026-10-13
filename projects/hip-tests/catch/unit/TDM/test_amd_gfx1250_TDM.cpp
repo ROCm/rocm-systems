@@ -10,8 +10,8 @@
 #include <string>
 
 #if defined(__clang__) && defined(__HIP__)
-typedef int v4i __attribute__((ext_vector_type(4)));
-typedef int v8i __attribute__((ext_vector_type(8)));
+typedef uint32_t v4u __attribute__((ext_vector_type(4)));
+typedef uint32_t v8u __attribute__((ext_vector_type(8)));
 __global__ void  TDM_load_store_tester(const int* data, int* result, int sizex, int sizey)
 {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds)) {
@@ -30,16 +30,16 @@ __global__ void  TDM_load_store_tester(const int* data, int* result, int sizex, 
     group1.tileDim0(sizex);
     group1.tileDim1(sizey);
 
-    v4i v4i_zeros{0, 0, 0, 0};
-    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
-    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
+    v4u v4u_zeros{0, 0, 0, 0};
+    v8u v8u_zeros{0, 0, 0, 0, 0, 0, 0, 0};
+    __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, v4u_zeros, v4u_zeros, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     __syncthreads();
 
     // write back to global
 
     group0.globalAddr((uintptr_t)result);
-    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, v4i_zeros, v4i_zeros, v8i_zeros, 0);
+    __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, v4u_zeros, v4u_zeros, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     }
 }
@@ -86,9 +86,9 @@ __global__ void TDM_load_store_tester_nd(const int* data, int* result, int e0, i
         group3.tileDim4(e4);
     }
 
-    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
+    v8u v8u_zeros{0, 0, 0, 0, 0, 0, 0, 0};
     __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
-                                         group3.m_bitfield, v8i_zeros, 0);
+                                         group3.m_bitfield, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     __syncthreads();
 
@@ -96,7 +96,7 @@ __global__ void TDM_load_store_tester_nd(const int* data, int* result, int e0, i
 
     group0.globalAddr((uintptr_t)result);
     __builtin_amdgcn_tensor_store_from_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
-                                            group3.m_bitfield, v8i_zeros, 0);
+                                            group3.m_bitfield, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     }
 }
@@ -148,7 +148,7 @@ __global__ void TDM_gather_load_tester(const int* data, int* result)
     group3.m_bitfield[2] = uint32_t{kGatherIndices[12]} | (uint32_t{kGatherIndices[13]} << 16);
     group3.m_bitfield[3] = uint32_t{kGatherIndices[14]} | (uint32_t{kGatherIndices[15]} << 16);
 
-    v8i v8i_zeros{0, 0, 0, 0, 0, 0, 0, 0};
+    v8u v8u_zeros{0, 0, 0, 0, 0, 0, 0, 0};
     __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
                                          group3.m_bitfield, v8i_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
@@ -168,9 +168,9 @@ __global__ void TDM_gather_load_tester(const int* data, int* result)
     store_group1.tileDim0(kGatherRowWidth);
     store_group1.tileDim1(kGatherNumIndices);
 
-    v4i v4i_zeros{0, 0, 0, 0};
+    v4u v4u_zeros{0, 0, 0, 0};
     __builtin_amdgcn_tensor_store_from_lds(store_group0.m_bitfield, store_group1.m_bitfield,
-                                            v4i_zeros, v4i_zeros, v8i_zeros, 0);
+                                            v4u_zeros, v4u_zeros, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     }
 }
