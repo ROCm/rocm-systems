@@ -67,7 +67,8 @@ uint64_t rcclKchRecorderProxyOpCount(void);
 size_t rcclKchRecorderProxyThreads(long* out, size_t cap);
 
 // Calls the plugin could not reconcile: a stop or state for a handle it never
-// issued or already stopped, or a KernelCh stop with no start.
+// issued or already stopped, a stop state of the wrong kind for the handle
+// (KernelPhase for KernelCh or the reverse), or a KernelCh stop with no start.
 uint64_t rcclKchRecorderAnomalies(void);
 
 #ifdef __cplusplus

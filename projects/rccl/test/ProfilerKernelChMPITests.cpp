@@ -421,17 +421,49 @@ protected:
         EXPECT_EQ(0u, violations) << what << ": KernelCh timestamps out of order on a channel";
     }
 
-    // Agreed across ranks like communicator creation: every caller goes straight
-    // into collective work, so one rank leaving alone would strand the rest.
+    // Setup that precedes collective work fails on every rank or on none: one rank
+    // leaving alone would strand the rest in the next collective. Returns a reason
+    // to leave the test once the failure is recorded.
+    std::string agreeOn(bool localFailure, const char* what)
+    {
+        if(!onAnyRank(localFailure)) return {};
+        ADD_FAILURE() << what << (localFailure ? "" : " on another rank");
+        return what;
+    }
+
     std::string allocBuffers(size_t count)
     {
         count_ = count;
         bool failed = hipMalloc(&send_, count * sizeof(float)) != hipSuccess ||
                       hipMalloc(&recv_, count * sizeof(float)) != hipSuccess ||
                       hipMemset(send_, 0, count * sizeof(float)) != hipSuccess;
-        if(!onAnyRank(failed)) return {};
-        ADD_FAILURE() << (failed ? "buffer allocation failed" : "buffer allocation failed on another rank");
-        return "no buffers";
+        return agreeOn(failed, "buffer allocation failed");
+    }
+
+    // Capture `ops` AllReduces of `count` elements and instantiate the graph,
+    // agreed across ranks; on failure every rank releases what it built.
+    std::string captureAllReduces(ncclComm_t comm, hipStream_t stream, int ops, size_t count, hipGraph_t* graph,
+                                  hipGraphExec_t* exec)
+    {
+        *graph = nullptr;
+        *exec = nullptr;
+        bool ok = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal) == hipSuccess;
+        if(ok)
+        {
+            for(int i = 0; i < ops; i++)
+                if(ncclAllReduce(send_, recv_, count, ncclFloat, ncclSum, comm, stream) != ncclSuccess) ok = false;
+            if(hipStreamEndCapture(stream, graph) != hipSuccess) ok = false;
+        }
+        if(ok && hipGraphInstantiate(exec, *graph, nullptr, nullptr, 0) != hipSuccess) ok = false;
+        std::string reason = agreeOn(!ok, "graph capture or instantiation failed");
+        if(!reason.empty())
+        {
+            if(*exec) (void)hipGraphExecDestroy(*exec);
+            if(*graph) (void)hipGraphDestroy(*graph);
+            *graph = nullptr;
+            *exec = nullptr;
+        }
+        return reason;
     }
 
     void freeBuffers()
@@ -638,10 +670,7 @@ TEST_F(ProfilerKernelChMPITest, GraphReplaysAreEachTimed)
     constexpr int kPerGraph = 4, kReplays = 6;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
-    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
-    for(int i = 0; i < kPerGraph; i++) EXPECT_EQ(ncclSuccess, allReduce(comm, stream));
-    ASSERT_EQ(hipSuccess, hipStreamEndCapture(stream, &graph));
-    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    KCH_SKIP_IF_NEEDED(captureAllReduces(comm, stream, kPerGraph, count_, &graph, &exec));
     for(int i = 0; i < kReplays; i++) EXPECT_EQ(hipSuccess, hipGraphLaunch(exec, stream));
     EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
 
@@ -684,11 +713,7 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
     constexpr int kPerGraph = 2, kRounds = 8;
     hipGraph_t graph = nullptr;
     hipGraphExec_t exec = nullptr;
-    ASSERT_EQ(hipSuccess, hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
-    for(int i = 0; i < kPerGraph; i++)
-        EXPECT_EQ(ncclSuccess, ncclAllReduce(send_, recv_, kGraphCount, ncclFloat, ncclSum, comm, stream));
-    ASSERT_EQ(hipSuccess, hipStreamEndCapture(stream, &graph));
-    ASSERT_EQ(hipSuccess, hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    KCH_SKIP_IF_NEEDED(captureAllReduces(comm, stream, kPerGraph, kGraphCount, &graph, &exec));
 
     std::atomic<int> holdsDone{0};
     auto holdStream = [](void* done) {
@@ -776,8 +801,10 @@ TEST_P(ProfilerKernelChSplitMPITest, SplitThreadOwnership)
     KCH_SKIP_IF_NEEDED(allocBuffers(1 << 18));
 
     ncclComm_t child = nullptr;
-    ASSERT_EQ(ncclSuccess, ncclCommSplit(parent, 0, MPIEnvironment::world_rank, &child, nullptr));
-    ownedComms_.push_back(child);
+    bool splitFailed = ncclCommSplit(parent, 0, MPIEnvironment::world_rank, &child, nullptr) != ncclSuccess ||
+                       child == nullptr;
+    if(child) ownedComms_.push_back(child);
+    KCH_SKIP_IF_NEEDED(agreeOn(splitFailed, "ncclCommSplit failed"));
 
     constexpr int kIters = 4;
     for(int i = 0; i < kIters; i++)
@@ -888,14 +915,18 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     KCH_SKIP_IF_NEEDED(allocBuffers(1 << 22));
 
     int dev = 0, rateKHz = 0;
-    ASSERT_EQ(hipSuccess, hipGetDevice(&dev));
-    ASSERT_EQ(hipSuccess, hipDeviceGetAttribute(&rateKHz, hipDeviceAttributeWallClockRate, dev));
-    ASSERT_GT(rateKHz, 0);
-    const double nsPerTick = 1e6 / rateKHz;
-
     hipEvent_t begin = nullptr, end = nullptr;
-    ASSERT_EQ(hipSuccess, hipEventCreate(&begin));
-    ASSERT_EQ(hipSuccess, hipEventCreate(&end));
+    bool setupFailed = hipGetDevice(&dev) != hipSuccess ||
+                       hipDeviceGetAttribute(&rateKHz, hipDeviceAttributeWallClockRate, dev) != hipSuccess ||
+                       rateKHz <= 0 || hipEventCreate(&begin) != hipSuccess || hipEventCreate(&end) != hipSuccess;
+    std::string setupReason = agreeOn(setupFailed, "wall-clock rate query or event creation failed");
+    if(!setupReason.empty())
+    {
+        if(begin) (void)hipEventDestroy(begin);
+        if(end) (void)hipEventDestroy(end);
+        GTEST_SKIP() << setupReason;
+    }
+    const double nsPerTick = 1e6 / rateKHz;
     // Connection setup on first use would otherwise sit inside the bracket with
     // the device idle.
     EXPECT_EQ(ncclSuccess, allReduce(comm, stream));

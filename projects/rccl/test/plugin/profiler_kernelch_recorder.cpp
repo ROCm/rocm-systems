@@ -175,7 +175,8 @@ ncclResult_t recorderRecordEventState(void* eHandle, ncclProfilerEventState_v7_t
   if (eState != ncclProfilerKernelChStop && eState != ncclProfilerKernelPhaseStop) return ncclSuccess;
   std::lock_guard<std::mutex> lock(gMutex);
   Record* r = asRecord(eHandle);
-  if (r == nullptr || r->view.stopStates != 0) {
+  const uint64_t stateType = eState == ncclProfilerKernelChStop ? ncclProfileKernelCh : ncclProfileKernelPhase;
+  if (r == nullptr || r->view.stopStates != 0 || r->view.type != stateType) {
     ++gAnomalies;
     return ncclSuccess;
   }
