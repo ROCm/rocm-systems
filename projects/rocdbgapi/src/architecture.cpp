@@ -2610,6 +2610,10 @@ public:
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 
   amd_dbgapi_size_t
+  scratch_memory_allocation (
+    uint32_t compute_tmpring_size_register) const override;
+
+  amd_dbgapi_size_t
   scratch_memory_size (uint32_t compute_tmpring_size_register) const override;
 
   std::vector<agent_t::aperture_t>
@@ -3436,7 +3440,7 @@ gfx9_architecture_t::scratch_memory_region (
 {
   /* Total size of allocated scratch memory in number of waves.  */
   amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
+    = scratch_memory_allocation (compute_tmpring_size_register);
   /* Amount of space in bytes used by each wave.  */
   amd_dbgapi_size_t wavesize
     = scratch_memory_size (compute_tmpring_size_register);
@@ -3468,6 +3472,13 @@ gfx9_architecture_t::scratch_memory_region (
     = waves * wavesize * cwsr_record.xcc_id ();
 
   return { xcc_scratch_base + offset, wavesize };
+}
+
+amd_dbgapi_size_t
+gfx9_architecture_t::scratch_memory_allocation (
+  uint32_t compute_tmpring_size_register) const
+{
+  return utils::bit_extract (compute_tmpring_size_register, 0, 11);
 }
 
 amd_dbgapi_size_t
@@ -6124,7 +6135,7 @@ gfx11_architecture_t::scratch_memory_region (
 {
   /* Total size of allocated scratch memory in number of waves.  */
   amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
+    = scratch_memory_allocation (compute_tmpring_size_register);
   /* Amount of space in bytes used by each wave.  */
   amd_dbgapi_size_t wavesize
     = scratch_memory_size (compute_tmpring_size_register);

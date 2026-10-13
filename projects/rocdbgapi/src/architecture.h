@@ -257,6 +257,11 @@ public:
                          const cwsr_record_t &cwsr_record) const
     = 0;
 
+  /* Total size of allocated scratch memory.  The unit is number of waves.  */
+  virtual amd_dbgapi_size_t
+  scratch_memory_allocation (uint32_t compute_tmpring_size_register) const
+    = 0;
+
   /* Size, in bytes, of the scratch memory allocated per wave.  */
   virtual amd_dbgapi_size_t
   scratch_memory_size (uint32_t compute_tmpring_size_register) const
