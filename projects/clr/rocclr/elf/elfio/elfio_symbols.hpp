@@ -206,6 +206,10 @@ template <class S> class symbol_section_accessor_template {
     if (section_name == nullptr) {
       return true;
     }
+    // Reserved indices (SHN_ABS, SHN_COMMON, SHN_XINDEX, ...) never name a section.
+    if (section_index >= SHN_LORESERVE) {
+      return false;
+    }
     const section* target_section = elf_file.sections[section_index];
     return target_section != nullptr && *section_name == target_section->get_name();
   }
@@ -214,23 +218,42 @@ template <class S> class symbol_section_accessor_template {
   bool lookup_symbol(const std::string& name, const std::string* section_name, Elf64_Addr& value,
                      Elf_Xword& size, unsigned char& bind, unsigned char& type,
                      Elf_Half& section_index, unsigned char& other) const {
+    // Search into locals so the caller's outputs are only written on a match.
+    Elf64_Addr found_value = 0;
+    Elf_Xword found_size = 0;
+    unsigned char found_bind = 0;
+    unsigned char found_type = 0;
+    Elf_Half found_section_index = 0;
+    unsigned char found_other = 0;
+    bool found = false;
+
+    hash_result result = hash_result::invalid;
     if (get_hash_table_index() != 0) {
-      const hash_result result =
-          hash_lookup(name, section_name, value, size, bind, type, section_index, other);
-      // Only an unusable table falls back to the linear scan.
-      if (result != hash_result::invalid) {
-        return result == hash_result::found;
+      result = hash_lookup(name, section_name, found_value, found_size, found_bind, found_type,
+                           found_section_index, found_other);
+      found = result == hash_result::found;
+    }
+    // Only an unusable table falls back to the linear scan.
+    if (result == hash_result::invalid) {
+      const Elf_Xword symbol_count = get_symbols_num();
+      for (Elf_Xword i = 0; i < symbol_count && !found; ++i) {
+        std::string symbol_name;
+        found = get_symbol(i, symbol_name, found_value, found_size, found_bind, found_type,
+                           found_section_index, found_other) &&
+                matches_symbol(name, section_name, symbol_name, found_section_index);
       }
     }
-    const Elf_Xword symbol_count = get_symbols_num();
-    for (Elf_Xword i = 0; i < symbol_count; ++i) {
-      std::string symbol_name;
-      if (get_symbol(i, symbol_name, value, size, bind, type, section_index, other) &&
-          matches_symbol(name, section_name, symbol_name, section_index)) {
-        return true;
-      }
+    if (!found) {
+      return false;
     }
-    return false;
+
+    value = found_value;
+    size = found_size;
+    bind = found_bind;
+    type = found_type;
+    section_index = found_section_index;
+    other = found_other;
+    return true;
   }
 
   //------------------------------------------------------------------------------
