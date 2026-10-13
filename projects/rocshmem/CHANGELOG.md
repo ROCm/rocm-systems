@@ -8,7 +8,7 @@
 * Fixed `rocshmem_ctx_tile_*` collective operations (allgather, broadcast, sum/max/min reduce, collective_wait) silently discarding the caller-supplied `rocshmem_ctx_t` context. The context was accepted but not forwarded to the internal bitcode layer, which always used `ROCSHMEM_CTX_DEFAULT` instead. The context is now threaded through correctly.
 
 ### Added
-* Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for the IPC backend. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. GDA backend support for 3D/4D is planned as a follow-up.
+* Extended the tile API to support **3D and 4D tensors** (in addition to the existing 1D and 2D support) for both the IPC and GDA backends. The `TileView` internal structure now uses fixed-size arrays of `MAX_NDIM=4`, `tile_make_view` uses a generic loop over all dimensions, and `tile_memcpy_rma` includes an N-dimensional strided copy path. The `ndim > 2` guards in the IPC and GDA RMA and reduction operations have been relaxed to `ndim > TileView::MAX_NDIM`. The GDA lane-level `tile_put`/`tile_get` and the `tile_put_gda_workers`/`tile_get_gda_workers` helpers include N-dimensional element-by-element and contiguous paths for ranks 3 and 4.
 
 ### Added
 * GDA device code refactor (#7217)

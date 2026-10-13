@@ -124,9 +124,16 @@ __global__ void TileNDRMATest(long long int* start_time, long long int* end_time
   const int slot_offset = wg_id * TILE_ELEMS;
 
   for (int i = 0; i < loop + skip; i++) {
-    if (i == skip && threadIdx.x == 0) {
-      rocshmem_ctx_quiet(ctx);
-      start_time[wg_id] = wall_clock64();
+    if (i == skip) {
+      // Drain all warm-up operations before starting the timer.
+      __syncthreads();
+      if (threadIdx.x == 0) {
+        rocshmem_ctx_quiet(ctx);
+        start_time[wg_id] = wall_clock64();
+      }
+      // All threads wait until lane 0 has recorded the start timestamp before
+      // entering the timed tile operation — mirrors the existing tile RMA tester.
+      __syncthreads();
     }
 
     if constexpr (Type == TilePut3DTestType) {

@@ -1381,7 +1381,7 @@ function(add_tile_tests)
     end_test_group()
 
     # 3D and 4D tile RMA tests (fixed problem size, no message sweep)
-    begin_test_group(CATEGORY "TILE;RMA;ND" TIER comprehensive BACKENDS "ipc" GPUS "all")
+    begin_test_group(CATEGORY "TILE;RMA;ND" TIER comprehensive BACKENDS "ipc;gda" GPUS "all")
         add_rocshmem_functional_test(NAME tile_put_3d    RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_get_3d    RANKS 2 WORKGROUPS 1 THREADS 1)
         add_rocshmem_functional_test(NAME tile_put_wg_3d RANKS 2 WORKGROUPS 4 NUM_WF 16)

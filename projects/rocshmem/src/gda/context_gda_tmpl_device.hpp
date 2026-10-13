@@ -2124,6 +2124,7 @@ __device__ inline int GDAContext::tile_allgather(rocshmem_team_t team,
                                                  int ndim,
                                                  size_t element_size,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2164,6 +2165,7 @@ __device__ inline int GDAContext::tile_allgather_wave(rocshmem_team_t team,
                                                       int ndim,
                                                       size_t element_size,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2203,6 +2205,7 @@ __device__ inline int GDAContext::tile_allgather_wg(rocshmem_team_t team,
                                                     int ndim,
                                                     size_t element_size,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -2244,6 +2247,7 @@ __device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
                                                  size_t element_size,
                                                  int pe_root,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -2281,6 +2285,7 @@ __device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int pe_root,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -2316,6 +2321,7 @@ __device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
                                                     size_t element_size,
                                                     int pe_root,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
