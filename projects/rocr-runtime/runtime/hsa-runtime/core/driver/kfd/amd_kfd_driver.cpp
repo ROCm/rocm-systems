@@ -95,17 +95,16 @@ static_assert(
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return HSA_MEMORY_ACCESS_RO;
-  case HSA_ACCESS_PERMISSION_WO:
-    return HSA_MEMORY_ACCESS_WO;
-  case HSA_ACCESS_PERMISSION_RW:
-    return HSA_MEMORY_ACCESS_RW;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return HSA_MEMORY_ACCESS_NONE;
-  }
+  unsigned flags = HSA_MEMORY_ACCESS_NONE;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= HSA_MEMORY_ACCESS_RO;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= HSA_MEMORY_ACCESS_WO;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= HSA_MEMORY_ACCESS_EX;
+
+  return static_cast<HsaMemoryMapFlags>(flags);
 }
 
 } // namespace

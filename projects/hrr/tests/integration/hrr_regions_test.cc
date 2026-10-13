@@ -198,10 +198,13 @@ namespace {
 
 constexpr size_t kHsaSegBytes = 256 * 1024;
 
-// The coarse-grained global pool of the first GPU agent, plus every agent in
-// the system. Access has to be granted to all of them, not just the owning GPU:
-// the copy HIP issues is serviced by a DMA engine, and on an unshared coarse
-// grained allocation that engine faults exactly like a stray kernel would.
+// The coarse-grained global pool of the first GPU agent, plus the CPU and GPU
+// agents. Access has to be granted to those, not just the owning GPU: the copy
+// HIP issues is serviced by a DMA engine, and on an unshared coarse grained
+// allocation that engine faults exactly like a stray kernel would.
+// hsa_amd_agents_allow_access rejects every other agent with
+// HSA_STATUS_ERROR_INVALID_AGENT. gfx1151 enumerates an NPU, and including it
+// fails the call before the copy runs.
 struct HsaTarget {
   hsa_agent_t gpu{};
   hsa_amd_memory_pool_t pool{};
@@ -239,12 +242,15 @@ hsa_status_t hrr_find_pool(hsa_amd_memory_pool_t pool, void* data) {
 
 hsa_status_t hrr_visit_agent(hsa_agent_t agent, void* data) {
   auto* target = static_cast<HsaTarget*>(data);
-  target->all_agents.push_back(agent);
 
   hsa_device_type_t type{};
   if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) !=
           HSA_STATUS_SUCCESS ||
-      type != HSA_DEVICE_TYPE_GPU)
+      (type != HSA_DEVICE_TYPE_CPU && type != HSA_DEVICE_TYPE_GPU))
+    return HSA_STATUS_SUCCESS;
+  target->all_agents.push_back(agent);
+
+  if (type != HSA_DEVICE_TYPE_GPU)
     return HSA_STATUS_SUCCESS;
   if (target->ok) return HSA_STATUS_SUCCESS;  // keep collecting agents
 
@@ -711,7 +717,7 @@ namespace {
 inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
     const std::string& direct_case, const fs::path& cap_path) {
   std::string out;
-  { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"" + direct_case + "\"");

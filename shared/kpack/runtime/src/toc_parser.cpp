@@ -1,6 +1,7 @@
 // Copyright (c) 2025 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include <limits>
 #include <msgpack.hpp>
 #include <new>
 #include <vector>
@@ -31,20 +32,37 @@ kpack_error_t parse_toc(FILE* file, uint64_t toc_offset, uint64_t file_size,
     return KPACK_ERROR_INVALID_FORMAT;
   }
 
+  // Validate that the TOC size is representable before narrowing it for
+  // allocation.
+  const uint64_t toc_size_u64 = file_size - toc_offset;
+  if constexpr (sizeof(size_t) < sizeof(uint64_t)) {
+    if (toc_size_u64 > std::numeric_limits<size_t>::max()) {
+      return KPACK_ERROR_INVALID_FORMAT;
+    }
+  }
+  const size_t toc_size = static_cast<size_t>(toc_size_u64);
+
   // Seek to TOC
   if (kpack_fseek(file, static_cast<int64_t>(toc_offset), SEEK_SET) != 0) {
     return KPACK_ERROR_IO_ERROR;
   }
 
   // Read TOC data
-  size_t toc_size = file_size - toc_offset;
   std::vector<char> toc_buf(toc_size);
   if (fread(toc_buf.data(), 1, toc_size, file) != toc_size) {
     return KPACK_ERROR_IO_ERROR;
   }
 
   // Unpack MessagePack
-  msgpack::object_handle oh = msgpack::unpack(toc_buf.data(), toc_buf.size());
+  // A complete array cannot have more elements than input bytes. Each map
+  // entry requires at least two encoded bytes: one for its key and one for its
+  // value, so the entry count cannot exceed half the input size. The remaining
+  // limits follow the same physical bound: declared data and nesting cannot
+  // exceed the buffer containing the encoded TOC.
+  const msgpack::unpack_limit unpack_limit(toc_size, toc_size / 2, toc_size,
+                                           toc_size, toc_size, toc_size);
+  msgpack::object_handle oh = msgpack::unpack(toc_buf.data(), toc_buf.size(),
+                                              nullptr, nullptr, unpack_limit);
 
   msgpack::object obj = oh.get();
   if (obj.type != msgpack::type::MAP) {

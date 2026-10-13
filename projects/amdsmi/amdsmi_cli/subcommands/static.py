@@ -250,7 +250,7 @@ class StaticCommands:
                 args.profile,
             ]
 
-        if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+        if self.helpers.is_linux():
             if numa:
                 args.numa = numa
             current_platform_args += ["numa"]
@@ -1441,39 +1441,25 @@ class StaticCommands:
                 affinity = numa_data.get("affinity", "N/A")
                 cpu_affinity = numa_data.get("cpu_affinity", {})
                 socket_affinity = numa_data.get("socket_affinity", {})
-                # Create a flattened row for list entry
-                row_dict = static_dict.copy()
+                # Either scope can be N/A on its own; NUMA scope needs a NUMA node.
+                cpu_affinity = cpu_affinity if isinstance(cpu_affinity, dict) else {}
+                socket_affinity = socket_affinity if isinstance(socket_affinity, dict) else {}
+                na_entry = {"bitmask": "N/A", "cpu_cores_affinity": "N/A"}
 
-                if cpu_affinity and isinstance(cpu_affinity, dict):
-                    for cpu_list_key in cpu_affinity.keys():
-                        cpu_entry = cpu_affinity[cpu_list_key]
-                        socket_entry = socket_affinity.get(
-                            cpu_list_key, {"bitmask": "N/A", "cpu_cores_affinity": "N/A"}
-                        )
-                        row_dict.update(
-                            {
-                                "node": node,
-                                "affinity": affinity,
-                                "cpu_list": cpu_list_key,
-                                "bitmask": cpu_entry.get("bitmask"),
-                                "cpu_cores_affinity": cpu_entry.get("cpu_cores_affinity"),
-                                "socket_bitmask": socket_entry.get("bitmask"),
-                                "socket_cpu_cores_affinity": socket_entry.get("cpu_cores_affinity"),
-                            }
-                        )
-                        self.logger.store_output(args.gpu, "values", row_dict)
-                        self.logger.store_gpu_json_output.append(row_dict)
-                        self.logger.store_multiple_device_output()
-                else:
+                # Create a flattened row for list entry
+                for cpu_list_key in list(cpu_affinity) or list(socket_affinity) or ["N/A"]:
+                    cpu_entry = cpu_affinity.get(cpu_list_key, na_entry)
+                    socket_entry = socket_affinity.get(cpu_list_key, na_entry)
+                    row_dict = static_dict.copy()
                     row_dict.update(
                         {
                             "node": node,
                             "affinity": affinity,
-                            "cpu_list": "N/A",
-                            "bitmask": "N/A",
-                            "cpu_cores_affinity": "N/A",
-                            "socket_bitmask": "N/A",
-                            "socket_cpu_cores_affinity": "N/A",
+                            "cpu_list": cpu_list_key,
+                            "bitmask": cpu_entry.get("bitmask"),
+                            "cpu_cores_affinity": cpu_entry.get("cpu_cores_affinity"),
+                            "socket_bitmask": socket_entry.get("bitmask"),
+                            "socket_cpu_cores_affinity": socket_entry.get("cpu_cores_affinity"),
                         }
                     )
                     self.logger.store_output(args.gpu, "values", row_dict)
