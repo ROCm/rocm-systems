@@ -6,7 +6,8 @@
 # host ASAN covers all of it.
 #
 #   unit: hardware-free unit tests on a GitHub-hosted runner.
-#   gpu:  full test suite plus an amd-smi CLI sweep on a self-hosted GPU runner.
+#   gpu:  full test suite plus amd-smi CLI sweeps for memory errors and for
+#         leaks on a self-hosted GPU runner.
 #
 # Both jobs build with GCC in the same pinned image, so findings reproduce
 # locally with `docker run` on it.
@@ -188,7 +189,8 @@ jobs:
 
       # Python is not instrumented: preload ASAN (with libstdc++, so it can
       # intercept the library's C++ throws) and use PYTHONMALLOC=malloc so it
-      # sees overflows of ctypes buffers. The interpreter leaks, so no LSan.
+      # sees overflows of ctypes buffers. The interpreter leaks, so no LSan
+      # here; the "Check amd-smi CLI for leaks" step covers leaks.
       - name: Run amd-smi CLI under ASAN
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
@@ -217,6 +219,41 @@ jobs:
           done
           if [ "${#findings[@]}" -gt 0 ]; then
             echo "::error::ASAN reported errors in: amd-smi ${findings[*]}"
+            exit 1
+          fi
+
+      # TheRock's ASAN test jobs run other components' scripts that call
+      # amd-smi (libhipcxx's runs it bare) with leak detection on and no
+      # preload, so ASAN loads with the library and sees only its C++
+      # allocations. Run the CLI that way, so such a leak fails here too.
+      - name: Check amd-smi CLI for leaks
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS_DIR/cli-leaks"
+          # Don't abort when the runtime loads after the interpreter (TheRock
+          # sets this too).
+          export ASAN_OPTIONS="$ASAN_OPTIONS:verify_asan_link_order=0"
+          # Must run in this mode and list a GPU, or the loop below proves
+          # nothing.
+          "$AMDSMI_PREFIX/bin/amd-smi" list | grep '^GPU: '
+          # The sweep's commands plus "" for bare amd-smi (logged as "default"):
+          # the default view, which lists GPU processes.
+          commands=("" list static firmware ucode bad-pages metric process topology monitor dmon xgmi partition)
+          findings=()
+          for cmd in "${commands[@]}"; do
+            name="${cmd:-default}"
+            log="$RESULTS_DIR/cli-leaks/amd-smi_$name.log"
+            rc=0
+            "$AMDSMI_PREFIX/bin/amd-smi" ${cmd:+"$cmd"} > "$log" 2>&1 || rc=$?
+            echo "amd-smi $name: exit $rc"
+            if grep -qE '^==[0-9]+==' "$log"; then
+              findings+=("$name")
+              cat "$log"
+            fi
+          done
+          if [ "${#findings[@]}" -gt 0 ]; then
+            echo "::error::ASAN reported leaks or errors in: amd-smi ${findings[*]}"
             exit 1
           fi
 
