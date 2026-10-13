@@ -633,10 +633,10 @@ static int symkHostRedOpToDev(ncclRedOp_t op) {
 // picked. Single source shared by rcclSymKGetInfo and the query-mode symmetric
 // reporting in rcclSelectAllReduce/rcclSelectAllGather/rcclSelectReduceScatter.
 // algo is RCCL_SYMMETRIC_TDM when the pick is a Tensor Data Mover kernel, else
-// RCCL_SYMMETRIC. Null buffers (rcclSymKGetInfo) count as 16 B aligned.
+// RCCL_SYMMETRIC. symAligned16B is ncclSymAligned16B for the operands; rcclSymKGetInfo
+// has no buffers and leaves it true.
 static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,
-                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels,
-                          const void* sendbuff = nullptr, const void* recvbuff = nullptr) {
+                          ncclRedOp_t op, int* algo, int* protocol, int* maxChannels, bool symAligned16B = true) {
   // Symmetric kernels need symmetric-window support (cuMem). Without it the
   // windows are never registered symmetric and symk cannot run, so do not report
   // it -- rcclSymKGetInfo's caller then falls back to the actual backend.
@@ -664,17 +664,7 @@ static bool rcclSymkQuery(struct ncclComm* comm, ncclFunc_t coll, uint64_t count
   input.maxCTAs = comm->config.maxCTAs;
   input.CTAPolicy = comm->config.CTAPolicy;
   input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(devOp, dataType) || coll == ncclFuncAllGather);
-  {
-    // Same rule as ncclPrepareTasks: the TDM kernels are masked out unless input and
-    // output sit at the same offset modulo 16 within their windows.
-    struct ncclDevrWindow* sendWin = nullptr;
-    struct ncclDevrWindow* recvWin = nullptr;
-    if (ncclDevrFindWindow(comm, sendbuff, &sendWin) != ncclSuccess) return false;
-    if (ncclDevrFindWindow(comm, recvbuff, &recvWin) != ncclSuccess) return false;
-    size_t inputOff = sendWin ? (uintptr_t)sendbuff - (uintptr_t)sendWin->userPtr : (uintptr_t)sendbuff;
-    size_t outputOff = recvWin ? (uintptr_t)recvbuff - (uintptr_t)recvWin->userPtr : (uintptr_t)recvbuff;
-    input.symAligned16B = (uint32_t(inputOff - outputOff) % 16 == 0);
-  }
+  input.symAligned16B = symAligned16B;
   struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
   if (ncclTuningCompute(&input, &bestTuning) != ncclSuccess) return false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)bestTuning.symKernelId;
@@ -1533,7 +1523,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       return ncclSuccess;
     }
     int a, p, ch;
-    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch, sendbuff, recvbuff)) {
+    if (rcclSymkQuery(comm, ncclFuncAllReduce, count, datatype, op, &a, &p, &ch,
+                      ncclSymAligned16B(ncclFuncAllReduce, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                        count * ncclTypeSize(datatype)))) {
       decision->algo = a;
       decision->protocol = p;
       decision->nMaxChannels = ch;
@@ -1763,7 +1755,9 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch, sendbuff, recvbuff)) {
+      if (rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin, recvWin,
+                                          sendcount * ncclTypeSize(datatype)))) {
         decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;
@@ -1894,7 +1888,9 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
         return ncclSuccess;
       }
       int a, p, ch;
-      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch, sendbuff, recvbuff)) {
+      if (rcclSymkQuery(comm, ncclFuncReduceScatter, recvcount, datatype, op, &a, &p, &ch,
+                        ncclSymAligned16B(ncclFuncReduceScatter, comm->rank, sendbuff, recvbuff, rsSendWin,
+                                          rsRecvWin, recvcount * ncclTypeSize(datatype)))) {
         decision->algo = a;
         decision->protocol = p;
         decision->nMaxChannels = ch;

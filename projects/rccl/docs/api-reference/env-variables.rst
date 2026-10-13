@@ -931,10 +931,11 @@ threshold table introduced for gfx1250.
     * - | ``NCCL_SYM_TMA_ENABLE``
         | Controls the Tensor Data Mover (TDM) symmetric kernels
           (``AllGather_TmaST``, ``AllReduce_RSxTmaLD_AGxTmaST`` and
-          ``ReduceScatter_TmaLD``). They are the gfx1250 counterpart of the NCCL
-          TMA kernels on NVIDIA Blackwell. They run only on gfx1250 builds whose
-          ROCm SDK ships the TDM descriptor header, and only for collectives on
-          symmetric registered windows whose buffers are 16-byte aligned. On every
+          ``ReduceScatter_TmaLD``), which stage data through the gfx1250 Tensor
+          Data Mover instead of per-lane vector loads and stores. They run only on
+          gfx1250 builds whose ROCm SDK ships the TDM descriptor header, and only
+          for collectives on symmetric registered windows whose buffers are
+          16-byte aligned. On every
           other architecture this variable has no effect. When enabled, the
           symmetric cost model offers these kernels only at message sizes where
           their TDM deep loop engages, and launches them with the widest allowed

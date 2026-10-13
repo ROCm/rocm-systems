@@ -255,18 +255,11 @@ TEST_F(SymKernelMaskTest, DefaultParam_EachCollectiveOffersItsTmaKernel) {
       ncclSymkKernelId_ReduceScatter_TmaLD));
 }
 
-TEST_F(SymKernelMaskTest, DefaultParam_ArchNotTmaCapable_TmaKernelCleared) {
-  MakeTmaIncapableComm();
-  uint32_t kmask =
-      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
-  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
-}
-
-TEST_F(SymKernelMaskTest, DefaultParam_NotSymAligned16B_TmaKernelCleared) {
+// Pins the default itself. Unlike the mask cases above, this runs on builds whose SDK lacks the TDM header.
+TEST_F(SymKernelMaskTest, DefaultParam_OffersButDoesNotForce) {
+  EXPECT_EQ(ncclParamSymTmaEnable(), 1);
   MakeTmaCapableComm();
-  uint32_t kmask =
-      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
-  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  EXPECT_FALSE(ncclSymkTmaForced(comm_.get()));
 }
 
 // ---- NCCL_SYM_TMA_ENABLE=2: force by leaving nothing else in the mask ----
@@ -512,6 +505,33 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
 // ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
 
 // Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
+// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label.
+TEST_F(SymKernelMicrotest, KernelIdIsTma_OnlyTheTdmKernels) {
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_TmaSTMC,
+                              ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclSymkKernelId_ReduceScatter_TmaLD}) {
+    EXPECT_TRUE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
+  }
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_ST, ncclSymkKernelId_AllGather_LL,
+                              ncclSymkKernelId_AllReduce_RSxLD_AGxST, ncclSymkKernelId_ReduceScatter_LD}) {
+    EXPECT_FALSE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(ncclSymkKernelId_Count));
+}
+
+TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
+  for (ncclSymkKernelId id :
+       {ncclSymkKernelId_AllGather_LL, ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_ReduceScatter_LL}) {
+    EXPECT_TRUE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
+  }
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_ST,
+                              ncclSymkKernelId_ReduceScatter_LD}) {
+    EXPECT_FALSE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(ncclSymkKernelId_Count));
+}
+
 TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
   EXPECT_FALSE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64));
 }

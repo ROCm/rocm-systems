@@ -6186,12 +6186,10 @@ TEST(WrapMicrotestIsolated, SymkQuery_TmaKernelReportsSymmetricTdm) {
       });
 }
 
-// The tuning input carries the same 16 B alignment bit the live path computes, or
-// the mask drops the TDM kernels and the report disagrees with what runs. Null
-// buffers (the rcclSymKGetInfo ABI) count as aligned.
-TEST(WrapMicrotestIsolated, SymkQuery_NullBuffersCountAsAligned16B) {
+// rcclSymKGetInfo has no operands, so the query defaults symAligned16B to true.
+TEST(WrapMicrotestIsolated, SymkQuery_DefaultsToAligned16BWithoutOperands) {
   RUN_ISOLATED_TEST(
-      "Wrap_SymkQuery_NullBuffersCountAsAligned16B",
+      "Wrap_SymkQuery_DefaultsToAligned16BWithoutOperands",
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
@@ -6213,35 +6211,73 @@ TEST(WrapMicrotestIsolated, SymkQuery_NullBuffersCountAsAligned16B) {
       });
 }
 
-// Window offsets that differ by 4 B clear symAligned16B; a 16 B difference keeps it.
-TEST(WrapMicrotestIsolated, SymkQuery_WindowOffsetsDecideAligned16B) {
+// The caller's alignment bit reaches the tuner, or the mask keeps the TDM kernels
+// that the live path would drop and the report disagrees with what runs.
+TEST(WrapMicrotestIsolated, SymkQuery_PassesCallerAligned16BToTuner) {
   RUN_ISOLATED_TEST(
-      "Wrap_SymkQuery_WindowOffsetsDecideAligned16B",
+      "Wrap_SymkQuery_PassesCallerAligned16BToTuner",
       []() {
         ScopedHook symkAvailable(g_symkAvailable,
                                  [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
         static bool aligned;
+        aligned = true;
         ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
           aligned = in->symAligned16B;
-          out->symKernelId = ncclSymkKernelId_AllGather_TmaST;
-          out->maxChannels = 64;
+          out->symKernelId = ncclSymkKernelId_AllGather_ST;
+          out->maxChannels = 8;
           return ncclSuccess;
         });
-        alignas(16) static char sendBase[64];
-        alignas(16) static char recvBase[64];
-        for (int recvOff : {4, 16}) {
-          ncclComm* comm = MakeZeroedComm();
-          comm->symmetricSupport = 1;
-          TestDevrWindows wins(comm, sendBase, false, recvBase + recvOff, false);
-          wins.windows[0].userPtr = sendBase;
-          wins.windows[1].userPtr = recvBase;
-          aligned = recvOff == 4;  // opposite of the expectation, so a stale value fails
-          int algo, protocol, maxChannels;
-          EXPECT_TRUE(rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol,
-                                    &maxChannels, sendBase, recvBase + recvOff));
-          EXPECT_EQ(recvOff == 16, aligned) << "recvOff=" << recvOff;
-          DeleteCommWithArch(comm);
-        }
+        ncclComm* comm = MakeZeroedComm();
+        comm->symmetricSupport = 1;
+        int algo, protocol, maxChannels;
+        EXPECT_TRUE(rcclSymkQuery(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, &algo, &protocol, &maxChannels,
+                                  /*symAligned16B=*/false));
+        EXPECT_FALSE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// In-place ReduceScatter whose per-rank slice is 24 B: on rank 0 the input and output
+// offsets match, but other ranks' differ by rank * 24, so every rank must report the
+// buffers as unaligned. Out-of-place with the same slice stays aligned.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        static int calls;
+        static bool aligned;
+        calls = 0;
+        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
+          ++calls;
+          aligned = in->symAligned16B;
+          out->symKernelId = ncclSymkKernelId_ReduceScatter_LD;
+          out->maxChannels = 8;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->rank = 0;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char otherbuf[256];
+        constexpr size_t kRecvcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, sendbuf, kRecvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, otherbuf, kRecvcount, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
       });
 }
 
