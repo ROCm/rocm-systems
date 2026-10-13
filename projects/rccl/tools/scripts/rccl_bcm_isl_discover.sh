@@ -340,18 +340,27 @@ if [ "${MODE}" = "populate" ]; then
     echo "Change log:          ${CHANGE_LOG}"
     echo "------------------------------------------------------------"
 
-    # Initialize change log (append mode — preserves entries from previous runs)
-    # Header with timestamp for this run
+    # If the base directory already exists and is non-empty, wipe it first.
+    # A previous --populate may have created links for a different switch
+    # topology (e.g. after firmware repartition); stale entries would cause
+    # ncclOsGetBcmLinks to report peers that no longer share a physical
+    # switch, leading to incorrect PATH_PXB classification.
+    if [ -d "${SYSFS_BASE}" ] && [ -n "$(ls -A "${SYSFS_BASE}" 2>/dev/null)" ]; then
+        echo "  Clearing stale link structure under ${SYSFS_BASE}"
+        rm -rf "${SYSFS_BASE}"
+        rm -f "${CHANGE_LOG}"
+        logger "rccl_bcm_isl_discover: Cleared stale ${SYSFS_BASE} before re-populate"
+    fi
+
+    # Initialize change log
     TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     echo "# --- populate run: ${TIMESTAMP} sysfs_base=${SYSFS_BASE} ---" >> "${CHANGE_LOG}"
 
-    # Create base directory if it doesn't exist
-    if [ ! -d "${SYSFS_BASE}" ]; then
-        mkdir -p "${SYSFS_BASE}"
-        echo "${TIMESTAMP} CREATE_DIR ${SYSFS_BASE}" >> "${CHANGE_LOG}"
-        logger "rccl_bcm_isl_discover: Created base directory ${SYSFS_BASE}"
-        echo "  Created base directory: ${SYSFS_BASE}"
-    fi
+    # Create base directory
+    mkdir -p "${SYSFS_BASE}"
+    echo "${TIMESTAMP} CREATE_DIR ${SYSFS_BASE}" >> "${CHANGE_LOG}"
+    logger "rccl_bcm_isl_discover: Created base directory ${SYSFS_BASE}"
+    echo "  Created base directory: ${SYSFS_BASE}"
 
     CREATED=0
     EXISTED=0
