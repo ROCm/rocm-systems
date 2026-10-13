@@ -27,7 +27,7 @@ on:
         description: 'ROCm/tRCCL git ref (commit, tag, or branch) to check out the harness at.'
         type: string
         required: false
-        default: 'main'
+        default: '1.3.x'
       trigger_kind:
         description: 'coco --trigger-kind, recorded against the run. Required, so a caller that does not wire it through fails rather than mislabelling its run.'
         type: string
@@ -242,7 +242,7 @@ jobs:
               --trigger-kind "${TRIGGER_KIND}" \
               -o "${COCO_OUTPUT}" \
               "$@" \
-              ${COCO_ARGS} 2>&1 | tee "${log}"
+              ${COCO_ARGS} > "${log}" 2>&1
             assert_built "${log}"
           }
 
@@ -267,7 +267,7 @@ jobs:
             "${COCO_VENV}/bin/coco" run \
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
-              ${COCO_ARGS} 2>&1 | tee "${LOG_FILE}"
+              ${COCO_ARGS} > "${LOG_FILE}" 2>&1
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1
