@@ -93,6 +93,7 @@ test_categories:
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
