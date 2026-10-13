@@ -332,23 +332,27 @@ expected_cdna3_buffer_load_lds_sequence(uint16_t mubuf_op, uint16_t ds_op,
   };
 }
 
-std::vector<ExpectedCdna3Inst> expected_cdna3_permlane32_swap_sequence() {
+std::vector<ExpectedCdna3Inst> expected_cdna3_permlane_swap_sequence(uint8_t width) {
+  const auto low_mask =
+      width == 16 ? expect_sop2(cdna3::kSPackLlB32B16Sop2) : expect_sop1(cdna3::kSMovB32);
+  const auto high_mask =
+      width == 16 ? expect_sop2(cdna3::kSPackHhB32B16Sop2) : expect_sop1(cdna3::kSMovB32);
   return {
       expect_sop1(cdna3::kSMovB64),            // s_mov_b64 save EXEC.
       expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, -1.
       expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, -1.
       expect_vop3(cdna3::kVMbcntLoU32B32Vop3), // v_mbcnt_lo_u32_b32
       expect_vop3(cdna3::kVMbcntHiU32B32Vop3), // v_mbcnt_hi_u32_b32
-      expect_vop3(cdna3::kVXorB32Vop3),        // v_xor_b32 lane, 32.
+      expect_vop3(cdna3::kVXorB32Vop3),        // v_xor_b32 lane, width.
       expect_vop3(cdna3::kVLshlrevB32Vop3),    // v_lshlrev_b32 byte address.
       expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32 from old vdst high half.
       expect_ds(cdna3::kDsBpermuteB32Ds),      // ds_bpermute_b32 from old src low half.
       expect_sopp(cdna3::kSWaitcntSopp),       // s_waitcnt lgkmcnt(0).
-      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, low-half mask.
-      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, low-half mask.
+      low_mask,                                // exec_lo = saved_exec_lo & low-group mask.
+      low_mask,                                // exec_hi = saved_exec_hi & low-group mask.
       expect_vop3(cdna3::kVMovB32Vop3),        // v_mov_b32 src <- old vdst high.
-      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_lo, high-half mask.
-      expect_sop1(cdna3::kSMovB32),            // s_mov_b32 exec_hi, high-half mask.
+      high_mask,                               // exec_lo = saved_exec_lo & high-group mask.
+      high_mask,                               // exec_hi = saved_exec_hi & high-group mask.
       expect_vop3(cdna3::kVMovB32Vop3),        // v_mov_b32 vdst <- old src low.
       expect_sop1(cdna3::kSMovB64),            // s_mov_b64 restore EXEC.
   };
@@ -1018,28 +1022,28 @@ std::vector<Cdna4ToCdna3SemanticRuleCase> cdna4_to_cdna3_semantic_rule_cases() {
                                              /*op_sel_hi_2=*/1, /*clamp=*/true)},
       {"VPermlane16SwapB32E32", cdna4::encoding::kVop1, cdna4::kVPermlane16SwapB32Vop1,
        make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(16), 1},
       {"VPermlane16SwapB32E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVPermlane16SwapB32Vop1,
        make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi1),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(16), 1},
       {"VPermlane16SwapB32E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVPermlane16SwapB32Vop1,
        make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi2),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(16), 1},
       {"VPermlane16SwapB32E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVPermlane16SwapB32Vop1,
        make_cdna4_permlane16_swap_b32_words(cdna4::encoding::kVop1Hi3),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(16), 1},
       {"VPermlane32SwapB32E32", cdna4::encoding::kVop1, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(32), 1},
       {"VPermlane32SwapB32E32Hi1", cdna4::encoding::kVop1Hi1, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi1),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(32), 1},
       {"VPermlane32SwapB32E32Hi2", cdna4::encoding::kVop1Hi2, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi2),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(32), 1},
       {"VPermlane32SwapB32E32Hi3", cdna4::encoding::kVop1Hi3, cdna4::kVPermlane32SwapB32Vop1,
        make_cdna4_permlane32_swap_b32_words(cdna4::encoding::kVop1Hi3),
-       expected_cdna3_permlane32_swap_sequence(), 1},
+       expected_cdna3_permlane_swap_sequence(32), 1},
       {"MfmaF32_16x16x32Bf16", cdna4::encoding::kVop3p, cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma,
        make_cdna4_mfma_words(cdna4::kVMfmaF3216x16x32Bf16Vop3pMfma, 0, 256, 260),
        expected_cdna3_mfma_sequence(cdna3::kVMfmaF3216x16x16Bf16Vop3pMfma)},
@@ -6382,42 +6386,101 @@ TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneExecSaveReservesSpecialSgprTail) {
   expect_cdna3_translated_descriptor_sgprs_eq(result.elf_bytes, 80);
 }
 
-TEST(BinaryTranslatorE2E, Cdna4ToCdna3Permlane16SwapWritesBothRowPairs) {
-  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
-  const auto permlane =
-      make_cdna4_permlane16_swap_b32_words(/*encoding_id=*/cdna4::encoding::kVop1);
-  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
-      {permlane[0], permlane[1], kCdna4SEndpgm});
+TEST(BinaryTranslatorE2E, Cdna4ToCdna3PermlaneSwapPreservesInactiveLanes) {
+  // Include asymmetric masks to check inactive destinations without prescribing
+  // the value read from an inactive source peer. Symmetric masks also verify
+  // that both row pairs gather their original values before either write.
+  constexpr std::array<uint64_t, 10> exec_masks = {0,
+                                                   UINT64_MAX,
+                                                   1,
+                                                   uint64_t{1} << 16,
+                                                   uint64_t{1} << 32,
+                                                   uint64_t{1} << 48,
+                                                   uint64_t{1} << 63,
+                                                   0x0001000100010001ull,
+                                                   0x8001800180018001ull,
+                                                   0xaaaaaaaaaaaaaaaaull};
+  for (const uint8_t width : {16, 32}) {
+    for (const bool alias : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "width=" << unsigned(width) << " alias=" << alias);
+      constexpr uint8_t vdst = 0;
+      const uint8_t vsrc = alias ? vdst : 1;
+      const auto swap = cdna4::build_vop1(
+          width == 16 ? cdna4::kVPermlane16SwapB32Vop1 : cdna4::kVPermlane32SwapB32Vop1,
+          {.src0 = static_cast<uint16_t>(256 + vsrc), .vdst = vdst});
+      auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_descriptor_after_text(
+          {swap[0], rocjitsu::build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)});
+      rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
+      const auto result = translator.translate(source);
+      ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                              : result.diagnostics.front().message);
+      rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(translated.is_valid());
+      ASSERT_FALSE(translated.text_sections().empty());
+      const auto *text = reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
+      const size_t word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
+      auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+      ASSERT_NE(decoder, nullptr);
 
-  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_TRUE(source.is_valid());
-
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA3);
-  auto result = translator.translate(source);
-  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
-                                                          : result.diagnostics.front().message);
-  ASSERT_FALSE(result.elf_bytes.empty());
-
-  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  ASSERT_TRUE(translated.is_valid());
-  ASSERT_FALSE(translated.text_sections().empty());
-  const auto *target_words =
-      reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  const size_t target_word_count = translated.text_sections()[0]->size() / sizeof(uint32_t);
-
-  // V_PERMLANE16_SWAP_B32 swaps both 16-lane row pairs: lanes 0..15 with
-  // 16..31, and lanes 32..47 with 48..63. The lowering therefore emits the
-  // same low/high row masks into EXEC_LO and EXEC_HI.
-  constexpr uint8_t kExecLoSgpr = 126;
-  constexpr uint8_t kExecHiSgpr = 127;
-  EXPECT_EQ(
-      count_cdna3_s_mov_b32_literal(target_words, target_word_count, kExecLoSgpr, 0x0000ffffu), 1u);
-  EXPECT_EQ(
-      count_cdna3_s_mov_b32_literal(target_words, target_word_count, kExecLoSgpr, 0xffff0000u), 1u);
-  EXPECT_EQ(
-      count_cdna3_s_mov_b32_literal(target_words, target_word_count, kExecHiSgpr, 0x0000ffffu), 1u);
-  EXPECT_EQ(
-      count_cdna3_s_mov_b32_literal(target_words, target_word_count, kExecHiSgpr, 0xffff0000u), 1u);
+      rocjitsu::amdgpu::GpuMemory memory("permlane_mem");
+      rocjitsu::amdgpu::L2Cache l2("permlane_l2");
+      rocjitsu::amdgpu::ComputeUnitCore::Config cfg{};
+      cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+      cfg.num_wf_slots = 1;
+      cfg.sgprs_per_wf = 102;
+      cfg.vgprs_per_wf = 256;
+      cfg.lds_size_kb = 64;
+      auto cu = rocjitsu::amdgpu::ComputeUnitCore::create("permlane", cfg, &memory, &l2);
+      ASSERT_NE(cu, nullptr);
+      auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t vb = wf->vgpr_alloc().base;
+      const auto initial = [](uint8_t reg, uint32_t lane) { return 0x1000u * (reg + 1) + lane; };
+      for (const uint64_t exec : exec_masks) {
+        for (const bool scc : {false, true}) {
+          SCOPED_TRACE(::testing::Message() << "exec=" << exec << " scc=" << scc);
+          for (uint8_t reg = 0; reg < 2; ++reg)
+            for (uint32_t lane = 0; lane < 64; ++lane)
+              cu->write_vgpr(vb + reg, lane, initial(reg, lane));
+          wf->set_exec(exec);
+          wf->write_scc(scc);
+          constexpr uint64_t vcc = 0x123456789abcdef0ull;
+          wf->set_vcc(vcc);
+          bool reached_end = false;
+          for (size_t offset = 0; offset < word_count;) {
+            std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, text + offset));
+            ASSERT_NE(inst, nullptr);
+            if (std::string_view(inst->mnemonic()) == "s_endpgm") {
+              reached_end = true;
+              break;
+            }
+            ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded()) << inst->mnemonic();
+            offset += static_cast<size_t>(inst->size()) / sizeof(uint32_t);
+          }
+          ASSERT_TRUE(reached_end);
+          EXPECT_EQ(wf->exec(), exec);
+          EXPECT_EQ(wf->read_scc(), scc);
+          EXPECT_EQ(wf->vcc(), vcc);
+          for (uint8_t reg = 0; reg < (alias ? 1 : 2); ++reg) {
+            for (uint32_t lane = 0; lane < 64; ++lane) {
+              const bool high = (lane & width) != 0;
+              const bool output = high ? reg == vdst : reg == vsrc;
+              const bool written = output && ((exec >> lane) & 1u);
+              const uint32_t peer = lane ^ width;
+              if (written && ((exec >> peer) & 1u) == 0)
+                continue;
+              const uint32_t expected =
+                  written ? initial(high ? vsrc : vdst, peer) : initial(reg, lane);
+              EXPECT_EQ(cu->read_vgpr(vb + reg, lane), expected)
+                  << "v" << unsigned(reg) << " lane=" << lane;
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 TEST(BinaryTranslatorE2E, RelocatedKernelCompactsReachableBodyAndPatchesBranches) {

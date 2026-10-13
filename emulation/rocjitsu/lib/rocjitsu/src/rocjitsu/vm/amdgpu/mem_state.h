@@ -170,6 +170,9 @@ public:
   bool is_load = true;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
+  /// FLAT counter participation selected from the resolved requesting lanes.
+  /// Unset before routing; decoded metadata continues to describe all domains.
+  std::optional<MemoryIssueInfo> routed_issue_info;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE

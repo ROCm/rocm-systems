@@ -170,6 +170,9 @@ struct PlaybackContext {
     bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
+    // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
+    // the pitched copies hold only the copied rows, packed end to end.
+    bool packed_host_rects = false;
     std::string kernel_filter;
 
     // Lightweight replay tracing. These are intentionally separate from
@@ -792,6 +795,15 @@ void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
 // would abort the replay over a call the recording shows failing identically.
 void hrr_note_recorded_error(PlaybackContext& ctx, const char* api,
                              int recorded_ret);
+
+// ---------------------------------------------------------------------------
+// hrr_runtime_symbol — address of an exported function in the HIP runtime this
+// process loaded, or nullptr when it does not export it.
+//
+// Handlers for APIs in _PLAYBACK_RUNTIME_RESOLVED_APIS (gen_hrr_api_args.py)
+// call through this instead of a link-time reference, so a playback built
+// against an SDK older than the tree still links and runs.
+void* hrr_runtime_symbol(const char* name);
 
 // ---------------------------------------------------------------------------
 // hrr_replayed_recorded_error — did this call fail exactly as the recording

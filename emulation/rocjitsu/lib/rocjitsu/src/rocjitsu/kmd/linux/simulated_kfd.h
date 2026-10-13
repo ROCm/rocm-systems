@@ -449,7 +449,8 @@ public:
   /// @retval true the range was installed.
   /// @retval false the local process is gone, so nothing was mapped (the caller
   ///         must surface an error rather than report a phantom success).
-  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags);
+  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                                bool sealed_ram = false);
 
   /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
   /// @retval true the range was unmapped.

@@ -100,8 +100,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // TODO: Move indirect-access properties into decoded instruction metadata so
   // future ISA variants cannot bypass this completeness gate. The scalar
   // s_movrel* family displaces an SGPR index through M0 the same way and has no
-  // equivalent gate here, so consumers needing one scan mnemonics themselves
-  // (code/patch/probe_live_in.cpp).
+  // equivalent gate here; consumers needing one call
+  // accesses_sgprs_indirectly_via_movrel().
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -198,6 +198,18 @@ uint32_t explicit_ordinary_sgpr_bound(KernelBlockScope blocks) {
     }
   }
   return bound;
+}
+
+bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks) {
+  for (BasicBlock *block : blocks) {
+    if (block == nullptr)
+      continue;
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic().starts_with("s_movrel"))
+        return true;
+    }
+  }
+  return false;
 }
 
 LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, std::unique_ptr<ExecMaskAnalysis> exec,
