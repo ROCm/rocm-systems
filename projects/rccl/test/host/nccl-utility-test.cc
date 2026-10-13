@@ -7,16 +7,18 @@
 // Host-only microtests for the pure host/device math helpers in
 // src/include/nccl_device/utility.h: rounding/alignment arithmetic, the
 // fast-division reciprocal family, the memory_order conversion helpers, and
-// the Optional<T>/Present<T...> variadic construction helpers. All targeted
-// functions are NCCL_HOST_DEVICE_INLINE with no HIP/device-only dependency,
-// so the real header compiles and runs unmodified in a host-only TU -- no
-// fakes needed.
+// the Optional<T>/Present<T...> variadic construction helpers. Most targeted
+// functions are NCCL_HOST_DEVICE_INLINE with no HIP/device-only dependency;
+// acquireOrderOf/releaseOrderOf/toAtomicBuiltinOrder/toCudaOrder are the
+// exception -- they sit inside `#if NCCL_CHECK_CUDACC`, which this build
+// satisfies because both the real device build and this host-only
+// `--offload-host-only` build still invoke hipcc. The real header compiles
+// and runs unmodified in a host-only TU either way -- no fakes needed.
 
 #include <gtest/gtest.h>
 
 #include <atomic>
 #include <cstdint>
-#include <limits>
 
 #include "nccl_device/utility.h"
 
@@ -77,6 +79,11 @@ TEST(NcclUtilityMicrotest, RoundUpDown_AreInverseDirectionsAroundAMultiple) {
   EXPECT_EQ(roundDown(7u, 8u), 0u);
   EXPECT_EQ(roundDown(8u, 8u), 8u);
   EXPECT_EQ(roundDown(15u, 8u), 8u);
+
+  // Non-power-of-two modulus: these use % y, not a power-of-two mask. Without
+  // this pair, modulus 8 alone can't tell `% y` apart from `& (y - 1)`.
+  EXPECT_EQ(roundUp(5u, 3u), 6u);
+  EXPECT_EQ(roundDown(7u, 3u), 6u);
 }
 
 TEST(NcclUtilityMicrotest, AlignUpDown_ScalarOverload_AssumesPowerOfTwoAlignment) {
@@ -95,14 +102,15 @@ TEST(NcclUtilityMicrotest, AlignUpDown_PointerOverload_RoundsTheAddressNotTheByt
   alignas(32) char buf[64];
   // Single-byte-type overload: static_assert(sizeof(T) == 1) gates this at
   // compile time, so the test itself is part of the contract being checked.
+  // Exact expectations, not just "divisible by 16": the mod/bound checks
+  // below would equally pass an off-by-one mutation of utility.h's
+  // `(addr + a - 1) & -uintptr_t(a)` to `(addr + a) & -uintptr_t(a)`, since
+  // buf + 3 rounds to buf + 16 either way.
   char* base = buf + 3;
   char* up = alignUp(base, size_t(16));
   char* down = alignDown(base, size_t(16));
-  EXPECT_EQ(reinterpret_cast<uintptr_t>(up) % 16, 0u);
-  EXPECT_EQ(reinterpret_cast<uintptr_t>(down) % 16, 0u);
-  EXPECT_GE(up, base);
-  EXPECT_LE(down, base);
-  EXPECT_LT(reinterpret_cast<uintptr_t>(up) - reinterpret_cast<uintptr_t>(down), 32u);
+  EXPECT_EQ(up, buf + 16);
+  EXPECT_EQ(down, buf);
 }
 
 TEST(NcclUtilityMicrotest, IsPow2_TrueOnlyForPowersOfTwoAndZero) {
@@ -126,19 +134,22 @@ TEST(NcclUtilityMicrotest, RollingLessEqAndLessThan_WrapAroundHalfTheRangeCorrec
   EXPECT_TRUE(rollingLessEq(uint8_t(7), uint8_t(7), 8));
   EXPECT_FALSE(rollingLessThan(uint8_t(7), uint8_t(7), 8));
 
-  // rollingLessThan is defined as !rollingLessEq(b, a); verify that identity
-  // directly so a copy-paste swap of a/b in either function is caught.
-  for (uint8_t a : {uint8_t(0), uint8_t(1), uint8_t(127), uint8_t(128), uint8_t(200)}) {
-    for (uint8_t b : {uint8_t(0), uint8_t(1), uint8_t(127), uint8_t(128), uint8_t(200)}) {
-      EXPECT_EQ(rollingLessThan(a, b, 8), !rollingLessEq(b, a, 8)) << "a=" << int(a) << " b=" << int(b);
-    }
-  }
+  // Every call above passes nBits == 8*sizeof(Uint) (a no-op mask), so the
+  // `m = Uint(-1) >> (8*sizeof(Uint) - nBits)` shift at utility.h:197 is
+  // never actually exercised -- production calls it with a narrower runtime
+  // width (gin_barrier__funcs.h:110 passes 32 for a uint64_t counter). Use a
+  // wider type with an explicit partial-width nBits so the mask is load-bearing:
+  // true only because the high 32 bits are masked out of the wraparound check.
+  EXPECT_TRUE(rollingLessEq(uint64_t(0xFFFFFFF0ull), uint64_t(0x10ull), 32));
+  EXPECT_FALSE(rollingLessEq(uint64_t(0x10ull), uint64_t(0xFFFFFFF0ull), 32));
 }
 
 TEST(NcclUtilityMicrotest, IdivRcp32_MatchesExactFormulaIncludingPow2Correction) {
-  // Formula: uint32_t(-1)/x + isPow2(x). The +1 correction for powers of two
-  // is what makes idivFast32 exact when y is a power of two; drop it and the
-  // round-trip test below would start failing for y in {1,2,4,...}.
+  // Formula: uint32_t(-1)/x + isPow2(x). The +1 term is a branch-avoidance
+  // optimisation, not a correctness requirement: idivFast32's own
+  // `if (r >= y) { q += 1; r -= y; }` correction step already recovers the
+  // right answer even without it. These assertions pin the exact reciprocal
+  // value the formula produces, not just that the round-trip still works.
   EXPECT_EQ(idivRcp32(1u), uint32_t(-1) / 1u + 1u);
   EXPECT_EQ(idivRcp32(2u), uint32_t(-1) / 2u + 1u);
   EXPECT_EQ(idivRcp32(3u), uint32_t(-1) / 3u + 0u);
@@ -154,7 +165,7 @@ TEST(NcclUtilityMicrotest, IdivRcp64_MatchesExactFormulaIncludingPow2Correction)
 
 TEST(NcclUtilityMicrotest, Mul32Hi_ReturnsTheHighHalfOfTheFull64BitProduct) {
   EXPECT_EQ(mul32hi(0u, 0xFFFFFFFFu), 0u);
-  EXPECT_EQ(mul32hi(0xFFFFFFFFu, 0xFFFFFFFFu), uint32_t((uint64_t(0xFFFFFFFFu) * 0xFFFFFFFFu) >> 32));
+  EXPECT_EQ(mul32hi(0xFFFFFFFFu, 0xFFFFFFFFu), 0xFFFFFFFEu);
   EXPECT_EQ(mul32hi(0x10000u, 0x10000u), 1u); // 2^16 * 2^16 == 2^32, high half == 1
 }
 
@@ -162,6 +173,7 @@ TEST(NcclUtilityMicrotest, Mul64Hi_ReturnsTheHighHalfOfTheFull128BitProduct) {
   EXPECT_EQ(mul64hi(0ull, ~0ull), 0ull);
   uint64_t big = 0x1'0000'0000ull; // 2^32
   EXPECT_EQ(mul64hi(big, big), 1ull); // 2^32 * 2^32 == 2^64, high half == 1
+  EXPECT_EQ(mul64hi(~0ull, ~0ull), 0xFFFFFFFFFFFFFFFEull);
 }
 
 TEST(NcclUtilityMicrotest, ImulRcp32_HandlesZeroReciprocalShortCircuitsAndMatchesIdivRcpOfProduct) {
@@ -201,7 +213,12 @@ TEST(NcclUtilityMicrotest, ImulRcp64_HandlesZeroReciprocalShortCircuitsAndMatche
 TEST(NcclUtilityMicrotest, IdivmodFast32_MatchesOrdinaryDivisionAcrossDivisorsAndYrcpZeroShortcut) {
   for (uint32_t y : {1u, 2u, 3u, 7u, 16u, 100u, 4096u}) {
     uint32_t yrcp = idivRcp32(y);
-    for (uint32_t x : {0u, 1u, 5u, 41u, 4095u, 4096u, 1000000u}) {
+    // 0xFFFFFFFFu exercises the top of the range: idivRcp32's single
+    // `if (r >= y)` correction step only recovers an *under*-estimating
+    // reciprocal, so an over-estimate (e.g. an erroneous unconditional +1)
+    // is only caught near the dividend's upper bound, not by the smaller
+    // values below.
+    for (uint32_t x : {0u, 1u, 5u, 41u, 4095u, 4096u, 1000000u, 0xFFFFFFFFu}) {
       uint32_t q, r;
       idivmodFast32(&q, &r, x, y, yrcp);
       EXPECT_EQ(q, x / y) << "x=" << x << " y=" << y;
@@ -218,7 +235,8 @@ TEST(NcclUtilityMicrotest, IdivmodFast32_MatchesOrdinaryDivisionAcrossDivisorsAn
 TEST(NcclUtilityMicrotest, IdivmodFast64_MatchesOrdinaryDivisionAcrossDivisorsAndYrcpZeroShortcut) {
   for (uint64_t y : {1ull, 2ull, 3ull, 7ull, 16ull, 100ull, 1ull << 20}) {
     uint64_t yrcp = idivRcp64(y);
-    for (uint64_t x : {0ull, 1ull, 5ull, 41ull, (1ull << 20) - 1, 1ull << 20, 1ull << 40}) {
+    // ~0ull is the 64-bit counterpart of the 32-bit sweep's 0xFFFFFFFFu above.
+    for (uint64_t x : {0ull, 1ull, 5ull, 41ull, (1ull << 20) - 1, 1ull << 20, 1ull << 40, ~0ull}) {
       uint64_t q, r;
       idivmodFast64(&q, &r, x, y, yrcp);
       EXPECT_EQ(q, x / y) << "x=" << x << " y=" << y;
@@ -238,12 +256,14 @@ TEST(NcclUtilityMicrotest, IdivFast32_MatchesRefDivisionAndIdivFast64TruncatesTo
       EXPECT_EQ(idivFast32(x, y, yrcp), refDiv32(x, y));
     }
   }
-  // idivFast64 returns a uint32_t truncation of a 64-bit quotient; pick a
-  // quotient that fits in 32 bits so truncation is a correctness check, not
-  // a free pass.
+  // idivFast64 narrows a 64-bit quotient to uint32_t. A quotient that fits in
+  // 32 bits leaves the narrowing inert (the oracle's own uint32_t cast is a
+  // no-op too), so the second case below -- whose true quotient is far above
+  // 2^32 -- is the one that actually exercises the truncation.
   uint64_t y = 1000, yrcp64 = idivRcp64(y);
   uint64_t x = 123456789ull;
   EXPECT_EQ(idivFast64(x, y, yrcp64), uint32_t(refDiv64(x, y)));
+  EXPECT_EQ(idivFast64(1ull << 40, 1ull, idivRcp64(1ull)), 0u);
 }
 
 TEST(NcclUtilityMicrotest, ImodFast32And64_MatchRefModulo) {
@@ -297,7 +317,7 @@ TEST(NcclUtilityMicrotest, Optional_DestructorOnlyRunsWhenPresentIsTrue) {
 
   destructorCalls = 0;
   {
-    Optional<Counted> present_opt(present());
+    Optional<Counted> presentOpt(present());
   }
   EXPECT_EQ(destructorCalls, 1);
 }
