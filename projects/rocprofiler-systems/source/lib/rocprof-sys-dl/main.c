@@ -122,16 +122,14 @@ rocprofsys_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** 
             // call original main
             return user_main(_main, _argc, _argv, _init, _fini, _rtld_fini, _stack_end);
         }
-        else
-        {
-            // return user_main(rocprofsys_main, _argc, _argv,
-            //                  rocprofsys_main_init, _fini,
-            //                  _rtld_fini, _stack_end);
 
-            // call rocprof-sys main function wrapper
-            return user_main(rocprofsys_main, _argc, _argv, _init, _fini, _rtld_fini,
-                             _stack_end);
-        }
+        // return user_main(rocprofsys_main, _argc, _argv,
+        //                  rocprofsys_main_init, _fini,
+        //                  _rtld_fini, _stack_end);
+
+        // call rocprof-sys main function wrapper
+        return user_main(rocprofsys_main, _argc, _argv, _init, _fini, _rtld_fini,
+                         _stack_end);
     }
     else
     {

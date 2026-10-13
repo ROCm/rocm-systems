@@ -95,7 +95,3 @@ class TestRevisionIdReporting(unittest.TestCase):
     def test_rev_id_not_supported_renders_na(self):
         # rev_id shares the not-supported value, so it must not leak it raw.
         self.assertEqual(_asic_info_with(0x47, 0x47)["rev_id"], "N/A")
-
-
-if __name__ == "__main__":
-    unittest.main()

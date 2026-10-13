@@ -175,9 +175,6 @@ include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM OR ENABLE_ROCSHMEM_GIN)
   include(cmake/ROCSHMEM.cmake)
-  if(RCCL_POISON_HIP_ATOMICS)
-    message(WARNING "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are incompatible with RCCL_POISON_HIP_ATOMICS")
-  endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -199,8 +196,10 @@ endif()
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 
-# Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
+# Adjust GPU architectures for Address Sanitizer builds; per-family rules are
+# in cmake/AsanGpuTargets.cmake.
 if (BUILD_ADDRESS_SANITIZER)
+  include(cmake/AsanGpuTargets.cmake)
   set(_suffix "asan")
   set(_clang_rt_names "libclang_rt.${_suffix}.so" "libclang_rt.${_suffix}-x86_64.so")
   foreach(_clang_rt_name ${_clang_rt_names})
@@ -220,18 +219,13 @@ if (BUILD_ADDRESS_SANITIZER)
   endif()
   message(STATUS "ASAN runtime directory: ${ASAN_RUNTIME_DIR}")
 
-  SET(amdgpu_targets "")
-  foreach(amdgpu_target IN LISTS GPU_TARGETS)
-    if(NOT amdgpu_target STREQUAL "")
-      string(FIND "${amdgpu_target}" ":xnack+" HAS_XNACK_SUFFIX)
-      if(HAS_XNACK_SUFFIX EQUAL -1)
-        list(APPEND amdgpu_targets "${amdgpu_target}:xnack+")
-      else()
-        list(APPEND amdgpu_targets "${amdgpu_target}")
-      endif()
-    endif()
-  endforeach()
-  SET(GPU_TARGETS "${amdgpu_targets}")
+  # Guarded so that "no targets at all" still reaches the curated diagnostic
+  # below. rocm_local_targets() reports failure as the literal "NOTFOUND",
+  # which if() treats as false along with the empty case.
+  if(GPU_TARGETS)
+    rccl_asan_adjust_gpu_targets(GPU_TARGETS ${GPU_TARGETS})
+    message(STATUS "ASAN: GPU targets = ${GPU_TARGETS}")
+  endif()
 endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
@@ -242,6 +236,10 @@ else()
   message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
   set(SUPPORTED_GPUS ${DEFAULT_GPUS})
 endif()
+
+# TLS backend for socket encryption (empty = disabled; OPENSSL3 = headers only, libssl is dlopen'd at runtime)
+set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3)")
+set_property(CACHE TLS_BACKEND PROPERTY STRINGS "" OPENSSL3)
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
@@ -630,6 +628,17 @@ set(USE_AMDSMI ON CACHE INTERNAL "Force enable AMD SMI path since we use lazy lo
 #   endif ()
 # endif()
 
+## Check for TLS backend (socket encryption, see src/misc/crypt.cc)
+set(NCCL_TLS_INCLUDE_DIRS)
+if(TLS_BACKEND STREQUAL "OPENSSL3")
+  find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
+  add_compile_definitions(NCCL_TLS_BACKEND_OPENSSL3=1)
+  list(APPEND NCCL_TLS_INCLUDE_DIRS ${OPENSSL_INCLUDE_DIR})
+  include_directories(${NCCL_TLS_INCLUDE_DIRS})
+elseif(NOT TLS_BACKEND STREQUAL "")
+  message(FATAL_ERROR "Unsupported TLS_BACKEND '${TLS_BACKEND}'; expected OPENSSL3 or empty")
+endif()
+
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
   enable_language(C)
@@ -784,6 +793,23 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
+## the files being staged on every node. Disk locations remain as overrides.
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
+set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
+# Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
+# when an input is newer than the output, so deleting a CSV would leave it
+# embedded. The script rewrites the header only when the content changes, so
+# running every build does not churn rebuilds.
+add_custom_target(rccl_embedded_tuner_configs
+  ALL
+  COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
+                           -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
+                           -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
+  COMMENT "Generating embedded RCCL tuner configs"
+  VERBATIM)
+
 # Example plugins are C sources
 if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
   enable_language(C)
@@ -848,6 +874,16 @@ rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl.h
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device/
              DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device)
+# Install SDMA device headers so consumers can compile GIN SDMA device templates
+# without depending on ROCSHMEM_SOURCE_DIR.
+if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
+  rocm_install(FILES
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/anvil_device.hpp
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_opcodes.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct.h
+    ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
+endif()
 ## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
 ## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
 ## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
@@ -862,9 +898,15 @@ if(EMIT_LLVM_IR)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
-## Install tuner config directory for CSV-based tuner
-file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
+## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
+## so nothing is copied to the build tree or installed. A CSV placed in
+## <libdir>/tuner/ or share/rccl/tuner/ still overrides the embedded defaults.
+##
+## Migration: dropping these rules does not delete copies an earlier build or
+## install already wrote, and those still win over the embedded map. Package
+## upgrades remove the installed copy, but `cmake --install` over an existing
+## prefix does not, and an incremental build tree keeps <builddir>/tuner/ next
+## to librccl.so. Delete those by hand to pick up the embedded defaults.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
@@ -932,6 +974,7 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)
     add_subdirectory(plugins/mixed/example)
+    add_subdirectory(plugins/rma/example)
   endif()
   add_subdirectory(test)
 

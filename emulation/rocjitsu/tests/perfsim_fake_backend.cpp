@@ -542,7 +542,7 @@ ffm_observer_plugin_get_api(uint32_t host_api_version) {
                     : mode_is("too_old_version") ? 7
                     : mode_is("bad_version")     ? 14
                                                  : 13;
-  api.name = "rocjitsu-perfsim-fake";
+  api.name = mode_is("gpucsim_name") ? "GPUCompilerSim" : "rocjitsu-perfsim-fake";
   api.on_init = on_init;
   api.on_dispatch_begin = on_dispatch_begin;
   api.on_dispatch_end = on_dispatch_end;

@@ -1,0 +1,79 @@
+{
+  "evaluations": [
+    {
+      "id": "pcs-which-instruction-stalls",
+      "skill_should_trigger": true,
+      "prompt": "which instruction in my MI300 kernel stalls the most?",
+      "expected_behavior": [
+        "queries the device for supported PC sampling configurations before choosing an interval",
+        "collects with --experimental --pc-sampling",
+        "sorts the analysis by sample count and reads the stall reason column"
+      ],
+      "unexpected_behavior": [
+        "hardcodes a sampling interval without querying the device"
+      ],
+      "logs_contain": ["--pc-sampling", "rocprofv3-avail"]
+    },
+    {
+      "id": "pcs-source-line-attribution",
+      "skill_should_trigger": true,
+      "prompt": "map the hot GPU instructions back to my HIP source lines",
+      "expected_behavior": [
+        "states that source line mapping requires the application to be built with debug info",
+        "notes that samples map to assembly even without debug info"
+      ],
+      "unexpected_behavior": [
+        "promises source line attribution for a build with no debug info"
+      ]
+    },
+    {
+      "id": "pcs-stochastic-vs-host-trap",
+      "skill_should_trigger": true,
+      "prompt": "should I use stochastic or host trap PC sampling on this GPU?",
+      "expected_behavior": [
+        "explains that only stochastic records a stall reason",
+        "notes stochastic needs MI300 or newer and host_trap is the fallback",
+        "checks what the installed device actually supports"
+      ],
+      "logs_contain": ["stochastic"]
+    },
+    {
+      "id": "pcs-export-disassembly",
+      "skill_should_trigger": true,
+      "prompt": "export the annotated disassembly with sample counts from my pc sampling workload",
+      "expected_behavior": [
+        "uses --output-format csv or db",
+        "notes that the per-kernel disassembly is written under per_kernel_pc_sampling"
+      ],
+      "logs_contain": ["--output-format"]
+    },
+    {
+      "id": "pcs-host-trap-stall-reason",
+      "skill_should_trigger": true,
+      "prompt": "my host trap PC sampling run has no stall reasons, how do I interpret them?",
+      "expected_behavior": [
+        "explains that host_trap records no stall reason",
+        "offers stochastic sampling if the device supports it"
+      ],
+      "unexpected_behavior": [
+        "interprets a stall reason from host-trap data"
+      ]
+    },
+    {
+      "id": "pcs-rank-kernels-by-time",
+      "skill_should_trigger": false,
+      "note": "Hotspot wording, but ranking whole kernels is counter work, not instruction sampling.",
+      "prompt": "which of my GPU kernels accounts for the most total time?"
+    },
+    {
+      "id": "pcs-cpu-profiler",
+      "skill_should_trigger": false,
+      "prompt": "profile my C++ program's CPU hotspots with perf"
+    },
+    {
+      "id": "pcs-cuda-sampling",
+      "skill_should_trigger": false,
+      "prompt": "do instruction level sampling on my CUDA kernel"
+    }
+  ]
+}

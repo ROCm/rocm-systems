@@ -19,6 +19,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include <algorithm>
 #include <cstdint>
 
 #include <timemory/components/timing/backends.hpp>
@@ -67,8 +68,8 @@ experiment::sample::sample(const base_type& _b, std::uint64_t _c)
         {
             if(itr.inlined)
             {
-                inlines.emplace_back(
-                    binary::inlined_symbol{ itr.line, itr.location, itr.name });
+                inlines.emplace_back(binary::inlined_symbol{
+                    .line = itr.line, .file = itr.location, .func = itr.name });
             }
         }
     }
@@ -140,6 +141,8 @@ experiment::record::serialize(ArchiveT& ar, const unsigned)
     ar(cereal::make_nvp("startup_time", startup),
        cereal::make_nvp("experiments", experiments),
        cereal::make_nvp("runtime", runtime));
+    // NOLINTNEXTLINE(misc-const-correctness) - deserialized into by ar() below when
+    // ArchiveT is an input archive
     auto _samples = std::vector<sample>{};
     if constexpr(concepts::is_input_archive<ArchiveT>::value)
     {
@@ -181,7 +184,7 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         init_progress.clear();
         fini_progress.clear();
         ar(cereal::make_nvp("progress_points", _ppts));
-        for(auto itr : _ppts)
+        for(const auto& itr : _ppts)
         {
             fini_progress.emplace(itr.get_hash(), itr);
         }
@@ -195,12 +198,12 @@ experiment::serialize(ArchiveT& ar, const unsigned)
             {
                 pitr.second.set_hash(pitr.first);
             }
-            for(auto pitr : init_progress)
+            for(const auto& pitr : init_progress)
             {
                 ppts[pitr.first] -= pitr.second;
             }
             _ppts.reserve(ppts.size());
-            for(auto& pitr : ppts)
+            for(auto const& pitr : ppts)
             {
                 _ppts.emplace_back(pitr.second);
             }
@@ -274,10 +277,10 @@ experiment::start()
 bool
 experiment::wait() const
 {
-    auto _now  = tracing::now();
-    auto _wait = experiment_time - (_now - start_time);
-    auto _end  = _now + _wait;
-    auto _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
+    auto const _now  = tracing::now();
+    auto const _wait = experiment_time - (_now - start_time);
+    auto const _end  = _now + _wait;
+    auto const _incr = std::min<std::uint64_t>(_wait / 100, 1000000);
     while(tracing::now() < _end && state::process::get() < state::process::Finalized)
     {
         std::this_thread::yield();
@@ -289,7 +292,7 @@ experiment::wait() const
 bool
 experiment::stop()
 {
-    auto _now = tracing::now();
+    auto const _now = tracing::now();
     if(_now < start_time + experiment_time)
     {
         return false;
@@ -311,9 +314,9 @@ experiment::stop()
     auto _prog_stats = tim::statistics<double>{};
     auto _prog_vals  = std::vector<std::int64_t>{};
     _prog_vals.reserve(fini_progress.size());
-    for(auto fitr : fini_progress)
+    for(auto const& fitr : fini_progress)
     {
-        auto               _pt  = fitr.second - init_progress[fitr.first];
+        auto const         _pt  = fitr.second - init_progress[fitr.first];
         const std::int64_t _num = std::max<std::int64_t>(
             { _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
         if(_num > 0)
@@ -321,17 +324,17 @@ experiment::stop()
             _prog_vals.emplace_back(_num);
         }
     }
-    std::sort(_prog_vals.begin(), _prog_vals.end());
-    for(auto itr : _prog_vals)
+    std::ranges::sort(_prog_vals);
+    for(auto const itr : _prog_vals)
     {
         _prog_stats += itr;
     }
 
-    auto _nvals = _prog_vals.size();
-    auto _medi  = (_nvals > 2) ? _prog_vals.at(_nvals / 2) : _prog_vals.front();
-    auto _mean  = (_nvals > 0) ? _prog_stats.get_mean() : 0;
-    auto _high  = (_nvals > 0) ? _prog_stats.get_max() : 0;
-    auto _lowv  = (_nvals > 0) ? _prog_stats.get_min() : 0;
+    auto const _nvals = _prog_vals.size();
+    auto       _medi  = (_nvals > 2) ? _prog_vals.at(_nvals / 2) : _prog_vals.front();
+    auto       _mean  = (_nvals > 0) ? _prog_stats.get_mean() : 0;
+    auto       _high  = (_nvals > 0) ? _prog_stats.get_max() : 0;
+    auto       _lowv  = (_nvals > 0) ? _prog_stats.get_min() : 0;
 
     if(_lowv <= 3 && (_mean < 5 || _medi < 5))
     {
@@ -403,7 +406,7 @@ experiment::as_string() const
             << selection.symbol.line << "]";
     }
 
-    auto _patch = [](std::string _v) {
+    auto const _patch = [](std::string _v) {
         auto _pos       = std::string::npos;
         using strpair_t = std::pair<std::string_view, std::string>;
         for(const auto& itr :
@@ -419,7 +422,7 @@ experiment::as_string() const
         }
         return _v;
     };
-    auto _func = _patch(rocprofsys::utility::demangle(selection.symbol.func));
+    auto const _func = _patch(rocprofsys::utility::demangle(selection.symbol.func));
     _ss << "['" << _func << "']";
 
     return _ss.str();
@@ -473,7 +476,7 @@ experiment::is_selected(unwind_addr_t _stack)
 {
     if(is_active())
     {
-        for(auto itr : _stack)
+        for(auto const itr : _stack)
         {
             if(itr > 0 && current_experiment_value.selection.contains(itr))
             {
@@ -489,7 +492,7 @@ experiment::is_selected(container::c_array<std::uint64_t> _stack)
 {
     if(is_active())
     {
-        for(auto itr : _stack)
+        for(auto const itr : _stack)
         {
             if(itr > 0 && current_experiment_value.selection.contains(itr))
             {
@@ -550,7 +553,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     {
         std::uint64_t _beg_runtime = std::numeric_limits<std::uint64_t>::max();
         std::uint64_t _end_runtime = std::numeric_limits<std::uint64_t>::min();
-        for(auto& itr : current_record.experiments)
+        for(auto const& itr : current_record.experiments)
         {
             if(itr.duration == 0)
             {
@@ -568,7 +571,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
     // update sample data
     {
-        auto _add_sample = [&current_record](sample&& _v) {
+        auto const _add_sample = [&current_record](sample&& _v) {
             current_record.samples.emplace_back(std::move(_v));
         };
 
@@ -604,13 +607,13 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             .value_or(false);
 
     {
-        auto _saved_experiments = (_causal_output_reset)
+        auto _saved_experiments = _causal_output_reset
                                       ? std::vector<experiment::record>{}
                                       : load_experiments(_fname_base, _cfg, false);
         _saved_experiments.emplace_back(current_record);
         std::stringstream oss{};
         {
-            auto ar =
+            auto const ar =
                 tim::policy::output_archive<cereal::PrettyJSONOutputArchive>::get(oss);
 
             ar->setNextName("rocprofsys");
@@ -698,12 +701,12 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                 << "\n";
 
             auto ppts = itr.fini_progress;
-            for(auto pitr : itr.init_progress)
+            for(const auto& pitr : itr.init_progress)
             {
                 ppts[pitr.first] -= pitr.second;
             }
 
-            for(auto pitr : ppts)
+            for(auto const& pitr : ppts)
             {
                 // if(pitr.second.get_laps() == 0) continue;
                 if(get_causal_end_to_end() && pitr.second.get_laps() > 1)
@@ -727,7 +730,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
                     {
                         continue;
                     }
-                    auto _delta =
+                    auto const _delta =
                         std::max<std::int64_t>(pitr.second.get_latency_delta(), 1);
                     ofs << "latency-point\tname="
                         << rocprofsys::utility::demangle(
@@ -779,7 +782,7 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
     ifs.open(_fname);
     if(ifs.is_open() && ifs.good())
     {
-        auto ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
+        auto const ar = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
         ar->setNextName("rocprofsys");
         ar->startNode();

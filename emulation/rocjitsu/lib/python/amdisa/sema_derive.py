@@ -33,10 +33,17 @@ from amdisa.sema_ast import (
 )
 from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
-from amdisa.semantics import F32_TO_INTEGER_DTYPES
+from amdisa.semantics import (
+    F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_DTYPES,
+    is_float_relation,
+)
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
+
+# Call name prefix of a floating VOPC relation; the relation mnemonic follows.
+FLOAT_COMPARE_CALL = 'float_compare_'
 
 
 def _src(idx: int, ty: SemaType = SemaType.B32) -> SemaNode:
@@ -1093,7 +1100,12 @@ class _VectorUnary(_ScalarDeriver):
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
-            if dtype in F32_TO_INTEGER_DTYPES:
+            if dtype in F16_INPUT_CONVERSION_DTYPES:
+                # Expose the floating F16 source to VOP3 modifier enrichment.
+                src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
+                if dtype == 'f32_f16':
+                    call_name = 'cvt_f32_f16_valu'
+            elif dtype in F32_TO_INTEGER_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1106,6 +1118,7 @@ class _VectorUnary(_ScalarDeriver):
                     ),
                 )
             if dtype in (
+                'f32_f16',
                 'f32_i32',
                 'f32_u32',
                 'f32_ubyte0',
@@ -1151,7 +1164,13 @@ class _VectorUnary(_ScalarDeriver):
             'cvt_norm_i16_f16',
             'cvt_norm_u16_f16',
         ):
-            src0 = _src(0)
+            # Normalized conversions take a decoded float for ABS/NEG enrichment;
+            # packed FP8/BF8 conversions still take register bits.
+            src0 = (
+                _cast(_src(0, SemaType.F16), SemaType.F16)
+                if op in ('cvt_norm_i16_f16', 'cvt_norm_u16_f16')
+                else _src(0)
+            )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(
@@ -1375,7 +1394,19 @@ class _VectorCmp(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        cmp = _make_cmp(sem.operation or "", src0, src1)
+        op = sem.operation or ""
+        if is_float_relation(sem.data_type, op):
+            # comparison.h evaluates float relations on the raw encodings. The
+            # typed casts stay so enrichment still attaches the VOP3 modifiers.
+            name = f'{FLOAT_COMPARE_CALL}{op}'
+            cmp = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U1,
+                call_name=name,
+                children=(_id(name), src0, src1),
+            )
+        else:
+            cmp = _make_cmp(op, src0, src1)
         body = _assign(
             SemaNode(
                 SemaNodeKind.ARRAYDEREF,
@@ -2875,6 +2906,7 @@ class _Interp(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('lds_direct_load')
 @_register('lds_direct')
 class _LdsDirect(_ScalarDeriver):
     @staticmethod

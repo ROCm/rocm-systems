@@ -69,7 +69,7 @@ basic_cached_perfetto_engine<Backend>::start(
     m_session = m_backend.start_cached_session(m_cfg);
 
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
         m_collected_bytes.clear();
     }
     m_collected_bytes_frozen.store(false, std::memory_order_release);
@@ -77,7 +77,7 @@ basic_cached_perfetto_engine<Backend>::start(
     m_running     = true;
     m_active_sink = sink;
 
-    void* prev =
+    void const* prev =
         activate_cached_engine(this, &basic_cached_perfetto_engine::collect_thunk);
     if(prev != nullptr && prev != this)
     {
@@ -116,11 +116,11 @@ basic_cached_perfetto_engine<Backend>::stop()
 
     std::unordered_map<int, std::vector<char>> drained;
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
         drained.swap(m_collected_bytes);
     }
 
-    auto sink = m_active_sink.lock();
+    auto const sink = m_active_sink.lock();
     m_active_sink.reset();
 
     if(!sink)
@@ -200,7 +200,7 @@ basic_cached_perfetto_engine<Backend>::preregister_pids(
     }
 
     {
-        std::lock_guard<std::mutex> lk{ m_collector_mutex };
+        std::lock_guard<std::mutex> const lk{ m_collector_mutex };
         for(const int pid : source_pids)
         {
             auto& bytes = m_collected_bytes[pid];
@@ -231,7 +231,7 @@ basic_cached_perfetto_engine<Backend>::collect_packet_bytes(int pid, const void*
 
     try
     {
-        auto it = m_collected_bytes.find(pid);
+        auto const it = m_collected_bytes.find(pid);
         if(it == m_collected_bytes.end())
         {
             LOG_ERROR("perfetto cached collector dropped packet for unregistered pid {}",

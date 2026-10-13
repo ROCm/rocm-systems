@@ -88,6 +88,10 @@ public:
                               core::MemoryRegion::AllocateFlags alloc_flags, size_t size,
                               uint32_t node_id, core::DriverMemoryHandle* handle) override;
   hsa_status_t FreeMemory(const core::DriverMemoryHandle& handle) override;
+  hsa_status_t QueryPointerInfo(const void* ptr, const core::MemoryRegion* region,
+                                core::MemoryRegion::AllocateFlags alloc_flags,
+                                const core::DriverMemoryHandle* handle,
+                                HsaPointerInfo* info) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                            HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, uint64_t queue_metadata_size_bytes, HsaEvent* event,
@@ -178,6 +182,10 @@ public:
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 
   hsa_status_t CheckAcceleratorReadiness(core::Agent& agent, bool* ready) const override;
+
+  hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
  private:
   /// @brief Queries the driver version and updates internal state.

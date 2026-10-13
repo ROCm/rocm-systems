@@ -131,7 +131,7 @@ int
 rocprofsys_mpi_fini(MPI_Comm, int, void*, void*)
 {
     LOG_DEBUG("MPI Comm attribute finalize");
-    auto _blocked = get_sampling_signals();
+    auto const _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
     if(mpip_index != std::numeric_limits<std::uint64_t>::max())
@@ -146,7 +146,7 @@ void
 rocprofsys_mpi_set_attr()
 {
 #if defined(ROCPROFSYS_USE_MPI)
-    auto _blocked = get_sampling_signals();
+    auto const _blocked = get_sampling_signals();
     if(!_blocked.empty())
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
 
@@ -262,7 +262,7 @@ mpi_gotcha::update()
         {
             continue;
         }
-        else if(_rank_data.comm == null_comm())
+        if(_rank_data.comm == null_comm())
         {
             // if currently have null comm, replace
             _rank_data = itr.second;
@@ -340,7 +340,7 @@ mpi_gotcha::audit([[maybe_unused]] const gotcha_data_t& _data, audit::incoming)
 {
     LOG_DEBUG("{}()", _data.tool_id);
 
-    auto _blocked = get_sampling_signals();
+    auto const _blocked = get_sampling_signals();
     if(!_blocked.empty())
     {
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
@@ -443,12 +443,12 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
             _comm_entry.comm  = m_comm_val;
 
             auto _get_rank = [&]() {
-                return (m_rank_ptr) ? std::max<int>(*m_rank_ptr, m_rank) : m_rank;
+                return m_rank_ptr ? std::max<int>(*m_rank_ptr, m_rank) : m_rank;
             };
 
-            auto _get_size = [&]() {
-                return (m_size_ptr) ? std::max<int>(*m_size_ptr, m_size)
-                                    : std::max<int>(m_size, _get_rank() + 1);
+            auto const _get_size = [&]() {
+                return m_size_ptr ? std::max<int>(*m_size_ptr, m_size)
+                                  : std::max<int>(m_size, _get_rank() + 1);
             };
 
             if(_data.tool_id == "MPI_Comm_rank" || _data.tool_id == "MPI_Comm_size" ||

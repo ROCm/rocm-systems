@@ -193,6 +193,12 @@ def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True, param_id=N
     return output_dir
 
 
+def read_counter_results(workload_dir):
+    """Load the long-form rocpd counter artifacts of a workload into one frame."""
+    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    return pd.concat([pd.read_csv(result_file) for result_file in result_files])
+
+
 def check_csv_files(output_dir, num_devices, num_kernels):
     """Check profiling output csv files for expected
     number of entries (based on kernel invocations)

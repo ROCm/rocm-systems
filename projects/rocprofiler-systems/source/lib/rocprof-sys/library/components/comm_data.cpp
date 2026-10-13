@@ -80,7 +80,8 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        trace_cache::get_metadata_registry().add_track({ label, std::nullopt, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { .track_name = label, .thread_id = std::nullopt, .extdata = "{}" });
     };
 
     static std::once_flag _once{};
@@ -99,7 +100,7 @@ metadata_initialize_comm_data_pmc()
     [[maybe_unused]] constexpr const char* k_expression       = "";
     [[maybe_unused]] constexpr const char* k_msg              = "bytes";
     [[maybe_unused]] constexpr const auto* k_target_arch      = "CPU";
-    auto                                   n_info             = node_info::get_instance();
+    auto const                             n_info             = node_info::get_instance();
     [[maybe_unused]] constexpr const auto k_device_id = 0;  // Assuming CPU device ID is 0
 
 #if defined(ROCPROFSYS_USE_MPI)
@@ -254,7 +255,7 @@ comm_data::configure()
 
     auto _fmt_flags = comm_data_tracker_t::get_format_flags();
     _fmt_flags &= (std::ios_base::fixed & std::ios_base::scientific);
-    _fmt_flags |= (std::ios_base::scientific);
+    _fmt_flags |= std::ios_base::scientific;
     comm_data_tracker_t::set_precision(3);
     comm_data_tracker_t::set_format_flags(_fmt_flags);
 }
@@ -265,7 +266,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int count,
                  MPI_Datatype datatype, int dst, int tag, MPI_Comm)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     write_perfetto_counter_track<mpi_send>(count * _size);
@@ -290,7 +291,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
                  MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Status*)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
@@ -315,7 +316,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int count,
                  MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Request*)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
@@ -340,7 +341,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
                  MPI_Datatype datatype, int dst, int tag, MPI_Comm, MPI_Request*)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
@@ -365,7 +366,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
                  MPI_Datatype datatype, int root, MPI_Comm)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
@@ -388,7 +389,7 @@ void
 comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, void*, int count,
                  MPI_Datatype datatype, MPI_Op, MPI_Comm)
 {
-    int _size = mpi_type_size(datatype);
+    int const _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
     if(get_use_perfetto())
@@ -411,8 +412,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
                  MPI_Datatype sendtype, int dst, int sendtag, void*, int recvcount,
                  MPI_Datatype recvtype, int src, int recvtag, MPI_Comm, MPI_Status*)
 {
-    int _send_size = mpi_type_size(sendtype);
-    int _recv_size = mpi_type_size(recvtype);
+    int const _send_size = mpi_type_size(sendtype);
+    int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
     if(get_use_perfetto())
@@ -434,7 +435,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         {
             tracker_t _b{ fmt::format("{}/send", _name) };
             add(_b, sendcount * _send_size);
-            tracker_t _c{ fmt::format("{}/send={}", _name, dst) };
+            tracker_t const _c{ fmt::format("{}/send={}", _name, dst) };
             add(_b, sendcount * _send_size);
             add(fmt::format("{}/send/tag={}", _name, sendtag), sendcount * _send_size);
             add(fmt::format("{}/send={}/tag={}", _name, dst, sendtag),
@@ -443,7 +444,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
         {
             tracker_t _b{ fmt::format("{}/recv", _name) };
             add(_b, recvcount * _recv_size);
-            tracker_t _c{ fmt::format("{}/recv={}", _name, src) };
+            tracker_t const _c{ fmt::format("{}/recv={}", _name, src) };
             add(_b, recvcount * _recv_size);
             add(fmt::format("{}/recv/tag={}", _name, recvtag), recvcount * _recv_size);
             add(fmt::format("{}/recv={}/tag={}", _name, src, recvtag),
@@ -459,8 +460,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
                  MPI_Datatype sendtype, void*, int recvcount, MPI_Datatype recvtype,
                  int root, MPI_Comm)
 {
-    int _send_size = mpi_type_size(sendtype);
-    int _recv_size = mpi_type_size(recvtype);
+    int const _send_size = mpi_type_size(sendtype);
+    int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
     if(get_use_perfetto())
@@ -492,8 +493,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
                  MPI_Datatype sendtype, void*, int recvcount, MPI_Datatype recvtype,
                  MPI_Comm)
 {
-    int _send_size = mpi_type_size(sendtype);
-    int _recv_size = mpi_type_size(recvtype);
+    int const _send_size = mpi_type_size(sendtype);
+    int const _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
     if(get_use_perfetto())
@@ -689,8 +690,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, const void*,
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, count);
     }
 }
@@ -717,8 +718,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, count);
     }
 }
@@ -744,8 +745,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, count);
     }
 }
@@ -771,8 +772,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t count,
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, count);
     }
 }
@@ -814,8 +815,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, size_t length
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, length);
     }
 }
@@ -842,8 +843,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, unsigned, voi
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, total_length);
     }
 }
@@ -885,8 +886,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
 
     if(rocprofsys::get_use_timemory())
     {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
+        auto const _name = std::string_view{ _data.tool_id };
+        tracker_t  _t{ _name };
         add(_t, count);
     }
 }

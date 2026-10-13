@@ -49,6 +49,13 @@ catch (hipFileError_t e) {
 catch (const Hip::RuntimeError &e) {
     return {hipFileHipDriverError, e.error};
 }
+catch (const std::system_error &err) {
+    int err_no = err.code().value();
+    if (err_no == EMFILE || err_no == ENFILE) {
+        return {hipFileGetNewFDFailed, hipSuccess};
+    }
+    return {hipFileInternalError, hipSuccess};
+}
 catch (...) {
     return {hipFileInternalError, hipSuccess};
 }

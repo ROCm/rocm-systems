@@ -17,6 +17,11 @@
 
 extern std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph;
 
+// Fail loud by default like the rest of this floor; the addon capture cases in
+// enqueue-test.cc install hooks.
+extern std::function<ncclResult_t(struct ncclCudaGraph, hipStream_t, hipEvent_t)> g_ncclStreamAdvanceToEvent;
+extern std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent;
+
 extern ncclResult_t g_ncclStrongStreamResult;
 
 // init.cc:778, gated on NCCL_LAUNCH_ORDER_IMPLICIT.

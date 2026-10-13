@@ -73,6 +73,9 @@ void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
+    assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
+    assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
+
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
