@@ -430,7 +430,7 @@ pub fn import_dma_buf(
         permissions,
     )?;
     Ok(Allocation::new(
-        crate::driver::AllocationState::from_linux_kfd(inner),
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
         device.endpoint.driver_instance,
     ))
 }
@@ -486,7 +486,7 @@ pub fn import_system_dma_buf(
         permissions,
     )?;
     Ok(Allocation::new(
-        crate::driver::AllocationState::from_linux_kfd(inner),
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
         driver.driver_instance(),
     ))
 }
@@ -521,7 +521,7 @@ pub fn import_graphics_dma_buf(
     )?;
     let inner = driver.import_graphics_dma_buf(states.as_slice(), descriptor, size_hint)?;
     Ok(Allocation::new(
-        crate::driver::AllocationState::from_linux_kfd(inner),
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
         driver.driver_instance(),
     ))
 }
@@ -567,7 +567,7 @@ pub fn import_kfd_ipc_memory(
     let inner =
         driver.import_kfd_ipc_memory(states.as_slice(), mapping_states.as_slice(), handle, size)?;
     Ok(Allocation::new(
-        crate::driver::AllocationState::from_linux_kfd(inner),
+        crate::driver::AllocationState::from_linux_kfd(driver, inner),
         driver.driver_instance(),
     ))
 }
