@@ -657,6 +657,25 @@ class BarrierTests(unittest.TestCase):
         self.assertEqual(b["least_waiting_wave_ran"][0]["line"], "k.hip:23")
         self.assertEqual(b["others_waited_at"][0]["line"], "k.hip:24")
 
+    def test_the_gap_before_a_barrier_is_not_time_at_it(self):
+        dispatch = SimpleNamespace(
+            time=0,
+            me_id=0,
+            pipe_id=0,
+            vgprs=32,
+            sgprs=16,
+            lds_size=0,
+            thread_dim_x=256,
+            thread_dim_y=1,
+            thread_dim_z=1,
+        )
+        waves = self.workgroup(1000, 0)
+        leader = waves[0].insts
+        leader[0].duration = 400
+        leader[1].idle = 500
+        b = mine.Capture.from_waves(waves, dispatches=[dispatch]).barriers()
+        self.assertLess(b["least_waiting_barrier_share_p50"], 1)
+
     def test_a_large_workgroup_launched_over_many_cycles_stays_one_group(self):
         # 16 waves (1024 threads) launched 5 cycles apart: 75 cycles from first to last.
         dispatch = SimpleNamespace(
@@ -1087,6 +1106,20 @@ class InstsAndGuardTests(unittest.TestCase):
             )
             stats = mine.read_stats(d)
         self.assertEqual(stats["lines"][0]["insts"], 2)
+
+    def test_stats_lines_count_an_instruction_of_several_dispatches_once(self):
+        import tempfile
+
+        rows = (
+            '"CodeObj","Vaddr","Instruction","Hitcount","Latency","Stall","Idle","Source"\n'
+            '2,4,"v_rcp_f32 v1, v2",10,40,0,0,"/a/k.hip:5"\n'
+            '2,8,"v_fma_f32 v1, v2, v3, v4",10,40,0,0,"/a/k.hip:5"\n'
+        )
+        with tempfile.TemporaryDirectory() as d:
+            for n in (1, 2):
+                (Path(d) / f"stats_x_dispatch_{n}.csv").write_text(rows)
+            line = mine.read_stats(d)["lines"][0]
+        self.assertEqual((line["insts"], line["cost"]), (2, 160))
 
     def test_every_next_line_ends_with_the_guard(self):
         self.assertTrue(

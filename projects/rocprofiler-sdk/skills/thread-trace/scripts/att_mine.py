@@ -941,7 +941,7 @@ class Capture:
         def barrier_share(w: WaveTrace) -> float:
             return (
                 100
-                * sum(i.cost for i in w.insts if i.text.startswith("s_barrier"))
+                * sum(i.latency for i in w.insts if i.text.startswith("s_barrier"))
                 / max(w.lifetime, 1)
             )
 
@@ -960,7 +960,7 @@ class Capture:
                 if k != r:
                     for i in w.insts:
                         if i.text.startswith("s_barrier"):
-                            waited_at[short_source(i.source)] += i.cost
+                            waited_at[short_source(i.source)] += i.latency
         n = len(groups) or 1
         ran_total, wait_total = sum(ran.values()) or 1, sum(waited_at.values()) or 1
         return {
@@ -1145,6 +1145,7 @@ def read_stats(path: str | Path, top: int = 15) -> dict:
                         "idle": idle,
                         "text": text,
                         "source": short_source(r.get("Source", "")),
+                        "pc": (r.get("CodeObj"), r.get("Vaddr")),
                     }
                 )
     total = sum(i["cost"] for i in insts) or 1
@@ -1159,13 +1160,13 @@ def read_stats(path: str | Path, top: int = 15) -> dict:
                 "stall": 0,
                 "wait": 0,
                 "idle": 0,
-                "count": 0,
+                "pcs": set(),
                 "insts": Counter(),
             },
         )
         for k in ("cost", "stall", "wait", "idle"):
             g[k] += i[k]
-        g["count"] += 1
+        g["pcs"].add(i["pc"])  # one CSV per dispatch: count each instruction once
         g["insts"][i["text"].split(" ", 1)[0]] += i["cost"]
     by_line = [
         {
@@ -1174,7 +1175,7 @@ def read_stats(path: str | Path, top: int = 15) -> dict:
             "stall": g["stall"],
             "wait": g["wait"],
             "idle": g["idle"],
-            "insts": g["count"],
+            "insts": len(g["pcs"]),
             "line": g["line"],
             "top_inst": ", ".join(k for k, _ in g["insts"].most_common(2)),
         }
