@@ -136,9 +136,14 @@ class TestEventMultiDeviceFanout(unittest.TestCase):
             commands.helpers = helpers
             commands.logger = self.logger_mod.AMDSMILogger(format="human_readable", helpers=helpers)
 
+            # _event_thread now takes a single already-opened listener (built
+            # by _open_listeners, one AmdSmiEventReader per device); read()
+            # itself is the global poll that fans events back out to every
+            # processor_handle, so reading through just one listener suffices.
+            listeners = commands._open_listeners(devices)
             buffer = io.StringIO()
             with redirect_stdout(buffer):
-                commands._event_thread(commands, devices)
+                commands._event_thread(commands, listeners[0])
         return buffer.getvalue(), reader
 
     def test_events_from_all_devices_are_printed(self):

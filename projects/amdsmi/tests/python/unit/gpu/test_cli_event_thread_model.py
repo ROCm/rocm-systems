@@ -5,38 +5,36 @@
 """Mock-based unit tests for the ``amd-smi event`` threading model.
 
 These tests drive ``EventCommands`` with ``amdsmi_interface``/``amdsmi_exception``
-fully stubbed and ``threading.Thread.start``/``join`` short-circuited to run
-synchronously, so they run without GPU hardware or the compiled ``amdsmi``
-package and without real OS threads. They lock in the behaviors introduced by
-the WSL event-thread-hang fix:
+fully stubbed and ``threading.Thread.start``/``join`` short-circuited where needed
+to run synchronously, so they run without GPU hardware or the compiled ``amdsmi``
+package. They lock in the current contract:
 
-* ``_read_stdin`` never blocks while ``stop`` is already set, and reads stdin
-  non-blockingly (``os.set_blocking`` + ``readline()``) instead of gating a
-  blocking ``input()`` behind ``select()`` -- which could strand an
-  already-buffered line (multiple lines delivered in one pipe write) behind a
-  ``select()`` call that only sees the OS-level fd, not the decoder's internal
-  buffer, and which raised an uncaught ``TypeError`` when stdin was closed
-  (``sys.stdin is None``).
-* ``EventListenerThread`` reports a worker exception via the result queue
-  instead of raising it out of ``join()``.
-* ``event()`` re-raises an ``AmdSmiLibraryException`` from a worker, lets any
-  other worker exception propagate, and always joins threads and restores the
-  SIGTERM handler before returning or raising.
-* ``_event_thread`` parses an event's ``message`` string into a dict and logs
-  it, and swallows ``AMDSMI_STATUS_NO_DATA`` while printing any other error.
+* ``_open_listeners`` opens one ``AmdSmiEventReader`` per device on the main
+  thread before any listener thread starts, so a device without event support
+  is reported there instead of stranding a listener thread while ``input()``
+  waits; it raises only when every device failed to open, and stops any
+  already-opened listeners before propagating an unexpected error.
+* ``_event_thread`` parses a batch's ``message`` string into a dict and logs
+  it, swallows ``AMDSMI_STATUS_NO_DATA`` while printing any other
+  ``AmdSmiLibraryException`` to stderr, isolates a single malformed event
+  instead of dropping its batch siblings, and always stops its listener.
+* ``event()`` reads stdin with a blocking ``input()`` loop (``EOFError`` /
+  ``KeyboardInterrupt`` also stop it), and always joins the per-listener
+  threads, stops every listener, and restores the previous SIGTERM handler
+  before returning or re-raising.
+* ``_event_sigterm_handler`` sets ``stop`` and converts SIGTERM into a
+  ``SystemExit`` so the ``finally`` cleanup in ``event()`` still runs.
 """
 
 import argparse
 import io
 import os
-import queue
 import signal
-import sys
 import threading
 import time
 import types
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
@@ -81,44 +79,151 @@ def _load_event_module():
 class _FakeLogger:
     def __init__(self):
         self.calls = []
+        self.print_calls = 0
 
-    def store_output(self, processor_handle, key, value):
-        self.calls.append((processor_handle, key, dict(value)))
+    def store_event_output(self, processor_handle, values_dict):
+        self.calls.append((processor_handle, dict(values_dict)))
 
-    def print_output(self, *args, **kwargs):
-        pass
+    def print_event_output(self):
+        self.print_calls += 1
 
 
 class _FakeHelpers:
+    def __init__(self):
+        self.check_required_groups_calls = 0
+
     def check_required_groups(self):
-        pass
+        self.check_required_groups_calls += 1
 
+    # event.py calls get_gpu_id_from_device (no "_handle" suffix); the real
+    # AMDSMIHelpers class only defines get_gpu_id_from_device_handle, so this
+    # stub matches event.py's actual call site rather than the real API.
+    def get_gpu_id_from_device_handle(self, device_handle):
+        return device_handle
 
-class _FakeNonBlockingStdin:
-    """Stands in for ``sys.stdin`` under ``os.set_blocking(fd, False)``.
-
-    ``readline()`` returns queued lines immediately (as a real non-blocking fd
-    would once data is buffered) and raises ``BlockingIOError`` once the queue
-    is empty, instead of blocking. Thread-safe so it can back a real reader
-    thread in the concurrency tests.
-    """
-
-    def __init__(self, lines=()):
-        self._lines = list(lines)
-        self._lock = threading.Lock()
-
-    def fileno(self):
-        return 0
-
-    def readline(self):
-        with self._lock:
-            if self._lines:
-                return self._lines.pop(0)
-        raise BlockingIOError()
+    def record_or_raise(self, exception, context=None):
+        return f"Error occurred for {context} - {exception}"
 
 
 def _build_event_args(gpu):
     return argparse.Namespace(gpu=gpu)
+
+
+class TestOpenListeners(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+        modules = _build_fake_amdsmi()
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+        cls.exception_module = modules["amdsmi.amdsmi_exception"]
+        cls.event_module = _load_event_module()
+
+    def _make_commands(self):
+        commands = object.__new__(self.event_module.EventCommands)
+        commands.group_check_printed = True
+        commands.helpers = _FakeHelpers()
+        return commands
+
+    def _make_reader_class(self, failing=()):
+        exception_cls = self.exception_module.AmdSmiLibraryException
+
+        class _Reader:
+            def __init__(self, device, event_types):
+                if device in failing:
+                    raise exception_cls(1, f"boom-{device}")
+                self.device = device
+                self.stopped = False
+
+            def stop(self):
+                self.stopped = True
+
+        return _Reader
+
+    def test_no_devices_prints_message_and_returns_empty_list(self):
+        commands = self._make_commands()
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            result = commands._open_listeners([])
+
+        self.assertEqual(result, [])
+        self.assertIn("No GPUs on machine", out.getvalue())
+
+    def test_group_permissions_checked_exactly_once(self):
+        commands = self._make_commands()
+        commands.group_check_printed = False
+        self.interface.AmdSmiEventReader = self._make_reader_class()
+
+        commands._open_listeners(["gpu0", "gpu1"])
+
+        self.assertEqual(commands.helpers.check_required_groups_calls, 1)
+        self.assertTrue(commands.group_check_printed)
+
+    def test_all_devices_open_successfully(self):
+        commands = self._make_commands()
+        self.interface.AmdSmiEventReader = self._make_reader_class()
+
+        listeners = commands._open_listeners(["gpu0", "gpu1"])
+
+        self.assertEqual([listener.device for listener in listeners], ["gpu0", "gpu1"])
+
+    def test_single_device_failure_raises_original_exception(self):
+        commands = self._make_commands()
+        self.interface.AmdSmiEventReader = self._make_reader_class(failing=("gpu0",))
+
+        with self.assertRaises(self.exception_module.AmdSmiLibraryException) as ctx:
+            commands._open_listeners(["gpu0"])
+
+        self.assertEqual(str(ctx.exception), "boom-gpu0")
+
+    def test_failure_does_not_abort_remaining_devices(self):
+        # A device that fails to open must not prevent the remaining devices
+        # from being tried.
+        commands = self._make_commands()
+        self.interface.AmdSmiEventReader = self._make_reader_class(failing=("bad",))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            listeners = commands._open_listeners(["bad", "good"])
+
+        self.assertEqual([listener.device for listener in listeners], ["good"])
+        self.assertEqual(out.getvalue().count("boom-bad"), 1)
+
+    def test_each_failed_device_is_reported_exactly_once(self):
+        commands = self._make_commands()
+        self.interface.AmdSmiEventReader = self._make_reader_class(failing=("bad",))
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            listeners = commands._open_listeners(["good1", "bad", "good2"])
+
+        self.assertEqual([listener.device for listener in listeners], ["good1", "good2"])
+        self.assertEqual(out.getvalue().count("boom-bad"), 1)
+
+    def test_unexpected_exception_stops_already_opened_listeners(self):
+        commands = self._make_commands()
+        opened = []
+
+        class _Reader:
+            def __init__(self, device, event_types):
+                if device == "boom":
+                    raise RuntimeError("unexpected")
+                self.device = device
+                self.stopped = False
+                opened.append(self)
+
+            def stop(self):
+                self.stopped = True
+
+        self.interface.AmdSmiEventReader = _Reader
+
+        with self.assertRaises(RuntimeError):
+            commands._open_listeners(["good", "boom"])
+
+        self.assertEqual(len(opened), 1)
+        self.assertTrue(opened[0].stopped)
 
 
 class TestEventThreadMessageParsing(unittest.TestCase):
@@ -128,15 +233,12 @@ class TestEventThreadMessageParsing(unittest.TestCase):
             raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
-        cls.interface = modules["amdsmi.amdsmi_interface"]
+        cls.exception_module = modules["amdsmi.amdsmi_exception"]
         cls.event_module = _load_event_module()
 
     def _make_commands(self):
         commands = object.__new__(self.event_module.EventCommands)
         commands.stop = False
-        commands.device_handles = ["fake-device"]
-        commands.group_check_printed = True
-        commands.helpers = _FakeHelpers()
         commands.logger = _FakeLogger()
         return commands
 
@@ -144,82 +246,125 @@ class TestEventThreadMessageParsing(unittest.TestCase):
         commands = self._make_commands()
         batch = [
             {
+                "timestamp": 1234,
                 "processor_handle": "handle-0",
                 "event": "VMFAULT",
                 "message": "process_id: 1234  client_id: UTCL2  ",
             }
         ]
 
-        class _Reader:
-            def __init__(self, device_handle, event_types):
-                pass
-
-            def read(self, timeout, num_elem=10):
+        class _Listener:
+            def read(self, timeout):
                 commands.stop = True  # one batch is enough; unblock the loop
                 return batch
 
             def stop(self):
                 pass
 
-        self.interface.AmdSmiEventReader = _Reader
-
-        commands._event_thread(commands, 0)
+        commands._event_thread(commands, _Listener())
 
         self.assertEqual(len(commands.logger.calls), 1)
-        processor_handle, key, value = commands.logger.calls[0]
+        processor_handle, values = commands.logger.calls[0]
         self.assertEqual(processor_handle, "handle-0")
-        self.assertEqual(key, "values")
-        self.assertEqual(value["event"], "VMFAULT")
-        self.assertEqual(value["message"], {"process_id": "1234", "client_id": "UTCL2"})
+        self.assertEqual(values["timestamp"], 1234)
+        self.assertEqual(values["event"], "VMFAULT")
+        self.assertEqual(values["message"], {"process_id": "1234", "client_id": "UTCL2"})
+        self.assertEqual(commands.logger.print_calls, 1)
 
     def test_no_data_status_is_silently_ignored(self):
         commands = self._make_commands()
+        exc = self.exception_module.AmdSmiLibraryException(_NO_DATA)
 
-        class _Reader:
-            def __init__(self, device_handle, event_types):
-                pass
-
-            def read(self, timeout, num_elem=10):
+        class _Listener:
+            def read(self, timeout):
                 commands.stop = True
-                raise self.exception_module.AmdSmiLibraryException(_NO_DATA)
+                raise exc
 
             def stop(self):
                 pass
 
-        _Reader.exception_module = self.event_module.amdsmi_exception
-        self.interface.AmdSmiEventReader = _Reader
-
         out = io.StringIO()
         with redirect_stdout(out):
-            commands._event_thread(commands, 0)
+            commands._event_thread(commands, _Listener())
 
         self.assertEqual(out.getvalue(), "")
+        self.assertEqual(commands.logger.calls, [])
 
-    def test_other_library_exception_is_printed(self):
+    def test_other_library_exception_is_printed_to_stderr(self):
         commands = self._make_commands()
+        exc = self.exception_module.AmdSmiLibraryException(1, message="mock boom")
 
-        class _Reader:
-            def __init__(self, device_handle, event_types):
-                pass
-
-            def read(self, timeout, num_elem=10):
+        class _Listener:
+            def read(self, timeout):
                 commands.stop = True
-                raise self.exception_module.AmdSmiLibraryException(1, message="mock boom")
+                raise exc
 
             def stop(self):
                 pass
 
-        _Reader.exception_module = self.event_module.amdsmi_exception
-        self.interface.AmdSmiEventReader = _Reader
+        err = io.StringIO()
+        with redirect_stderr(err):
+            commands._event_thread(commands, _Listener())
 
-        out = io.StringIO()
-        with redirect_stdout(out):
-            commands._event_thread(commands, 0)
+        self.assertIn("mock boom", err.getvalue())
 
-        self.assertIn("mock boom", out.getvalue())
+    def test_malformed_event_is_isolated_and_remaining_events_still_processed(self):
+        commands = self._make_commands()
+        batch = [
+            {"timestamp": 1, "processor_handle": "h0", "event": "BAD", "message": None},
+            {"timestamp": 2, "processor_handle": "h1", "event": "OK", "message": "pid: 1  "},
+        ]
+
+        class _Listener:
+            def read(self, timeout):
+                commands.stop = True
+                return batch
+
+            def stop(self):
+                pass
+
+        err = io.StringIO()
+        with redirect_stderr(err):
+            commands._event_thread(commands, _Listener())
+
+        self.assertEqual(len(commands.logger.calls), 1)
+        self.assertEqual(commands.logger.calls[0][0], "h1")
+        self.assertNotEqual(err.getvalue(), "")
+
+    def test_listener_stop_called_on_normal_completion(self):
+        commands = self._make_commands()
+        stopped = []
+
+        class _Listener:
+            def read(self, timeout):
+                commands.stop = True
+                return []
+
+            def stop(self):
+                stopped.append(True)
+
+        commands._event_thread(commands, _Listener())
+
+        self.assertEqual(stopped, [True])
+
+    def test_listener_stop_called_and_exception_propagates_on_unexpected_error(self):
+        commands = self._make_commands()
+        stopped = []
+
+        class _Listener:
+            def read(self, timeout):
+                raise RuntimeError("driver crashed")
+
+            def stop(self):
+                stopped.append(True)
+
+        with self.assertRaises(RuntimeError):
+            commands._event_thread(commands, _Listener())
+
+        self.assertEqual(stopped, [True])
 
 
-class TestEventListenerThread(unittest.TestCase):
+class TestEventSigtermHandler(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
@@ -228,182 +373,15 @@ class TestEventListenerThread(unittest.TestCase):
         stub_modules(cls, modules)
         cls.event_module = _load_event_module()
 
-    def test_exception_from_target_is_queued_not_raised(self):
-        result_queue = queue.Queue()
-
-        def _boom(*_args, **_kwargs):
-            raise RuntimeError("thread boom")
-
-        thread = self.event_module.EventCommands.EventListenerThread(
-            target=_boom, args=(), result_queue=result_queue
-        )
-        thread.start()
-        thread.join()  # must not raise; the exception travels via the queue
-
-        kind, payload = result_queue.get_nowait()
-        self.assertEqual(kind, "exception")
-        self.assertIsInstance(payload, RuntimeError)
-        self.assertEqual(str(payload), "thread boom")
-
-    def test_normal_completion_leaves_queue_empty(self):
-        result_queue = queue.Queue()
-        thread = self.event_module.EventCommands.EventListenerThread(
-            target=lambda: None, args=(), result_queue=result_queue
-        )
-        thread.start()
-        thread.join()
-
-        self.assertTrue(result_queue.empty())
-
-
-class TestReadStdin(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
-        modules = _build_fake_amdsmi()
-        stub_modules(cls, modules)
-        cls.event_module = _load_event_module()
-
-    def _make_commands(self, stop=False):
+    def test_sets_stop_and_raises_system_exit(self):
         commands = object.__new__(self.event_module.EventCommands)
-        commands.stop = stop
-        return commands
+        commands.stop = False
 
-    def _patch_set_blocking(self):
-        # The real os.set_blocking(0, False) would flip the test runner's own
-        # stdin to non-blocking; stub it out everywhere except the dedicated
-        # os.set_blocking-failure test below.
-        return mock.patch.object(self.event_module.os, "set_blocking")
+        with self.assertRaises(SystemExit) as ctx:
+            commands._event_sigterm_handler(signal.SIGTERM, None)
 
-    def test_returns_immediately_when_stop_already_set(self):
-        # Regression guard: the WSL hang was _read_stdin blocking forever on
-        # input(), never observing that stop had already flipped True.
-        commands = self._make_commands(stop=True)
-        result_queue = queue.Queue()
-        fake_stdin = _FakeNonBlockingStdin()
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        self.assertEqual(fake_stdin._lines, [])
-        self.assertTrue(result_queue.empty())
-
-    def test_reads_quit_without_blocking(self):
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = _FakeNonBlockingStdin(["q\n"])
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "quit")
-
-    def test_blocking_io_error_retries_until_data_ready(self):
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        calls = {"n": 0}
-
-        def _readline_then_blocking():
-            # First poll finds nothing buffered yet; the retry sleep must not
-            # be a real 0.1s wait in a test (sleep is mocked below).
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise BlockingIOError()
-            return "q\n"
-
-        with self._patch_set_blocking(), mock.patch.object(
-            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=_readline_then_blocking)
-        ), mock.patch.object(self.event_module.time, "sleep") as mock_sleep:
-            commands._read_stdin(result_queue)
-
-        mock_sleep.assert_called_once()
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "quit")
-
-    def test_eof_when_readline_returns_empty_string(self):
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = _FakeNonBlockingStdin([""])
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "eof")
-
-    def test_keyboard_interrupt_is_queued(self):
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = mock.Mock(fileno=lambda: 0, readline=mock.Mock(side_effect=KeyboardInterrupt))
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "interrupt")
-
-    def test_closed_stdin_is_queued_as_eof(self):
-        # Regression guard: sys.stdin is None when fd 0 is closed outright
-        # (e.g. `0<&-`); the old select()-based version raised an uncaught
-        # TypeError here and the reader thread died silently.
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-
-        with mock.patch.object(sys, "stdin", None):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "eof")
-
-    def test_invalid_fd_from_set_blocking_is_queued_as_eof(self):
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = mock.Mock(fileno=lambda: 0)
-
-        with mock.patch.object(
-            self.event_module.os, "set_blocking", side_effect=OSError("bad fd")
-        ), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "eof")
-        fake_stdin.readline.assert_not_called()
-
-    def test_multiple_buffered_lines_are_each_processed_without_stranding(self):
-        # Regression guard: select() only confirms the OS-level fd is
-        # readable, not that a full line is buffered. Piping "x\nq\n" in one
-        # write let input() consume "x" while "q" sat stranded behind a
-        # select() that (correctly) saw nothing left at the OS level. Plain
-        # readline() calls, with no select() in between, can't strand a line
-        # that's already sitting in the decoder's own buffer.
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = _FakeNonBlockingStdin(["x\n", "q\n"])
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, _payload = result_queue.get_nowait()
-        self.assertEqual(kind, "quit")
-        self.assertEqual(fake_stdin._lines, [])
-
-    def test_unexpected_exception_is_queued_not_raised(self):
-        # Safety net: any exception type we didn't anticipate still unblocks
-        # event()'s result_queue.get() instead of killing the thread silently.
-        commands = self._make_commands()
-        result_queue = queue.Queue()
-        fake_stdin = mock.Mock(
-            fileno=lambda: 0, readline=mock.Mock(side_effect=RuntimeError("boom"))
-        )
-
-        with self._patch_set_blocking(), mock.patch.object(sys, "stdin", fake_stdin):
-            commands._read_stdin(result_queue)
-
-        kind, payload = result_queue.get_nowait()
-        self.assertEqual(kind, "exception")
-        self.assertIsInstance(payload, RuntimeError)
+        self.assertTrue(commands.stop)
+        self.assertEqual(ctx.exception.code, 128 + signal.SIGTERM)
 
 
 class TestEventOrchestration(unittest.TestCase):
@@ -416,9 +394,11 @@ class TestEventOrchestration(unittest.TestCase):
         cls.exception_module = modules["amdsmi.amdsmi_exception"]
         cls.event_module = _load_event_module()
 
-    def _make_commands(self):
+    def _make_commands(self, listeners=()):
         commands = object.__new__(self.event_module.EventCommands)
         commands.device_handles = []
+        commands._open_listeners = mock.Mock(return_value=list(listeners))
+        commands._event_thread = mock.Mock()
         return commands
 
     def _run_synchronously(self, commands, args):
@@ -430,41 +410,83 @@ class TestEventOrchestration(unittest.TestCase):
             commands.event(args)
 
     def test_quit_message_stops_cleanly(self):
-        commands = self._make_commands()
-        commands._event_thread = lambda *_a, **_kw: None
-        commands._read_stdin = lambda result_queue: result_queue.put(("quit", None))
+        listener = mock.Mock()
+        commands = self._make_commands(listeners=[listener])
         previous_handler = signal.getsignal(signal.SIGTERM)
 
-        self._run_synchronously(commands, _build_event_args([0]))
-
-        self.assertTrue(commands.stop)
-        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
-
-    def test_library_exception_from_worker_is_reraised(self):
-        commands = self._make_commands()
-        exc = self.exception_module.AmdSmiLibraryException(1, message="library boom")
-        commands._event_thread = mock.Mock(side_effect=exc)
-        commands._read_stdin = lambda result_queue: None  # event thread wins the race
-        previous_handler = signal.getsignal(signal.SIGTERM)
-
-        with self.assertRaises(self.exception_module.AmdSmiLibraryException) as ctx:
-            self._run_synchronously(commands, _build_event_args([0]))
-
-        self.assertIs(ctx.exception, exc)
-        self.assertTrue(commands.stop)
-        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
-
-    def test_generic_exception_from_worker_propagates_after_cleanup(self):
-        commands = self._make_commands()
-        commands._event_thread = mock.Mock(side_effect=RuntimeError("worker boom"))
-        commands._read_stdin = lambda result_queue: None
-        previous_handler = signal.getsignal(signal.SIGTERM)
-
-        with self.assertRaises(RuntimeError):
+        with mock.patch("builtins.input", return_value="q"):
             self._run_synchronously(commands, _build_event_args([0]))
 
         self.assertTrue(commands.stop)
+        listener.stop.assert_called_once()
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
+
+    def test_eof_stops_cleanly(self):
+        listener = mock.Mock()
+        commands = self._make_commands(listeners=[listener])
+        previous_handler = signal.getsignal(signal.SIGTERM)
+
+        with mock.patch("builtins.input", side_effect=EOFError):
+            self._run_synchronously(commands, _build_event_args([0]))
+
+        self.assertTrue(commands.stop)
+        listener.stop.assert_called_once()
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
+
+    def test_keyboard_interrupt_stops_cleanly(self):
+        listener = mock.Mock()
+        commands = self._make_commands(listeners=[listener])
+        previous_handler = signal.getsignal(signal.SIGTERM)
+
+        with mock.patch("builtins.input", side_effect=KeyboardInterrupt):
+            self._run_synchronously(commands, _build_event_args([0]))
+
+        self.assertTrue(commands.stop)
+        listener.stop.assert_called_once()
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
+
+    def test_sigterm_triggered_system_exit_is_reraised_after_cleanup(self):
+        # Mirrors what input() sees once _event_sigterm_handler fires mid-wait.
+        listener = mock.Mock()
+        commands = self._make_commands(listeners=[listener])
+        previous_handler = signal.getsignal(signal.SIGTERM)
+
+        with mock.patch("builtins.input", side_effect=SystemExit(143)):
+            with self.assertRaises(SystemExit) as ctx:
+                self._run_synchronously(commands, _build_event_args([0]))
+
+        self.assertEqual(ctx.exception.code, 143)
+        self.assertTrue(commands.stop)
+        listener.stop.assert_called_once()
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
+
+    def test_one_thread_started_per_listener(self):
+        listeners = [mock.Mock(), mock.Mock()]
+        commands = self._make_commands(listeners=listeners)
+
+        with mock.patch("builtins.input", return_value="q"):
+            self._run_synchronously(commands, _build_event_args([0, 1]))
+
+        self.assertEqual(commands._event_thread.call_count, 2)
+        for listener in listeners:
+            listener.stop.assert_called_once()
+
+    def test_gpu_arg_defaults_to_device_handles_when_none(self):
+        commands = self._make_commands()
+        commands.device_handles = ["dev-a", "dev-b"]
+
+        with mock.patch("builtins.input", return_value="q"):
+            self._run_synchronously(commands, _build_event_args(None))
+
+        commands._open_listeners.assert_called_once_with(["dev-a", "dev-b"])
+
+    def test_single_gpu_arg_is_wrapped_in_list(self):
+        commands = self._make_commands()
+
+        with mock.patch("builtins.input", return_value="q"):
+            self._run_synchronously(commands, _build_event_args("dev-a"))
+
+        commands._open_listeners.assert_called_once_with(["dev-a"])
 
 
 class _EventTimeoutError(Exception):
@@ -479,12 +501,12 @@ class TestEventRealThreads(unittest.TestCase):
     """Runs event() with real, unpatched Thread.start/join.
 
     The tests above patch Thread.start/join to run inline, which proves the
-    message-passing logic but can't catch an actual hang: a worker or
-    stdin-reader thread that never observes ``stop`` would just make those
-    tests block forever too. These run real OS threads and bound the wait with
-    a SIGALRM (event() itself must stay on the main thread -- it calls
-    signal.signal(SIGTERM, ...), which only works there), so a reintroduced
-    hang fails the assertion instead of hanging the suite.
+    message-passing logic but can't catch an actual hang: a worker thread that
+    never observes ``stop`` would just make those tests block forever too.
+    These run real OS threads and bound the wait with a SIGALRM (event()
+    itself must stay on the main thread -- it calls signal.signal(SIGTERM,
+    ...), which only works there), so a reintroduced hang fails the assertion
+    instead of hanging the suite.
     """
 
     @classmethod
@@ -493,12 +515,12 @@ class TestEventRealThreads(unittest.TestCase):
             raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
-        cls.exception_module = modules["amdsmi.amdsmi_exception"]
         cls.event_module = _load_event_module()
 
-    def _make_commands(self):
+    def _make_commands(self, listeners):
         commands = object.__new__(self.event_module.EventCommands)
         commands.device_handles = []
+        commands._open_listeners = mock.Mock(return_value=listeners)
         return commands
 
     def _run_with_timeout(self, commands, args, timeout_seconds=5):
@@ -514,49 +536,19 @@ class TestEventRealThreads(unittest.TestCase):
             signal.signal(signal.SIGALRM, previous_handler)
 
     def test_real_threads_quit_without_hanging(self):
-        commands = self._make_commands()
+        listener = mock.Mock()
+        commands = self._make_commands([listener])
 
         # Mirrors _event_thread's "while not self.stop" shape on a real thread,
         # without touching AmdSmiEventReader.
-        def _worker(cmds, _i):
+        def _worker(cmds, _listener):
             while not cmds.stop:
                 time.sleep(0.01)
 
         commands._event_thread = _worker
 
-        # A couple of BlockingIOError polls before "q" lands, same as a real
-        # non-blocking fd with no data ready yet.
-        fake_stdin = _FakeNonBlockingStdin([None, None, "q\n"])
-
-        def _readline():
-            line = fake_stdin._lines.pop(0)
-            if line is None:
-                raise BlockingIOError()
-            return line
-
-        with mock.patch.object(self.event_module.os, "set_blocking"), mock.patch.object(
-            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=_readline)
-        ):
+        with mock.patch("builtins.input", return_value="q"):
             self._run_with_timeout(commands, _build_event_args([0]))
 
         self.assertTrue(commands.stop)
-
-    def test_real_threads_worker_exception_unblocks_without_waiting_on_stdin(self):
-        commands = self._make_commands()
-
-        def _worker(cmds, _i):
-            time.sleep(0.02)
-            raise RuntimeError("worker boom")
-
-        commands._event_thread = _worker
-
-        # The reader thread keeps polling and never sees "q"; only the worker's
-        # exception should unblock event(), so it must not wait on stdin.
-        fake_readline = mock.Mock(side_effect=BlockingIOError)
-        with mock.patch.object(self.event_module.os, "set_blocking"), mock.patch.object(
-            sys, "stdin", mock.Mock(fileno=lambda: 0, readline=fake_readline)
-        ):
-            with self.assertRaises(RuntimeError):
-                self._run_with_timeout(commands, _build_event_args([0]))
-
-        self.assertTrue(commands.stop)
+        listener.stop.assert_called_once()
