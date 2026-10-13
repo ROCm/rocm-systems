@@ -23,7 +23,7 @@ mod tests;
 
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, KfdAllocation,
-    KfdDeviceState, new_driver_instance,
+    new_driver_instance,
 };
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
@@ -47,7 +47,7 @@ use crate::memory::{
     VirtualMemoryInfo,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
 
 /// Address-space identity and bounds for devices that can map memory.
@@ -97,6 +97,12 @@ pub(crate) trait Driver: Send + Sync {
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
+    /// Queries optional information about a passive endpoint without
+    /// activating it. Kind-specific details must match the endpoint kind.
+    /// Drivers with no additional source return empty details.
+    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        Ok(EndpointDetails::empty_for(endpoint))
+    }
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
 }
 
@@ -262,7 +268,7 @@ pub(crate) trait KernelQueueResource {
 /// queue models. Hardware-dependent operations can report `Unsupported` after
 /// checking the activated device's capabilities. NPU drivers do not implement
 /// this trait merely because they support a shared memory contract.
-pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperations {
+pub(crate) trait GpuDriver: AllocationOperations + VirtualMemoryOperations {
     /// Direct GPU queue retained by this driver's activated device state.
     type UserQueue: UserQueueResource<DeviceState = Self::DeviceState>;
     /// Kernel-mediated submission queue created by this same driver.
@@ -283,7 +289,6 @@ pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperati
         device: &Self::DeviceState,
         format: KernelQueueFormat,
     ) -> Result<Owned<Self::KernelQueue>, Error>;
-    fn gpu_presentation(&self, endpoint: &Endpoint) -> GpuPresentation;
     fn set_persisting_l2_cache_size(
         &self,
         device: &Self::DeviceState,

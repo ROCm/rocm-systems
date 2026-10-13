@@ -139,7 +139,7 @@ pub fn create_signal_event(
         }
         None => None,
     };
-    let (driver, state) = device.device.linux_kfd()?;
+    let (driver, state) = device.device.driver_state.linux_kfd()?;
     let mut page_offered = false;
     let result = driver.create_kfd_signal_event(state, native_page, &mut page_offered);
     if let Some(page) = event_page {

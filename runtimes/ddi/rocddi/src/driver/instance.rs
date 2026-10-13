@@ -18,7 +18,7 @@ use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::ClockCounters;
 use crate::host_storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -110,16 +110,14 @@ impl DriverInstance {
         }
     }
 
-    // A non-GPU driver variant needs the same fallible routing contract.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn gpu_presentation(&self, endpoint: &Endpoint) -> Result<GpuPresentation, Error> {
+    pub(crate) fn query_endpoint_details(
+        &self,
+        endpoint: &Endpoint,
+    ) -> Result<EndpointDetails, Error> {
         match self {
-            Self::LinuxKfd(driver) => Ok(driver.gpu_presentation(endpoint)),
+            Self::LinuxKfd(driver) => driver.query_endpoint_details(endpoint),
             #[cfg(test)]
-            Self::Test(_) => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "driver does not present GPU endpoints",
-            }),
+            Self::Test(driver) => driver.query_endpoint_details(endpoint),
         }
     }
 

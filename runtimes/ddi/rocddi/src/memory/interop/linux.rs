@@ -396,7 +396,7 @@ pub fn import_dma_buf(
     alignment: u64,
     permissions: DeviceAccess,
 ) -> Result<Allocation, Error> {
-    let (driver, state) = device.linux_kfd()?;
+    let (driver, state) = device.driver_state.linux_kfd()?;
     let inner = driver.import_dma_buf(
         state,
         descriptor,
@@ -416,6 +416,7 @@ pub fn import_dma_buf(
 #[must_use]
 pub fn supports_system_dma_buf_import(device: &Device) -> bool {
     device
+        .driver_state
         .linux_kfd()
         .is_ok_and(|(_, state)| crate::driver::KfdDriver::supports_system_dma_buf_import(state))
 }
@@ -449,7 +450,7 @@ pub fn import_system_dma_buf(
     let driver = session.linux_kfd()?;
     let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        let (device_driver, state) = device.linux_kfd()?;
+        let (device_driver, state) = device.driver_state.linux_kfd()?;
         if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -494,7 +495,7 @@ pub fn import_graphics_dma_buf(
     let driver = session.linux_kfd()?;
     let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        let (device_driver, state) = device.linux_kfd()?;
+        let (device_driver, state) = device.driver_state.linux_kfd()?;
         if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -537,7 +538,7 @@ pub fn import_kfd_ipc_memory(
     let driver = session.linux_kfd()?;
     let mut states = Buffer::try_with_capacity(devices.len(), driver.allocator())?;
     for device in devices {
-        let (device_driver, state) = device.linux_kfd()?;
+        let (device_driver, state) = device.driver_state.linux_kfd()?;
         if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -548,7 +549,7 @@ pub fn import_kfd_ipc_memory(
     }
     let mut mapping_states = Buffer::try_with_capacity(mapping_devices.len(), driver.allocator())?;
     for device in mapping_devices {
-        let (device_driver, state) = device.linux_kfd()?;
+        let (device_driver, state) = device.driver_state.linux_kfd()?;
         if !Shared::ptr_eq(driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,

@@ -13,7 +13,7 @@ use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
 use crate::host_storage::{Allocator, Buffer, Shared};
 use crate::memory::{HostAllocation, VirtualAddress};
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
 
 /// Maximum lifetime allowed for a driver context acquired through a session.
@@ -84,35 +84,32 @@ impl Clone for Session {
 }
 
 impl Session {
-    /// Returns optional display metadata from the endpoint's driver.
-    /// The GPU target and optional PCI identity remain in [`Endpoint`].
+    /// Queries optional information from the endpoint's owning driver.
+    /// Identity and discovered capabilities remain in [`Endpoint`]. This
+    /// query does not activate or revalidate the endpoint snapshot.
     ///
     /// # Errors
-    /// Rejects an endpoint owned by another session or a non-GPU endpoint.
-    pub fn gpu_presentation(&self, endpoint: &Endpoint) -> Result<GpuPresentation, Error> {
+    /// Rejects an endpoint owned by another session or a closed session, and
+    /// propagates any driver query error.
+    pub fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
         self.ensure_open()?;
-        let Some(entry) = self.owns_endpoint(endpoint) else {
+        let Some(driver) = self.driver_for_endpoint(endpoint) else {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
-                detail: "GPU presentation requires a GPU in this session",
+                detail: "endpoint details require an endpoint in this session",
             });
         };
-        if endpoint.gpu().is_none() {
-            return Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "GPU presentation requires a GPU in this session",
-            });
-        }
-        entry.driver.gpu_presentation(endpoint)
+        driver.query_endpoint_details(endpoint)
     }
 
-    /// Finds the driver instance named by a passive endpoint snapshot. This
-    /// does not refresh the endpoint or acquire driver state.
-    fn owns_endpoint(&self, endpoint: &Endpoint) -> Option<&DriverRegistryEntry> {
+    /// Selects the driver named by a passive endpoint snapshot without
+    /// refreshing the endpoint or acquiring driver state.
+    fn driver_for_endpoint(&self, endpoint: &Endpoint) -> Option<&DriverInstance> {
         self.drivers
             .entries
             .iter()
             .find(|entry| entry.driver.instance_id() == endpoint.driver_instance)
+            .map(|entry| &entry.driver)
     }
 
     /// Rejects new session operations after driver cleanup has started.
@@ -397,13 +394,13 @@ impl Session {
             kind: ErrorKind::InvalidArgument,
             detail: "virtual-address reservation requires an activated device",
         })?;
-        let entry = self
-            .owns_endpoint(&first.endpoint)
+        let driver = self
+            .driver_for_endpoint(&first.endpoint)
             .ok_or(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "virtual-address device belongs to another session",
             })?;
-        VirtualAddress::reserve_for_devices(&entry.driver, devices, size, alignment, address)
+        VirtualAddress::reserve_for_devices(driver, devices, size, alignment, address)
     }
 
     /// Revalidates a passive endpoint with its owning driver and acquires or
@@ -419,11 +416,11 @@ impl Session {
     /// Partial driver setup remains owned for safe cleanup or a later retry.
     pub fn activate(&self, endpoint: &Endpoint) -> Result<Device, Error> {
         self.ensure_open()?;
-        let entry = self.owns_endpoint(endpoint).ok_or(Error::Operation {
+        let driver = self.driver_for_endpoint(endpoint).ok_or(Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "endpoint belongs to another driver instance",
         })?;
-        let driver_state = entry.driver.activate(endpoint)?;
+        let driver_state = driver.activate(endpoint)?;
         let endpoint = endpoint.clone();
         // Construct family-owned services before publishing the device so a
         // metadata allocation failure cannot leave a partial public handle.
@@ -452,8 +449,8 @@ impl Session {
     pub fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         !self.drivers.closing
             && self
-                .owns_endpoint(endpoint)
-                .is_some_and(|entry| entry.driver.supports_host_registration(endpoint))
+                .driver_for_endpoint(endpoint)
+                .is_some_and(|driver| driver.supports_host_registration(endpoint))
     }
 }
 
@@ -466,7 +463,7 @@ mod tests {
     use crate::memory::{
         DeviceAccess, DeviceIntervals, DriverVirtualAddress, HostIntervals, MemoryKind,
     };
-    use crate::topology::EndpointKind;
+    use crate::topology::{EndpointDetailsKind, EndpointKind};
     use std::sync::atomic::Ordering;
 
     #[test]
@@ -547,7 +544,19 @@ mod tests {
         assert_eq!(endpoints[0].id, ids[0]);
         assert_eq!(endpoints[1].id, ids[1]);
         assert_eq!(session.open_endpoint(ids[1]).unwrap(), endpoints[1]);
+        for endpoint in &endpoints {
+            let details = session.query_endpoint_details(endpoint).unwrap();
+            assert_eq!(details.product_name, None);
+            assert_eq!(details.kind, EndpointDetailsKind::Other);
+        }
         let (mut other_session, _) = test_session(&ids);
+        assert_eq!(
+            other_session
+                .query_endpoint_details(&endpoints[0])
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
         assert_eq!(
             other_session.activate(&endpoints[0]).err().unwrap().kind(),
             ErrorKind::InvalidArgument
@@ -586,6 +595,13 @@ mod tests {
         assert_eq!(probes[1].shutdowns.load(Ordering::Relaxed), 1);
         assert_eq!(
             session.open_endpoint(ids[0]).unwrap_err().kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            session
+                .query_endpoint_details(&endpoints[0])
+                .unwrap_err()
+                .kind(),
             ErrorKind::Unsupported
         );
         session.destroy().unwrap();

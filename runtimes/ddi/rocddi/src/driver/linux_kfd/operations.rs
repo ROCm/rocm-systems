@@ -7,6 +7,40 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+pub(super) fn query_endpoint_details(endpoint: &Endpoint) -> EndpointDetails {
+    let mut details = EndpointDetails::empty_for(endpoint);
+    let EndpointDetailsKind::Gpu {
+        asic_family_id,
+        counter_frequency_hz,
+    } = &mut details.kind
+    else {
+        return details;
+    };
+    let Some(pci) = endpoint.pci else {
+        return details;
+    };
+    let Some(native) = endpoint.linux_kfd_drm_info() else {
+        return details;
+    };
+    let device_info = native
+        .render_minor
+        .and_then(|minor| sysfs::open_render(minor).ok())
+        .and_then(|render| drm::device_info_prefix(&render).ok())
+        .filter(|info| info.device_id == pci.device_id);
+    if let Some(info) = device_info.filter(|info| info.family_id != 0) {
+        *asic_family_id = Some(info.family_id);
+    }
+    *counter_frequency_hz = device_info
+        .filter(|info| info.gpu_counter_frequency_khz != 0)
+        .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
+    details.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
+        .ok()
+        .filter(|metadata| metadata.len() <= 1024 * 1024)
+        .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
+        .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
+    details
+}
+
 impl GpuDriver for LinuxKfdDriver {
     type UserQueue = KfdQueue;
     type KernelQueue = KfdKernelQueue;
@@ -85,36 +119,6 @@ impl GpuDriver for LinuxKfdDriver {
             .map_err(|source| native_error("KFD available memory query", source))
     }
 
-    fn gpu_presentation(&self, endpoint: &Endpoint) -> GpuPresentation {
-        let mut presentation = GpuPresentation {
-            product_name: None,
-            asic_family_id: endpoint.gpu().map_or(0, |gpu| gpu.asic_family_id),
-            gpu_counter_frequency_hz: None,
-        };
-        let Some(pci) = endpoint.pci else {
-            return presentation;
-        };
-        let Some(native) = endpoint.linux_kfd_drm_info() else {
-            return presentation;
-        };
-        let device_info = native
-            .render_minor
-            .and_then(|minor| sysfs::open_render(minor).ok())
-            .and_then(|render| drm::device_info_prefix(&render).ok())
-            .filter(|info| info.device_id == pci.device_id);
-        if let Some(info) = device_info.filter(|info| info.family_id != 0) {
-            presentation.asic_family_id = info.family_id;
-        }
-        presentation.gpu_counter_frequency_hz = device_info
-            .filter(|info| info.gpu_counter_frequency_khz != 0)
-            .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
-        presentation.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
-            .ok()
-            .filter(|metadata| metadata.len() <= 1024 * 1024)
-            .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
-            .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
-        presentation
-    }
     fn set_persisting_l2_cache_size(
         &self,
         device: &DeviceState,
