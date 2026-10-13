@@ -1142,6 +1142,7 @@ TEST_F(TopoTest, CheckP2p_LevelXgmiRejectsPhbPeer) {
   RUN_ISOLATED_TEST_WITH_ENV(
       "CheckP2p_LevelXgmiRejectsPhbPeer",
       [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
         const uint64_t host = 0xe6;
         struct ncclXmlNode* cpu = addSystemCpu(host);
         addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
