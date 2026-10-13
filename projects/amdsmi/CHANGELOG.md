@@ -32,15 +32,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Each event now includes `TIMESTAMP` (Unix epoch seconds) so events can be correlated across streams. `AmdSmiEventReader.read()` returns it as `timestamp`.
   - `--json` now prints one JSON object per line, and `--csv` prints the header once followed by one row per event.
 
-- **Added IFoE fabric RAS CPER API**.
-  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
-  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
-
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
+- **Added `amdsmi_get_fabric_cper_entries()` for IFoE fabric RAS events**.  
+  - Returns fabric link-down, link-up and fatal-error events as CPER records, paged with a cursor like `amdsmi_get_gpu_cper_entries()`. It returns `AMDSMI_STATUS_NOT_SUPPORTED` when UALoE is not available.
+  - `amd-smi ras --cper` now lists these events (`fabric-linkdown`, `fabric-linkup`, `fabric-fatal`) alongside GPU errors.
 
 - **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
   - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
