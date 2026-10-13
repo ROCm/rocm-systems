@@ -1312,10 +1312,10 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // batching; rcclEffectiveP2pBatchEnable separately controls the default policy.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
 RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
-// Give direct Send/Recv/SendRecv operations the full P2P channel pool while
+// Let direct Send/Recv/SendRecv operations use a wider P2P channel tile while
 // preserving the communicator-wide peer split for P2P-backed collectives.
-// Opt-in: explicit fan-out may oversubscribe channels across rounds.
-RCCL_PARAM(P2pDirectFullChannels, "P2P_DIRECT_FULL_CHANNELS", 0);
+// 128 is the largest validated grid; 256-channel P2P kernels can starve progress.
+RCCL_PARAM(P2pDirectMaxChannels, "P2P_DIRECT_MAX_CHANNELS", 0);
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
@@ -1352,16 +1352,17 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
-int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, bool directFullChannels) {
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int directMaxChannels) {
   bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-  if (!directFullChannels || !directApi) return comm->p2pnChannelsPerPeer;
+  if (directMaxChannels <= 0 || !directApi) return comm->p2pnChannelsPerPeer;
   int argsLimit = pow2Down(ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes));
-  return std::min(comm->p2pnChannels, argsLimit);
+  int requested = pow2Down(std::min(directMaxChannels, 128));
+  return std::min(std::min(comm->p2pnChannels, argsLimit), requested);
 }
 
 static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p* task) {
   ncclFunc_t collAPI = task == nullptr ? ncclNumFuncs : task->collAPI;
-  return rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectFullChannels());
+  return rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectMaxChannels());
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
@@ -1856,7 +1857,8 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         int nChannelsMax = std::max(rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send));
         int nChannelsMin = nChannelsMax;
         // Try to use all channels, but one channel per operation.
-        while (nChannelsMin * nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
+        if (nChannelsMax == comm->p2pnChannelsPerPeer)
+          while (nChannelsMin * nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
         // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
         // split into two one-sided work items, so reserve twice the P2P work.
         if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,

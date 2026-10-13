@@ -125,38 +125,54 @@ void checkMaxP2pResolver(int expected)
     EXPECT_EQ(ncclMaxP2pNchannels(), expected);
 }
 
-TEST(P2pDirectFullChannelsTests, DirectApisUseFullPoolWhenEnabled)
+TEST(P2pDirectMaxChannelsTests, DirectApisUseRequestedPoolWhenEnabled)
 {
     auto comm                    = std::make_unique<ncclComm>();
     comm->p2pnChannels           = 64;
     comm->p2pnChannelsPerPeer    = 16;
     comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, true), 64);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, true), 64);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, true), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128), 64);
 }
 
-TEST(P2pDirectFullChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
+TEST(P2pDirectMaxChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
 {
     auto comm                    = std::make_unique<ncclComm>();
     comm->p2pnChannels           = 64;
     comm->p2pnChannelsPerPeer    = 16;
     comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, false), 16);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, true), 16);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, true), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, 0), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, 128), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, 128), 16);
 }
 
-TEST(P2pDirectFullChannelsTests, FullPoolRespectsKernelArgsBudget)
+TEST(P2pDirectMaxChannelsTests, RequestedPoolRespectsKernelArgsBudget)
 {
     auto comm                    = std::make_unique<ncclComm>();
     comm->p2pnChannels           = 64;
     comm->p2pnChannelsPerPeer    = 16;
     comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 32 * sizeof(ncclDevWorkBatch);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, true), 32);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128), 32);
+}
+
+TEST(P2pDirectMaxChannelsTests, RequestedPoolIsCappedAtValidatedMaximum)
+{
+    auto comm                    = std::make_unique<ncclComm>();
+    comm->p2pnChannels           = 256;
+    comm->p2pnChannelsPerPeer    = 64;
+    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 256 * sizeof(ncclDevWorkBatch);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 64), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 256), 128);
+}
+
+TEST(P2pDirectMaxChannelsTests, DefaultKernelArgsBudgetFits256ChannelBatches)
+{
+    EXPECT_GE(ncclDevMaxChannelsForArgsBytes(ncclMaxKernelArgsSize(1250)), 256);
 }
 
 void checkUpperBound(int expectedUpper, bool expectedOptedHigher)

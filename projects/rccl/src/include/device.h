@@ -807,18 +807,16 @@ struct alignas(16) ncclDevKernelArgsStorage {
 };
 
 typedef ncclDevKernelArgsStorage<(5 << 10)> ncclDevKernelArgs5K;
+typedef ncclDevKernelArgsStorage<(8 << 10)> ncclDevKernelArgs8K;
 typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // typedef ncclDevKernelArgsStorage<(32<<10)-4> ncclDevKernelArgs31K;
 
 #ifdef ENABLE_WARP_SPEED
-// needed extra storage for accomodating more channels than 128 for WarpSpeed support
-// 256 channels (i.e. 256 warps) would hang without this extra storage
-// 5KB should be sufficient for now
-typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+// 8 KiB accommodates the kernel-args header plus one batch per channel at 256 channels.
+typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
 #else
-// 5KB needed so 256-channel non-WarpSpeed builds can fit one batch per channel
-// in the kernel-args buffer (4KB only fits ~252 batches).
-typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+// Keep the same budget for regular P2P plans, which also use one batch per channel.
+typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
