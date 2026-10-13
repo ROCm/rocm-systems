@@ -112,6 +112,16 @@ if(HIP_PLATFORM MATCHES "amd")
   # Build hipSpirvTest with a custom command so it is compiled for amdgcnspirv only.
   # Catch2 v3 is not header-only, so its include dirs and library come from the
   # Catch2::Catch2 target (works for both find_package and FetchContent Catch2).
+  # On Windows the custom command does not get CMake's MSVC runtime flags, so pick
+  # the runtime that matches CMAKE_MSVC_RUNTIME_LIBRARY (default is the DLL runtime).
+  set(SPIRV_TEST_RUNTIME_FLAG)
+  if(WIN32)
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY OR CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
+      set(SPIRV_TEST_RUNTIME_FLAG "-fms-runtime-lib=dll$<$<CONFIG:Debug>:_dbg>")
+    else()
+      set(SPIRV_TEST_RUNTIME_FLAG "-fms-runtime-lib=static$<$<CONFIG:Debug>:_dbg>")
+    endif()
+  endif()
   add_custom_target(hipSpirvTest ALL
                   COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
@@ -119,6 +129,7 @@ if(HIP_PLATFORM MATCHES "amd")
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
                   "-I$<JOIN:$<TARGET_PROPERTY:Catch2::Catch2,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
                   --offload-arch=amdgcnspirv
+                  ${SPIRV_TEST_RUNTIME_FLAG}
                   -x none $<TARGET_LINKER_FILE:Catch2::Catch2>
                   -o ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX}
                   COMMAND_EXPAND_LISTS
