@@ -710,8 +710,9 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     if (has_mailbox) epilogue_bytes += fence_command_size_ + trap_command_size_;
   }
 
-  const uint32_t completion_command_size =
-      profiling_enabled ? atomic_command_size_ : 0;
+  const uint32_t completion_command_size = profiling_enabled
+      ? (platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_)
+      : 0;
   const uint32_t total_command_size =
       prologue_bytes + extra_poll_bytes + total_timestamp_command_size +
       copy_bytes + completion_command_size + epilogue_bytes;
@@ -774,10 +775,15 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += timestamp_command_size_;
 
-    BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
-    command_addr += atomic_command_size_;
+    if (platform_atomic_support_) {
+      BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    } else {
+      BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                           static_cast<uint64_t>(out_signal.LoadRelaxed() - 1));
+    }
+    command_addr += completion_command_size;
     bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += atomic_command_size_;
+    wrapped_index += completion_command_size;
   }
 
   if (emit_epilogue) {
