@@ -147,6 +147,7 @@ TEST(P2pDirectMaxChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, 0), 16);
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, 128), 16);
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, 128), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128, /*useMemcpy=*/true), 16);
 }
 
 TEST(P2pDirectMaxChannelsTests, RequestedPoolRespectsKernelArgsBudget)

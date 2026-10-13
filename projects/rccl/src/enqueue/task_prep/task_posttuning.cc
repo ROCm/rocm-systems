@@ -165,7 +165,7 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
   // private to each comm, so we need to set it anyway.
   (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  int channelStride = rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectMaxChannels());
+  int channelStride = rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectMaxChannels(), ncclP2pUsesMemcpy());
   for (int c = 0; c < channelStride; c++) {
     int channelId =
       ncclP2pChannelForPart(comm->p2pnChannels, base, c, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
@@ -232,7 +232,8 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
-  int channelStride = rcclP2pChannelStrideForApi(comm, task->collAPI, rcclParamP2pDirectMaxChannels());
+  int channelStride =
+    rcclP2pChannelStrideForApi(comm, task->collAPI, rcclParamP2pDirectMaxChannels(), ncclP2pUsesMemcpy());
   int channelId =
     ncclP2pChannelForPart(comm->p2pnChannels, base, 0, channelStride, comm->nNodes, comm->p2pChannelShiftSize);
   struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;

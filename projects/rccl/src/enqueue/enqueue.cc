@@ -1352,9 +1352,9 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   return -1;
 }
 
-int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int directMaxChannels) {
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int directMaxChannels, bool useMemcpy) {
   bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-  if (directMaxChannels <= 0 || !directApi) return comm->p2pnChannelsPerPeer;
+  if (directMaxChannels <= 0 || !directApi || useMemcpy) return comm->p2pnChannelsPerPeer;
   int argsLimit = pow2Down(ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes));
   int requested = pow2Down(std::min(directMaxChannels, 128));
   return std::min(std::min(comm->p2pnChannels, argsLimit), requested);
@@ -1362,7 +1362,7 @@ int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int di
 
 static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p* task) {
   ncclFunc_t collAPI = task == nullptr ? ncclNumFuncs : task->collAPI;
-  return rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectMaxChannels());
+  return rcclP2pChannelStrideForApi(comm, collAPI, rcclParamP2pDirectMaxChannels(), ncclP2pUsesMemcpy());
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget

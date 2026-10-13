@@ -496,6 +496,8 @@ in the following table.
         | budget, and the validated maximum of 128 channels.
         | This option is useful for large pairwise transfers on gfx1250 when
         | the communicator contains more ranks than the operation uses.
+        | It does not widen the Copy Engine path selected by
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1``.
       - | ``0`` (default): use the communicator's per-peer channel count.
         | Positive integer: maximum channels for direct P2P operations;
         | values above 128 are capped to 128.
