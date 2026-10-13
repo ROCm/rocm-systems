@@ -117,4 +117,24 @@ TEST_F(RomeModelsParseGraphLightMicrotest, NumberWiderThanIntRange_IsRejected) {
   EXPECT_EQ(parseGraphLight("(4294967299)", system(), graph(), nullptr), ncclInvalidUsage);
 }
 
+// A segment is transcribed into one fixed-width treeBase row. Parentheses are copied
+// through one-for-one and are not counted against any limit, so a segment can outrun
+// the row; it must be refused rather than run on into the row after it (and, from the
+// last row, past treeBase altogether). The row can run out under either of the two
+// things written to it, a parenthesis or a digit of a GPU number, so both are checked.
+TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsRejected) {
+  const size_t rowLen = sizeof(graph()->treeBase[0]);
+
+  // Overruns while copying a parenthesis.
+  const std::string parens(rowLen, '(');
+  // Overruns on the second digit of "14": the parentheses fill the row up to its last
+  // usable byte. The trailing ')' keeps the number's end-of-token scan inside the string.
+  const std::string endsInNumber = std::string(rowLen - 2, '(') + "14)";
+
+  for (const std::string& tooLong : {parens, endsInNumber}) {
+    SCOPED_TRACE("segment length " + std::to_string(tooLong.size()));
+    EXPECT_EQ(parseGraphLight(tooLong.c_str(), system(), graph(), nullptr), ncclInvalidUsage);
+  }
+}
+
 }  // namespace

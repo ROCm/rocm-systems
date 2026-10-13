@@ -3970,6 +3970,8 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int status = 0; // 0 : between numbers, 1 : inside number
   int ngpus = system->nodes[GPU].count;
   int x = 0;
+  // Longest segment transcription that still leaves room for the terminating 0.
+  const int maxTreeBaseLen = (int)sizeof(graph->treeBase[0]) - 1;
   do {
     int digit = str[offset] - '0';
     if (digit >= 0 && digit <= 9) {
@@ -4000,6 +4002,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         while (start_offset < offset) {
         // for (int r=0; r<gpu; r++) {
           if (str[start_offset] == '(' || str[start_offset] == ')') {
+            if (y >= maxTreeBaseLen) {
+              WARN("Tree too long in user-defined trees (max %d), ignoring user-defined trees", maxTreeBaseLen);
+              return ncclInvalidUsage;
+            }
             graph->treeBase[x][y] = str[start_offset];
             y++;
             start_offset++;
@@ -4018,6 +4024,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               sprintf(number_str, "%d", g);
               int k = 0;
               while (number_str[k] != 0) {
+                if (y >= maxTreeBaseLen) {
+                  WARN("Tree too long in user-defined trees (max %d), ignoring user-defined trees", maxTreeBaseLen);
+                  return ncclInvalidUsage;
+                }
                 graph->treeBase[x][y] = number_str[k];
                 y++;
                 k++;
