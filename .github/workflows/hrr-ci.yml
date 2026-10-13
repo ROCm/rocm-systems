@@ -210,19 +210,21 @@ jobs:
 
       # This tree's HIP headers come first: an API added here is not in the
       # pinned SDK's headers yet. The SDK supplies the hip CMake package.
+      # On Windows, cygpath -m gives the drive-letter form a native cmake accepts.
       - name: Configure
         env:
           LINKER_FLAGS: ${{ matrix.linker_flags }}
-        run: >-
-          cmake -S projects/hrr -B build -GNinja -Wno-dev
-          -DCMAKE_BUILD_TYPE=Release
-          "-DCMAKE_PREFIX_PATH=${ROCM_SDK}"
-          "-DROCM_PATH=${ROCM_SDK}"
-          "-DHRR_HIP_INCLUDE_DIRS=${PWD}/projects/hip/include;${PWD}/projects/clr/hipamd/include"
-          "-DCMAKE_EXE_LINKER_FLAGS=${LINKER_FLAGS}"
-          -DHRR_BUILD_PLAYBACK=ON
-          -DHRR_BUILD_TESTS=ON
-          -DHRR_BUILD_INTEGRATION_TESTS=OFF
+        run: |
+          tree="$(cygpath -m "${PWD}" 2>/dev/null || echo "${PWD}")"
+          cmake -S projects/hrr -B build -GNinja -Wno-dev \
+            -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_PREFIX_PATH=${ROCM_SDK}" \
+            "-DROCM_PATH=${ROCM_SDK}" \
+            "-DHRR_HIP_INCLUDE_DIRS=${tree}/projects/hip/include;${tree}/projects/clr/hipamd/include" \
+            "-DCMAKE_EXE_LINKER_FLAGS=${LINKER_FLAGS}" \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=ON \
+            -DHRR_BUILD_INTEGRATION_TESTS=OFF
 
       - name: Build
         run: cmake --build build -j
