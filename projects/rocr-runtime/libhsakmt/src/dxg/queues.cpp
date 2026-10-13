@@ -265,9 +265,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetSdmaUserQueueConfig(HsaSdmaUserQueueConfig Config) {
-  dxg_runtime->sdma_user_queue_enabled_ = Config.ui32.NativeUserQueue != 0;
-  dxg_runtime->sdma_user_queue_gpu_poll_ = Config.ui32.GpuPoll != 0;
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetSdmaConfig(HsaSdmaConfig Config) {
+  dxg_runtime->sdma_gpu_poll_ = Config.ui32.GpuPoll != 0;
   return HSAKMT_STATUS_SUCCESS;
 }
 

@@ -43,8 +43,8 @@ bool LoadPlatformDynamicApis(ThunkLoader* loader, void* thunk_handle) {
 void BindPlatformStaticApis(ThunkLoader* loader) {
   loader->HSAKMT_PFN(hsaKmtQueueRingDoorbell) =
       (ThunkLoader::HSAKMT_DEF(hsaKmtQueueRingDoorbell)*)(&hsaKmtQueueRingDoorbell);
-  loader->HSAKMT_PFN(hsaKmtSetSdmaUserQueueConfig) =
-      (ThunkLoader::HSAKMT_DEF(hsaKmtSetSdmaUserQueueConfig)*)(&hsaKmtSetSdmaUserQueueConfig);
+  loader->HSAKMT_PFN(hsaKmtSetSdmaConfig) =
+      (ThunkLoader::HSAKMT_DEF(hsaKmtSetSdmaConfig)*)(&hsaKmtSetSdmaConfig);
   loader->HSAKMT_PFN(hsaKmtGetMemoryHandle) =
       (ThunkLoader::HSAKMT_DEF(hsaKmtGetMemoryHandle)*)(&hsaKmtGetMemoryHandle);
 }

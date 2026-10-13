@@ -2805,15 +2805,10 @@ hsa_status_t Runtime::Load() {
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
   }
 
-  if (!thunkLoader_->IsDXG()) flag_.disable_sdma_user_queue();
-
-  if (HSAKMT_CALL(hsaKmtSetSdmaUserQueueConfig) != nullptr) {
-    HsaSdmaUserQueueConfig sdma_user_queue_config = {};
-    if (flag_.enable_sdma_user_queue()) {
-      sdma_user_queue_config.ui32.NativeUserQueue = 1;
-      sdma_user_queue_config.ui32.GpuPoll = flag_.enable_sdma_gpu_poll() ? 1 : 0;
-    }
-    HSAKMT_CALL(hsaKmtSetSdmaUserQueueConfig(sdma_user_queue_config));
+  if (HSAKMT_CALL(hsaKmtSetSdmaConfig) != nullptr) {
+    HsaSdmaConfig sdma_config = {};
+    sdma_config.ui32.GpuPoll = flag_.enable_sdma_gpu_poll() ? 1 : 0;
+    HSAKMT_CALL(hsaKmtSetSdmaConfig(sdma_config));
   }
 
 #if defined(__linux__)

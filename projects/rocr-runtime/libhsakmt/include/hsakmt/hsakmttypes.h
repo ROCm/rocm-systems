@@ -797,28 +797,26 @@ typedef struct _HsaQueueResource
     volatile HSAint64* ErrorReason;  /** exception bits signal payload */
 } HsaQueueResource;
 
-/** Windows/DXG only: process-wide policy for SDMA user queues, applied by
- *  hsaKmtSetSdmaUserQueueConfig to every queue created afterwards.
+/** Windows/DXG only: process-wide SDMA policy, applied by hsaKmtSetSdmaConfig to every
+ *  queue created afterwards.
  */
-typedef struct _HsaSdmaUserQueueConfig
+typedef struct _HsaSdmaConfig
 {
     union
     {
         struct
         {
-            unsigned int NativeUserQueue : 1; // default = 1: submit through the native WDDM hardware queue;
-                                              // the KMD capability still has the final say. If 0: legacy
-                                              // software-scheduled translation thread.
             unsigned int GpuPoll         : 1; // default = 0: the producer's dependency POLL_REGMEM packets are
                                               // waited out and stripped on a host thread before the span is
                                               // submitted. If 1: they are left in the ring for the SDMA engine
-                                              // to execute. Ignored when NativeUserQueue is 0.
-            unsigned int Reserved        : 30;
+                                              // to execute. Ignored on queues that did not get a native user
+                                              // queue, which HSA_CAPABILITY2.NativeSDMA decides.
+            unsigned int Reserved        : 31;
 
         } ui32;
         HSAuint32 Value;
     };
-} HsaSdmaUserQueueConfig;
+} HsaSdmaConfig;
 
 
 //TEMPORARY structure definition - to be used only on "Triniti + Southern Islands" platform
