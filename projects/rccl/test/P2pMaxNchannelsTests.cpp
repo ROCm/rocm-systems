@@ -123,6 +123,28 @@ void checkMaxP2pResolver(int expected)
     EXPECT_EQ(ncclMaxP2pNchannels(), expected);
 }
 
+TEST(P2pCeChannelCapTests, Gfx1250CeDefaultsToSafePerPeerCount)
+{
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/2), 2);
+}
+
+TEST(P2pCeChannelCapTests, OtherArchitecturesAndKernelP2pAreUnchanged)
+{
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, false, true, /*configuredCap=*/2), 64);
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, false, /*configuredCap=*/2), 64);
+}
+
+TEST(P2pCeChannelCapTests, NonPositiveConfigurationDisablesTheCap)
+{
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/0), 64);
+}
+
+TEST(P2pCeChannelCapTests, OverrideIsPowerOfTwoAndBoundedByPool)
+{
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/7), 4);
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/2, true, true, /*configuredCap=*/8), 2);
+}
+
 void checkUpperBound(int expectedUpper, bool expectedOptedHigher)
 {
     // Neutral arch and topology: gfx942 resolves to the default bound on any node count,
