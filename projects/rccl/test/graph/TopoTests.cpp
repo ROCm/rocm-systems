@@ -1138,6 +1138,31 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
+TEST_F(TopoTest, CheckP2p_LevelXgmiRejectsPhbPeer) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckP2p_LevelXgmiRejectsPhbPeer",
+      [this]() {
+        const uint64_t host = 0xe6;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+        addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_PHB);
+
+        int p2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_LEVEL", "XGMI"}});
+}
+
 TEST_F(TopoTest, ComputePaths_CpxPeersUseLocalPath) {
   RUN_ISOLATED_TEST(
       "ComputePaths_CpxPeersUseLocalPath",
@@ -1190,6 +1215,8 @@ TEST_F(TopoTest, ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath) {
         // NCCL_P2P_DISABLE must divert the local CPX peer path through the CPU.
         EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
         EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
         int peerP2p = -1;
         ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
                                    nullptr, nullptr, nullptr),
