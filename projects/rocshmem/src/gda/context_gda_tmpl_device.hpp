@@ -2187,7 +2187,6 @@ __device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
     // Root PE: copy src tile into dst locally when they are different buffers.
     // Non-root PEs receive via tile_get above; the root must populate its own
     // dst explicitly — the GET path does not write to the root's dst.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -2223,7 +2222,6 @@ __device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -2259,7 +2257,6 @@ __device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
