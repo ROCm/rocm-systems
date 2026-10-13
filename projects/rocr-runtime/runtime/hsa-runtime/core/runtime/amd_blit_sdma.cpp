@@ -692,7 +692,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   if (profiling_enabled) {
     out_signal.GetSdmaTsAddresses(start_ts_addr, end_ts_addr);
     total_timestamp_command_size = 2 * timestamp_command_size_;
-    deferred_completion_size = atomic_command_size_;
+    deferred_completion_size =
+        platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_;
   }
 
   const uint32_t wait_dws = dep_signals.empty() ? 0 : 7;
@@ -778,10 +779,15 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += timestamp_command_size_;
 
-    BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
-    command_addr += atomic_command_size_;
+    if (platform_atomic_support_) {
+      BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    } else {
+      BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                           static_cast<uint64_t>(out_signal.LoadRelaxed() - 1));
+    }
+    command_addr += deferred_completion_size;
     bytes_written_[wrapped_index] = post_bytes;
-    wrapped_index += atomic_command_size_;
+    wrapped_index += deferred_completion_size;
   }
 
   if (emit_epilogue) {
