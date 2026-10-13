@@ -188,8 +188,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     and that a libionic without `ionic_dv_qp_set_gda` still builds, using
     `fakes/dv_provider_fake.cc` built as shared objects with SONAME `libionic.so` /
     `libmlx5.so`. Each test runs in its own process because the builders open the
-    fakes with `RTLD_NODELETE`. The tests skip when those libraries are not next to
-    the build tree (e.g. an installed binary).
+    fakes with `RTLD_NODELETE`. The fakes are built and installed beside the test
+    binary; the tests skip if they are missing.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file

@@ -522,7 +522,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
   if (wrap_ionicdv_qp_set_gda(qp->qp, false, true) != ncclSuccess) {
     static std::once_flag gdaWarnOnce;
     std::call_once(gdaWarnOnce, []() {
-      WARN("NET/IB-CAST : ionic_dv_qp_set_gda is unavailable or failed; IB-CAST QPs are created without GDA receive "
+      ATTN("NET/IB-CAST : ionic_dv_qp_set_gda is unavailable or failed; IB-CAST QPs are created without GDA receive "
            "mode. Upgrade libionic for full IB-CAST support.");
     });
   }

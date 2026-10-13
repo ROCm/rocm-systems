@@ -68,6 +68,9 @@ foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fa
   rccl_assert_source_line("${_path_cc}" "const char* topoPathTypeStr[] = {\"LOC\", \"XGMI\", \"NVB\", \"C2C\", \"PIX\", \
 \"PXB\", \"P2C\", \"PXN\", \"PHB\", \"SYS\", \"NET\", \"DIS\"};" "fakes/topo_stubs.cc: topoPathTypeStr")
 endforeach()
+# The GIN GDA factory only builds with ENABLE_ROCSHMEM_GIN (default OFF), so no test covers its dlopen flags.
+rccl_assert_source_line("${_rccl_src_root}/gin/gin_rocshmem_gda_factory.cc"
+  "return dlopen(path, RTLD_LAZY | RTLD_NODELETE)" "gin_dv_dlopen() and this check")
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
@@ -851,12 +854,13 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
     IONICDV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
     MLX5DV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
-    DV_PROVIDER_FAKE_IONIC_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-ionic>"
-    DV_PROVIDER_FAKE_IONIC_NO_GDA_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-ionic-no-gda>"
-    DV_PROVIDER_FAKE_MLX5_PATH="$<TARGET_FILE:rccl-micro-dv-provider-fake-mlx5>"
+    DV_PROVIDER_FAKE_IONIC_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic>"
+    DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
+    DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
+# The test finds them beside its own executable, in the build tree and in an install.
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
@@ -864,10 +868,15 @@ foreach(_fake ionic ionic-no-gda mlx5)
   target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
+  if(BUILD_TESTS)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
+  endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
 target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map)
+set_property(TARGET rccl-micro-dv-provider-fake-ionic-no-gda APPEND PROPERTY
+  LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
