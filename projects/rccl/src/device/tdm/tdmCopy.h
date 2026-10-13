@@ -355,6 +355,16 @@ __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* global
 //     instead, with a wait after each load and each store: at that size a chunk
 //     twice as large is worth more than the overlap.
 //
+// ONE-WAY LEGS (asyncLoadToLDS / asyncStoreFromLDS)
+//   * A line-aligned call of whole rows is one descriptor behind a single check:
+//     back-to-back sub-KB calls are issue-bound, and the symmetric kernels'
+//     reduce loops on 2-byte types are latency-bound per tile.
+//   * The head and tail stay TDM byte ops. Per-lane async b8/b128 ops move
+//     misaligned edges faster in isolation (up to ~2x at odd offsets), but
+//     inlined into the symmetric kernels they cost 12-15% on 2-byte AllReduce
+//     even when they never execute, and out of line the call costs more. Those
+//     kernels only pass 16B-aligned tiles anyway.
+//
 // VISIBILITY
 //   tdmWait() drains only the calling wave's TDM ops. Cross-warp / block-wide
 //   visibility is the caller's __syncthreads(); the vector head's ordinary
@@ -547,14 +557,20 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
 //
 // `head` brings the GLOBAL pointer up to a 128B boundary and the same offset is
 // applied to the LDS side. When the two pointers start with the same sub-128B
-// offset the bulk rows land on a 128B natural alignment on both ends; when they 
-// do not, the rows are still valid -- the LDS address field is an unconstrained 
-// byte address -- they just straddle lines. `Aligned` asserts both offsets are 
-// zero and compiles the peel out entirely, which is the real win: one descriptor
-// rather than head/bulk/tail.
+// offset the bulk rows land on a 128B natural alignment on both ends; when they
+// do not, the rows are still valid -- the LDS address field is an unconstrained
+// byte address -- they just straddle lines. A line-aligned global pointer with a
+// whole number of rows is one descriptor; `Aligned` asserts both offsets are zero
+// and compiles the head peel out.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
   if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
+
+  if ((((static_cast<uint32_t>(global) & (LINE - 1)) | (static_cast<uint32_t>(sizeInBytes) & (WIDTH - 1))) == 0) &&
+      sizeInBytes <= static_cast<size_t>(MAX_ROWS) * WIDTH) {
+    ldsTileRows<DIR, cp>(global, lds, static_cast<uint32_t>(sizeInBytes / WIDTH));
+    return;
+  }
 
   size_t off = 0;
   if constexpr (!Aligned) {
