@@ -340,6 +340,39 @@ TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
   EXPECT_EQ(driver->close(), 0);
 }
 
+/// @brief Final close must not unmap a caller-reserved range the caller still holds.
+/// @details A local allocation at a caller-provided VA is memfd-backed, and the
+/// MAP_FIXED mmap that follows installs the memfd view over the caller's own
+/// mapping. That range remains the caller's, so teardown must leave it mapped.
+TEST_F(SimulatedKfdTest, FinalCloseLeavesCallerReservedMappingMapped) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  void *target =
+      ::mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.size = page_size;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(driver->local_process_id(), AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_EQ(driver->mmap(target, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            target);
+
+  EXPECT_EQ(driver->close(), 0);
+
+  unsigned char resident = 0;
+  EXPECT_EQ(::mincore(target, page_size, &resident), 0)
+      << "final close unmapped a range the caller still owns";
+  ::munmap(target, page_size);
+}
+
 /// @brief A doorbell MAP_FIXED must not replace a page an access is holding.
 /// @details The interposer hands a MAP_FIXED mmap straight to the driver, so
 /// this replacement never passes through the interposer's lock either.

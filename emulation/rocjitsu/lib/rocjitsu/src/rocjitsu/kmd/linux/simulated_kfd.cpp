@@ -2163,6 +2163,9 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     if (alloc.user_va && (flags & MAP_FIXED) && addr != nullptr) {
       auto prot_rc = safe_mprotect(addr, length, PROT_READ | PROT_WRITE);
       if (prot_rc == 0) {
+        // The caller's own mapping is being replaced in place; as on the
+        // anonymous path, it stays the caller's to unmap, not teardown's.
+        host_ptr_owned = false;
         constexpr size_t page_size = 4096;
         size_t num_pages = (length + page_size - 1) / page_size;
         std::vector<uint8_t> page_resident(num_pages);
