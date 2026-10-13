@@ -40,7 +40,7 @@ class RomeModelsParseScene {
 class RomeModelsParseGraphLightMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    scene_ = std::make_unique<RomeModelsParseScene>(8);
+    scene_ = std::make_unique<RomeModelsParseScene>(16);
     graph_ = std::make_unique<ncclTopoGraph>();
     std::memset(graph_.get(), 0, sizeof(*graph_));
   }
@@ -76,6 +76,20 @@ class RomeModelsParseGraphLightMicrotest : public ::testing::Test {
 //   WellFormedTree_IsTranscribedToTreeBase
 //   MultipleSegments_ProduceOneTreeBaseRowEach
 //   GpuNumbersAreTranslatedThroughGpuMap
+
+// The happy path the bounds guards above must not regress: a tree naming GPUs the
+// system has is accepted and transcribed into the first treeBase row, with the row
+// after it terminated so the row count reads back as one. GPU 14 is two digits, so
+// the multi-digit arms of both the accumulator and the transcription are exercised.
+TEST_F(RomeModelsParseGraphLightMicrotest, WellFormedTree_IsTranscribedToTreeBase) {
+  const char* tree = "(4(2(14)(1))(6(5)))";
+  graph()->treeBase[1][0] = 'x';  // the fixture zeroes the graph, so dirty the terminator
+
+  ASSERT_EQ(parseGraphLight(tree, system(), graph(), nullptr), ncclSuccess);
+
+  EXPECT_STREQ(graph()->treeBase[0], tree);
+  EXPECT_EQ(graph()->treeBase[1][0], 0);
+}
 
 TEST_F(RomeModelsParseGraphLightMicrotest, EmptyString_ProducesEmptyTreeBase) {
   graph()->treeBase[0][0] = 'x';
