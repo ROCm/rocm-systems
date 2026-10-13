@@ -232,7 +232,7 @@ No new privilege, network, or credential surface. Profile still launches the exi
 
 ## Open questions
 
-- Pass budgets other than gfx942 are not locked. gfx1250 stays an open question: it may need an explicit rule that some blocks never share a pass (VALU versus VMEM). That constraint is not in this design, and gfx1250 is not a health-runner arch.
+- Pass budgets other than gfx942 are not locked. The impact on gfx1250 was evaluated the same way as the other architectures. Hardware testing of gfx1250 comes in a separate pull request.
 - Filtered `--block` / `--set` profiles allocate only the counters that were requested. There is no separate acceptance count for those subsets.
 - An SPU parent leaves its YAML `min` and `max` empty (FR-8). A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. A later definition of min and max for a split parent is deferred.
 - One replay can still be split into time slices. This design does not cover that. Reading each metric from one pass is about which replay the counters come from.
