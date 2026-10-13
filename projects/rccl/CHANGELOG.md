@@ -19,6 +19,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Inspector plugin ring-buffer drop counters: a single warning per process when events are dropped, a `dump_stats` record with operation and drop counts in JSON output, and `NCCL_INSPECTOR_PROM_DUMP_STATS` (default `0`) to add the same counters to Prometheus output.
 * `NCCL_CE_CHUNK_SIZE` (default 8 MiB): chunk size for the round-robin chunking that host RMA Copy Engine batches use when per-peer transfer sizes differ.
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
+* `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `2`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion and SDMA completion stalls.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * Hierarchical symmetric `ncclAllGather` for multi-node using GIN and LSA (`AllGather_RailRing_LsaST`): a GIN ring over the rails team moves data between nodes and LSA stores broadcast it to the other GPUs in each node.

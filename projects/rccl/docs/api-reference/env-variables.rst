@@ -487,6 +487,16 @@ in the following table.
         | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
         | communicator initialization.
 
+    * - | ``RCCL_P2P_CE_CHANNELS_PER_PEER``
+        | Caps P2P channels per peer on gfx1250 when
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1`` selects the Copy Engine transport.
+        | Each CE channel owns a staging buffer, stream, and event ring; the
+        | cap avoids VMM resource exhaustion and SDMA completion stalls.
+        | Other architectures and the default kernel P2P path are unchanged.
+      - | Positive integer, rounded down to a power of two and bounded by the
+        | P2P channel pool (default: ``2``).
+        | ``0`` or a negative value disables the cap.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
