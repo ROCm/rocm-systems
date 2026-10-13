@@ -2982,7 +2982,7 @@ typedef struct hip_api_data_s {
     struct {
       hipKernel_t kernel;
       hipFuncCache_t config;
-      hipDevice_t dev;
+      hipDevice_t device;
     } hipKernelSetCacheConfig;
     struct {
       const void* hostFunction;
@@ -5924,11 +5924,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipKernelSetAttributeForDevice.value = (int)value; \
   cb_data.args.hipKernelSetAttributeForDevice.device = (int)device; \
 };
-// hipKernelSetCacheConfig[('hipKernel_t', 'kernel'), ('hipFuncCache_t', 'config'), ('hipDevice_t', 'dev')]
+// hipKernelSetCacheConfig[('hipKernel_t', 'kernel'), ('hipFuncCache_t', 'config'), ('hipDevice_t', 'device')]
 #define INIT_hipKernelSetCacheConfig_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipKernelSetCacheConfig.kernel = (hipKernel_t)kernel; \
   cb_data.args.hipKernelSetCacheConfig.config = (hipFuncCache_t)config; \
-  cb_data.args.hipKernelSetCacheConfig.dev = (hipDevice_t)device; \
+  cb_data.args.hipKernelSetCacheConfig.device = (hipDevice_t)device; \
 };
 // hipLaunchByPtr[('const void*', 'hostFunction')]
 #define INIT_hipLaunchByPtr_CB_ARGS_DATA(cb_data) { \
@@ -8489,7 +8489,7 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipKernelSetAttributeForDevice[('hipKernel_t', 'kernel'), ('hipFuncAttribute', 'attr'), ('int', 'value'), ('int', 'device')]
     case HIP_API_ID_hipKernelSetAttributeForDevice:
       break;
-// hipKernelSetCacheConfig[('hipKernel_t', 'kernel'), ('hipFuncCache_t', 'config'), ('hipDevice_t', 'dev')]
+// hipKernelSetCacheConfig[('hipKernel_t', 'kernel'), ('hipFuncCache_t', 'config'), ('hipDevice_t', 'device')]
     case HIP_API_ID_hipKernelSetCacheConfig:
       break;
 // hipLaunchByPtr[('const void*', 'hostFunction')]
@@ -11378,7 +11378,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipKernelSetCacheConfig(";
       oss << "kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetCacheConfig.kernel);
       oss << ", config="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetCacheConfig.config);
-      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetCacheConfig.dev);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetCacheConfig.device);
       oss << ")";
     break;
     case HIP_API_ID_hipLaunchByPtr:
