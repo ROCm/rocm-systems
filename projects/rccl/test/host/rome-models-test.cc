@@ -37,10 +37,12 @@ class RomeModelsParseScene {
   std::unique_ptr<ncclTopoSystem> system_;
 };
 
+constexpr int kGpus = 16;
+
 class RomeModelsParseGraphLightMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    scene_ = std::make_unique<RomeModelsParseScene>(16);
+    scene_ = std::make_unique<RomeModelsParseScene>(kGpus);
     graph_ = std::make_unique<ncclTopoGraph>();
     std::memset(graph_.get(), 0, sizeof(*graph_));
   }
@@ -107,6 +109,40 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
   for (int i = 0; i <= NCCL_TOPO_MAX_NODES; i++) tooManyNumbers += "(0)";
 
   EXPECT_EQ(parseGraphLight(tooManyNumbers.c_str(), system(), graph(), nullptr),
+            ncclInvalidUsage);
+}
+
+// The counterpart to the range check below: every number the table can hold is accepted
+// and comes out translated through it, including the highest, so the range check cannot
+// be tightened into rejecting a legitimate topology. A reversing table is used rather
+// than an identity one so the translation itself is visible in the output.
+TEST_F(RomeModelsParseGraphLightMicrotest, GpuNumbersAreTranslatedThroughGpuMap) {
+  std::vector<int> reversingMap(kGpus);
+  for (int i = 0; i < kGpus; i++) reversingMap[i] = kGpus - 1 - i;
+
+  const std::string highestAndLowest =
+      "(" + std::to_string(kGpus - 1) + "(0))";  // "(15(0))" for 16 GPUs
+
+  ASSERT_EQ(parseGraphLight(highestAndLowest.c_str(), system(), graph(), reversingMap.data()),
+            ncclSuccess);
+
+  EXPECT_STREQ(graph()->treeBase[0], "(0(15))");
+}
+
+// A GPU number is used directly as an index into the caller's remap table, which is only
+// as long as the system has GPUs, so a number naming a GPU the system does not have reads
+// past the end of that table. Callers inside this file pass built-in trees, but the
+// function cannot tell those from a tree that came out of the environment.
+TEST_F(RomeModelsParseGraphLightMicrotest, GpuNumberOutsideGpuMap_IsRejected) {
+  // Exactly as long as the system has GPUs, matching the shortest table any caller
+  // passes, and heap-allocated so a read past it is one ASan can see.
+  std::vector<int> gpuMap(kGpus);
+  for (int i = 0; i < kGpus; i++) gpuMap[i] = i;
+
+  // The smallest number the table cannot hold, so the limit itself is pinned.
+  const std::string justPastEnd = "(" + std::to_string(kGpus) + ")";
+
+  EXPECT_EQ(parseGraphLight(justPastEnd.c_str(), system(), graph(), gpuMap.data()),
             ncclInvalidUsage);
 }
 

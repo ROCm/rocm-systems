@@ -4021,8 +4021,14 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               return ncclInvalidUsage;
             }
             int g = gpus[r];
-            // remap if needed
-            if (gpu_map) g = gpu_map[g];
+            // remap if needed; gpu_map is indexed by GPU number and only has ngpus entries
+            if (gpu_map) {
+              if (g >= ngpus) {
+                WARN("GPU %d in user-defined trees is out of range, ignoring user-defined trees", g);
+                return ncclInvalidUsage;
+              }
+              g = gpu_map[g];
+            }
             r++;
             int j = 0;
             // Translate gpu numbers into ranks
