@@ -222,6 +222,7 @@ test_categories:
       - "Share/ProfilerKernelChSplitMPITest.*"
     exclude:
       - "ProfilerKernelChMPITest.ShmTransportIsTimed"
+      - "ProfilerKernelChMPITest.SymmetricKernelPhasesTileKernelCh"
     exclude_windows: *mpi_exclude_windows
     labels: *mpi_quick_labels
     env_variables:
@@ -247,6 +248,16 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_P2P_DISABLE=1"
       - "NCCL_SHM_DISABLE=1"
+      - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_kernelch_sym:
+    description: "KernelPhase events from the symmetric kernels, which are the only ones that stamp phase boundaries. A communicator only gets symmetric support with cuMem on, and NCCL_CUMEM_ENABLE is cached for the process lifetime, so it is set before launch. DDA is disabled as in quick_env_profiler_kernelch."
+    test_patterns:
+      - "ProfilerKernelChMPITest.SymmetricKernelPhasesTileKernelCh"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_CUMEM_ENABLE=1"
       - "RCCL_DDA_ENABLE=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
@@ -461,6 +472,7 @@ execution_settings:
     quick_env_profiler_kernelch: 1200
     quick_env_profiler_kernelch_shm: 1200
     quick_env_profiler_kernelch_net: 1200
+    quick_env_profiler_kernelch_sym: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200

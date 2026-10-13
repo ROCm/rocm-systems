@@ -162,6 +162,7 @@ protected:
             (void)hipStreamDestroy(ownedStream_);
             ownedStream_ = nullptr;
         }
+        freeSymmetricBuffers();
         freeBuffers();
         for(auto it = ownedComms_.rbegin(); it != ownedComms_.rend(); ++it) (void)ncclCommDestroy(*it);
         ownedComms_.clear();
@@ -478,6 +479,39 @@ protected:
         return ncclAllReduce(send_, recv_, count_, ncclFloat, ncclSum, comm, stream);
     }
 
+    // Send and receive buffers from ncclMemAlloc, each registered as a symmetric
+    // window. Registration is collective, so allocation is agreed on first.
+    std::string allocSymmetricBuffers(ncclComm_t comm, size_t count)
+    {
+        count_ = count;
+        bool failed = ncclMemAlloc(&symSend_, count * sizeof(float)) != ncclSuccess ||
+                      ncclMemAlloc(&symRecv_, count * sizeof(float)) != ncclSuccess ||
+                      hipMemset(symSend_, 0, count * sizeof(float)) != hipSuccess;
+        std::string reason = agreeOn(failed, "symmetric buffer allocation failed");
+        if(!reason.empty()) return reason;
+        symComm_ = comm;
+        failed = ncclCommWindowRegister(comm, symSend_, count * sizeof(float), &symWins_[0],
+                                        NCCL_WIN_COLL_SYMMETRIC) != ncclSuccess ||
+                 ncclCommWindowRegister(comm, symRecv_, count * sizeof(float), &symWins_[1],
+                                        NCCL_WIN_COLL_SYMMETRIC) != ncclSuccess;
+        return agreeOn(failed, "symmetric window registration failed");
+    }
+
+    // Windows go before their communicator, so TearDown calls this ahead of the
+    // communicator teardown.
+    void freeSymmetricBuffers()
+    {
+        for(ncclWindow_t& win : symWins_)
+        {
+            if(win) (void)ncclCommWindowDeregister(symComm_, win);
+            win = nullptr;
+        }
+        if(symSend_) (void)ncclMemFree(symSend_);
+        if(symRecv_) (void)ncclMemFree(symRecv_);
+        symSend_ = symRecv_ = nullptr;
+        symComm_ = nullptr;
+    }
+
     std::string pluginPath_;
     void* handle_ = nullptr;
     ResetFn reset_ = nullptr;
@@ -496,6 +530,10 @@ protected:
     void* send_ = nullptr;
     void* recv_ = nullptr;
     size_t count_ = 0;
+    ncclComm_t symComm_ = nullptr;
+    ncclWindow_t symWins_[2] = {nullptr, nullptr};
+    void* symSend_ = nullptr;
+    void* symRecv_ = nullptr;
 };
 
 #define KCH_SKIP_IF_NEEDED(reason)                 \
@@ -961,6 +999,99 @@ TEST_F(ProfilerKernelChMPITest, TimersAreWallClockTicks)
     EXPECT_GE(spanNs, eventNs * 0.5) << "KernelCh span " << spanNs << " ns at " << rateKHz
                                      << " kHz covers under half of the " << eventNs << " ns between stream events";
     freeBuffers();
+}
+
+// KernelPhase events split a KernelCh into the kernel's barrier phases and come
+// from the same profiler thread, just before their parent stops. Only the
+// symmetric kernels stamp phase boundaries, so this needs symmetric support and
+// both buffers in symmetric windows. The kernel takes the outer boundaries from
+// the KernelCh start and stop stamps, so the phases must tile their parent's span.
+TEST_F(ProfilerKernelChMPITest, SymmetricKernelPhasesTileKernelCh)
+{
+    KCH_REQUIRE_RECORDER();
+    if(!validateTestPrerequisites(2)) GTEST_SKIP() << "needs at least 2 ranks";
+
+    // The recorder reads its mask when the communicator initializes it.
+    const char* prevMask = getenv("RCCL_TEST_KCH_EVENT_MASK");
+    const std::string savedMask = prevMask ? prevMask : "";
+    const int mask = ncclProfileGroup | ncclProfileColl | ncclProfileP2p | ncclProfileKernelCh | ncclProfileProxyOp |
+                     ncclProfileKernelPhase;
+    setenv("RCCL_TEST_KCH_EVENT_MASK", std::to_string(mask).c_str(), 1);
+    ncclComm_t comm = nullptr;
+    hipStream_t stream = nullptr;
+    std::string reason = createCommWithRecorder(&comm, &stream);
+    if(prevMask)
+        setenv("RCCL_TEST_KCH_EVENT_MASK", savedMask.c_str(), 1);
+    else
+        unsetenv("RCCL_TEST_KCH_EVENT_MASK");
+    KCH_SKIP_IF_NEEDED(reason);
+
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    KCH_SKIP_IF_NEEDED(agreeOn(ncclCommQueryProperties(comm, &props) != ncclSuccess,
+                               "ncclCommQueryProperties failed"));
+    KCH_SKIP_IF_NEEDED(mpiCoordinatedSkipReason(!props.deviceApiSupport,
+                                                "communicator has no symmetric support (needs cuMem and "
+                                                "all-P2P peers)"));
+    KCH_SKIP_IF_NEEDED(allocSymmetricBuffers(comm, 1 << 18));
+
+    constexpr int kIters = 8;
+    for(int i = 0; i < kIters; i++)
+        EXPECT_EQ(ncclSuccess, ncclAllReduce(symSend_, symRecv_, count_, ncclFloat, ncclSum, comm, stream));
+    EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    auto recs = waitForDrain(kIters);
+    size_t symColls = 0;
+    for(const auto& r : recs)
+        if(r.type == ncclProfileColl && r.isSymColl) ++symColls;
+    KCH_SKIP_IF_NEEDED(mpiCoordinatedSkipReason(symColls == 0, "AllReduce over symmetric windows did not take a "
+                                                               "symmetric kernel"));
+    EXPECT_EQ((size_t)kIters, symColls) << "only some AllReduces took a symmetric kernel";
+    KernelChStats s = checkBalanced(recs, "symmetric AllReduce");
+    EXPECT_EQ((size_t)kIters, s.tasks);
+
+    std::map<int64_t, std::vector<const RcclKchRecord*>> phasesOf;  // KernelCh index -> its phases
+    for(size_t i = 0; i < recs.size(); i++)
+        if(recs[i].type == ncclProfileKernelCh) phasesOf[(int64_t)i];
+    size_t phases = 0;
+    for(const auto& r : recs)
+    {
+        if(r.type != ncclProfileKernelPhase) continue;
+        ++phases;
+        EXPECT_EQ(1, r.stopEvents) << "KernelPhase " << r.phaseId << " stopped " << r.stopEvents << " times";
+        EXPECT_EQ(1, r.stopStates) << "KernelPhase " << r.phaseId << " got " << r.stopStates << " stop states";
+        EXPECT_GT(r.stopTimer, r.startTimer) << "KernelPhase " << r.phaseId << " has no duration";
+        for(long tid : {r.startTid, r.stopTid, r.stateTid})
+            EXPECT_EQ(1u, s.kernelChTids.count(tid)) << "KernelPhase " << r.phaseId
+                                                     << " delivered off the profiler thread";
+        bool underKernelCh = r.parentIndex >= 0 && recs[r.parentIndex].type == ncclProfileKernelCh;
+        EXPECT_TRUE(underKernelCh) << "KernelPhase " << r.phaseId << " has no KernelCh parent";
+        if(!underKernelCh) continue;
+        EXPECT_EQ(recs[r.parentIndex].channelId, r.channelId) << "KernelPhase on another channel than its KernelCh";
+        phasesOf[r.parentIndex].push_back(&r);
+    }
+    EXPECT_GT(phases, 0u) << "no KernelPhase events recorded for symmetric AllReduce";
+
+    for(auto& [chIdx, list] : phasesOf)
+    {
+        const RcclKchRecord& ch = recs[chIdx];
+        EXPECT_FALSE(list.empty()) << "KernelCh on channel " << ch.channelId << " got no KernelPhase children";
+        if(list.empty()) continue;
+        std::sort(list.begin(), list.end(),
+                  [](const RcclKchRecord* a, const RcclKchRecord* b) { return a->phaseId < b->phaseId; });
+        EXPECT_EQ(ch.startTimer, list.front()->startTimer)
+            << "first KernelPhase on channel " << ch.channelId << " does not start with its KernelCh";
+        EXPECT_EQ(ch.stopTimer, list.back()->stopTimer)
+            << "last KernelPhase on channel " << ch.channelId << " does not stop with its KernelCh";
+        for(size_t i = 1; i < list.size(); i++)
+        {
+            EXPECT_LT(list[i - 1]->phaseId, list[i]->phaseId)
+                << "two KernelPhase children with phase " << list[i]->phaseId << " on channel " << ch.channelId;
+            EXPECT_EQ(list[i - 1]->stopTimer, list[i]->startTimer)
+                << "KernelPhase " << list[i]->phaseId << " on channel " << ch.channelId
+                << " does not start where phase " << list[i - 1]->phaseId << " stopped";
+        }
+    }
+    freeSymmetricBuffers();
 }
 
 #endif  // MPI_TESTS_ENABLED

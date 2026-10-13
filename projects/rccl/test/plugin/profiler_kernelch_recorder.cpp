@@ -55,6 +55,8 @@ uint64_t gProxyOpCount;
 std::set<long> gProxyTids;
 uint64_t gAnomalies;
 
+// KernelPhase is off by default: it is only stamped by the symmetric kernels, and the
+// test that runs them turns it on through RCCL_TEST_KCH_EVENT_MASK.
 int activationMask() {
   const char* env = getenv("RCCL_TEST_KCH_EVENT_MASK");
   if (env && env[0] != '\0') return (int)strtol(env, nullptr, 0);
