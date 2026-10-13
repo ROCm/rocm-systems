@@ -832,6 +832,7 @@ if(BUILD_TESTS)
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SymkBlockWidthTests.cpp
+      SocketCryptTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -1077,6 +1078,7 @@ if(BUILD_TESTS)
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
+      BootstrapTlsMPITests.cpp
       BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp

@@ -51,6 +51,7 @@ test_categories:
       - "NetBootstrapInterfaceTest.*"
       - "BcmLinksTest.*"
       - "SocketPollTimeout.*"
+      - "SocketCrypt.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
       - "NetDevsPolicyP2pNetTests.*"
