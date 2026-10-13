@@ -387,6 +387,7 @@ if(BUILD_TESTS)
       Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestFp8Reduce.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/TestTDM.cpp
