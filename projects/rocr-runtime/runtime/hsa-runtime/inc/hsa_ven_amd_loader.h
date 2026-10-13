@@ -564,20 +564,19 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  * the loaded image is placed at @p address. On success,
  * ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE is @p address.
  *
- * @p address must lie in one virtual-memory mapping to which @p agent has
- * been granted access that includes ::HSA_ACCESS_PERMISSION_EX. The bytes
- * occupied by the code object, as reported by
- * ::hsa_ven_amd_loader_code_object_reader_get_load_size, must fit in @p size
- * and in the mapping. The mapping stays owned by the application. Destroying
- * @p executable does not unmap it.
+ * @p address is an application-owned range, for example a virtual-memory
+ * mapping or an mmap allocation. The runtime does not check that the range is
+ * mapped or executable. The bytes occupied by the code object, as reported by
+ * ::hsa_ven_amd_loader_code_object_reader_get_load_size, must fit in @p size.
+ * The range stays owned by the application. Destroying @p executable does not
+ * unmap it.
  *
  * Only supported for GPU agents and code object version 2 and later. Other
  * error conditions are as for ::hsa_executable_load_agent_code_object.
  *
  * @param[in] executable Executable.
  *
- * @param[in] agent Agent to load code object for. Must already have execute
- * access to the mapping.
+ * @param[in] agent Agent to load code object for.
  *
  * @param[in] code_object_reader A code object reader that holds the code
  * object to load.
@@ -605,9 +604,8 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER @p code_object_reader
  * is invalid.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p address is NULL, the code
- * object does not fit in @p size, or @p address is not inside one mapping
- * that @p agent can execute.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p address is NULL, or the code
+ * object does not fit in @p size.
  *
  * @retval ::HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS The code object is version
  * 1, or is incompatible with @p agent.
