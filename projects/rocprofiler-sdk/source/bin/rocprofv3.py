@@ -1438,19 +1438,17 @@ def has_set_attr(obj, key):
 def services_conflicting_with_kernel_replay(args, environ=None):
     """Services that kernel replay cannot collect correctly in the same run.
 
-    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
-    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
-    picks a different group on each pass. Every other service is simply left enabled for the whole
-    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
-    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+    Kernel replay re-runs each dispatch once per counter group, and --att adds one more pass that
+    runs the dispatch thread trace on its own. Those are the only pass-aware services: the tool
+    selects a counter group, or the thread trace, for each pass and switches the other off. Every
+    other service is simply left enabled for the whole replay loop, so it instruments all of the
+    passes and reports them under the one dispatch id the replay reuses -- N sets of PC samples,
+    where the run asked for one.
 
     Returns the display names of the conflicting services, in the order they are reported.
     """
     environ = os.environ if environ is None else environ
     conflicts = []
-
-    if getattr(args, "advanced_thread_trace", None):
-        conflicts.append("--att")
 
     if (
         getattr(args, "pc_sampling_beta_enabled", None)
@@ -1465,6 +1463,31 @@ def services_conflicting_with_kernel_replay(args, environ=None):
         conflicts.append("--spm")
 
     return conflicts
+
+
+def att_options_conflicting_with_kernel_replay(args):
+    """--att options that kernel replay cannot confine to the thread trace pass.
+
+    Replay runs --att as a dispatch thread trace on a pass of its own. These options instead select
+    a device-mode trace (or, for --collection-period, gate tracing on a timer), which captures
+    whatever runs on the device and ignores replay's per-pass selection, so every pass of a
+    replayed dispatch would be traced.
+
+    Returns the conflicting option names, in the order they are reported.
+    """
+    if not getattr(args, "advanced_thread_trace", None):
+        return []
+
+    return [
+        name
+        for name, attr in (
+            ("--att-consecutive-kernels", "att_consecutive_kernels"),
+            ("--att-no-intercept", "att_no_intercept"),
+            ("--selected-regions", "selected_regions"),
+            ("--collection-period", "collection_period"),
+        )
+        if getattr(args, attr, None)
+    ]
 
 
 def patch_args(data):
@@ -2245,14 +2268,23 @@ def run(app_args, args, **kwargs):
             fatal_error(
                 "--replay-mode kernel cannot be combined with "
                 + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
-                "every other service stays on for all of the passes and would report each "
-                "kernel once per pass. Collect them in a separate run."
+                + ". Kernel replay gives each counter group, and the --att thread trace, a pass "
+                "of its own; every other service stays on for all of the passes and would "
+                "report each kernel once per pass. Collect them in a separate run."
+            )
+        att_conflicts = att_options_conflicting_with_kernel_replay(args)
+        if att_conflicts:
+            fatal_error(
+                "--replay-mode kernel with --att cannot be combined with "
+                + " or ".join(att_conflicts)
+                + ". Kernel replay runs --att as a dispatch thread trace on a pass of its own; "
+                "these options trace the device instead and would capture every pass. Drop "
+                "them, or collect the thread trace in a separate run."
             )
 
         # Route counter collection through the in-process kernel-replay service. The SDK derives
-        # the pass count from the number of counter groups via the tool's pass-count callback, so
-        # there is nothing else to communicate.
+        # the pass count from the number of counter groups (plus one with --att) via the tool's
+        # pass-count callback, so there is nothing else to communicate.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
 
     if args.pmc:

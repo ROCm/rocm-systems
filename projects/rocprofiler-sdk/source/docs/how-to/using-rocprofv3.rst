@@ -1180,11 +1180,11 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - ``--replay-mode kernel`` requires ``--pmc`` and ``--kernel-replay-beta-enabled``.
 
-   - ``--replay-mode kernel`` collects counters only. It cannot be combined with ``--att``, PC sampling, or ``--spm``, and rocprofv3 rejects those combinations. Counter groups are the only thing that changes from one pass to the next, so any other service would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
+   - ``--replay-mode kernel`` collects counters and, with ``--att``, a dispatch thread trace. The thread trace runs on a pass of its own ahead of the counter passes, with counter collection switched off, so the trace does not perturb the counters. PC sampling and ``--spm`` cannot be combined with it, and rocprofv3 rejects those combinations: they would stay enabled across all of the passes and report every kernel once per pass. Collect them in a separate run. Tool authors who need per-pass control over other services can get it through the SDK; see :ref:`using-kernel-replay`.
 
    - This feature is in beta. The flags, the SDK API, and the output schema may change.
 
-   - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent.
+   - There is no ``--kernel-replay-passes`` flag. The number of passes is the number of ``--pmc`` groups collectable on the dispatch's GPU agent, plus one with ``--att``. A dispatch that the kernel filters do not select is not replayed.
 
    - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
 

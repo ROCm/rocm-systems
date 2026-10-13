@@ -6,7 +6,15 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**rocprofv3 (CLI):**
+
+  - `--att` can be combined with `--replay-mode kernel` (beta). Each profiled dispatch gets one extra replay pass, ahead of its counter passes, that runs the dispatch thread trace with counter collection switched off; the counter groups then run with the trace switched off. Device-mode thread trace options (`--att-consecutive-kernels`, `--att-no-intercept`, `--selected-regions`, `--collection-period`) are rejected with `--replay-mode kernel`.
+
 ### Changed
+
+**rocprofv3 (CLI):**
+
+  - With `--replay-mode kernel`, a dispatch that the kernel filters do not select is no longer replayed. It runs once on the ordinary path instead of being snapshotted and re-executed once per counter group.
 
 ### Resolved issues
 
