@@ -1001,16 +1001,8 @@ Output
 
 When Torch operator mapping is enabled, profiling writes additional CSV files in
 the workload directory: **marker_api_trace** and **counter_collection** files with
-the ``ml_api_trace`` prefix. Profile copies those marker CSVs unchanged.
-The source marker and counter files are **retained** in the workload directory.
-
-Each Function cell is one ROCTX range:
-
-``{encoded_name}:{location}|seqNr=...|tid=...|ftid=...|ltid=...|scope=...|args=...[|backend]``
-
-``/`` and ``%`` in the name token are percent-encoded.
-``Backend`` is the trailing ``|torch`` or ``|triton`` on Function, or ``user``
-when that suffix is absent (user-defined ROCTX ranges).
+the ``ml_api_trace`` prefix. The source marker and counter files are **retained**
+in the workload directory.
 
 Analyze reads those files and prints an operator call tree and a per-operator
 summary (for example with ``--list-torch-operators`` or ``--torch-operator``).
@@ -1060,19 +1052,14 @@ This means the install requirement above was not met.
 Hierarchical operator names
 ----------------------------
 
-Profile emits one-level ROCTX ranges (one Function cell per open range), with
-``file:line`` on Python wraps when a user frame exists. Analyze nests those
-ranges per ``Thread_Id`` and prints the reconstructed path with ``/``. That
-path is not a filesystem path.
+Analyze prints a call tree from the captured ranges. ``/`` in the operator
+summary is the reconstructed call path.
 
 .. code-block:: text
 
    nn.Module.Net.forward/nn.Module.Conv2d.forward/aten::convolution
    nn.Module.MyModel.forward/nn.Module.Linear.forward
    aten::relu
-
-The analyze call tree shows each call as a node; the reconstructed path
-uses ``/`` in the operator summary.
 
 This hierarchical information enables:
 

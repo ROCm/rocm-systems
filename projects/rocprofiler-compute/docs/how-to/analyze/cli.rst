@@ -826,8 +826,7 @@ A Function whose first token is the legacy stacked shape (``:#`` or
 ``#n@file:line``) makes analyze exit during parse, before the tree.
 Re-profile with current ``--torch-trace`` or ``--triton-trace``.
 
-``/`` in the Operator column and in globs is the reconstructed call path,
-not a filesystem path.
+``/`` in the Operator column and in globs is the reconstructed call path.
 
 
 List all operators
