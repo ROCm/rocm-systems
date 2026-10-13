@@ -347,7 +347,7 @@ class ThunkLoader {
                                       HSAuint64 value);
     // DXG-only; these pointers stay null on thunks that do not export them, so callers must
     // null-check them before use.
-    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetSdmaUserQueueConfig))(HsaSdmaUserQueueConfig Config);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetSdmaConfig))(HsaSdmaConfig Config);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtAisReadWriteFile))(void *devicePtr, \
                                       HSAuint64 size, \
                                       HSAint32 fd, \
@@ -564,7 +564,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtPcSamplingSupport)* HSAKMT_PFN(hsaKmtPcSamplingSupport);
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
-    HSAKMT_DEF(hsaKmtSetSdmaUserQueueConfig)* HSAKMT_PFN(hsaKmtSetSdmaUserQueueConfig) = nullptr;
+    HSAKMT_DEF(hsaKmtSetSdmaConfig)* HSAKMT_PFN(hsaKmtSetSdmaConfig) = nullptr;
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
 #if defined(_WIN32)
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);

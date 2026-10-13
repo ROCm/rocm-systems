@@ -124,12 +124,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
-      // Policy AND capability: the env flag only asks for the native user queue, the node
-      // bit says whether this device can actually provide one. libhsakmt applies the same
-      // product per queue, so taking it here keeps ROCr's packet choice in step with the
-      // path the queue will really use.
-      sdma_native_(core::Runtime::runtime_singleton_->flag().enable_sdma_user_queue() &&
-                   node_props.Capability2.ui32.NativeSDMA),
+      sdma_native_(node_props.Capability2.ui32.NativeSDMA),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
