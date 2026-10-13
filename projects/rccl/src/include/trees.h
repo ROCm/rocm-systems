@@ -15,9 +15,10 @@ ncclResult_t ncclGetDtree(int nranks, int rank, int* u0, int* d0_0, int* d0_1, i
                           int* d1_0, int* d1_1, int* parentChildType1);
 
 // Compact tree algorithms optimized for sorted domain ordering.
-// Uses half-interleave remapping to keep spine in first half of ranks and push
-// cross-domain hops to leaf level where they execute in parallel.
-// Enable via NCCL_TREE_COMPACT=1
+// Uses half-interleave remapping so that, in the first tree, every non-leaf node is in the
+// first half of ranks and the second half are leaves (the second tree is its mirror/shift).
+// Both trees keep cross-domain hops at the leaves only for an even two-way domain split;
+// see trees.cc. Enable via NCCL_TREE_COMPACT=1
 ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1, int* parentChildType0, int* s1,
                                  int* d1_0, int* d1_1, int* parentChildType1);
 

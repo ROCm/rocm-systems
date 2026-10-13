@@ -117,11 +117,17 @@ ncclResult_t ncclGetDtree(int nranks, int rank, int* s0, int* d0_0, int* d0_1, i
  * the standard binary tree creates cross-domain hops along the spine, adding
  * sequential latency. This optimization uses "half-interleave" remapping to
  * build a tree where:
- *   - The tree spine stays in the first half of ranks (typically same domain)
- *   - Cross-domain hops are pushed to leaf level where they execute in parallel
+ *   - Every non-leaf node is in the first half of ranks, so the spine stays there
+ *   - Every rank in the second half is a leaf, so hops into it execute in parallel
  *
- * This works for ANY domain distribution (5+3, 7+1, 6+1+1, etc.) without needing
- * to know domain boundaries.
+ * The remap needs no knowledge of domain boundaries, but the benefit depends on the
+ * split. The first tree of the double tree keeps cross-domain hops at the leaves only
+ * when the first domain holds at least ceil(nranks/2) nodes. The second tree is the
+ * mirror (even nranks) or shift (odd nranks) of the first, so its spine sits in the
+ * second half instead: for even nranks it is clean only when the first domain holds at
+ * most nranks/2 nodes, and for odd nranks it is never clean. Both trees are clean only
+ * for an even two-way split; with any other split one tree still crosses domains on
+ * its spine.
  *
  * Example with 8 nodes:
  *   Standard btree:        Compact tree (sorted-optimized):
