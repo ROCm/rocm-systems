@@ -123,6 +123,67 @@ TEST(WmmaSimdExact, F32_f16) {
   });
 }
 
+// Compare to the pre-existing generic native path, including rounding-sensitive
+// inputs and distinct NaN payloads for this host/compiler path, not a portable
+// ISA NaN policy. Scalar-vs-SIMD checks above use an exact corpus.
+TEST(WmmaSimdExact, F16NativeWidthSpecializationMatchesGeneric) {
+  SKIP_IF_NO_SIMD();
+  const uint32_t width = util::native<float>::size();
+  if (!amdgpu::mma_f32_native_width_supported(16, width))
+    GTEST_SKIP() << "unsupported native float width";
+  constexpr uint16_t halves[] = {0x0000, 0x8000, 0x0001, 0x03ff, 0x0400, 0x3c01, 0x3555, 0xbc01,
+                                 0x7bff, 0x7c00, 0xfc00, 0x7e11, 0xfe22, 0x7c33, 0xfc44};
+  constexpr uint32_t kFiniteHalfCount = 9; // The prefix before the first infinity.
+  for (bool scalar : {false, true})
+    for (bool nan_inputs : {false, true})
+      for (uint32_t dst : {0u, 4u, 32u, 36u, 64u, 68u, 112u})
+        for (uint32_t ca : {amdgpu::ACC_FROM_VGPR, CONST_ONE})
+          for (uint32_t modifier = 0; modifier < 4; ++modifier) {
+            // The legacy 16-wide path has its own host NaN operand priority.
+            // This comparison qualifies the newly enabled widths.
+            if (nan_inputs && width == 16)
+              continue;
+            WmmaFixture fx;
+            ASSERT_NE(fx.wf, nullptr);
+            // Match the template instantiation used by generated instruction execution.
+            amdgpu::InstructionComputeUnitView view(*fx.cu, *fx.wf);
+            ForceScalarGuard force_scalar_guard;
+            util::set_force_scalar_for_testing(scalar);
+            auto reseed = [&] {
+              const uint32_t count = nan_inputs ? std::size(halves) : kFiniteHalfCount;
+              for (uint32_t reg = 0; reg < 8; ++reg)
+                for (uint32_t lane = 0; lane < 32; ++lane) {
+                  const uint32_t i = reg * 32 + lane;
+                  fx.cu->write_vgpr(fx.vbase + S0 + reg, lane,
+                                    halves[i % count] |
+                                        (static_cast<uint32_t>(halves[(i + 3) % count]) << 16));
+                  fx.cu->write_vgpr(fx.vbase + S1 + reg, lane,
+                                    halves[(i + 7) % count] |
+                                        (static_cast<uint32_t>(halves[(i + 9) % count]) << 16));
+                  fx.cu->write_vgpr(fx.vbase + ACC + reg, lane,
+                                    nan_inputs ? 0x7fc01234u : 0x3f800001u);
+                }
+            };
+            reseed();
+            amdgpu::exec_wmma_f32(view, 16, 16, 32, 16, fx.vbase + dst, fx.vbase + S0,
+                                  fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, ca, modifier);
+            std::array<uint32_t, 256> expected;
+            for (uint32_t reg = 0; reg < 8; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                expected[reg * 32 + lane] = fx.cu->read_vgpr(fx.vbase + dst + reg, lane);
+            reseed();
+            amdgpu::exec_wmma_f32_16x16x32_f16(view, fx.vbase + dst, fx.vbase + S0, fx.vbase + S1,
+                                               fx.vbase + ACC, ca, modifier);
+            for (uint32_t reg = 0; reg < 8; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                ASSERT_EQ(fx.cu->read_vgpr(fx.vbase + dst + reg, lane), expected[reg * 32 + lane])
+                    << "scalar=" << scalar << " nan=" << nan_inputs << " dst=" << dst
+                    << " ca=" << ca << " modifier=" << modifier << " reg=" << reg
+                    << " lane=" << lane;
+          }
+}
+
 // --- dense f16-out (packed16, generic + specialized) ---
 TEST(WmmaSimdExact, F16_f16) {
   SKIP_IF_NO_SIMD();
