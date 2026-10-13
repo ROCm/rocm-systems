@@ -252,9 +252,9 @@ def hardware_counters_for_pass_select(
 ) -> FrozenSet[str]:
     """PMC names used to choose a pass.
 
-    Timestamps and non-counter SUPPORTED_DENOM tokens are stripped. Hardware
-    denominator counters such as SQ_WAVES stay, and the normalization fallback
-    may still relax those.
+    Timestamps and non-counter SUPPORTED_DENOM tokens are stripped. They do
+    not choose the pass. Hardware denominator counters such as SQ_WAVES and
+    GRBM_GUI_ACTIVE stay in the set.
     """
     drop = set(_NON_PMC_BIND_NAMES)
     for formula in SUPPORTED_DENOM.values():
@@ -282,31 +282,18 @@ def select_pass_with_normalization_fallback(
     layout: PassLayout,
     gpu_series: str,
 ) -> Tuple[Optional[str], bool]:
-    """Select one pass. SQ_WAVES and GRBM_GUI_ACTIVE are never dropped.
+    """Select a pass that holds every required counter.
 
-    Returns (pass_key, relaxed). pass_key is None when no pass holds the
-    counters that must stay together. relaxed is true only when removing a
-    runtime normalization counter other than SQ_WAVES or GRBM_GUI_ACTIVE
-    produced a qualifying pass.
+    ``SQ_WAVES`` and ``GRBM_GUI_ACTIVE`` stay in ``required``. When either is
+    only on another pass, return ``(None, False)`` so the caller leaves the
+    metric unset. The same pass still evaluates when it holds those
+    denominators. ``gpu_series`` does not drop them. The second value is
+    always False: there is no cross-pass denominator exception.
     """
-    chosen = select_pass(required, layout)
-    if chosen is not None:
-        return chosen, False
-
-    normalization_counters: Set[str] = set()
-    for formula in SUPPORTED_DENOM.values():
-        counters, _ = extract_counters_and_variables(
-            formula,
-            gpu_series,
-            include_supported_denom=False,
-        )
-        normalization_counters.update(counters)
-    normalization_counters -= _SAME_PASS_COUNTERS
-    formula_counters = required - normalization_counters
-    if not formula_counters or formula_counters == required:
-        return None, False
-    fallback = select_pass(frozenset(formula_counters), layout)
-    return fallback, fallback is not None
+    # Accepted so existing callers keep their argument. It must not relax
+    # SQ_WAVES or GRBM_GUI_ACTIVE onto a different pass.
+    del gpu_series
+    return select_pass(required, layout), False
 
 
 def _expression_should_unset(value: object) -> bool:
@@ -328,11 +315,12 @@ def choose_metric_pass(
 ) -> Optional[str]:
     """Pick a pass from the hardware PMC set.
 
-    Timestamps alone do not make the row unset. If the remaining PMC set fits
-    no pass, warn and return None so the caller leaves the metric unset.
+    Timestamps do not choose the pass. If no pass holds every required
+    counter, including SQ_WAVES and GRBM_GUI_ACTIVE, warn and return None
+    so the caller leaves the metric unset.
     """
     pmc_required = hardware_counters_for_pass_select(required, gpu_series)
-    chosen, normalization_relaxed = select_pass_with_normalization_fallback(
+    chosen, _relaxed = select_pass_with_normalization_fallback(
         pmc_required,
         layout,
         gpu_series,
@@ -350,13 +338,6 @@ def choose_metric_pass(
                 f"{label}: no hardware PMC set to bind",
             )
         return None
-    if normalization_relaxed:
-        missing = pmc_required - layout.counters_by_pass[chosen]
-        console_warning(
-            "pass_provenance",
-            f"{label}: runtime normalization counters {sorted(missing)} "
-            f"are not in {chosen}; binding formula counters to that pass",
-        )
     return chosen
 
 
