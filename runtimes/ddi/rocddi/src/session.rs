@@ -13,7 +13,6 @@ use crate::device::{Device, DeviceResources};
 use crate::driver::{self, DriverInstance};
 use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
-use crate::memory::{HostAllocation, VirtualAddress};
 use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
 
@@ -250,24 +249,6 @@ impl Session {
         first_error.map_or(Ok(()), Err)
     }
 
-    /// Allocates host-only storage under either driver context lifetime policy.
-    /// Host backing is independent of device activation and driver selection.
-    /// The session supplies its process scope.
-    /// `size` is a nonzero multiple of
-    /// [`host_page_size`](crate::memory::host::host_page_size); `alignment` is a power
-    /// of two at least that large. The host service may reserve a larger backing
-    /// extent while preserving the requested logical range. This owner needs no
-    /// activated device and retains only its storage owner.
-    ///
-    /// # Errors
-    /// Rejects invalid extents, an inherited session, or a session whose
-    /// teardown has begun. Metadata exhaustion and host mapping failure leave
-    /// no published owner; native errors retain their original cause.
-    pub fn allocate_host(&self, size: u64, alignment: u64) -> Result<HostAllocation, Error> {
-        self.ensure_open()?;
-        HostAllocation::allocate(size, alignment, self.registry.process_id)
-    }
-
     /// Visits passive endpoint records from every installed driver. Each
     /// driver's records are generation-consistent; independent drivers have no
     /// shared native generation. With multiple drivers, the session stages all
@@ -341,36 +322,6 @@ impl Session {
         self.registry.drivers[index].open_endpoint(id)
     }
 
-    /// Reserves one process virtual-address range common to every supplied
-    /// activated device. A nonzero requested address is a hint and may fall
-    /// back to another address in the common aperture. The selected driver's
-    /// virtual-memory capability owns the reservation.
-    ///
-    /// # Errors
-    /// Rejects an empty or cross-session device set, incompatible apertures,
-    /// invalid page-aligned extents, unsupported virtual memory, or address-space
-    /// exhaustion.
-    pub fn reserve_virtual_address(
-        &self,
-        devices: &[&Device],
-        size: u64,
-        alignment: u64,
-        address: u64,
-    ) -> Result<VirtualAddress, Error> {
-        self.ensure_open()?;
-        let first = devices.first().ok_or(Error::Operation {
-            kind: ErrorKind::InvalidArgument,
-            detail: "virtual-address reservation requires an activated device",
-        })?;
-        let driver = self
-            .driver_for_endpoint(&first.endpoint)
-            .ok_or(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "virtual-address device belongs to another session",
-            })?;
-        VirtualAddress::reserve_for_devices(driver, devices, size, alignment, address)
-    }
-
     /// Revalidates a passive endpoint with its owning driver and acquires or
     /// reuses the driver context and device state required for operations. The
     /// returned [`Device`] retains only that driver instance. The driver may
@@ -428,6 +379,8 @@ mod tests {
     use super::*;
     use crate::driver::VirtualMemoryOperations;
     use crate::driver::test_driver::TestDriver;
+    use crate::memory::device::VirtualAddress;
+    use crate::memory::host::HostAllocation;
     use crate::memory::{
         DeviceAccess, DeviceIntervals, DriverVirtualAddress, HostIntervals, MemoryKind,
     };
@@ -553,8 +506,7 @@ mod tests {
             ErrorKind::Unsupported
         );
         assert_eq!(
-            session
-                .reserve_virtual_address(&[&first], 4096, 4096, 0)
+            VirtualAddress::reserve(&[&first], 4096, 4096, 0)
                 .err()
                 .unwrap()
                 .kind(),
@@ -593,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn virtual_address_reservation_validates_session_before_driver_capability() {
+    fn virtual_address_reservation_validates_driver_identity_before_capability() {
         let own_id = [0x55; 16];
         let foreign_id = [0x66; 16];
         let (mut session, _) = test_session(&[own_id]);
@@ -606,32 +558,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            session
-                .reserve_virtual_address(&[], 4096, 4096, 0)
+            VirtualAddress::reserve(&[], 4096, 4096, 0)
                 .err()
                 .unwrap()
                 .kind(),
             ErrorKind::InvalidArgument
         );
         assert_eq!(
-            session
-                .reserve_virtual_address(&[&foreign], 4096, 4096, 0)
+            VirtualAddress::reserve(&[&foreign], 4096, 4096, 0)
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::Unsupported
+        );
+        assert_eq!(
+            VirtualAddress::reserve(&[&own, &foreign], 4096, 4096, 0)
                 .err()
                 .unwrap()
                 .kind(),
             ErrorKind::InvalidArgument
         );
         assert_eq!(
-            session
-                .reserve_virtual_address(&[&own, &foreign], 4096, 4096, 0)
-                .err()
-                .unwrap()
-                .kind(),
-            ErrorKind::InvalidArgument
-        );
-        assert_eq!(
-            session
-                .reserve_virtual_address(&[&own], 4096, 4096, 0)
+            VirtualAddress::reserve(&[&own], 4096, 4096, 0)
                 .err()
                 .unwrap()
                 .kind(),
@@ -648,7 +596,7 @@ mod tests {
     fn host_allocation_is_available_without_a_gpu_driver() {
         let (mut session, _) = test_session(&[[0x44; 16]]);
         let page = crate::memory::host_page_size().unwrap();
-        let mut allocation = session.allocate_host(page, page).unwrap();
+        let mut allocation = HostAllocation::allocate(page, page).unwrap();
         let info = allocation.info();
         assert_ne!(info.host_address, 0);
         assert_eq!(info.size, page);
@@ -683,7 +631,7 @@ mod tests {
             .activate(&session.open_endpoint(id).unwrap())
             .unwrap();
         let page = crate::memory::host_page_size().unwrap();
-        let mut host = HostAllocation::allocate(page, page, std::process::id()).unwrap();
+        let mut host = HostAllocation::allocate(page, page).unwrap();
 
         assert_eq!(
             device
@@ -716,7 +664,7 @@ mod tests {
             .activate(&session.open_endpoint(ids[1]).unwrap())
             .unwrap();
         let page = crate::memory::host_page_size().unwrap();
-        let mut host = session.allocate_host(page, page).unwrap();
+        let mut host = HostAllocation::allocate(page, page).unwrap();
         let permissions = DeviceAccess::READ | DeviceAccess::WRITE;
         let mut first_mapping = first
             .register_host_allocation(
@@ -774,7 +722,7 @@ mod tests {
             .activate(&session.open_endpoint(ids[1]).unwrap())
             .unwrap();
         let page = crate::memory::host_page_size().unwrap();
-        let host = session.allocate_host(page, page).unwrap();
+        let host = HostAllocation::allocate(page, page).unwrap();
         let mut memory = crate::memory::device::RegisteredHostMemory::new(host);
         let policy = crate::memory::HostMappingPolicy::Fine;
         let permissions = DeviceAccess::READ | DeviceAccess::WRITE;
@@ -811,7 +759,7 @@ mod tests {
             .activate(&session.open_endpoint(id).unwrap())
             .unwrap();
         let page = crate::memory::host_page_size().unwrap();
-        let host = session.allocate_host(page, page).unwrap();
+        let host = HostAllocation::allocate(page, page).unwrap();
         let address = host.info().host_address;
         let mut mapping = device
             .register_host_allocation(

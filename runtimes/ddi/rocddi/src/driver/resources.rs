@@ -11,8 +11,8 @@
 #[cfg(test)]
 use super::test_driver::{TestAllocation, TestDriver};
 use super::{
-    AllocationOperations, DeviceDriverState, DriverInstance, GpuDriver, KfdAllocation, KfdDriver,
-    KfdKernelQueue, KfdQueue, VirtualMemoryOperations,
+    AllocationOperations, DeviceDriverState, GpuDriver, KfdAllocation, KfdDriver, KfdKernelQueue,
+    KfdQueue, VirtualMemoryOperations,
 };
 use crate::Error;
 #[cfg(test)]
@@ -71,7 +71,7 @@ impl VirtualAddressState {
     }
 }
 
-impl DriverInstance {
+impl DeviceDriverState {
     pub(crate) fn reserve_virtual_address(
         &self,
         bounds: (u64, u64),
@@ -80,11 +80,11 @@ impl DriverInstance {
         address: u64,
     ) -> Result<VirtualAddressState, Error> {
         match self {
-            Self::LinuxKfd(driver) => Ok(VirtualAddressState::LinuxKfd(
+            Self::LinuxKfd { driver, .. } => Ok(VirtualAddressState::LinuxKfd(
                 DriverVirtualAddress::reserve(driver, bounds, size, alignment, address)?,
             )),
             #[cfg(test)]
-            Self::Test(_) => Err(Error::Operation {
+            Self::Test { .. } => Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "device driver has no virtual-memory capability",
             }),

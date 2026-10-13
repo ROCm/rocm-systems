@@ -179,33 +179,38 @@ pub struct VirtualAddress {
 }
 
 impl VirtualAddress {
-    /// Verifies one exact driver owner and a common aperture for the device
-    /// set, then routes to that driver's virtual-memory capability. The
-    /// device-set checks apply to every driver implementation.
-    pub(crate) fn reserve_for_devices(
-        selected_driver: &driver::DriverInstance,
+    /// Reserves one process virtual-address range common to the supplied
+    /// activated devices. All devices must use the same driver instance. A
+    /// nonzero requested address is a hint and may fall back to another address
+    /// in the common aperture. The selected driver's virtual-memory capability
+    /// owns the reservation.
+    ///
+    /// # Errors
+    /// Rejects an empty or mixed-driver device set, incompatible apertures,
+    /// invalid page-aligned extents, unsupported virtual memory, or address-space
+    /// exhaustion. Driver process and lifecycle errors are propagated.
+    pub fn reserve(
         devices: &[&Device],
         size: u64,
         alignment: u64,
         address: u64,
     ) -> Result<Self, Error> {
-        let mut bounds: Option<(u64, u64)> = None;
-        for device in devices {
-            if !device.driver_state.belongs_to(selected_driver) {
-                return Err(Error::Operation {
-                    kind: ErrorKind::InvalidArgument,
-                    detail: "virtual-address devices must belong to one session driver",
-                });
-            }
-            let range = device.driver_state.address_range();
-            bounds = Some(bounds.map_or(range, |bounds| {
-                (bounds.0.max(range.0), bounds.1.min(range.1))
-            }));
-        }
-        let bounds = bounds.ok_or(Error::Operation {
+        let first = devices.first().ok_or(Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "virtual-address reservation requires an activated device",
         })?;
+        let selected_driver = &first.driver_state;
+        let mut bounds = selected_driver.address_range();
+        for device in &devices[1..] {
+            if !device.driver_state.shares_driver_instance(selected_driver) {
+                return Err(Error::Operation {
+                    kind: ErrorKind::InvalidArgument,
+                    detail: "virtual-address devices must share one driver instance",
+                });
+            }
+            let range = device.driver_state.address_range();
+            bounds = (bounds.0.max(range.0), bounds.1.min(range.1));
+        }
         if bounds.0 > bounds.1 {
             return Err(Error::Operation {
                 kind: ErrorKind::Unsupported,
@@ -761,9 +766,7 @@ mod tests {
             .info()
             .mapping_granularity
             .max(second_memory.info().mapping_granularity);
-        let mut reservation = session
-            .reserve_virtual_address(&[&device], size, granularity, 0)
-            .unwrap();
+        let mut reservation = VirtualAddress::reserve(&[&device], size, granularity, 0).unwrap();
         let address = reservation.info().address;
         let mut first = device
             .map_virtual_memory(
@@ -833,9 +836,7 @@ mod tests {
             .unwrap();
         let endpoint = endpoint.unwrap();
         let device = session.activate(&endpoint).unwrap();
-        let mut reservation = session
-            .reserve_virtual_address(&[&device], 4096, 4096, 0)
-            .unwrap();
+        let mut reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0).unwrap();
         let mut first_memory = device
             .create_virtual_memory(MemoryKind::System, 4096, false, false)
             .unwrap();

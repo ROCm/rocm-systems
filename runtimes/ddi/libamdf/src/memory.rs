@@ -862,6 +862,9 @@ pub(crate) unsafe extern "C" fn create(
         let accesses = unsafe { array(create.accesses, create.access_count) }?;
         // SAFETY: The live scope borrows its parent instance.
         let instance = unsafe { object(scope.instance) }?;
+        if instance.closing || instance.process_id != std::process::id() {
+            return Err(PRECONDITION);
+        }
         if !unique_devices(accesses) {
             return Err(INVALID);
         }
@@ -1152,10 +1155,9 @@ pub(crate) unsafe extern "C" fn create(
                 create.registered_host_cacheability,
             )
         } else {
-            let native_allocation = instance
-                .native
-                .allocate_host(native_length, alignment)
-                .map_err(|e| native(&e))?;
+            let native_allocation =
+                memory::host::HostAllocation::allocate(native_length, alignment)
+                    .map_err(|e| native(&e))?;
             let address = native_allocation.info().host_address;
             (
                 Backing::Host(native_allocation),

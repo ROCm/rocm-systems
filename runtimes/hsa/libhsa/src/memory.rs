@@ -2555,12 +2555,8 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             .iter()
             .map(|gpu| &gpu.device)
             .collect::<Vec<_>>();
-        let reservation = match runtime.session.reserve_virtual_address(
-            &devices,
-            size as u64,
-            alignment,
-            requested,
-        ) {
+        let reservation = match VirtualAddress::reserve(&devices, size as u64, alignment, requested)
+        {
             Ok(reservation) => reservation,
             Err(error) => return map_error(error),
         };
