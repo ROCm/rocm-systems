@@ -17,15 +17,15 @@
 # Modes:
 #   --discover     Print discovered switch groups and peer links (default)
 #   --populate     Create the sysfs directory structure for RCCL consumption
-#                  and register the path in /etc/rccl.conf
+#                  and register the path in <ROCM_PATH>/share/rccl/rccl.conf
 #   --clean        Remove all files/directories previously created by --populate
-#                  and remove the RCCL_BCM_LINKS_PATH entry from /etc/rccl.conf
+#                  and remove the RCCL_BCM_LINKS_PATH entry from rccl.conf
 #
 # Options:
 #   --sysfs-base   Override the base path (default: /var/run/rccl_bcm_links)
 #   --log-file     Override the change log path (default: /var/run/rccl_bcm_isl_discover.log)
-#   --rccl-conf    Override RCCL config file path (default: /etc/rccl.conf)
-#   --no-conf      Skip updating /etc/rccl.conf
+#   --rccl-conf    Override RCCL config file path (default: <ROCM_PATH>/share/rccl/rccl.conf)
+#   --no-conf      Skip updating rccl.conf
 #
 # Modeled after /apps/shared/disable_acs.sh — intended to run as a privileged
 # step during NIC bring-up, before RCCL initializes.
@@ -36,8 +36,9 @@ set -euo pipefail
 # --- Configuration ---
 SYSFS_BASE="/var/run/rccl_bcm_links"
 CHANGE_LOG="/var/run/rccl_bcm_isl_discover.log"
-RCCL_CONF="/etc/rccl.conf"
-UPDATE_CONF=1          # 1 = update /etc/rccl.conf, 0 = skip
+ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
+RCCL_CONF="${ROCM_PATH}/share/rccl/rccl.conf"
+UPDATE_CONF=1          # 1 = update rccl.conf, 0 = skip
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID
 BCM_SWITCH_DEV="c030"  # PEX890xx device ID
@@ -57,15 +58,16 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Modes:"
             echo "  --discover     Print discovered switch groups and peer links (default)"
-            echo "  --populate     Create sysfs directory structure for RCCL and register path in /etc/rccl.conf"
+            echo "  --populate     Create sysfs directory structure for RCCL and register path in"
+            echo "                 \${ROCM_PATH}/share/rccl/rccl.conf (default: ${RCCL_CONF})"
             echo "  --clean        Remove all files/directories created by a previous --populate and"
-            echo "                 remove the RCCL_BCM_LINKS_PATH entry from /etc/rccl.conf"
+            echo "                 remove the RCCL_BCM_LINKS_PATH entry from rccl.conf"
             echo ""
             echo "Options:"
             echo "  --sysfs-base   Override base path (default: /var/run/rccl_bcm_links)"
             echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
-            echo "  --rccl-conf    Override RCCL config file path (default: /etc/rccl.conf)"
-            echo "  --no-conf      Skip updating /etc/rccl.conf (path must be passed via env var instead)"
+            echo "  --rccl-conf    Override RCCL config file path (default: \${ROCM_PATH}/share/rccl/rccl.conf)"
+            echo "  --no-conf      Skip updating rccl.conf (path must be passed via env var instead)"
             exit 0
             ;;
         *)
@@ -139,7 +141,7 @@ if [ "${MODE}" = "clean" ]; then
         fi
     done < <(tac "${CHANGE_LOG}")
 
-    # Remove RCCL_BCM_LINKS_PATH from /etc/rccl.conf
+    # Remove RCCL_BCM_LINKS_PATH from rccl.conf
     if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
         if grep -q '^RCCL_BCM_LINKS_PATH=' "${RCCL_CONF}" 2>/dev/null; then
             sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
@@ -381,7 +383,7 @@ if [ "${MODE}" = "populate" ]; then
     echo "Change log written to: ${CHANGE_LOG}"
     echo "  To undo: sudo $0 --clean --log-file ${CHANGE_LOG}"
 
-    # Register RCCL_BCM_LINKS_PATH in /etc/rccl.conf so RCCL discovers the
+    # Register RCCL_BCM_LINKS_PATH in rccl.conf so RCCL discovers the
     # links automatically without requiring an env var in mpirun/launcher.
     # Uses setenv(..., 0) semantics — env var override still takes precedence.
     if [ "${UPDATE_CONF}" -eq 1 ]; then
