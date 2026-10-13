@@ -17,14 +17,14 @@
 # Modes:
 #   --discover     Print discovered switch groups and peer links (default)
 #   --populate     Create the sysfs directory structure for RCCL consumption
-#                  and register the path in <ROCM_PATH>/share/rccl/rccl.conf
+#                  and register the path in /var/run/rccl.conf
 #   --clean        Remove all files/directories previously created by --populate
 #                  and remove the RCCL_BCM_LINKS_PATH entry from rccl.conf
 #
 # Options:
 #   --sysfs-base   Override the base path (default: /var/run/rccl_bcm_links)
 #   --log-file     Override the change log path (default: /var/run/rccl_bcm_isl_discover.log)
-#   --rccl-conf    Override RCCL config file path (default: <ROCM_PATH>/share/rccl/rccl.conf)
+#   --rccl-conf    Override RCCL config file path (default: /var/run/rccl.conf)
 #   --no-conf      Skip updating rccl.conf
 #
 # Modeled after /apps/shared/disable_acs.sh — intended to run as a privileged
@@ -36,12 +36,29 @@ set -euo pipefail
 # --- Configuration ---
 SYSFS_BASE="/var/run/rccl_bcm_links"
 CHANGE_LOG="/var/run/rccl_bcm_isl_discover.log"
-ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-RCCL_CONF="${ROCM_PATH}/share/rccl/rccl.conf"
+RCCL_CONF="/var/run/rccl.conf"
 UPDATE_CONF=1          # 1 = update rccl.conf, 0 = skip
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID
 BCM_SWITCH_DEV="c030"  # PEX890xx device ID
+
+# --- Usage ---
+usage() {
+    echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]"
+    echo ""
+    echo "Modes:"
+    echo "  --discover     Print discovered switch groups and peer links (default)"
+    echo "  --populate     Create sysfs directory structure for RCCL and register path in"
+    echo "                 /var/run/rccl.conf (default: ${RCCL_CONF})"
+    echo "  --clean        Remove all files/directories created by a previous --populate and"
+    echo "                 remove the RCCL_BCM_LINKS_PATH entry from rccl.conf"
+    echo ""
+    echo "Options:"
+    echo "  --sysfs-base   Override base path (default: /var/run/rccl_bcm_links)"
+    echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
+    echo "  --rccl-conf    Override RCCL config file path (default: /var/run/rccl.conf)"
+    echo "  --no-conf      Skip updating rccl.conf (path must be passed via env var instead)"
+}
 
 # --- Parse arguments ---
 while [[ $# -gt 0 ]]; do
@@ -54,25 +71,12 @@ while [[ $# -gt 0 ]]; do
         --rccl-conf)  RCCL_CONF="$2"; shift 2 ;;
         --no-conf)    UPDATE_CONF=0; shift ;;
         -h|--help)
-            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]"
-            echo ""
-            echo "Modes:"
-            echo "  --discover     Print discovered switch groups and peer links (default)"
-            echo "  --populate     Create sysfs directory structure for RCCL and register path in"
-            echo "                 \${ROCM_PATH}/share/rccl/rccl.conf (default: ${RCCL_CONF})"
-            echo "  --clean        Remove all files/directories created by a previous --populate and"
-            echo "                 remove the RCCL_BCM_LINKS_PATH entry from rccl.conf"
-            echo ""
-            echo "Options:"
-            echo "  --sysfs-base   Override base path (default: /var/run/rccl_bcm_links)"
-            echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
-            echo "  --rccl-conf    Override RCCL config file path (default: \${ROCM_PATH}/share/rccl/rccl.conf)"
-            echo "  --no-conf      Skip updating rccl.conf (path must be passed via env var instead)"
+            usage
             exit 0
             ;;
         *)
             echo "ERROR: Unknown option: $1"
-            echo "Usage: $0 [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH] [--rccl-conf PATH] [--no-conf]"
+            usage
             exit 1
             ;;
     esac
@@ -91,9 +95,25 @@ if [ "${MODE}" = "clean" ]; then
     echo "============================================================"
     echo ""
 
+    # Remove RCCL_BCM_LINKS_PATH from rccl.conf even when the change log is
+    # missing (e.g. /var/run cleared by reboot while the conf entry persists).
+    if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
+        if grep -q '^RCCL_BCM_LINKS_PATH=' "${RCCL_CONF}" 2>/dev/null; then
+            sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
+            sed -i '/^# Added by rccl_bcm_isl_discover/d' "${RCCL_CONF}"
+            echo "  Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+            logger "rccl_bcm_isl_discover: Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+        else
+            echo "  No RCCL_BCM_LINKS_PATH entry in ${RCCL_CONF}"
+        fi
+    fi
+
     if [ ! -f "${CHANGE_LOG}" ]; then
+        echo ""
         echo "No change log found at: ${CHANGE_LOG}"
-        echo "Nothing to clean."
+        echo "Nothing else to clean."
+        echo ""
+        echo "Done."
         exit 0
     fi
 
@@ -110,6 +130,11 @@ if [ "${MODE}" = "clean" ]; then
         if [ "${ACTION}" != "CREATE_FILE" ]; then
             continue
         fi
+        # Safety: only remove entries under the expected base directory
+        case "${ENTRY_PATH}" in
+            "${SYSFS_BASE}/"*) ;;
+            *) echo "  REFUSED (outside ${SYSFS_BASE}): ${ENTRY_PATH}"; FAILED=$((FAILED + 1)); continue ;;
+        esac
         if [ -e "${ENTRY_PATH}" ]; then
             rm -f "${ENTRY_PATH}"
             echo "  Removed file: ${ENTRY_PATH}"
@@ -125,6 +150,10 @@ if [ "${MODE}" = "clean" ]; then
         if [ "${ACTION}" != "CREATE_DIR" ]; then
             continue
         fi
+        case "${ENTRY_PATH}" in
+            "${SYSFS_BASE}"*) ;;
+            *) echo "  REFUSED (outside ${SYSFS_BASE}): ${ENTRY_PATH}"; FAILED=$((FAILED + 1)); continue ;;
+        esac
         if [ -d "${ENTRY_PATH}" ]; then
             # Only remove if empty (safety check)
             if [ -z "$(ls -A "${ENTRY_PATH}" 2>/dev/null)" ]; then
@@ -140,19 +169,6 @@ if [ "${MODE}" = "clean" ]; then
             echo "  Already absent: ${ENTRY_PATH}"
         fi
     done < <(tac "${CHANGE_LOG}")
-
-    # Remove RCCL_BCM_LINKS_PATH from rccl.conf
-    if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
-        if grep -q '^RCCL_BCM_LINKS_PATH=' "${RCCL_CONF}" 2>/dev/null; then
-            sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
-            # Remove the marker comment if present
-            sed -i '/^# Added by rccl_bcm_isl_discover/d' "${RCCL_CONF}"
-            echo "  Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
-            logger "rccl_bcm_isl_discover: Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
-        else
-            echo "  No RCCL_BCM_LINKS_PATH entry in ${RCCL_CONF}"
-        fi
-    fi
 
     echo ""
     echo "  Entries removed: ${REMOVED}"
@@ -197,7 +213,10 @@ for BDF in $(lspci -D -d ${BCM_VENDOR}:${BCM_SWITCH_DEV} | awk '{print $1}'); do
     # across all ports — collapsing every port into one false DSN group.
     DSN_CAP_OFFSET=""
     CAP_OFFSET="100"
-    while [ -n "${CAP_OFFSET}" ] && [ "${CAP_OFFSET}" != "000" ]; do
+    CAP_ITERS=0
+    MAX_CAP_ITERS=48   # PCIe extended config space is 4KB; 48 caps is a safe upper bound
+    while [ -n "${CAP_OFFSET}" ] && [ "${CAP_OFFSET}" != "000" ] && [ "${CAP_ITERS}" -lt "${MAX_CAP_ITERS}" ]; do
+        CAP_ITERS=$((CAP_ITERS + 1))
         CAP_HDR=$(setpci -s ${BDF} 0x${CAP_OFFSET}.L 2>/dev/null) || break
         CAP_ID=$((16#${CAP_HDR} & 0xFFFF))
         if [ "${CAP_ID}" -eq 3 ]; then
@@ -224,9 +243,13 @@ for BDF in $(lspci -D -d ${BCM_VENDOR}:${BCM_SWITCH_DEV} | awk '{print $1}'); do
     DSN_LO=$(setpci -s ${BDF} 0x${DSN_DATA_LO}.L 2>/dev/null) || continue
     DSN_HI=$(setpci -s ${BDF} 0x${DSN_DATA_HI}.L 2>/dev/null) || continue
 
-    # Skip if DSN read failed (returns all-ones without root)
+    # Skip if DSN read failed (all-ones without root) or unprogrammed (all-zeros)
     if [ "${DSN_LO}" = "ffffffff" ] && [ "${DSN_HI}" = "ffffffff" ]; then
         logger "rccl_bcm_isl_discover: WARNING: Cannot read DSN for ${BDF} (permission denied?)"
+        continue
+    fi
+    if [ "${DSN_LO}" = "00000000" ] && [ "${DSN_HI}" = "00000000" ]; then
+        logger "rccl_bcm_isl_discover: WARNING: ${BDF} has unprogrammed DSN (all zeros) — skipping"
         continue
     fi
 
@@ -395,7 +418,12 @@ if [ "${MODE}" = "populate" ]; then
                 echo ""
                 echo "RCCL config: ${RCCL_CONF} already contains ${CONF_ENTRY}"
             else
-                sed -i "s|^RCCL_BCM_LINKS_PATH=.*|${CONF_ENTRY}|" "${RCCL_CONF}"
+                # Delete-and-append instead of sed substitution to avoid
+                # metacharacter issues if SYSFS_BASE contains &, |, or \.
+                sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
+                sed -i '/^# Added by rccl_bcm_isl_discover/d' "${RCCL_CONF}"
+                echo "# Added by rccl_bcm_isl_discover ($(date -u '+%Y-%m-%dT%H:%M:%SZ'))" >> "${RCCL_CONF}"
+                echo "${CONF_ENTRY}" >> "${RCCL_CONF}"
                 echo ""
                 echo "RCCL config: Updated ${RCCL_CONF} with ${CONF_ENTRY}"
                 logger "rccl_bcm_isl_discover: Updated ${RCCL_CONF} with ${CONF_ENTRY}"

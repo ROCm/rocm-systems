@@ -713,7 +713,7 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   const char* base = defaultBase;
   struct stat st;
   if (stat(defaultBase, &st) != 0 || !S_ISDIR(st.st_mode)) {
-    const char* envBase = getenv("RCCL_BCM_LINKS_PATH");
+    const char* envBase = ncclGetEnv("RCCL_BCM_LINKS_PATH");
     if (envBase && stat(envBase, &st) == 0 && S_ISDIR(st.st_mode)) {
       base = envBase;
     }
