@@ -67,7 +67,7 @@ After the run, inspect any `rccl_telemetry_*.json` in the output directory.
 ```
 {
   "version", "host_name", "process_name", "process_id",
-  "start_time", "end_time", "transport",
+  "start_time", "end_time", "transport",   // "none" if no device registered
   "latency_sample_interval",   // only when RCCL_TELEMETRY_LATENCY_SAMPLE > 1
   "devices": [
     {
@@ -222,7 +222,7 @@ channel (aggregated) and per QP.
 |---|---|
 | `num_wqe_sent` | Send WQEs posted on this QP. |
 | `num_recv_wqe` | Receive WQEs posted (`ibv_post_recv`). |
-| `num_wqe_rcvd` | Completions drained from the CQ, send and receive alike. |
+| `num_wqe_rcvd` | Completions drained from the CQ: send, receive and CTS. GPU flush completions are not counted. |
 | `num_wqe_completed` | Completions that matched a tracked posting, i.e. those with a recorded post timestamp so latency is computable. |
 | `num_cts_sent` | CTS (clear-to-send) messages posted. |
 | `num_cts_sent_signalled` / `num_cts_sent_unsignalled` | Split of `num_cts_sent` by whether the WR was signalled. Their sum equals `num_cts_sent`. |
@@ -251,7 +251,7 @@ Three counters look similar but mean different things, and the difference is the
 usual source of confusion:
 
 - `num_recv_wqe` counts receive WQEs **posted**, not completed.
-- `num_wqe_rcvd` counts **all** completions drained from the CQ (send and recv).
+- `num_wqe_rcvd` counts every send, receive and CTS completion drained from the CQ.
 - `num_wqe_completed` counts only the subset of those completions that were
   matched to a tracked posting.
 
@@ -271,7 +271,7 @@ whole run: once on first use (baseline) and once at exit (final). A rank
 registers every NIC it can enumerate but normally drives only one or two, and
 each read is a direct `ioctl(SIOCETHTOOL)` (using `<linux/ethtool.h>` and
 `<net/if.h>`, no shell) plus a few IB sysfs reads, so devices the rank never
-connects over are not read at all and report `-1`. The periodic `hw_samples`
+connects over are not read at all and are left out of the JSON. The periodic `hw_samples`
 time series is produced only when `RCCL_TELEMETRY_SAMPLE_MS > 0`, and even then
 it reads only IB sysfs files. The data path itself never reads sysfs or the NIC
 counters.
@@ -283,3 +283,10 @@ counters.
   completion, so `rx_bytes` cannot be measured and reads 0. This is expected,
   not a lost count. When the receiver does take completions,
   `IBV_WR_RDMA_WRITE_WITH_IMM` is used and `rx_bytes` is populated.
+- With pre-posted receive WQEs (resiliency, OOO RQ), receive completions carry no
+  post timestamp: they count in `num_wqe_rcvd` but not in `num_wqe_completed` or
+  the latency histogram.
+- thor2 (`bnxt_re`): counter names differ across driver versions, so the table
+  falls back to older names. The IB sysfs byte counters can update late, so
+  `delta_*` is only reliable over the whole run. Some firmware reports
+  `pfc_*_pause_us` as 0 while PFC frames are counted.
