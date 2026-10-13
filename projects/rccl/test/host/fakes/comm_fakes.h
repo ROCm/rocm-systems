@@ -27,6 +27,13 @@ struct ncclComm;
 // returns ncclSuccess; a test observes/injects by overwriting the hook.
 extern std::function<ncclResult_t(struct ncclComm*, ncclResult_t)> g_commSetAsyncError;
 
+// ncclCommEnsureReady (init.cc:657): the RedOp create path joins the init thread
+// through this. Controllable so a test can exercise the not-ready rejection.
+extern ncclResult_t g_commEnsureReadyResult;
+
+// ncclGetEnvCtaPolicy (init.cc:231): NCCL_CONFIG_UNDEF_INT means no override, so comm policy stands.
+extern int g_envCtaPolicy;  // UNDRIVEN
+
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
 

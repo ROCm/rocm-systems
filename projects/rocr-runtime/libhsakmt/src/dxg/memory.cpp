@@ -456,16 +456,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtGetDefaultHostGpu(HSAuint32 *NodeId,
-                                                HSAuint32 *GpuId) {
-  CHECK_DXG_OPEN();
-
-  if (!NodeId || !GpuId)
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-
-  return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes) {
   CHECK_DXG_OPEN();
@@ -1310,6 +1300,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd)
+{
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+// Persisting GL2 cache sizing is an amdgpu DRM ioctl; no DXG/WDDM equivalent.
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node, HSAuint64 CacheSize)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

@@ -6,6 +6,10 @@ inputs:
     description: 'Path to ROCm installation'
     required: false
     default: '/opt/rocm'
+  python-venv-path:
+    description: 'Python virtual environment with the pinned cmake, relative to the workspace'
+    required: false
+    default: ''
   gpu-target:
     description: 'GPU target (e.g., gfx94X, gfx110X, gfx120X)'
     required: true
@@ -74,13 +78,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment variables
-      shell: bash
-      run: |
-        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
-
     - name: Setup ccache
       if: ${{ inputs.enable-ccache == 'true' }}
       uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
@@ -101,6 +98,16 @@ runs:
         else
           echo "Warning: Compiler launcher ${{ inputs.compiler-launcher }} not found or not executable"
         fi
+
+    - name: Setup environment variables
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.python-venv-path }}" ]; then
+          echo "${GITHUB_WORKSPACE}/${{ inputs.python-venv-path }}/bin" >> $GITHUB_PATH
+        fi
+        echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib64:${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/llvm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:$HOME/.local/bin:${PATH}" >> $GITHUB_ENV
 
     - name: Build and Install ROCR-Runtime
       if: ${{ inputs.enable-rocr-build == 'true' }}
@@ -153,7 +160,7 @@ runs:
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
         echo "Install ROCProfiler-Register"
         cmake -B build-rocprofiler-register \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -175,7 +182,7 @@ runs:
         export ROCM_PATH=${{ inputs.rocm-path }}
         export HIP_PLATFORM=amd
         export LD_LIBRARY_PATH=${{ inputs.rocm-path }}/lib:${{ inputs.rocm-path }}/lib/rocm_sysdeps/lib:${{ inputs.rocm-path }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:/usr/local/bin:~/.local/bin:$PATH
+        export PATH=${{ inputs.rocm-path }}/bin:${{ inputs.rocm-path }}/llvm/bin:${PATH}:/usr/local/bin
         # Temporary workaround until hipFILE adds the ROCm sysdeps include path for libmount.
         if [ -f "${ROCM_PATH}/lib/rocm_sysdeps/include/libmount/libmount.h" ]; then
           install -D -m 0644 \

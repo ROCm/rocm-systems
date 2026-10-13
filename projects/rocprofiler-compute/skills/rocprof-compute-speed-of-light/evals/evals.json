@@ -1,0 +1,72 @@
+{
+  "evaluations": [
+    {
+      "id": "sol-percent-of-peak",
+      "skill_should_trigger": true,
+      "prompt": "how close to peak is this kernel running in my rocprof-compute workload?",
+      "expected_behavior": [
+        "analyzes the sol block for a single kernel id",
+        "reads the Percent of Peak column from the report",
+        "compares against the Peak value the report prints rather than a remembered threshold"
+      ],
+      "unexpected_behavior": [
+        "calculates a theoretical peak instead of using the one in the report"
+      ],
+      "logs_contain": ["-b sol"]
+    },
+    {
+      "id": "sol-overall-efficiency",
+      "skill_should_trigger": true,
+      "prompt": "give me an overall efficiency summary of this rocprofiler-compute capture",
+      "expected_behavior": [
+        "selects one kernel with -k before reading Speed-of-Light",
+        "summarizes using the printed peak and percent of peak values"
+      ],
+      "unexpected_behavior": [
+        "reports a Speed-of-Light table averaged across unrelated kernels"
+      ],
+      "logs_contain": ["-b sol"]
+    },
+    {
+      "id": "sol-mfma-zero",
+      "skill_should_trigger": true,
+      "prompt": "my rocprof-compute report shows MFMA FLOPs at zero, is that a bug?",
+      "expected_behavior": [
+        "explains that zero is expected when the kernel issues no matrix instructions",
+        "suggests confirming the instruction mix before treating it as a problem"
+      ],
+      "unexpected_behavior": [
+        "treats zero MFMA as a defect without checking whether the kernel should use matrix instructions"
+      ]
+    },
+    {
+      "id": "sol-threshold-pushback",
+      "skill_should_trigger": true,
+      "prompt": "my kernel is at 62% of peak memory bandwidth, is that good enough?",
+      "expected_behavior": [
+        "declines to apply a fixed pass or fail cutoff",
+        "suggests comparing against neighbouring kernels or a known-good baseline"
+      ],
+      "unexpected_behavior": [
+        "states a universal threshold such as 70% as if the tool defined one"
+      ]
+    },
+    {
+      "id": "sol-instruction-level",
+      "skill_should_trigger": false,
+      "note": "Peak comparison is not the question; this is per-instruction work.",
+      "prompt": "which individual instruction in this kernel stalls the most?"
+    },
+    {
+      "id": "sol-cuda-peak",
+      "skill_should_trigger": false,
+      "prompt": "what percent of peak is my CUDA kernel hitting in Nsight Compute?"
+    },
+    {
+      "id": "sol-hardware-spec-lookup",
+      "skill_should_trigger": false,
+      "note": "Asks for a datasheet number, not a reading from a profile.",
+      "prompt": "what is the theoretical peak FP64 throughput of an MI300X?"
+    }
+  ]
+}

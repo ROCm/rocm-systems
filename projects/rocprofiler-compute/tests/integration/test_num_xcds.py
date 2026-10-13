@@ -6,9 +6,9 @@
 import re
 import subprocess
 
-import common
 import pytest
 
+from utils.mem_chart_common import strip_ansi
 from utils.specs import (
     generate_machine_specs,
 )
@@ -134,7 +134,7 @@ def test_num_xcds_cli_output(gpu_arch):
     )
 
     # 3. strip ANSI, parse table
-    clean = common.strip_ansi(proc.stdout)
+    clean = strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected

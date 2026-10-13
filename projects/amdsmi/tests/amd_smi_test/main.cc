@@ -26,6 +26,7 @@
 #include "functional/gpu/metrics/process_list_read.h"
 #include "functional/gpu/partition/computepartition_memallocmode_read_write.h"
 #include "functional/gpu/partition/computepartition_read_write.h"
+#include "functional/gpu/partition/memorypartition_read.h"
 #include "functional/gpu/partition/memorypartition_read_write.h"
 #include "functional/gpu/pci/pci_read_write.h"
 #include "functional/gpu/perf/overdrive_read.h"
@@ -46,6 +47,7 @@
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
+#include "functional/ifoe/tray/tray_info_read.h"
 #include "functional/system/cross_process_serialization.h"
 #include "functional/system/hw_topology_read.h"
 #include "functional/system/init_shutdown_refcount.h"
@@ -247,6 +249,10 @@ TEST(GpuFunctionalReadOnly, TestGpuPartitionMetricsRead) {
   TestGpuPartitionMetricsRead tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadOnly, TestMemoryPartitionRead) {
+  TestMemoryPartitionRead tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadOnly, TestMetricsCounterRead) {
   TestMetricsCounterRead tst;
   RunGenericTest(&tst);
@@ -340,6 +346,11 @@ TEST(IfoeFunctionalReadOnly, TestIfoeInfoRead) {
   RunGenericTest(&tst);
 }
 
+TEST(IfoeFunctionalReadOnly, TestTrayInfoRead) {
+  TestTrayInfoRead tst;
+  RunGenericTest(&tst);
+}
+
 TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   // Cross-process device mutex doesn't apply to the DXG backend on WSL.
   if (access("/dev/dxg", F_OK) == 0)
@@ -351,7 +362,6 @@ TEST(SystemFunctionalReadOnly, TestCrossProcessSerialization) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-/*
 TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   TestConcurrentInit tst;
   SetFlags(&tst);
@@ -361,7 +371,6 @@ TEST(SystemFunctionalReadOnly, TestConcurrentInit) {
   // RunCustomTestEpilog(&tst);  // Avoid extra amdsmi_shut_down
   tst.DisplayResults();
 }
-*/
 
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);

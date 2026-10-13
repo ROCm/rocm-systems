@@ -19,6 +19,9 @@ public:
     MOCK_METHOD(bool, fixedIOSize, (), (const, override));
     MOCK_METHOD(bool, pageAligned, (), (const, override));
     MOCK_METHOD(std::unique_lock<std::mutex>, getLock, (), (override));
+    MOCK_METHOD(void *, asyncBufferHostPtr, (), (const, override));
+    MOCK_METHOD(void *, asyncBufferDevPtr, (), (const, override));
+    MOCK_METHOD(size_t, asyncBufferSize, (), (const, override));
 };
 
 }

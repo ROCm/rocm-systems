@@ -13,6 +13,7 @@
 #include "device/device.hpp"
 
 #include <atomic>
+#include <cmath>
 
 namespace amd {
 
@@ -1509,9 +1510,20 @@ void SvmBuffer::Add(uintptr_t k, uintptr_t v) {
   Allocated_.insert(std::pair<uintptr_t, uintptr_t>(k, v));
 }
 
-void SvmBuffer::Remove(uintptr_t k) {
+bool SvmBuffer::Remove(uintptr_t ptr, uintptr_t* base) {
   std::scoped_lock lock(AllocatedLock_);
-  Allocated_.erase(k);
+  // ptr may not be base pointer, so look up the allocation that contains it.
+  auto it = Allocated_.upper_bound(ptr);
+  if (it == Allocated_.begin()) {
+    return false;
+  }
+  --it;
+  if (ptr < it->first || ptr >= it->second) {
+    return false;
+  }
+  *base = it->first;
+  Allocated_.erase(it);
+  return true;
 }
 
 bool SvmBuffer::Contains(uintptr_t ptr) {
@@ -1537,9 +1549,13 @@ void* SvmBuffer::malloc(Context& context, cl_svm_mem_flags flags, size_t size, s
   return ret;
 }
 
-void SvmBuffer::free(const Context& context, void* ptr) {
-  Remove(reinterpret_cast<uintptr_t>(ptr));
-  context.svmFree(ptr);
+bool SvmBuffer::free(const Context& context, void* ptr) {
+  uintptr_t base_ptr = 0;
+  if (!Remove(reinterpret_cast<uintptr_t>(ptr), &base_ptr)) {
+    return false;
+  }
+  context.svmFree(reinterpret_cast<void*>(base_ptr));
+  return true;
 }
 
 void SvmBuffer::memFill(void* dst, const void* src, size_t srcSize, size_t times) {

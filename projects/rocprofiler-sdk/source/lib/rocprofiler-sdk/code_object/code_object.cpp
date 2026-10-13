@@ -1270,15 +1270,13 @@ shutdown(hsa_executable_t executable)
 
     auto _unloaded = code_object::get_unloaded_code_objects(executable);
 
-    // Code-object unload callbacks often invalidate tool-side kernel symbol metadata. Drain inline
-    // queue-interposition completion records first so pending dispatch records are delivered while
-    // that metadata is still valid.
-    // Hub-aware sync: joining already-enqueued tasks is not enough once a
-    // firmware record can still be sitting in the ring or parked in the retry
-    // owner. This additionally fences registration/publication, the reader's
-    // drain, and the ready-task handoff, so no completion can run against symbol
-    // metadata this unload is about to invalidate. No-op with signal-less off.
-    ::rocprofiler::kfd::signal_less_fence_completions();
+    // No signal-less-specific hook at code-object unload: a late signal-less completion
+    // is memory-safe (the payload carries copies, no code-object-owned pointer is
+    // dereferenced), so the only residual is a tool-semantic/buffered-tracing
+    // inconsistency, which is explicitly acceptable per the success criterion.
+
+    // Unloading invalidates tool-side kernel symbol metadata, so drain in-flight
+    // queue-interposition completions first while that metadata is still valid.
     ::rocprofiler::hsa::queue_interposition::interposition_sync();
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;

@@ -10,6 +10,8 @@
 /// These tests complement the hardware tests in hsa_translate_test.cpp which
 /// verify correctness on real DBT host GPUs.
 
+#include "../amdgpu_elf_test_support.h"
+#include "../elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/basic_block.h"
@@ -50,8 +52,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "support/elf_test_support.h"
-#include "support/translate_test_support.h"
 #include "util/data_types.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -777,6 +777,74 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchIsSuccessfulNoOp) {
             "unchanged");
 }
 
+TEST(BinaryTranslatorE2E, RejectsUnsupportedCrossTargetCdna5TranslationInBothDirections) {
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 2> kDirections{{
+      {EF_AMDGPU_MACH_AMDGCN_GFX1251, EF_AMDGPU_MACH_AMDGCN_GFX1250},
+      {EF_AMDGPU_MACH_AMDGCN_GFX1250, EF_AMDGPU_MACH_AMDGCN_GFX1251},
+  }};
+
+  for (const auto &[source_mach, target_mach] : kDirections) {
+    auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
+    auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    header.e_flags = source_mach;
+    write_elf_struct_for_test(image, 0, header);
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, target_mach);
+    const auto result = translator.translate(source);
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(std::ranges::any_of(result.diagnostics, [](const auto &diagnostic) {
+      return diagnostic.message == "cross-target CDNA5 translation is unsupported";
+    })) << (result.diagnostics.empty() ? "" : result.diagnostics.front().message);
+  }
+}
+
+TEST(BinaryTranslatorE2E, PreservesGfx1251IdentityForSameTargetDataOnlyObject) {
+  auto image = make_minimal_gfx1250_elf_with_empty_text_and_rodata();
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1251;
+  write_elf_struct_for_test(image, 0, header);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  EXPECT_EQ(result.elf_bytes, image);
+  const auto output_header = read_elf_struct_for_test<Elf64_Ehdr>(result.elf_bytes, 0);
+  EXPECT_EQ(output_header.e_flags & EF_AMDGPU_MACH, EF_AMDGPU_MACH_AMDGCN_GFX1251);
+}
+
+TEST(BinaryTranslatorE2E, UsesGfx1251DecoderForSameTargetExecutableObject) {
+  const std::vector<uint32_t> kText = {
+      0xCC4B4004u, // v_pk_add_f64 v[4:7], v[8:11], v[12:15]
+      0x1A021908u,
+      0xBFB00000u, // s_endpgm
+  };
+  auto image = make_minimal_amdgpu_elf_with_descriptor_after_text(kText);
+  auto header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1251;
+  write_elf_struct_for_test(image, 0, header);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
+
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5,
+                              EF_AMDGPU_MACH_AMDGCN_GFX1251);
+  const auto result = translator.translate(source);
+
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+  const auto output_header = read_elf_struct_for_test<Elf64_Ehdr>(result.elf_bytes, 0);
+  EXPECT_EQ(output_header.e_flags & EF_AMDGPU_MACH, EF_AMDGPU_MACH_AMDGCN_GFX1251);
+}
+
 TEST(BinaryTranslatorE2E, TruncatedImageFailsBeforeReadingElfHeader) {
   const std::array<uint8_t, sizeof(Elf64_Ehdr) - 1> image{};
   AmdGpuCodeObject source(image.data(), image.size());
@@ -822,6 +890,52 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ResourceLimit,
                                    "does not expose a non-empty .text section"));
+}
+
+TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
+  for (uint16_t opcode : {cdna4::kDsMinF32Ds, cdna4::kDsMaxF32Ds}) {
+    // Legacy SNaN propagation differs from RDNA4 MIN_NUM/MAX_NUM. Refuse the
+    // translation before executing a target atomic with a different policy.
+    const std::array<uint32_t, 2> atomic = cdna4::build_ds(opcode, {.addr = 4, .data0 = 0});
+    const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+    const std::vector<uint8_t> image =
+        make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+    const TranslatedCodeObject result = translator.translate(source);
+    std::string diagnostics;
+    for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+      diagnostics += diagnostic.message + "\n";
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                     "no expansion rule is implemented"))
+        << diagnostics;
+  }
+}
+
+TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
+  // Input denormals flush on CDNA4 and survive on RDNA4. A direct opcode
+  // substitution changes 0x00000001 + 0x00000001 from zero to 0x00000002.
+  const std::array<uint32_t, 2> atomic =
+      cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
+                        {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+  const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+  const std::vector<uint8_t> image =
+      make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const TranslatedCodeObject result = translator.translate(source);
+  std::string diagnostics;
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+    diagnostics += diagnostic.message + "\n";
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                   "no expansion rule is implemented"))
+      << diagnostics;
 }
 
 TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRequiresRevisions) {
@@ -2765,6 +2879,54 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
   EXPECT_EQ(AMDHSA_BITS_GET(*gfx1250_rsrc1, COMPUTE_PGM_RSRC1_FWD_PROGRESS), 1u);
 }
 
+TEST(CodeObjectPatcher, WavefrontSizeBitIsReservedUnlessTargetSupportsBothSizes) {
+  using namespace rocr::llvm::amdhsa;
+
+  struct Target {
+    rj_code_arch_t arch;
+    uint8_t wave_size;
+    uint32_t expected_bit;
+  };
+  const Target targets[] = {
+      {ROCJITSU_CODE_ARCH_CDNA4, 64, 0},   {ROCJITSU_CODE_ARCH_CDNA5, 32, 0},
+      {ROCJITSU_CODE_ARCH_RDNA1, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA1, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA2, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA2, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA3, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA3, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA3_5, 32, 1}, {ROCJITSU_CODE_ARCH_RDNA3_5, 64, 0},
+      {ROCJITSU_CODE_ARCH_RDNA4, 32, 1},   {ROCJITSU_CODE_ARCH_RDNA4, 64, 0},
+  };
+  for (const auto &target : targets) {
+    for (const uint32_t source_bit : {0u, 1u}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "arch=" << target.arch << " wave_size=" << unsigned(target.wave_size)
+                   << " source_bit=" << source_bit);
+      auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+      AmdGpuCodeObject probe(image.data(), image.size());
+      ASSERT_TRUE(probe.is_valid());
+      const Section *rodata = find_section(probe, ".rodata");
+      ASSERT_NE(rodata, nullptr);
+      const uint64_t descriptor_offset = rodata->sectionOffset();
+      auto descriptor = read_kernel_descriptor_for_test(rodata->data());
+      AMDHSA_BITS_SET(descriptor.kernel_code_properties,
+                      KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, source_bit);
+      write_kernel_descriptor_for_test(image.data() + descriptor_offset, descriptor);
+
+      AmdGpuCodeObject source(image.data(), image.size());
+      KdTranslation translation{};
+      translation.descriptor_file_offset = descriptor_offset;
+      translation.target_wave_size = target.wave_size;
+      CodeObjectPatcher patcher(source);
+      ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(translation, target.arch));
+      const auto patched_image = patcher.emit();
+      const auto patched =
+          read_kernel_descriptor_for_test(patched_image.data() + descriptor_offset);
+      EXPECT_EQ(AMDHSA_BITS_GET(patched.kernel_code_properties,
+                                KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32),
+                target.expected_bit);
+    }
+  }
+}
+
 TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
   using namespace rocr::llvm::amdhsa;
 
@@ -2850,9 +3012,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr)
       << "expanded RX LOAD must not overlap the following LOAD in virtual memory";
 
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
   ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
@@ -2883,9 +3044,8 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   const auto patched_bytes = patcher.emit();
   const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
   const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
                                                           symtab->sh_size / symtab->sh_entsize);
@@ -3590,7 +3750,7 @@ TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  const bool diagnosed = std::any_of(
+  const bool diagnosed = std::ranges::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
         return diagnostic.severity == DiagnosticSeverity::Error &&
@@ -3744,7 +3904,8 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 
   const uint32_t workgroup_id_x_prologue =
       build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
-  const uint32_t prologue_delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t prologue_delay =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
     EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
         << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
@@ -3960,7 +4121,7 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   // stale value the fail-closed path exists to prevent.
   expect_builder_targets_endpgm(kBypassSreg);
 
-  EXPECT_NE(std::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
+  EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }

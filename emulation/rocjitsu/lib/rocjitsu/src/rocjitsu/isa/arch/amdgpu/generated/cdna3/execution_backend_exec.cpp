@@ -1426,6 +1426,11 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicXorX2Flat>,
     &execute_with_backend<FlatAtomicIncX2Flat>,
     &execute_with_backend<FlatAtomicDecX2Flat>,
+    &execute_with_backend<GlobalLoadLdsUbyteFlat>,
+    &execute_with_backend<GlobalLoadLdsSbyteFlat>,
+    &execute_with_backend<GlobalLoadLdsUshortFlat>,
+    &execute_with_backend<GlobalLoadLdsSshortFlat>,
+    &execute_with_backend<GlobalLoadLdsDwordFlat>,
 }};
 
 } // namespace

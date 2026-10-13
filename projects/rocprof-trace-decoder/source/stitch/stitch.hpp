@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <shared_mutex>
@@ -39,12 +40,40 @@ typedef std::shared_mutex SharedMutex;
 
 struct assemblyLine
 {
+    assemblyLine() = default;
+    assemblyLine(assemblyLine&& other)
+    {
+        line = std::move(other.line);
+        loc = std::move(other.loc);
+        cat = other.cat;
+        addr = other.addr;
+        next = other.next;
+        to_line = other.to_line;
+        taken = other.taken.load();
+        not_taken = other.not_taken.load();
+        parsed = other.parsed;
+    };
+    assemblyLine(const assemblyLine& other)
+    {
+        line = other.line;
+        loc = other.loc;
+        cat = other.cat;
+        addr = other.addr;
+        next = other.next;
+        to_line = other.to_line;
+        taken = other.taken.load();
+        not_taken = other.not_taken.load();
+        parsed = other.parsed;
+    };
+
     String line{};
     String loc{};
     InstCategory cat{};
     pcinfo_t addr{};
     pcinfo_t next{};
     pcinfo_t to_line{};
+    std::atomic<size_t> taken{};
+    std::atomic<size_t> not_taken{};
     bool parsed{};
 };
 typedef std::shared_ptr<assemblyLine> assemblyLinePtr;

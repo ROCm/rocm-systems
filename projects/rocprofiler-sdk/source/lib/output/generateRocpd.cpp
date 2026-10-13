@@ -261,7 +261,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 3};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 4};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -1030,7 +1030,8 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_ompt_record_t>&              ompt_gen,
     const generator<rocprofiler_buffer_tracing_hip_graph_record_t>&         graph_launch_gen,
     const generator<rocprofiler_buffer_tracing_rocshmem_api_ext_record_t>&  rocshmem_api_gen,
-    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen)
+    const generator<rocprofiler_buffer_tracing_hipfile_api_ext_record_t>&   hipfile_api_gen,
+    const generator<tool_buffer_tracing_hip_event_ext_record_t>&            hip_event_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -1261,7 +1262,35 @@ write_rocpd(
     auto insert_process_data = [&db, &tool_metadata, &cfg, node_id, this_pid]() {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_process");
         auto json_cfg          = get_json_string([&cfg](auto& ar) { cfg.save(ar); });
-        auto json_env          = get_json_string([](auto& ar) {
+
+        static constexpr auto sensitive_env_keywords = std::array<std::string_view, 12>{
+            "api_key",
+            "auth",
+            "bearer",
+            "cert",
+            "credential",
+            "header",
+            "key",
+            "password",
+            "private",
+            "_pwd",  // keep 'print working directory' but flag any short forms of password
+            "secret",
+            "token"};
+
+        auto contains_sensitive_keyword = [](std::string_view name) {
+            auto lower_name = std::string{name};
+            std::transform(
+                lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) {
+                    return std::tolower(c);
+                });
+            return std::any_of(sensitive_env_keywords.begin(),
+                               sensitive_env_keywords.end(),
+                               [&lower_name](std::string_view keyword) {
+                                   return lower_name.find(keyword) != std::string::npos;
+                               });
+        };
+
+        auto json_env = get_json_string([&contains_sensitive_keyword](auto& ar) {
             size_t i = 0;
             while(true)
             {
@@ -1271,8 +1300,14 @@ write_rocpd(
                 {
                     auto evar = std::string{itr}.substr(0, pos);
                     auto eval = std::string{itr}.substr(pos + 1);
-                    ROCP_TRACE << "ENV: " << evar << " = " << eval;
-                    if(eval.find(';') != std::string::npos)
+
+                    if(contains_sensitive_keyword(evar))
+                    {
+                        ROCP_INFO << fmt::format(
+                            "Env variable {} was excluded due to potentially sensitive content",
+                            evar);
+                    }
+                    else if(eval.find(';') != std::string::npos)
                     {
                         ROCP_INFO << fmt::format(
                             "Env variable {} was sanitized due to semi-colon in the value", evar);
@@ -1783,6 +1818,64 @@ write_rocpd(
             }
         };
 
+    auto insert_hip_event_data = [&db,
+                                  &tool_metadata,
+                                  &string_entries,
+                                  node_id,
+                                  this_pid,
+                                  &get_thread_id,
+                                  &get_queue_id,
+                                  &get_stream_id](const auto& _gen) {
+        auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_hip_event");
+        auto   _deferred         = sql::deferred_transaction{db.conn};
+        size_t event_idx         = 1;
+
+        for(auto pitr : _gen)
+        {
+            for(auto itr : _gen.get(pitr))
+            {
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto kind = tool_metadata.buffer_names.at(itr.kind);
+                auto name = tool_metadata.buffer_names.at(itr.kind, itr.operation);
+
+                auto evt_id = create_event(
+                    db,
+                    {
+                        insert_value("category_id", string_entries.at(kind)),
+                        insert_value("stack_id", itr.correlation_id.internal),
+                        insert_value("parent_stack_id", itr.correlation_id.internal),
+                        insert_value("correlation_id", itr.correlation_id.external.value),
+                    });
+
+                auto agent_node_id =
+                    (itr.agent_id.handle != 0)
+                        ? std::optional<uint64_t>{tool_metadata.get_agent(itr.agent_id)->node_id}
+                        : std::nullopt;
+
+                get_insert_statement(
+                    db,
+                    "rocpd_hip_event{{uuid}}",
+                    {
+                        insert_value("id", event_idx++),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("name_id", string_entries.at(name)),
+                        insert_value("agent_id", agent_node_id),
+                        insert_value("queue_id", get_queue_id(itr.queue_id)),
+                        insert_value("stream_id", get_stream_id(itr.stream_id)),
+                        insert_value("hip_event_handle", itr.hip_event_handle),
+                        insert_value("source_queue_id", get_queue_id(itr.source_queue_id)),
+                        insert_value("event_id", evt_id),
+                    });
+            }
+        }
+    };
+
     auto insert_graph_launch_data = [&db,
                                      &tool_metadata,
                                      &string_entries,
@@ -2215,6 +2308,7 @@ write_rocpd(
     insert_kernel_dispatch_data(dispatch_to_evt_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
+    insert_hip_event_data(hip_event_gen);
     insert_graph_launch_data(graph_launch_gen);
 
     {

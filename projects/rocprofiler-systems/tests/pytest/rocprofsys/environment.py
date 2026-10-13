@@ -182,6 +182,7 @@ class TestEnvironment:
             "LD_LIBRARY_PATH",
             "LD_PRELOAD",
             "ROCPROFSYS_OUTPUT_PATH",
+            "ROCPROFSYS_TMPDIR",
             "ROCPROFSYS_CONFIG_FILE",
         )
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
@@ -270,6 +271,7 @@ def base_python_environment(
 
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_TRACE": "ON",
         "ROCPROFSYS_PROFILE": "ON",
         "ROCPROFSYS_USE_SAMPLING": "OFF",
@@ -285,6 +287,7 @@ def base_causal_environment() -> dict[str, str]:
     """Framework default environment for causal profiling test execution."""
     return {
         **COMMON_BASE_DEFAULT_VARS,
+        **OMP_DEFAULT_VARS,
         "ROCPROFSYS_THREAD_POOL_SIZE": "0",
         "ROCPROFSYS_VERBOSE": "1",
         "ROCPROFSYS_LOG_LEVEL": "info",

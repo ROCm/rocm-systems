@@ -8,8 +8,6 @@ from __future__ import annotations
 import ast
 import re
 
-import astunparse
-
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
 from utils.utils_counter_defs import SUPPORTED_DENOM
@@ -85,7 +83,7 @@ SUPPORTED_CALL: dict[str, str] = {
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
     "MOD": "to_mod",
-    # Concat operation from the memory chart "active cus"
+    # String concatenation operation
     "CONCAT": "to_concat",
     # Threshold-based clamping for multi-pass profiling noise
     "NOISE_CLAMP": "to_noise_clamp",
@@ -224,7 +222,7 @@ def build_eval_string(equation: str) -> str:
     if not transform_expression(ast_node, equation):
         return ""
 
-    equation_string = astunparse.unparse(ast_node)
+    equation_string = ast.unparse(ast_node)
 
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']

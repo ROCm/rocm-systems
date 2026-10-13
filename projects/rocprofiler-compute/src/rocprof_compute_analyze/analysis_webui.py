@@ -134,7 +134,6 @@ class webui_analysis(OmniAnalyze_Base):
                 # Generate original raw df
                 run_workload.raw_pmc = file_io.create_df_pmc(
                     self.dest_dir,
-                    args.kernel_verbose,
                     args.verbose,
                 )
 
@@ -169,7 +168,6 @@ class webui_analysis(OmniAnalyze_Base):
                     filter_gpu_ids=run_workload.filter_gpu_ids,
                     filter_dispatch_ids=run_workload.filter_dispatch_ids,
                     time_unit=args.time_unit,
-                    kernel_verbose=args.kernel_verbose,
                 )
                 run_workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
                 run_workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
@@ -408,7 +406,6 @@ class webui_analysis(OmniAnalyze_Base):
 
         workload.raw_pmc = file_io.create_df_pmc(
             self.dest_dir,
-            args.kernel_verbose,
             args.verbose,
         )
 
@@ -425,7 +422,6 @@ class webui_analysis(OmniAnalyze_Base):
             filter_gpu_ids=workload.filter_gpu_ids,
             filter_dispatch_ids=workload.filter_dispatch_ids,
             time_unit=args.time_unit,
-            kernel_verbose=args.kernel_verbose,
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df

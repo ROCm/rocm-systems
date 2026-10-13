@@ -11,7 +11,6 @@ from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import common
@@ -21,9 +20,17 @@ import pytest
 from sqlalchemy import text
 
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
-from rocprof_compute_analyze.analysis_db import SourceFrameCollector, db_analysis
+from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
+from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
+from rocprof_compute_analyze.analysis_db import (
+    SourceFrameCollector,
+    db_analysis,
+    filter_dispatch_frame,
+    report_evaluation_diagnostics,
+)
 from utils import analysis_orm as orm
 from utils import schema
+from utils.file_io import create_df_kernel_top_stats
 from utils.metrics.noise_clamper import (
     clear_noise_clamp_warnings,
     get_noise_clamp_warnings,
@@ -41,6 +48,14 @@ VIEW_CSV_FILENAMES = frozenset({
 })
 
 
+def drain_evaluation_diagnostics():
+    """Discard messages left over from earlier evaluate() calls."""
+    with patch("rocprof_compute_analyze.analysis_db.console_warning"), patch(
+        "rocprof_compute_analyze.analysis_db.console_debug"
+    ):
+        report_evaluation_diagnostics()
+
+
 def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     """Build an arch_config with a metric_table carrying one VALU row."""
     metric_df = pd.DataFrame(
@@ -55,6 +70,18 @@ def make_dual_issue_arch_config(metric_name: str, peak_col: str = "Peak"):
     arch_config.dfs = {201: metric_df}
     arch_config.dfs_type = {201: "metric_table"}
     return arch_config
+
+
+def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
+    """Build a SimpleNamespace analyzer for calc_roofline_data tests."""
+    sys_info_df = pd.DataFrame([{"gpu_arch": "gfx90a"}])
+    arch_config = SimpleNamespace(dfs={402: roofline_df})
+    return SimpleNamespace(
+        _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
+        _pmc_df_per_workload={workload_path: pmc_df},
+        _arch_configs={"gfx90a": arch_config},
+        get_args=lambda: SimpleNamespace(),
+    )
 
 
 def store_instruction_lines(code_object_store):
@@ -113,6 +140,7 @@ def make_pc_sampling_database_analyzer(
     filter_gpu_ids=(),
     filter_kernel_ids=(),
     filter_dispatch_ids=(),
+    sys_info_row=None,
 ):
     """Build a database analyzer configured for sampling-only workloads."""
     analyzer = db_analysis(
@@ -121,7 +149,13 @@ def make_pc_sampling_database_analyzer(
     )
     analyzer._runs = {
         workload_path: schema.Workload(
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+            sys_info=pd.DataFrame([
+                (
+                    dict(sys_info_row)
+                    if sys_info_row is not None
+                    else {"gpu_arch": "gfx942"}
+                )
+            ]),
             filter_gpu_ids=list(filter_gpu_ids),
             filter_kernel_ids=list(filter_kernel_ids),
             filter_dispatch_ids=list(filter_dispatch_ids),
@@ -454,6 +488,100 @@ def test_evaluate_divide_by_zero_silenced_and_logged_at_debug():
 
 
 # =============================================================================
+# Evaluation diagnostics tests
+# =============================================================================
+
+
+def test_evaluate_reports_na_at_debug_level():
+    """An expression that evaluates to N/A is reported as debug, not warning."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": []})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_max(raw_pmc_df['Counter1'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        with patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug:
+            report_evaluation_diagnostics()
+
+    mock_warning.assert_not_called()
+    debug_msgs = [call.args[0] for call in mock_debug.call_args_list]
+    assert any("evaluated to N/A" in msg for msg in debug_msgs), (
+        f"Expected an N/A message at debug level, got {debug_msgs}"
+    )
+
+
+def test_evaluate_failure_message_names_the_exception_type():
+    """A missing counter is reported as a warning naming the exception type."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_sum(raw_pmc_df['TCC_TAG_STALL_sum'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        report_evaluation_diagnostics()
+
+    warning_msgs = [call.args[0] for call in mock_warning.call_args_list]
+    assert len(warning_msgs) == 1, f"Expected one warning, got {warning_msgs}"
+    assert "KeyError: 'TCC_TAG_STALL_sum'" in warning_msgs[0]
+
+
+def test_evaluate_reports_a_repeated_failure_once():
+    """The same failure across kernels is reported once, not once per kernel."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    for _ in range(5):
+        db_analysis.evaluate(
+            "test_metric",
+            "to_sum(raw_pmc_df['Missing_Counter'])",
+            pmc_df,
+            {},
+            parse=False,
+        )
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        report_evaluation_diagnostics()
+
+    assert mock_warning.call_count == 1, (
+        f"Expected one warning, got {mock_warning.call_args_list}"
+    )
+
+
+def test_report_evaluation_diagnostics_clears_collected_messages():
+    """A second report emits nothing, so a later run starts clean."""
+    drain_evaluation_diagnostics()
+    pmc_df = pd.DataFrame({"Counter1": [1, 2, 3]})
+
+    db_analysis.evaluate(
+        "test_metric",
+        "to_sum(raw_pmc_df['Missing_Counter'])",
+        pmc_df,
+        {},
+        parse=False,
+    )
+    drain_evaluation_diagnostics()
+
+    with patch("rocprof_compute_analyze.analysis_db.console_warning") as mock_warning:
+        with patch("rocprof_compute_analyze.analysis_db.console_debug") as mock_debug:
+            report_evaluation_diagnostics()
+
+    mock_warning.assert_not_called()
+    mock_debug.assert_not_called()
+
+
+# =============================================================================
 # db_analysis.calc_builtin_vars() tests
 # =============================================================================
 
@@ -530,6 +658,24 @@ def test_calc_builtin_vars_with_dataframe_expressions():
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
+
+
+def test_calc_builtin_vars_uses_gfx1250_gui_active_sum():
+    """gfx1250 computes per-dispatch GUI-active cycles from the XCD sum."""
+    pmc_df = pd.DataFrame({"GRBM_GUI_ACTIVE_sum": [800, 1600]})
+    sys_info = {"num_xcd": 8, "gpu_arch": "gfx1250"}
+
+    db_analysis.calc_builtin_vars(
+        pmc_df,
+        sys_info,
+        ["$GRBM_GUI_ACTIVE_PER_XCD"],
+    )
+
+    pd.testing.assert_series_equal(
+        sys_info["GRBM_GUI_ACTIVE_PER_XCD"],
+        pd.Series([100.0, 200.0]),
+        check_names=False,
+    )
 
 
 # =============================================================================
@@ -643,7 +789,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
     arch_config = schema.ArchConfig()
-    # Table 1 has no Metric/Channel column and is skipped; table 701 maps to
+    # Table 1 has no Metric column and is skipped; table 701 maps to
     # panel 700 (table_name) and sub-table 701 (sub_table_name).
     arch_config.dfs = {
         1: pd.DataFrame({"from_csv": ["pmc_kernel_top.csv"]}),
@@ -659,7 +805,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         }
     }
 
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock(verbose=0), {})
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
         workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
@@ -683,6 +829,145 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+LONG_FORM_PMC_PERF = (
+    "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
+    "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
+    "Start_Timestamp,End_Timestamp,Kernel_ID,Counter_Name,Counter_Value\n"
+    "0,0,256,64,0,0,8,0,16,kernel_a,10,20,0,SQ_WAVES,4\n"
+)
+
+
+def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
+    """The reader consumes compressed rocpd result artifacts."""
+    common.write_result_csv(tmp_path, LONG_FORM_PMC_PERF)
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+
+    assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+
+
+def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
+    """A workload with no counter artifacts, such as a PC-sampling-only run."""
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._runs = {str(tmp_path): MagicMock()}
+    analyzer._profiling_config = {}
+
+    assert analyzer.calc_pmc_df_data() == {}
+
+
+def test_calc_metrics_data_exports_qualified_per_channel_names():
+    """
+    Panel 18's per-channel rows reach the database as "Channel N", not as a
+    bare index.
+    """
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["Channel 0", "Channel 1"],
+            "Min": [" 33.29 ", " 33.33 "],
+            "Max": [" 33.51 ", " 33.33 "],
+        },
+        index=pd.Index(["18.2.0", "18.2.1"], name="Metric_ID"),
+    )
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {1802: metric_df}
+    arch_config.panel_configs = {
+        1800: {
+            "id": 1800,
+            "title": "L2 Cache (per Channel)",
+            "data source": [
+                {"metric_table": {"id": 1802, "title": "L2 Cache Hit Rate (Percent)"}}
+            ],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    metrics_info, expressions = analyzer.calc_metrics_data()
+
+    info = metrics_info[workload_path]
+    assert list(info["name"]) == ["Channel 0", "Channel 1"]
+    assert list(info["table_name"]) == ["L2 Cache (per Channel)"] * 2
+    assert list(info["sub_table_name"]) == ["L2 Cache Hit Rate (Percent)"] * 2
+
+    # The label column is non-expression, so only Min/Max become expressions.
+    exprs = expressions[workload_path]
+    assert set(exprs["value_name"]) == {"Min", "Max"}
+
+
+# =============================================================================
+# filter_dispatch_frame tests
+# =============================================================================
+
+
+def make_repeated_dispatch_frame():
+    """Frame where the longest kernel by total time is not the longest dispatch.
+
+    ``kernel_frequent`` runs three times for 500ns each, ``kernel_long`` once
+    for 1000ns.
+    """
+    return pd.DataFrame({
+        "Kernel_Name": [
+            "kernel_long",
+            "kernel_frequent",
+            "kernel_frequent",
+            "kernel_frequent",
+        ],
+        "GPU_ID": [0, 0, 0, 0],
+        "Dispatch_ID": [1, 2, 3, 4],
+        "Start_Timestamp": [0, 2000, 3000, 4000],
+        "End_Timestamp": [1000, 2500, 3500, 4500],
+    })
+
+
+def test_filter_dispatch_frame_kernel_ids_match_the_cli_top_stats(tmp_path):
+    """-k selects the same kernel here as it does in the cli top stats table."""
+    dispatch_frame = make_repeated_dispatch_frame()
+    kernel_top_df, _ = create_df_kernel_top_stats(
+        df_in=dispatch_frame,
+        raw_data_dir=str(tmp_path),
+        filter_gpu_ids=None,
+        filter_dispatch_ids=None,
+        time_unit="ns",
+    )
+
+    filtered_df = filter_dispatch_frame(dispatch_frame, None, [0], None)
+
+    assert filtered_df["Kernel_Name"].unique().tolist() == [
+        kernel_top_df.loc[0, "Kernel_Name"]
+    ]
+
+
+@pytest.mark.parametrize("kernel_id", [99, -1])
+def test_filter_dispatch_frame_rejects_out_of_range_kernel_id(kernel_id):
+    """An out-of-range -k exits instead of raising IndexError."""
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [kernel_id], None)
+
+
+def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
+    """Kernel ids are bounded by the frame left after the gpu and dispatch filters.
+
+    Dispatch 1 leaves one kernel, so id 1 is out of range here even though the
+    unfiltered frame has two kernels.
+    """
+    assert not filter_dispatch_frame(
+        make_repeated_dispatch_frame(), None, [1], None
+    ).empty
+
+    with pytest.raises(SystemExit):
+        filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
 
 
 # =============================================================================
@@ -1044,12 +1329,14 @@ def make_pc_sampling_tool_data():
                 "code_object_id": 5,
                 "kernel_name": "_Z7vecCopyv.kd",
                 "formatted_kernel_name": "vecCopy",
+                "truncated_kernel_name": "vecCopy",
             },
             {
                 "kernel_id": 101,
                 "code_object_id": 5,
                 "kernel_name": "vecAdd.kd",
                 "formatted_kernel_name": "vecAdd",
+                "truncated_kernel_name": "vecAdd",
             },
         ],
         "code_objects": [{"code_object_id": 5, "load_base": 0x1000}],
@@ -1065,7 +1352,12 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     code_object_stores = analyzer.add_pc_sampling_data(
-        "/fake/workload", workload, {}, {}, make_source_frame_collector(workload)
+        "/fake/workload",
+        workload,
+        {},
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1091,7 +1383,12 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1114,6 +1411,69 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     assert {
         r.stall_reason_lookup.text for r in stalled.pc_sample_state.stall_reasons
     } == {"WAITCNT"}
+
+
+def test_add_pc_sampling_data_inserts_wave_measurements_from_sys_info(
+    db_session,
+):
+    """Configured denominators populate percentages; absent ones stay null."""
+    tool_data = make_pc_sampling_tool_data()
+    samples = tool_data["buffer_records"]["pc_sample_stochastic"]
+    samples[0]["record"].update({"exec_mask": 0b1111, "wave_cnt": 8})
+    samples[1]["record"].update({"exec_mask": 0b11, "wave_cnt": 16})
+    cases = [
+        (
+            "/fake/workload/missing-wave-denominators",
+            {"gpu_arch": "gfx942"},
+            {0x10: (None, None), 0x20: (None, None)},
+        ),
+        (
+            "/fake/workload/configured-wave-denominators",
+            {
+                "gpu_arch": "gfx942",
+                "wave_size": "64",
+                "max_waves_per_cu": "32",
+            },
+            {0x10: (6.25, 25.0), 0x20: (3.125, 50.0)},
+        ),
+    ]
+
+    for workload_path, sys_info_row, expected_by_offset in cases:
+        workload = orm.Workload(name=workload_path, sub_name="sampling")
+        db_session.add(workload)
+        kernel_objs = {
+            kernel_name: orm.Kernel(kernel_name=kernel_name, workload=workload)
+            for kernel_name in ("vecCopy", "vecAdd")
+        }
+        db_session.add_all(kernel_objs.values())
+        analyzer = make_pc_sampling_database_analyzer(
+            {workload_path: [copy.deepcopy(tool_data)]},
+            sys_info_row=sys_info_row,
+        )
+
+        code_object_stores = analyzer.add_pc_sampling_data(
+            workload_path,
+            workload,
+            kernel_objs,
+            {},
+            make_source_frame_collector(workload, workload_path),
+            sys_info=sys_info_row,
+        )
+        db_session.commit()
+
+        sample_states_by_offset = {
+            line.code_object_offset: line.pc_sample_state
+            for code_object_store in code_object_stores.values()
+            for line in store_instruction_lines(code_object_store)
+        }
+        actual_by_offset = {
+            offset: (
+                sample_state.active_thread_percent,
+                sample_state.wave_occupancy_percent,
+            )
+            for offset, sample_state in sample_states_by_offset.items()
+        }
+        assert actual_by_offset == expected_by_offset
 
 
 def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
@@ -1143,7 +1503,12 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
         workload_path: [first_tool_data, second_tool_data]
     }
     code_object_stores = analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -1230,9 +1595,9 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
         (2, "vecCopy"),
+        (3, "vecCopy"),
     ]
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 3
@@ -1297,8 +1662,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     assert [
         (dispatch.dispatch_id, dispatch.kernel.kernel_name) for dispatch in dispatches
     ] == [
-        (0, "vecCopy"),
         (1, "vecCopy"),
+        (2, "vecCopy"),
     ]
     assert len({dispatch.dispatch_uuid for dispatch in dispatches}) == 2
     assert len({dispatch.kernel_uuid for dispatch in dispatches}) == 1
@@ -1734,10 +2099,12 @@ def make_source_workload_tool_data_records(
     workload_path,
     snapshot_sources,
     sampled_sources,
+    source_path_map=None,
 ):
     """Create PC-sampling inputs whose comments point at snapshot sources.
 
     A path named only in sampled_sources is absent from the snapshot.
+    source_path_map pairs raw DWARF paths with canonical ones.
     """
     workload_path.mkdir(parents=True, exist_ok=True)
     for original_source_path, content in snapshot_sources.items():
@@ -1746,6 +2113,13 @@ def make_source_workload_tool_data_records(
         )
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot_path.write_text(content, encoding="utf-8")
+
+    if source_path_map:
+        map_path = workload_path / "src" / "42_source_map.json"
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        map_path.write_text(
+            json.dumps({"source_paths": source_path_map}), encoding="utf-8"
+        )
 
     tool_data = make_pc_sampling_tool_data()
     tool_data["strings"]["pc_sample_comments"] = list(sampled_sources)
@@ -2012,6 +2386,33 @@ def test_run_analysis_records_source_file_missing_from_snapshot(db_session, tmp_
     ]
 
 
+def test_run_analysis_resolves_raw_dwarf_path_to_canonical_path(db_session, tmp_path):
+    """A file whose raw DWARF path is not canonical is read from its copy."""
+    workload_path = tmp_path / "workload"
+    raw_dwarf_path = "/home/u/app/build/../include/vcopy.hpp"
+    canonical_path = "/home/u/app/include/vcopy.hpp"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {canonical_path: "int first;\nint second;\n"},
+        [f"{raw_dwarf_path}:2"],
+        source_path_map={raw_dwarf_path: canonical_path},
+    )
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): tool_data_records
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    source_file = db_session.query(orm.SourceFile).one()
+    assert source_file.file_path == canonical_path
+    # A checksum at all means the snapshot copy was found.
+    assert source_file.md5_checksum is not None
+    assert [
+        (source_line.line_number, source_line.content)
+        for source_line in source_file.source_lines
+    ] == [(1, "int first;"), (2, "int second;")]
+
+
 def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path):
     """A frame naming a line the snapshot copy lacks gets a contentless row."""
     workload_path = tmp_path / "workload"
@@ -2170,7 +2571,12 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2179,6 +2585,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2278,7 +2685,12 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload, workload_path)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         assert code_object_stores == {}
         analyzer.add_code_object_isa(
@@ -2288,6 +2700,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2349,7 +2762,12 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2358,6 +2776,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2436,7 +2855,12 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
         code_object_stores = analyzer.add_pc_sampling_data(
-            workload_path, workload, kernel_objs, kernel_symbols, source_frames
+            workload_path,
+            workload,
+            kernel_objs,
+            kernel_symbols,
+            source_frames,
+            sys_info={},
         )
         analyzer.add_code_object_isa(
             workload_path,
@@ -2445,6 +2869,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
             code_object_stores,
             kernel_symbols,
             source_frames,
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2548,6 +2973,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
             code_object_stores,
             {},
             make_source_frame_collector(workload),
+            {"gpu_arch": "gfx950"},
         )
         db_session.commit()
 
@@ -2579,7 +3005,12 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
         workload_path: [make_pc_sampling_tool_data()]
     }
     analyzer.add_pc_sampling_data(
-        workload_path, workload, kernel_objs, {}, make_source_frame_collector(workload)
+        workload_path,
+        workload,
+        kernel_objs,
+        {},
+        make_source_frame_collector(workload),
+        sys_info={},
     )
     db_session.commit()
 
@@ -2643,14 +3074,17 @@ def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
     return analyzer, result_path
 
 
-def read_per_kernel_isa_file(result_path, kernel_uuid, code_object_id=5, pid=42):
-    """Return one exported ISA file as its header and its rows."""
+def read_per_kernel_isa_file(result_path, kernel_row, code_object_id=5, pid=42):
+    """Return one exported ISA file as its header and its rows.
+
+    The folder is named after the kernel's row in kernel.csv.
+    """
     export_path = (
         result_path
         / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
         / ISA_WORKLOAD_NAME
         / ISA_WORKLOAD_SUB_NAME
-        / f"kernel_{kernel_uuid}"
+        / f"{kernel_row['short_name']}_uuid_{kernel_row['kernel_uuid']}"
         / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
     )
     with export_path.open(newline="", encoding="utf-8") as export_file:
@@ -2704,13 +3138,10 @@ def test_run_analysis_writes_one_isa_file_per_kernel_code_object_and_process(
     run_source_export_analysis(analyzer)
 
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
     assert per_kernel_isa_paths(result_path) == sorted(
-        f"vector_copy/run/kernel_{kernel_uuid}"
+        f"vector_copy/run/{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
         f"/isa_code_object_id_{code_object_id}_pid_{pid}.csv"
-        for kernel_uuid in kernel_uuids.values()
+        for kernel_row in kernel_frame.itertuples()
         for code_object_id, pid in ((5, 42), (5, 43), (6, 44))
     )
 
@@ -2731,16 +3162,14 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
     )
     run_source_export_analysis(analyzer)
 
-    kernel_frame = pd.read_csv(result_path / "kernel.csv")
-    kernel_uuids = dict(
-        zip(kernel_frame["kernel_name"], kernel_frame["kernel_uuid"], strict=True)
-    )
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuids["vecCopy"])
+    kernel_frame = pd.read_csv(result_path / "kernel.csv").set_index("kernel_name")
+    header, rows = read_per_kernel_isa_file(result_path, kernel_frame.loc["vecCopy"])
 
     assert header == [
         "Instruction line number",
         "Code object offset",
         "Instruction line",
+        "Instruction type",
         "Total count",
         "Active count",
         "Stall count",
@@ -2756,6 +3185,7 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "1",
             str(0x10),
             "v_mov",
+            "",
             "1",
             "0",
             "1",
@@ -2767,6 +3197,33 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
             "42",
         ]
     ]
+
+
+def test_run_analysis_isa_file_carries_the_static_instruction_type(tmp_path):
+    """Real mnemonics get a pipeline; an unclassified one leaves the cell empty."""
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data = make_pc_sampling_tool_data()
+    tool_data["strings"]["pc_sample_instructions"] = [
+        "v_mov_b32_e32 v1, 0",
+        "not_an_instruction",
+    ]
+    # Both offsets belong to one kernel, so one file holds both rows.
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path,
+        {str(workload_path): [tool_data]},
+    )
+    run_source_export_analysis(analyzer)
+
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
+
+    type_column = header.index("Instruction type")
+    assert [row[type_column] for row in rows] == ["VALU", ""]
 
 
 def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
@@ -2793,8 +3250,8 @@ def test_run_analysis_isa_stall_columns_follow_the_workloads_reasons(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == ["Stall SLEEP_WAIT", "Stall WAITCNT"]
     sleep_index, waitcnt_index = (
@@ -2828,12 +3285,12 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     )
     run_source_export_analysis(analyzer)
 
-    kernel_uuid = pd.read_csv(result_path / "kernel.csv")["kernel_uuid"].iloc[0]
-    header, rows = read_per_kernel_isa_file(result_path, kernel_uuid)
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    header, rows = read_per_kernel_isa_file(result_path, kernel_row)
 
     assert stall_reason_columns(header) == []
     # host_trap knows the sample landed, but not whether the wave issued.
-    assert rows[0][3:6] == ["1", "", ""]
+    assert rows[0][4:7] == ["1", "", ""]
 
 
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
@@ -2871,12 +3328,13 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     # The second code object held only the kernel the filter dropped.
     assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
 
-@pytest.mark.parametrize("filter_dispatch_ids", [["1"], [">0"], ["> 0"]])
+@pytest.mark.parametrize("filter_dispatch_ids", [["2"], [">1"], ["> 1"]])
 def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     tmp_path, filter_dispatch_ids
 ):
@@ -2893,7 +3351,8 @@ def test_run_analysis_dispatch_filter_reaches_a_sampling_only_workload(
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert list(kernel_frame["kernel_name"]) == ["vecAdd"]
     assert per_kernel_isa_paths(result_path) == [
-        f"vector_copy/run/kernel_{kernel_frame['kernel_uuid'].iloc[0]}"
+        f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
+        f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
         "/isa_code_object_id_5_pid_42.csv"
     ]
 
@@ -2910,37 +3369,16 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     or filtered out, the function logs a warning and skips that workload
     without adding it to the result dictionary.
     """
-    from rocprof_compute_analyze.analysis_db import db_analysis
-
-    # Create mock db_analysis instance
-    analyzer = mock.MagicMock(spec=db_analysis)
-
-    # Mock workload data
     workload_path = "/mock/workload/path"
-    mock_runs = {
-        workload_path: mock.MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]))
-    }
-
-    # Mock PMC dataframe with kernel data
-    mock_pmc_df = pd.DataFrame({
+    pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel1", "kernel2"],
         "Start_Timestamp": [100, 200],
         "End_Timestamp": [150, 300],
     })
+    roofline_df = pd.DataFrame()  # Empty roofline dataframe triggers early exit
 
-    # Mock architecture config with EMPTY roofline dataframe (ID 402)
-    mock_arch_config = mock.MagicMock()
-    mock_arch_config.dfs = {
-        402: pd.DataFrame()  # Empty roofline dataframe triggers early exit
-    }
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
 
-    # Setup instance variables
-    analyzer._runs = mock_runs
-    analyzer._pmc_df_per_workload = {workload_path: mock_pmc_df}
-    analyzer._arch_configs = {"gfx90a": mock_arch_config}
-    analyzer.get_args = mock.MagicMock(return_value=mock.MagicMock(max_stat_num=10))
-
-    # Mock console_warning to verify it's called
     warning_messages = []
 
     def mock_warning(msg):
@@ -2966,3 +3404,161 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]
+
+
+# =============================================================================
+# Static instruction type tests
+# =============================================================================
+
+
+def test_both_instruction_line_paths_share_one_instruction_type(db_session):
+    """The sampling and disassembly paths classify lines the same way, and a
+    pipeline seen twice is stored once."""
+    workload = orm.Workload(name="w", sub_name="s")
+    kernel = orm.Kernel(kernel_name="vecCopy", workload=workload)
+    code_object_store = orm.CodeObjectStore(
+        workload=workload, pid=42, code_object_id=5, load_base=0x1000
+    )
+    db_session.add_all([workload, kernel, code_object_store])
+    source_frames = make_source_frame_collector(workload)
+    kernel_symbols = {}
+
+    db_analysis._add_instruction_line(
+        InstructionLineRecord(
+            code_object_offset=0x10,
+            kernel_name="vecCopy",
+            instruction="v_mov_b32_e32 v1, 0",
+            source=SOURCE_LINE_MISSING,
+            total_count=1,
+            issue_count=1,
+            stall_count=0,
+            stall_reasons={},
+            inst_types={},
+            active_thread_percent=None,
+            wave_occupancy_percent=None,
+        ),
+        code_object_store,
+        kernel,
+        kernel_symbols,
+        source_frames,
+    )
+    db_analysis._add_symbol_isa(
+        kernel_symbols[(42, 5, "vecCopy")],
+        CodeObjectSymbol(
+            name="vecCopy",
+            virtual_address=0x1020,
+            instructions=[
+                CodeObjectInstruction(
+                    virtual_address=0x1020,
+                    instruction="v_add_f32_e32 v0, v1, v2",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1028,
+                    instruction="s_waitcnt lgkmcnt(0)",
+                    source=None,
+                ),
+                CodeObjectInstruction(
+                    virtual_address=0x1030,
+                    instruction="not_an_instruction v0",
+                    source=None,
+                ),
+            ],
+        ),
+        source_frames,
+    )
+    db_session.commit()
+
+    pipeline_by_offset = {
+        line.code_object_offset: (
+            line.instruction_type_lookup.text
+            if line.instruction_type_lookup is not None
+            else None
+        )
+        for line in db_session.query(orm.InstructionLine).all()
+    }
+    assert pipeline_by_offset == {
+        0x10: "VALU",
+        0x20: "VALU",
+        0x28: "INTERNAL",
+        0x30: None,
+    }
+    # The two VALU lines share one lookup row.
+    assert db_session.query(orm.InstructionTypeLookup).count() == 2
+
+
+def test_calc_roofline_data_includes_all_kernels(monkeypatch):
+    """calc_roofline_data computes roofline for all kernels, not just top N."""
+    NUM_KERNELS = 15
+    kernel_names = [f"kernel_{i:02d}" for i in range(NUM_KERNELS)]
+
+    # Two dispatches per kernel: a unique long dispatch and a fixed short
+    # dispatch. The long duration decreases with index so the sort in
+    # calc_roofline_data produces a deterministic descending order.
+    long_durations = [500 - i * 30 for i in range(NUM_KERNELS)]
+    short_duration = 50
+
+    rows = []
+    t = 0
+    for i in range(NUM_KERNELS):
+        rows.append((kernel_names[i], t, t + long_durations[i]))
+        t += long_durations[i] + 10
+        rows.append((kernel_names[i], t, t + short_duration))
+        t += short_duration + 10
+
+    pmc_df = pd.DataFrame(
+        rows, columns=["Kernel_Name", "Start_Timestamp", "End_Timestamp"]
+    )
+
+    roofline_metrics = [
+        "Performance (GFLOPs)",
+        "AI HBM",
+        "AI L2",
+        "AI L1",
+        "AI L0",
+        "AI LDS",
+    ]
+    roofline_df = pd.DataFrame({
+        "Metric": roofline_metrics,
+        "Value": ["expr_" + m.lower().replace(" ", "_") for m in roofline_metrics],
+    })
+
+    workload_path = "/mock/workload/path"
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
+        lambda name, value, pmc_df, sys_info: 42.0,
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_warning", lambda msg: None
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    kernel_data, workload_data = db_analysis.calc_roofline_data(analyzer)
+
+    assert len(kernel_data) == 1
+    df = kernel_data[workload_path]
+    assert len(df) == NUM_KERNELS, f"Expected {NUM_KERNELS} kernels, got {len(df)}"
+    assert list(df["kernel_name"]) == kernel_names, (
+        f"Expected kernels sorted by duration descending, got {list(df['kernel_name'])}"
+    )
+
+    expected_columns = [
+        "total_flops",
+        "l0_cache_data",
+        "l1_cache_data",
+        "l2_cache_data",
+        "hbm_cache_data",
+        "lds_cache_data",
+    ]
+    for col in expected_columns:
+        assert col in df.columns
+        assert (df[col] == 42.0).all()
+
+    assert len(workload_data) == 1
+    workload_metrics = workload_data[workload_path]
+    assert len(workload_metrics) == len(roofline_metrics)
+    assert all(v == 42.0 for v in workload_metrics.values())

@@ -263,6 +263,7 @@ set ( SRCS core/driver/driver.cpp
 
 if(UNIX)
   set(SRC_OS core/util/lnx/os_linux.cpp
+	     core/runtime/thunk_loader_linux.cpp
 	     libamdhsacode/lnx/amd_core_dump.cpp)
   set(SRC_XDNA core/driver/xdna/amd_xdna_driver.cpp
                core/runtime/amd_aie_agent.cpp
@@ -270,6 +271,7 @@ if(UNIX)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
   set(SRC_OS core/util/win/os_win.cpp
+	     core/runtime/thunk_loader_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
 
@@ -299,9 +301,8 @@ if (${PC_SAMPLING_SUPPORT})
 endif()
 
 if (${AMDCUID_FOUND})
-  find_package(OpenSSL REQUIRED) # Required by CUID library
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_INCLUDE_DIR})
-  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB} OpenSSL::Crypto)
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE ${AMDCUID_LIB})
   set_target_properties(${CORE_RUNTIME_TARGET} PROPERTIES
               BUILD_RPATH "${AMDCUID_ROOT}/lib"
               INSTALL_RPATH "${AMDCUID_ROOT}/lib")

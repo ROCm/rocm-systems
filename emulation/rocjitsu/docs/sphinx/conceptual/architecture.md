@@ -79,20 +79,22 @@ This layer handles loading, decoding, and transforming GPU code objects:
     `code/patch/`).
 -   **Register analysis** --- Backward liveness analysis and def-use
     chains over kernel CFGs provide free-register search used by both
-    DBT and DBI (under `analysis/`).
+    DBT and DBI (under `code/analysis/`).
 
 ### ISA layer
 
 **Source directory:** `lib/rocjitsu/src/rocjitsu/isa/`
 
-Instruction decoding and execution for AMD GPU architectures (CDNA1
-through CDNA4, RDNA1 through RDNA4, gfx1250) plus RISC-V. Most files in
-this layer are auto-generated from AMD Machine-Readable ISA XML
-specifications by the amdisa Python codegen pipeline
-(`lib/python/amdisa/`). The layer contains per-architecture
-subdirectories with decoders, encoding structs, and execution bodies,
-along with hand-written files for address calculation, matrix math, and
-ISA-specific traits.
+Instruction models for AMD GPU architectures (CDNA1 through CDNA5 and
+RDNA1 through RDNA4) plus RISC-V. Most files in this layer are
+auto-generated from AMD Machine-Readable ISA XML specifications by the
+amdisa Python codegen pipeline (`lib/python/amdisa/`). The layer contains
+per-architecture subdirectories with decoders, encoding structs, and
+execution bodies, along with hand-written files for address calculation,
+matrix math, and ISA-specific traits. Concrete CDNA5 bindings distinguish
+gfx1250 from gfx1251 for target legality and behavior. Both concrete targets
+have full functional-execution bindings; decoder-only consumers select the
+separate model provider, which omits execution callbacks for both targets.
 
 ### VM and hardware model
 
@@ -100,14 +102,23 @@ ISA-specific traits.
 
 Models the GPU hardware pipeline as simdojo components:
 
--   **Command processor** --- Monitors doorbells, fetches AQL packets,
-    parses kernel descriptors, and dispatches workgroups to compute
-    units. Handles SDMA packets.
+-   **Command processor** --- Monitors compute doorbells, owns AQL and the
+    supported PM4 compute queues, parses kernel descriptors, and dispatches
+    workgroups to compute units. SDMA queues belong to the SoC scheduler.
 -   **Compute unit** --- Executes wavefronts, managing SGPR/VGPR
     register files, LDS, and scratch memory.
--   **GPU memory** --- VRAM model with per-process VMID page tables and
-    support for both passthrough mode and daemon-mode shared `memfd`
-    mappings.
+-   **GPU VM** --- Frontend-neutral address-space identity, translation,
+    permissions, invalidation epochs, and generation-checked queue bindings.
+    Legacy KFD and PCI/VFIO queues retain the same immutable access snapshots.
+-   **GPU memory** --- Sparse physical backing bytes. Translation, process
+    mappings, and transport ownership live in the GPU VM and its frontend
+    adapters.
+-   **SDMA scheduler** --- SoC-owned queue scheduler and worker shared by KFD
+    and PCI/MES front ends. Ring consumers retain cursors, retry state, and
+    packet continuation independently from the command processor.
+-   **PCI/VFIO adapters** --- PCI configuration, BAR/MMIO, DMA, interrupt, and
+    transport-session lifetime. They adapt guest operations into the shared GPU
+    VM, queue registry, command processor, MES, and SDMA services.
 -   **Cache hierarchy** --- L1 vector cache, L1 scalar cache, L2 cache,
     and memory-side cache with MTYPE awareness.
 -   **Execution plugins** --- Pluggable hooks for runtime analysis. See
@@ -196,7 +207,7 @@ lib/
       code/             Code object loader, basic block analysis
       code/dbt/         Dynamic binary translator
       code/patch/       Code object patcher, spill manager
-      analysis/         Register liveness and def-use analysis
+      code/analysis/    Register liveness and def-use analysis
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline

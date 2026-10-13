@@ -25,10 +25,16 @@
 #ifndef LIBRARY_SRC_GDA_BNXT_GDA_PROVIDER_HPP_
 #define LIBRARY_SRC_GDA_BNXT_GDA_PROVIDER_HPP_
 
+#include <linux/types.h> /* For __u32 and __u64 types needed by bnxt_re_hsi.h */
+
+#include "gda/ibv_core.hpp" /* For ibv types needed by bnxt_re_dv.h */
+
 extern "C" {
 #include "gda/bnxt/bnxt_re_dv.h"
 #include "gda/bnxt/bnxt_re_hsi.h"
 }
+
+namespace rocshmem {
 
 #define GDA_BNXT_WQE_SLOT_COUNT 3
 
@@ -38,22 +44,30 @@ struct bnxt_device_wq {
   uint32_t head;
   uint32_t tail;
   uint32_t flags;
-  uint32_t id;
-} __attribute__((packed));
+
+  __host__ inline bnxt_device_wq(void *buf, uint32_t depth)
+    : buf{buf}, depth{depth}, head{0}, tail{0}, flags{0} { }
+};
 
 struct bnxt_device_cq : public bnxt_device_wq {
-} __attribute__((packed));
+  // inherit constructors
+  using bnxt_device_wq::bnxt_device_wq;
+};
 
 struct bnxt_device_sq : public bnxt_device_wq {
-  uint32_t psn;
-
   void *msntbl;
+  uint32_t psn;
   uint32_t msn;
   uint32_t msn_tbl_sz;
   uint32_t psn_sz_log2;
-  uint64_t mtu;
+  uint32_t mtu;
   uint32_t lock;
-} __attribute__((packed));
+
+  __host__ inline bnxt_device_sq(void *buf, uint32_t depth, void *msntbl, uint32_t msn_tbl_sz,
+                                 uint32_t psn_sz_log2, uint32_t mtu)
+    : bnxt_device_wq{buf, depth}, msntbl{msntbl}, psn{0}, msn{0}, msn_tbl_sz{msn_tbl_sz},
+      psn_sz_log2{psn_sz_log2}, mtu{mtu}, lock{0} { }
+};
 
 struct bnxt_host_cq {
   void *buf;
@@ -103,5 +117,7 @@ struct bnxtdv_funcs_t {
   struct bnxt_re_dv_db_region_attr * (*alloc_db_region)(struct ibv_context *ctx);
   int (*free_db_region)(struct ibv_context *ctx, struct bnxt_re_dv_db_region_attr *attr);
 };
+
+}  // namespace rocshmem
 
 #endif  //LIBRARY_SRC_GDA_BNXT_GDA_PROVIDER_HPP_

@@ -169,3 +169,18 @@ hipFileSetParameterString(hipFileStringConfigParameter_t param, const char *desc
 {
     return hipFile::GetHipFileDispatchTable()->pfn_hipfile_set_parameter_string(param, desc_str);
 }
+hipFileError_t
+hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
+{
+    return hipFile::GetHipFileDispatchTable()->pfn_hipfile_get_stats_l1(stats);
+}
+hipFileError_t
+hipFileGetStatsL2(hipFileStatsLevel2_t *stats)
+{
+    return hipFile::GetHipFileDispatchTable()->pfn_hipfile_get_stats_l2(stats);
+}
+hipFileError_t
+hipFileGetStatsL3(hipFileStatsLevel3_t *stats)
+{
+    return hipFile::GetHipFileDispatchTable()->pfn_hipfile_get_stats_l3(stats);
+}

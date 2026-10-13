@@ -122,7 +122,7 @@ struct testColl {
   testResult_t (*getCollImplInfo)(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
       const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels);
   // Optional device-side (in-kernel wall_clock64) timing hook. Non-null only for
-  // collectives that implement it (currently AllToAll). Driven by BenchTime via
+  // collectives that implement it (AllToAll, AllGather). Driven by BenchTime via
   // --device_timing (0=off, 1=augment, 2=device-time-only):
   //   - outDeltaSec == nullptr (mode 1): prints an extra device-only
   //     latency/busbw line alongside the normal graph/hipEvent numbers (report,
@@ -454,18 +454,30 @@ testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
 #define SPECIALIZE_KERNEL(kernel, type, op) nullptr
 #endif
 
+// Must match librccl's internal ncclFunc_t (src/include/nccl_common.h): these
+// values cross the rcclGetAlgoInfo / rcclSymKGetInfo / rcclGetCollImplInfo ABI,
+// so a renumbering here silently mislabels results instead of failing to build.
 typedef enum {
   ncclFuncBroadcast = 0,
   ncclFuncReduce = 1,
   ncclFuncAllGather = 2,
   ncclFuncReduceScatter = 3,
   ncclFuncAllReduce = 4,
-  ncclFuncAllReduceWithBias = 5,
-  ncclFuncSendRecv = 6,
-  ncclFuncSend = 7,
-  ncclFuncRecv = 8,
-  ncclFuncAllToAllPivot = 9,
-  ncclNumFuncs = 10
+  ncclFuncSendRecv = 5,
+  ncclFuncSend = 6,
+  ncclFuncRecv = 7,
+  ncclFuncAlltoAll = 8,
+  ncclFuncScatter = 9,
+  ncclFuncGather = 10,
+  ncclFuncAllToAllPivot = 11,
+  ncclFuncAlltoAllGda = 12,
+  ncclFuncAlltoAllvGda = 13,
+  ncclFuncAllGatherV = 14,
+  ncclFuncPutSignal = 15,
+  ncclFuncSignal = 16,
+  ncclFuncWaitSignal = 17,
+  ncclFuncAlltoAllv = 18,
+  ncclNumFuncs = 19
 } ncclFunc_t;
 
 typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t coll, uint64_t count, ncclDataType_t dataType,

@@ -21,8 +21,8 @@
 /// copying a large input adds pressure to a system that just ran out, and the
 /// bytes are not what failed.
 ///
-/// `HSA_HOTSWAP_DISABLE` belongs to ROCr rather than this hook: it stops
-/// Runtime::LoadHotswapTool() loading this library at all.
+/// `HSA_HOTSWAP_ENABLE` belongs to ROCr rather than this hook: the runtime only
+/// calls Runtime::LoadHotswapTool() for this library when the flag is enabled.
 
 #include "hsa/hsa_api_trace_minimal.h"
 #include "rocjitsu/code/amdgpu_elf.h"

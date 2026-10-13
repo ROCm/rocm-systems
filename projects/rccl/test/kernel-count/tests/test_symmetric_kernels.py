@@ -18,6 +18,7 @@ total (net effect) -- and keeps PARSER breakage distinct from baseline movement.
 Baselines seeded from origin/develop @ 4a99ef1f9c (develop, post-AllGatherV).
 """
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -48,6 +49,27 @@ EXPECTED_DIMS = {
     "ty": {"f32", "f16", "bf16", "f8e4m3", "f8e5m2"},
 }
 
+# The generator takes GPU_TARGETS as its second argument and emits the Tma* algos
+# only when a target carries a DMA tile mover (gfx1250's Tensor Data Mover). Those
+# kernels are therefore invisible to the baselines above, so guard them separately:
+# +1 AllGather (TmaST), +5 AllReduce (RSxTmaLD_AGxTmaST, sum only), +10 ReduceScatter
+# (TmaLD, sum and avg).
+#
+# These two are GPU_TARGETS lists, not lists of movers: gfx942 has no TDM and is in
+# both on purpose. A build always passes GPU_TARGETS whole (src/CMakeLists.txt), so a
+# mixed list is the only shape the generator ever really sees, and testing a bare
+# "gfx1250" against a no-argument run would not distinguish a gate that looks for the
+# arch from one that only asks whether any target was given.
+GPU_TARGETS_WITHOUT_TDM = "gfx942;gfx950"
+GPU_TARGETS_WITH_TDM = "gfx942;gfx1250"
+EXPECTED_TDM_TOTAL = 58
+EXPECTED_TDM_PER_COLL = {
+    "AllGather": 3,
+    "AllReduce": 15,
+    "ReduceScatter": 40,
+}
+EXPECTED_TDM_ALGOS = {"TmaST", "RSxTmaLD_AGxTmaST", "TmaLD"}
+
 # Anchors for parsing kernel names. Reductions carry a trailing _<red>_<ty>;
 # non-reductions (AllGather) carry only _<algo>. Algorithm tokens themselves
 # contain underscores (RSxLD_AGxST, RailA2A_LsaLD), so names are parsed by
@@ -62,6 +84,10 @@ _COUNT_RE = re.compile(r"ncclSymkKernelCount\s*=\s*(\d+)\s*;")
 _LIST_BLOCK_RE = re.compile(r"ncclSymkKernelList\[\]\s*=\s*\{(.*?)\bnullptr\b", re.DOTALL)
 _CNAME_RE = re.compile(r"\(void\*\)\s*(ncclSymkDevKernel_\w+)")
 _PREFIX = "ncclSymkDevKernel_"
+
+# ncclSymkKernelRequirements[] entries: "    11080, /*  17 ncclSymkDevKernel_...*/".
+_REQ_BLOCK_RE = re.compile(r"ncclSymkKernelRequirements\[\]\s*=\s*\{(.*?)\};", re.DOTALL)
+_REQ_ENTRY_RE = re.compile(r"(\d+),\s*/\*\s*(\d+)\s+(\w+)\*/")
 
 DIMENSIONS = ("coll", "algo", "red", "ty")
 
@@ -149,19 +175,33 @@ def _dims(records):
     return {dim: {r[dim] for r in records if r[dim] is not None} for dim in DIMENSIONS}
 
 
-@pytest.fixture(scope="session")
-def sym_host(tmp_path_factory):
+def _generate(tmp_path_factory, name, *args):
     if not GENERATE_PY.exists():
         pytest.fail("symmetric generate.py not found: %s" % GENERATE_PY)
-    d = tmp_path_factory.mktemp("sym")
+    d = tmp_path_factory.mktemp(name)
     subprocess.run(
-        [sys.executable, str(GENERATE_PY), str(d)],
+        [sys.executable, str(GENERATE_PY), str(d), *args],
         check=True,
         capture_output=True,
         text=True,
     )
     with open(os.path.join(str(d), "sym_kernels_host.cc")) as f:
         return f.read()
+
+
+@pytest.fixture(scope="session")
+def sym_host(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym")
+
+
+@pytest.fixture(scope="session")
+def sym_host_no_tdm(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym_no_tdm", GPU_TARGETS_WITHOUT_TDM)
+
+
+@pytest.fixture(scope="session")
+def sym_host_tdm(tmp_path_factory):
+    return _generate(tmp_path_factory, "sym_tdm", GPU_TARGETS_WITH_TDM)
 
 
 def _count_literal(host):
@@ -182,6 +222,35 @@ def _list_cnames(host):
     cnames = _CNAME_RE.findall(block.group(1))
     assert cnames, "parser integrity: ncclSymkKernelList[] parsed but no entries found"
     return cnames
+
+
+def _requirements_entries(host):
+    """Parse ncclSymkKernelRequirements[] into ordered (cudart, index, name) tuples."""
+    block = _REQ_BLOCK_RE.search(host)
+    assert block is not None, (
+        "parser integrity: could not find ncclSymkKernelRequirements[] block -- "
+        "sym_kernels_host.cc format likely changed (this is NOT a requirements change)"
+    )
+    entries = [(int(c), int(i), n) for c, i, n in _REQ_ENTRY_RE.findall(block.group(1))]
+    assert entries, "parser integrity: ncclSymkKernelRequirements[] parsed but no entries found"
+    return entries
+
+
+@pytest.fixture(scope="session")
+def sym_module(tmp_path_factory):
+    """Import generate.py as a live module, so required_cuda()/enumerate_kernels() are called directly."""
+    if not GENERATE_PY.exists():
+        pytest.fail("symmetric generate.py not found: %s" % GENERATE_PY)
+    d = tmp_path_factory.mktemp("sym_module")
+    old_argv = sys.argv
+    sys.argv = [str(GENERATE_PY), str(d)]
+    try:
+        spec = importlib.util.spec_from_file_location("rccl_symmetric_generate", GENERATE_PY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.argv = old_argv
+    return module
 
 
 @pytest.mark.symmetric_generator
@@ -212,6 +281,92 @@ def test_per_collective_and_dimension_baselines(sym_host):
         EXPECTED_DIMS, _dims(records),
     )
     assert report is None, report
+
+
+# --- ncclSymkKernelRequirements[] vs required_cuda(): generator-logic-vs-emitted-text diff --------
+@pytest.mark.symmetric_generator
+def test_requirements_entries_are_ordered_and_indexed_correctly(sym_host):
+    entries = _requirements_entries(sym_host)
+    cnames = _list_cnames(sym_host)
+    assert len(entries) == len(cnames), (
+        "ncclSymkKernelRequirements[] has %d entries, ncclSymkKernelList[] has %d" % (len(entries), len(cnames))
+    )
+    for position, (cudart, index, name) in enumerate(entries):
+        assert index == position, "entry %d claims index %d in its own comment" % (position, index)
+        assert name == cnames[position], (
+            "entry %d names %r, but ncclSymkKernelList[] position %d is %r"
+            % (position, name, position, cnames[position])
+        )
+
+
+@pytest.mark.symmetric_generator
+def test_requirements_values_match_required_cuda(sym_host, sym_module):
+    entries = _requirements_entries(sym_host)
+    kernel_list = list(sym_module.enumerate_kernels())
+    assert len(entries) == len(kernel_list), (
+        "ncclSymkKernelRequirements[] has %d entries, enumerate_kernels() yields %d" % (len(entries), len(kernel_list))
+    )
+    mismatches = []
+    for (emitted_cudart, index, name), k in zip(entries, kernel_list):
+        # Anchors the zip to identity: only 3 distinct cudart values exist, so a reorder could hide behind one.
+        assert name == sym_module.kernel_cname(k), (
+            "position %d: ncclSymkKernelRequirements[] names %r, enumerate_kernels() yields %r"
+            % (index, name, sym_module.kernel_cname(k))
+        )
+        expected_cudart, _, _ = sym_module.required_cuda(k)
+        expected_cudart = expected_cudart or 0
+        if emitted_cudart != expected_cudart:
+            mismatches.append(
+                "index %d (%s): emitted %d, required_cuda() says %d" % (index, name, emitted_cudart, expected_cudart)
+            )
+    assert not mismatches, "ncclSymkKernelRequirements[] disagrees with required_cuda():\n" + "\n".join(mismatches)
+
+
+@pytest.mark.symmetric_generator
+def test_non_tdm_target_list_stays_at_the_baseline(sym_host_no_tdm):
+    """A populated GPU_TARGETS without gfx1250 emits no Tma algos at all."""
+    records = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
+    report = diff_report(
+        EXPECTED_TOTAL, len(records),
+        EXPECTED_PER_COLL, _per_coll(records),
+        EXPECTED_DIMS, _dims(records),
+    )
+    assert report is None, report
+
+    assert _count_literal(sym_host_no_tdm) == EXPECTED_TOTAL, (
+        "ncclSymkKernelCount %d != expected %d for %s"
+        % (_count_literal(sym_host_no_tdm), EXPECTED_TOTAL, GPU_TARGETS_WITHOUT_TDM)
+    )
+    emitted = {r["algo"] for r in records}
+    assert not (emitted & EXPECTED_TDM_ALGOS), (
+        "%s emitted mover algos %s; the gate must key on the arch, not on GPU_TARGETS "
+        "being non-empty" % (GPU_TARGETS_WITHOUT_TDM, sorted(emitted & EXPECTED_TDM_ALGOS))
+    )
+
+
+@pytest.mark.symmetric_generator
+def test_tdm_target_adds_only_the_tma_algos(sym_host_no_tdm, sym_host_tdm):
+    """Adding gfx1250 to GPU_TARGETS gains exactly the Tma* algos, nothing else moves."""
+    base = [parse_kernel_name(c) for c in _list_cnames(sym_host_no_tdm)]
+    tdm = [parse_kernel_name(c) for c in _list_cnames(sym_host_tdm)]
+
+    expected_dims = dict(EXPECTED_DIMS)
+    expected_dims["algo"] = EXPECTED_DIMS["algo"] | EXPECTED_TDM_ALGOS
+    report = diff_report(
+        EXPECTED_TDM_TOTAL, len(tdm),
+        EXPECTED_TDM_PER_COLL, _per_coll(tdm),
+        expected_dims, _dims(tdm),
+    )
+    assert report is None, report
+
+    assert _count_literal(sym_host_tdm) == EXPECTED_TDM_TOTAL, (
+        "ncclSymkKernelCount %d != expected %d for %s"
+        % (_count_literal(sym_host_tdm), EXPECTED_TDM_TOTAL, GPU_TARGETS_WITH_TDM)
+    )
+    # Every baseline kernel must survive: the arch algos are additive, never a swap.
+    assert {tuple(sorted(r.items())) for r in base} <= {tuple(sorted(r.items())) for r in tdm}, (
+        "GPU_TARGETS=%s dropped kernels that %s emits" % (GPU_TARGETS_WITH_TDM, GPU_TARGETS_WITHOUT_TDM)
+    )
 
 
 # --- anchored name parser: valid cases --------------------------------------

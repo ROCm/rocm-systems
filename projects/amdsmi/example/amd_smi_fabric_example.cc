@@ -18,11 +18,11 @@
       std::cout << "AMDSMI call returned " << RET << " at line " << __LINE__ << std::endl; \
       amdsmi_status_code_to_string(RET, &err_str);                                         \
       std::cout << err_str << std::endl;                                                   \
-      return RET;                                                                          \
+      return static_cast<int>(RET);                                                        \
     }                                                                                      \
   }
 
-const char* category_to_string(int category) {
+const char* category_to_string(amdsmi_fabric_telemetry_category_t category) {
   switch (category) {
     case AMDSMI_FABRIC_TELEMETRY_CATEGORY_UALOE:
       return "UALOE";
