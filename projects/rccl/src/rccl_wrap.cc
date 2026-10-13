@@ -1016,7 +1016,7 @@ inline size_t rcclDdaVmmThresholdCtxTab(const rcclArchThresholds* table, ncclFun
 }
 
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
-                    bool query, const char* prefix) {
+                    bool query, const char* prefix, int minRanks) {
   // The environment parameter can be NCCL_CONFIG_UNDEF_INT when launch order
   // is configured per communicator. Use the resolved communicator value:
   // testing the raw sentinel as a boolean disables DDA by default, while
@@ -1028,7 +1028,9 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   if (IsArchMatch(comm->archName, "gfx1250")) {
     // gfx1250 has no nRanks floor.
   } else if (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950")) {
-    if (comm->nRanks < 8) return false;
+    // Participant-count floor supplied by the caller; see the declaration in
+    // rccl_common.h for which collectives relax it.
+    if (comm->nRanks < minRanks) return false;
   } else {
     return false;
   }
@@ -1596,7 +1598,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so
     // symk never reclaims it), mirroring rcclSelectAllReduce.
     const size_t agDdaVmmMax  = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllGather, winRegType, ceCapturing);
-    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), query, "AG")) {
+    // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+    const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
+    if (!symEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAllGather), query,
+                                       "AG", ddaMinRanks)) {
       const bool agFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (agFabricArch) {
         const size_t agDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllGather);
@@ -1811,8 +1816,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // (2) DDA fast paths. Symmetric wins when buffers are registered (-R 2); DDA
     // enters only when symk is unavailable. No Blocks helpers -> nMaxChannels 0.
     const size_t rsDdaVmmMax   = rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false);
+    // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+    const int ddaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
     if (!symEligible &&
-        rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), query, "RS")) {
+        rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter), query, "RS",
+                       ddaMinRanks)) {
       const bool ddaFabricArch   = IsArchMatch(comm->archName, "gfx1250");
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter);
@@ -1978,7 +1986,10 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // (3) DDA fast paths. gfx1250 uses fabric tiers; other archs use IPC.
   // Symmetric-registered buffers defer to the symmetric kernel; DDA gated on !a2aSymEligible.
   const size_t a2aDdaMax    = rcclDdaVmmThresholdTab(archTable, ncclFuncAlltoAll);
-  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), query, "A2A")) {
+  // Relaxed DDA rank floor; see rcclDdaEnabled() in rccl_common.h.
+  const int a2aDdaMinRanks = ncclDdaNranksRelaxEnabled() ? 2 : 8;
+  if (!a2aSymEligible && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThresholdTab(archTable, ncclFuncAlltoAll), query,
+                                        "A2A", a2aDdaMinRanks)) {
     const bool a2aFabricArch  = IsArchMatch(comm->archName, "gfx1250");
     if (a2aFabricArch) {
       const size_t llThresh    = rcclDdaLLThresholdTab(archTable, ncclFuncAlltoAll);
