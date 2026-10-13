@@ -3,6 +3,8 @@
 
 """Unit tests for same-pass analyze provenance and binding."""
 
+import logging
+
 import pandas as pd
 
 from utils.file_io import load_df_pmc
@@ -14,6 +16,7 @@ from utils.metrics.pass_provenance import (
     bind_expression_dataframe,
     bind_metric_tables_to_passes,
     build_pass_layout,
+    choose_metric_pass,
     extract_row_refs,
     natural_pass_sort_key,
     resolve_weight_counter_column,
@@ -177,8 +180,9 @@ def test_select_pass_returns_none_when_counters_span_passes() -> None:
     assert select_pass(frozenset({"A", "B"}), layout) is None
 
 
-def test_select_pass_relaxes_only_runtime_normalization_counter() -> None:
-    layout = PassLayout(
+def test_denominator_only_on_another_pass_does_not_bind(caplog) -> None:
+    """SQ_WAVES or GRBM_GUI_ACTIVE on a different pass leaves the metric unset."""
+    sq_layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
             "pmc_perf_0": frozenset({"TA_BUSY"}),
@@ -186,18 +190,72 @@ def test_select_pass_relaxes_only_runtime_normalization_counter() -> None:
         },
         duplicated=frozenset(),
     )
-
     selected, relaxed = select_pass_with_normalization_fallback(
         frozenset({"TA_BUSY", "SQ_WAVES"}),
+        sq_layout,
+        "MI300",
+    )
+    assert selected is None
+    assert not relaxed
+
+    grbm_layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset(),
+    )
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+        grbm_layout,
+        "MI300",
+    )
+    assert selected is None
+    assert not relaxed
+
+    with caplog.at_level(logging.WARNING):
+        warned = choose_metric_pass(
+            frozenset({"TA_BUSY", "SQ_WAVES"}),
+            sq_layout,
+            "MI300",
+            "row sq",
+        )
+    assert warned is None
+    assert "leaving the metric unset" in caplog.text
+    assert "SQ_WAVES" in caplog.text
+
+
+def test_same_pass_denominator_still_selects_that_pass() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"TD_BUSY"}),
+        },
+        duplicated=frozenset(),
+    )
+
+    selected, relaxed = select_pass_with_normalization_fallback(
+        frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
         layout,
         "MI300",
     )
 
     assert selected == "pmc_perf_0"
-    assert relaxed
+    assert not relaxed
+    assert (
+        choose_metric_pass(
+            frozenset({"TA_BUSY", "SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+            layout,
+            "MI300",
+            "row same",
+        )
+        == "pmc_perf_0"
+    )
 
 
-def test_normalization_fallback_reports_failure_when_formula_still_spans_passes():
+def test_formula_that_spans_passes_stays_unset_with_its_denominator() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
