@@ -293,6 +293,16 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroRoctxNvml -- src/misc/roctx.cc + src/misc/nvmlwrap_stub.cc. Its own binary:
+  # fakes/comm_fakes.cc (linked by rccl-UnitTestsMicro and most other targets) stubs the
+  # roctx_scoped_range_in constructor/destructor this target compiles as the real thing, and
+  # ras-diagnostics-gpu-test.cc defines its own NVML seams. The test TU supplies ncclDebugLog and
+  # g_loadParam itself, so no shared fakes are linked.
+  set(TEST_MICRO_ROCTX_NVML_SOURCE_FILES
+    roctx-nvml-stub-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
   set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
     sym-kernels-test.cc
@@ -1053,6 +1063,17 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRoctxNvml
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml
+  SOURCES ${TEST_MICRO_ROCTX_NVML_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ROCTX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/roctx.cc"
+    NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
