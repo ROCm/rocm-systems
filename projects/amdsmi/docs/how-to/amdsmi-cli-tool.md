@@ -1120,8 +1120,16 @@ NODE:
 ```
 
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
-`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
-`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+`AMDSMI_STATUS_NOT_SUPPORTED`, and both fields report `N/A` (also under the
+`tray`/`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`):
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: N/A
+        TRAY_TYPE: N/A
+```
 
 `amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
 balancing mode (`POWER_BALANCING`, the default, or `FREQUENCY_BALANCING`).
