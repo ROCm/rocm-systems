@@ -5116,7 +5116,9 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
  *  the same thread, even for different devices. Callers must copy the entire
  *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
+ *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
+ *  including a GPU metrics table (v1.x) reported by an APU: the pointer
+ *  tracks the table the device publishes, not whether the device is an APU.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -5149,7 +5151,9 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
  *  the same thread, even for different devices. Callers must copy the entire
  *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  For non-APU devices, @p pgpu_metrics->apu_metrics will be nullptr.
+ *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
+ *  including a GPU metrics table (v1.x) reported by an APU: the pointer
+ *  tracks the table the device publishes, not whether the device is an APU.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

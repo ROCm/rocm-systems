@@ -14,11 +14,16 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "libdrm/amdgpu_drm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_common.h"
 
 namespace {
+
+// amdsmi.h publishes the APU auxiliary table through amdsmi_gpu_metrics_t
+// apu_metrics for format_revision 2 (v2.x) and 3 (v3.0); every other revision
+// describes a GPU-only table and leaves that pointer null.
+constexpr auto kApuMetricsFormatRevision = std::uint8_t(2);
+constexpr auto kApuMetricsV3FormatRevision = std::uint8_t(3);
 
 template <typename T>
 void PrintArrayLine(const std::string& label, const T* values, size_t count) {
@@ -220,14 +225,19 @@ void TestGpuMetricsRead::Run(void) {
                     << " (current_gfxclk=" << smu.current_gfxclks[0] << " MHz)\n";
         }
       }
-      amdsmi_asic_info_t asic_info = {};
-      err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
-      ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {
-        // An APU reports its metrics through the shared APU table; a null one
-        // here means the device answered SUCCESS without any of that data.
+      // amdsmi.h ties apu_metrics to the header revision, not to the FUSION
+      // bit: an APU such as MI300A publishes a v1.x GPU table and correctly
+      // leaves the pointer null, so gating this on FUSION would fail it.
+      const auto format_revision = smu.common_header.format_revision;
+      if (format_revision == kApuMetricsFormatRevision ||
+          format_revision == kApuMetricsV3FormatRevision) {
         ASSERT_NE(smu.apu_metrics, nullptr)
-            << "device " << i << " is an APU but reported no APU metrics";
+            << "device " << i << " reports APU metrics format_revision "
+            << static_cast<uint16_t>(format_revision) << " but exposed no APU metrics";
+      } else {
+        ASSERT_EQ(smu.apu_metrics, nullptr)
+            << "device " << i << " reports GPU metrics format_revision "
+            << static_cast<uint16_t>(format_revision) << " but exposed an APU metrics pointer";
       }
       IF_VERB(STANDARD) {
         std::cout << "METRIC TABLE HEADER:\n";
