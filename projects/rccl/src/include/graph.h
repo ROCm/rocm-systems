@@ -39,6 +39,15 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int configuredCap);
+inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
+  return cudaArch == 1250 && useMemcpy && configured > 0 ? configured : fallback;
+}
+inline bool rcclP2pCeUsesPerThreadStream(int cudaArch, bool useMemcpy) {
+  return cudaArch == 1250 && useMemcpy;
+}
+inline bool rcclP2pCeSupportsKernelCollectives(bool useMemcpy) {
+  return !useMemcpy;
+}
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();
 // Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the

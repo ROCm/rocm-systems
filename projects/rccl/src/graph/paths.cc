@@ -1350,7 +1350,7 @@ RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 // The gfx1250 CE P2P path allocates one staging buffer, stream, and event ring
 // per channel. More than two channels per peer can exhaust VMM resources or
 // over-subscribe SDMA queues and stall completion progress.
-RCCL_PARAM(P2pCeChannelsPerPeer, "P2P_CE_CHANNELS_PER_PEER", 2);
+RCCL_PARAM(P2pCeChannelsPerPeer, "P2P_CE_CHANNELS_PER_PEER", 16);
 extern int64_t ncclParamWorkArgsBytes();
 
 int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int configuredCap) {

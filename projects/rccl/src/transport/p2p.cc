@@ -75,6 +75,7 @@ struct p2pShmProxyInfo {
   // Used by CE memcpy progress only
   uint64_t step;
   cudaStream_t stream;
+  bool ownsStream;
   cudaEvent_t events[NCCL_STEPS];
 };
 static_assert(sizeof(p2pConnectInfo) <= CONNECT_SIZE, "P2P Connect info is too large");
@@ -126,10 +127,15 @@ static int busIdToCudaDev(int64_t busId) {
 
 // CE memcpy support
 NCCL_PARAM(P2pUseCudaMemcpy, "P2P_USE_CUDA_MEMCPY", 0);
+NCCL_PARAM(P2pCeChunkSize, "P2P_CE_CHUNK_SIZE", 4 * 1024 * 1024);
 static int useMemcpy = 0;
 static void initCeOperation();
 
 extern int64_t ncclParamMNNVLEnable();
+
+size_t ncclP2pCeStepSize(int cudaArch, size_t fallback) {
+  return rcclP2pCeStepSizePolicy(cudaArch, useMemcpy, ncclParamP2pCeChunkSize(), fallback);
+}
 
 /* Determine if two peers can communicate through p2p */
 ncclResult_t p2pCanConnect(int* ret, struct ncclComm* comm, struct ncclTopoGraph* graph, struct ncclPeerInfo* info1,
@@ -580,7 +586,11 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   int recvSize = sizeof(struct ncclRecvMem);
   // For P2P Read the SIMPLE buffer is tagged on the end of the ncclSendMem structure
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-    if (!(info->read && p == NCCL_PROTO_SIMPLE)) recvSize += comm->buffSizes[p];
+    if (!(info->read && p == NCCL_PROTO_SIMPLE)) {
+      recvSize += p == NCCL_PROTO_SIMPLE ?
+                    NCCL_STEPS * ncclP2pCeStepSize(comm->cudaArch, comm->buffSizes[p] / NCCL_STEPS) :
+                    comm->buffSizes[p];
+    }
   }
   ALIGN_SIZE(recvSize, CUDA_IPC_MIN);
 
@@ -648,10 +658,11 @@ static ncclResult_t p2pSendConnect(struct ncclComm* comm, struct ncclConnect* co
       send->conn.buffs[p] = (char*)(resources->sendDevMem + 1);
     } else {
       send->conn.buffs[p] = buff;
-      buff += comm->buffSizes[p];
+      buff += p == NCCL_PROTO_SIMPLE ? NCCL_STEPS * ncclP2pCeStepSize(comm->cudaArch, comm->buffSizes[p] / NCCL_STEPS) :
+                                       comm->buffSizes[p];
     }
   }
-  send->conn.stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
+  send->conn.stepSize = ncclP2pCeStepSize(comm->cudaArch, comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS);
 
   if (useMemcpy) {
     send->conn.tail = &resources->proxyInfo.ceRecvMem->tail;
@@ -698,7 +709,7 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
     recv->conn.ptrExchange = &remDevMem->ptrExchange;
     recv->conn.redOpArgExchange = remDevMem->redOpArgExchange;
   }
-  recv->conn.stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS;
+  recv->conn.stepSize = ncclP2pCeStepSize(comm->cudaArch, comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS);
 
   char* buff = (char*)(resources->recvDevMem + 1);
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
@@ -708,7 +719,8 @@ ncclResult_t p2pRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
       recv->conn.buffs[p] = (char*)(remDevMem + 1);
     } else {
       recv->conn.buffs[p] = buff;
-      buff += comm->buffSizes[p];
+      buff += p == NCCL_PROTO_SIMPLE ? NCCL_STEPS * ncclP2pCeStepSize(comm->cudaArch, comm->buffSizes[p] / NCCL_STEPS) :
+                                       comm->buffSizes[p];
     }
   }
   return ncclSuccess;
@@ -790,12 +802,14 @@ static ncclResult_t p2pSendProxySetup(struct ncclProxyConnection* connection, st
     NCCLCHECK(ncclCalloc(&proxyInfo, 1));
     connection->transportResources = proxyInfo;
 
+    size_t ceBufferSize =
+      NCCL_STEPS * ncclP2pCeStepSize(proxyState->comm->cudaArch, proxyState->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS);
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager,
-                             ncclMemPersist, hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, ceBufferSize, proxyState->memManager, ncclMemPersist,
+                             hipDeviceMallocUncached));
 #else
-    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, proxyState->buffSizes[NCCL_PROTO_SIMPLE], proxyState->memManager,
-                             ncclMemPersist, hipDeviceMallocFinegrained));
+    NCCLCHECK(ncclCudaCalloc(&proxyInfo->ceDevBuff, ceBufferSize, proxyState->memManager, ncclMemPersist,
+                             hipDeviceMallocFinegrained));
 #endif
 
     // Create a SHM segment for the peer to attach to
@@ -858,7 +872,12 @@ static ncclResult_t p2pSendProxyConnect(struct ncclProxyConnection* connection, 
   if (reqSize != sizeof(void*)) return ncclInternalError;
   proxyInfo->recvFifo = *((char**)reqBuff);
 
-  CUDACHECK(cudaStreamCreateWithFlags(&proxyInfo->stream, cudaStreamNonBlocking));
+  if (rcclP2pCeUsesPerThreadStream(proxyState->comm->cudaArch, useMemcpy)) {
+    proxyInfo->stream = cudaStreamPerThread;
+  } else {
+    CUDACHECK(cudaStreamCreateWithFlags(&proxyInfo->stream, cudaStreamNonBlocking));
+    proxyInfo->ownsStream = true;
+  }
   for (int i = 0; i < NCCL_STEPS; i++) {
     CUDACHECK(cudaEventCreate(proxyInfo->events + i));
   }
@@ -896,7 +915,7 @@ static ncclResult_t p2pSendProxyFree(struct ncclProxyConnection* connection, str
       NCCLCHECK(ncclShmIpcClose(&proxyInfo->desc));
       NCCLCHECK(ncclCudaHostFree(proxyInfo->ceRecvMem));
       NCCLCHECK(ncclCudaFree(proxyInfo->ceDevBuff, proxyState->memManager));
-      CUDACHECK(cudaStreamDestroy(proxyInfo->stream));
+      if (proxyInfo->ownsStream) CUDACHECK(cudaStreamDestroy(proxyInfo->stream));
       for (int i = 0; i < NCCL_STEPS; i++) {
         CUDACHECK(cudaEventDestroy(proxyInfo->events[i]));
       }
@@ -958,7 +977,7 @@ static ncclResult_t p2pSendProxyProgress(struct ncclProxyState* proxyState, stru
   args->idle = 1;
   if (args->state == ncclProxyOpProgress) {
     int p = args->protocol;
-    int stepSize = proxyState->buffSizes[p] / NCCL_STEPS;
+    int stepSize = ncclP2pCeStepSize(proxyState->comm->cudaArch, proxyState->buffSizes[p] / NCCL_STEPS);
     for (int s = 0; s < args->nsubs; s++) {
       struct ncclProxySubArgs* sub = args->subs + s;
       struct p2pShmProxyInfo* resources = (struct p2pShmProxyInfo*)(sub->connection->transportResources);
