@@ -17,16 +17,14 @@ _MRISA = Path(
 ).resolve()
 
 
-@pytest.mark.parametrize(
-    ('output_option', 'existing_header'),
-    [('--dbt-output', False), ('--isa-output', True)],
-)
+@pytest.mark.parametrize('output_option', ['--dbt-output', '--isa-output'])
+@pytest.mark.parametrize('existing_header', [False, True], ids=['missing', 'stale'])
 def test_dbt_cli_regenerates_matrix_header(tmp_path, output_option, existing_header):
     output = tmp_path / 'generated'
     header = output / 'matrix_conversions.h'
     if existing_header:
         output.mkdir()
-        header.write_text('// stale output must be replaced\n')
+        header.write_text('// stale output must be replaced\n', encoding='utf-8')
 
     result = subprocess.run(
         [
@@ -54,6 +52,6 @@ def test_dbt_cli_regenerates_matrix_header(tmp_path, output_option, existing_hea
     # The CLI emits unformatted C++; the whole-tree helper runs clang-format.
     # The committed header is the compatibility oracle for the catalog's
     # complete contents, including the derived lane permutation values.
-    assert ''.join(header.read_text().split()) == ''.join(
-        checked_in.read_text().split()
+    assert ''.join(header.read_text(encoding='utf-8').split()) == ''.join(
+        checked_in.read_text(encoding='utf-8').split()
     )
