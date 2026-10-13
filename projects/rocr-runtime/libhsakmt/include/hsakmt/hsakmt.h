@@ -1501,17 +1501,30 @@ hsaKmtGetAmdGPUDeviceFd(
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetPersistingCacheSizeCtx(
-    HsaKFDContext *ctx,
+hsaKmtSetPersistingCacheSize(
     HSAuint32 Node,
     HSAuint64 CacheSize
     );
 
 HSAKMT_STATUS
 HSAKMTAPI
-hsaKmtSetPersistingCacheSize(
+hsaKmtGetPersistingCacheSize(
     HSAuint32 Node,
-    HSAuint64 CacheSize
+    HSAuint64 *CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheSizeMax(
+    HSAuint32 Node,
+    HSAuint64 *MaxCacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetPersistingCacheInfo(
+    HSAuint32               Node,
+    HsaPersistingCacheInfo *Info
     );
 
 #ifdef __cplusplus

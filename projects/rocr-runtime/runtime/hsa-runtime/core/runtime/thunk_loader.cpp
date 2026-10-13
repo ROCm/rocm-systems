@@ -466,9 +466,10 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetAmdGPUDeviceFd");
       if (HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) == nullptr) goto LOAD_ERROR;
 
+      // Optional: GL2 persisting cache control. Missing exports leave pfns null
+      // and gracefully degrade (KfdDriver guards each call, feature self-gates).
       HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtSetPersistingCacheSize");
-      if (HSAKMT_PFN(hsaKmtSetPersistingCacheSize) == nullptr) goto LOAD_ERROR;
-
+      HSAKMT_PFN(hsaKmtGetPersistingCacheInfo) = (HSAKMT_DEF(hsaKmtGetPersistingCacheInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtGetPersistingCacheInfo");
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtMemoryCpuMap");
       if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == nullptr) goto LOAD_ERROR;
 
@@ -480,6 +481,9 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
 
       DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_query_gpu_info");
       if (DRM_PFN(amdgpu_query_gpu_info) == nullptr) goto LOAD_ERROR;
+
+      DRM_PFN(amdgpu_query_info) = (DRM_DEF(amdgpu_query_info)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_query_info");
+      if (DRM_PFN(amdgpu_query_info) == nullptr) goto LOAD_ERROR;
 
       DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)rocr::os::GetExportAddress(thunk_handle, "amdgpu_bo_cpu_map");
       if (DRM_PFN(amdgpu_bo_cpu_map) == nullptr) goto LOAD_ERROR;
@@ -619,12 +623,15 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata) = (HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)*)(&hsaKmtMemHandleFreePreserveMetadata);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
       HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd) = (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)*)(&hsaKmtGetAmdGPUDeviceFd);
+      HSAKMT_PFN(hsaKmtSetPersistingCacheSize) = (HSAKMT_DEF(hsaKmtSetPersistingCacheSize)*)(&hsaKmtSetPersistingCacheSize);
+      HSAKMT_PFN(hsaKmtGetPersistingCacheInfo) = (HSAKMT_DEF(hsaKmtGetPersistingCacheInfo)*)(&hsaKmtGetPersistingCacheInfo);
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);
       HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)*)(&hsaKmtGetNodeWallclockFrequency);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);
       DRM_PFN(amdgpu_query_gpu_info) = (DRM_DEF(amdgpu_query_gpu_info)*)(&amdgpu_query_gpu_info);
+      DRM_PFN(amdgpu_query_info) = (DRM_DEF(amdgpu_query_info)*)(&amdgpu_query_info);
       DRM_PFN(amdgpu_bo_cpu_map) = (DRM_DEF(amdgpu_bo_cpu_map)*)(&amdgpu_bo_cpu_map);
       DRM_PFN(amdgpu_bo_free) = (DRM_DEF(amdgpu_bo_free)*)(&amdgpu_bo_free);
       DRM_PFN(amdgpu_bo_export) = (DRM_DEF(amdgpu_bo_export)*)(&amdgpu_bo_export);
