@@ -6027,7 +6027,11 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
         // return false and prevents Branch #3 from firing.  Supply a minimal table
         // directly so extAlgoArchTable() short-circuits to comm->archThresholds.
         rcclArchThresholds archTab{};
-        archTab.ceRegMax[ncclFuncAllGather] = kThreshUnlimited;  // no upper cap
+        // Cap below the 32-byte message (1 rank * 8 * sizeof(float32)) so that
+        // !symEligible && window is false in both halves; only ctaZero distinguishes
+        // them. kThreshUnlimited would let the !symEligible path fire even at
+        // CTAPolicy=0 and break the EXPECT_NE below.
+        archTab.ceRegMax[ncclFuncAllGather] = 16;
         // ceRegMin stays 0: no lower bound
         comm->archThresholds = &archTab;
         // Branch #3 requires both CTAPolicy=ZERO and a registered recv window.
