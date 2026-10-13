@@ -146,7 +146,7 @@ TEST_F(HipFileAsyncOp, async_dispatch_delegates_to_submitIo)
     async_dispatch(op.get());
 }
 
-TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
+TEST_F(HipFileAsyncOp, async_dispatch_reports_error_without_inline_io_when_submit_throws)
 {
     StrictMock<MAsyncMonitor> mmon;
     uint64_t                  slot_storage      = 0;
@@ -163,7 +163,8 @@ TEST_F(HipFileAsyncOp, async_dispatch_runs_inline_when_submit_throws)
 
     EXPECT_CALL(mmon, submitIo(raw)).WillOnce(Throw(std::runtime_error("no capacity")));
     async_dispatch(op.release());
-    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(g_test_io_fn_calls.load(), 0);
+    ASSERT_EQ(bytes_transferred, -hipFileInternalError);
     ASSERT_EQ(slot_storage, 1u);
 }
 
@@ -210,7 +211,7 @@ TEST_F(HipFileAsyncOp, async_run_inline_delegates_to_submitIoAndWait)
     async_run_inline(op.get());
 }
 
-TEST_F(HipFileAsyncOp, async_run_inline_runs_inline_when_submit_throws)
+TEST_F(HipFileAsyncOp, async_run_inline_reports_error_without_inline_io_when_submit_throws)
 {
     StrictMock<MAsyncMonitor> mmon;
     uint64_t                  slot_storage      = 0;
@@ -226,7 +227,8 @@ TEST_F(HipFileAsyncOp, async_run_inline_runs_inline_when_submit_throws)
 
     EXPECT_CALL(mmon, submitIoAndWait(op.get())).WillOnce(Throw(std::runtime_error("no capacity")));
     async_run_inline(op.release());
-    ASSERT_EQ(g_test_io_fn_calls.load(), 1);
+    ASSERT_EQ(g_test_io_fn_calls.load(), 0);
+    ASSERT_EQ(bytes_transferred, -hipFileInternalError);
     ASSERT_EQ(slot_storage, 1u);
 }
 

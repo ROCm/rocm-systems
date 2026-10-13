@@ -184,7 +184,7 @@ async_dispatch(void *userargs)
     }
     catch (...) {
         std::unique_ptr<AsyncOp> owned{op};
-        owned->io_fn(owned.get());
+        *owned->bytes_transferred = -hipFileInternalError;
         signalOffloadComplete(owned.get());
     }
 }
@@ -199,7 +199,7 @@ async_run_inline(void *userargs)
     }
     catch (...) {
         std::unique_ptr<AsyncOp> owned{op};
-        owned->io_fn(owned.get());
+        *owned->bytes_transferred = -hipFileInternalError;
         signalOffloadComplete(owned.get());
     }
 }
