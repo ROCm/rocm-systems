@@ -745,7 +745,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Multi-segment adds one segmented multi-recv chain (also covering GIN iput) to the 2*MAX budget.
+  // RCCL: sized before the peer cap arrives. Local advertise covers a segmented
+  // multi-recv chain (also used by GIN iput); legacy peers keep 2*MAX.
   qpCreateAttrs.maxSendWorkRequest = ncclIbAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1031,8 +1032,8 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO, plus the multi-seg side table when we advertise it
-    // (one covering MR).
+    // RCCL: one covering MR for the CTS FIFO and the side table. Peer cap is not
+    // known yet, so the extra bytes follow local advertise.
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
                                   sizeof(comm->ctsFifo) + (ncclIbAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
@@ -1269,8 +1270,8 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   // +1 reserves space for one in-flight speed update RDMA write on qps[0].
   qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) +
                                      ((ncclParamIbEventBasedLb() && ncclParamIbEventBasedLbRemote()) ? 1 : 0);
-  // Multi-segment chains an unsignaled side-table WR before each CTS WR.
-  if (ncclIbAdvertiseMultiSeg())
+  // RCCL: extra CTS WRs only when the peer advertised the side table.
+  if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG)
     qpCreateAttrs.maxSendWorkRequest += NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1414,9 +1415,9 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // Multi-segment iflush posts one RDMA_READ per recv per segment; this also covers GIN flush.
+    // RCCL: one RDMA_READ per recv per segment when the peer advertised the cap.
     qpCreateAttrs.maxSendWorkRequest =
-      2 * NET_IB_MAX_REQUESTS + (ncclIbAdvertiseMultiSeg() ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
+      2 * NET_IB_MAX_REQUESTS + ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
@@ -1736,15 +1737,20 @@ ib_recv:
 
   rComm->flushEnabled = ((peermemAvailable || useDmaBuf) && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;
 
+  // RCCL: peer cap is in remMeta before the CTS SQ is created.
+  rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
+  if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remSegLayout, sizeof(*rComm->remSegLayout)), ret, fail);
+    rComm->remSegLayout->addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
+  }
+
   NCCLCHECKGOTO(ncclIbReceiverQpsCreateToRts(rComm, &remMeta, &meta), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
     NCCLCHECKGOTO(ncclIbReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
   }
 
   // Store the remote CTS FIFO info provided by the remote peer
-  rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
   rComm->remCtsFifo.addr = remMeta.addr;
-  rComm->remSegLayout.addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
     rComm->remCtsFifo.rkeys[i] = remMeta.devs[i].rkey;
   }
@@ -1759,8 +1765,8 @@ ib_recv:
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
     // Local source of the side-table write; only used for a peer with the cap.
     if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
-      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
-                                    sizeof(rComm->remSegLayout.elems), IBV_ACCESS_LOCAL_WRITE),
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, rComm->remSegLayout->elems,
+                                    sizeof(rComm->remSegLayout->elems), IBV_ACCESS_LOCAL_WRITE),
                     ret, fail);
     }
 
@@ -1970,6 +1976,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  if (rComm) free(rComm->remSegLayout);
   free(rComm);
   goto exit;
 }
@@ -2056,6 +2063,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(ncclIbResiliencyDestroy(&comm->base.resiliency));
     }
+    free(comm->remSegLayout);
     free(comm);
   }
   return ncclSuccess;

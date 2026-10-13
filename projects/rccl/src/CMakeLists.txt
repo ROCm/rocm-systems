@@ -565,7 +565,6 @@ set(SRC_FILES
   transport/multicast.cc
   transport/net.cc
   transport/net_telemetry.cc
-  transport/rccl_ib_multiseg.cc
   transport/rccl_ib_multiseg.h
   transport/net_ib/common.cc
   transport/net_ib/common.h
@@ -581,13 +580,11 @@ set(SRC_FILES
   transport/net_ib/net_ib_gid_inspect.cc
   transport/net_ib/net_ib_wqe_lat_inspect.cc
   transport/net_ib/p2p.cc
-  transport/net_ib/p2p_multiseg.h
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
   transport/net_ib/p2p_resiliency.h
   transport/net_ib/p2p_resiliency_recovery.cc
   transport/net_ib/p2p_resiliency_recovery.h
-  transport/net_ib/rccl_reg_multiseg.cc
   transport/net_ib/reg.cc
   transport/net_ib/wqe_lat_mon.cc
   transport/net_ib/wqe_lat_mon.h
