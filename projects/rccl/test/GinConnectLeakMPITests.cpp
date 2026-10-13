@@ -102,6 +102,9 @@ protected:
     ASSERT_EQ(0, setTestEnv("NCCL_GIN_ENABLE", "1"));
     // Without cuMem there is no symmetric support, and ncclGinConnectOnce never runs.
     ASSERT_EQ(0, setTestEnv("NCCL_CUMEM_ENABLE", "1"));
+    // Both gate the symmetric GIN setup that reaches ncclGinConnectOnce during init.
+    ASSERT_EQ(0, setTestEnv("NCCL_WIN_ENABLE", "1"));
+    ASSERT_EQ(0, setTestEnv("NCCL_SYM_GIN_KERNELS_ENABLE", "1"));
     ASSERT_EQ(0, setTestEnv("NCCL_GIN_TYPE", std::to_string(kGinTypeGpi)));
     ASSERT_EQ(0, setTestEnv("NCCL_GIN_NCONNECTIONS", std::to_string(kConnections)));
     ASSERT_EQ(0, setTestEnv("RCCL_TEST_GIN_FAULT_FAIL_CONNECT_AT", std::to_string(kFailConnectAt)));
