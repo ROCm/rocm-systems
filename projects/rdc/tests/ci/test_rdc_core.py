@@ -6,6 +6,7 @@ group management, field groups, dmon, job statistics, and diagnostics.
 """
 
 import os
+import re
 import subprocess
 import time
 import pytest
@@ -130,6 +131,33 @@ class TestDiscovery:
     def test_discovery_shows_attributes(self, rdci_path, rdcd_server):
         r = run_rdci(rdci_path, "discovery", "-i")
         assert r.returncode == 0, f"rdci discovery -i failed: {r.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Topology (requires GPU + daemon)
+# ---------------------------------------------------------------------------
+class TestTopology:
+    """Verify rdci topo lists every other GPU for each GPU."""
+
+    def test_topo_every_gpu(self, rdci_path, rdcd_server):
+        # Checks exit codes and the listed GPUs, not link types: every link looks the
+        # same on a uniform XGMI mesh. rdc_topology_tests checks the links themselves.
+        r = run_rdci(rdci_path, "discovery", "-l")
+        assert r.returncode == 0, f"rdci discovery failed: {r.stderr}"
+        found = re.search(r"(\d+) GPUs found", r.stdout)
+        assert found, f"No GPU count in rdci discovery output:\n{r.stdout}"
+        count = int(found.group(1))
+
+        for gpu in range(count):
+            r = run_rdci(rdci_path, "topo", "-i", str(gpu))
+            assert r.returncode == 0, f"rdci topo -i {gpu} failed (rc={r.returncode}):\n{r.stdout}"
+            peers = {int(p) for p in re.findall(r"^\| To GPU (\d+)\s", r.stdout, re.MULTILINE)}
+            assert peers == set(range(count)) - {gpu}, f"rdci topo -i {gpu}:\n{r.stdout}"
+
+    def test_topo_unknown_gpu(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "topo", "-i", "999")
+        assert r.returncode not in (0, -11), f"rdci topo -i 999 (rc={r.returncode}):\n{r.stdout}"
+        assert "to the topology gpu index" in r.stdout, r.stdout
 
 
 # ---------------------------------------------------------------------------

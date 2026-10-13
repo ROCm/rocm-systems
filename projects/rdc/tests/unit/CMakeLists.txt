@@ -75,6 +75,22 @@ target_compile_definitions(
 target_link_libraries(rdc_diag_kernel_tests PRIVATE GTest::gtest_main pthread)
 add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
 
+# rdc_topology_tests: rdc_device_topology_get() against fake AMD SMI calls that
+# the test defines. It compiles RdcTopologyLinkImpl.cc instead of linking librdc,
+# so it needs no GPU; librdc_bootstrap provides the logger.
+add_executable(
+    rdc_topology_tests
+    ${SRC_DIR}/test_topology_link.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTopologyLinkImpl.cc
+)
+target_include_directories(
+    rdc_topology_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_topology_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_topology_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_topology_tests COMMAND rdc_topology_tests)
+
 # rdc_client_tests: standalone (client) mode as rdci uses it. rdc_connect()
 # dlopens librdc_client.so (gRPC); needs no GPU and no rdcd. Built only when the
 # client library is.
@@ -124,7 +140,7 @@ set_target_properties(
 add_test(NAME ${RDC_UNIT_TESTS} COMMAND ${RDC_UNIT_TESTS})
 
 install(
-    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests
+    TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests rdc_topology_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
