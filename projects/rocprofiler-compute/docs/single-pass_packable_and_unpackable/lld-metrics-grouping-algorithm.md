@@ -60,11 +60,13 @@ flowchart TD
   M -->|yes| L
   M -->|no| FF[First-fit PMCs<br/>not in any bucket yet]
   FF --> R[Merge bucket pairs while each SPP<br/>PMC set still fits one bucket<br/>under the same block limits]
-  R --> S[Place leftover SPU counters]
-  S --> S1{Every PMC already<br/>in some bucket?}
-  S1 -->|yes| G[pmc_perf buckets<br/>gfx942: 14 total, +0 for SPU fill]
-  S1 -->|no| S2{Fit remaining PMCs<br/>into an existing bucket?}
-  S2 -->|yes| S3[Place into that bucket]
+  R --> S[Next SPU PMC set,<br/>largest first]
+  S --> S1{Any PMC in that set<br/>still outside every bucket?}
+  S1 -->|no| SM{More SPU PMC sets?}
+  SM -->|yes| S
+  SM -->|no| G[Leftover SPU PMCs are placed.<br/>Each new bucket is an extra pass.<br/>gfx942 adds none: 14 total, +0]
+  S1 -->|yes| S2{A subset fits<br/>an existing bucket?}
+  S2 -->|yes| S3[Place the largest fitting subset<br/>into the existing bucket<br/>that accepts the most]
   S2 -->|no| S4{Any remaining PMC<br/>fits an empty bucket?}
   S4 -->|yes| S5[Open one new bucket<br/>with the largest fitting subset]
   S4 -->|no| S6[Error: that counter exceeds<br/>its block budget alone]
