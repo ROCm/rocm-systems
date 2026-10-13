@@ -1020,14 +1020,9 @@ Performance counter data
 ------------------------
 
 The retained ``ml_api_trace_*_counter_collection.csv.gz`` files hold the
-per-pass performance counters, the same counters a non-torch profile
-collects. Analyze joins each file to the matching marker CSV. This data
-enables analysis such as:
-
-* Identifying which PyTorch operators executed which GPU kernels
-* Aggregating performance counter values by operator
-* Correlating operator-level timing with kernel-level hardware metrics
-* Tracing the execution flow from high-level PyTorch API to low-level GPU kernels
+same per-dispatch performance counters as a profile without torch tracing.
+Analyze attributes GPU kernels to operators; ``--torch-operator`` /
+``--triton-operator`` run the usual metric tables on those kernels.
 
 .. _torch-trace-limitations:
 
