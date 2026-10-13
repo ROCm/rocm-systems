@@ -48,15 +48,27 @@ static void hrr_pinned_workload(int* in, bool by_struct = false) {
   int* dout = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dout, kPinnedN * sizeof(int)));
   std::vector<int> hout(kPinnedN);
-  for (int it = 0; it < kPinnedIters; ++it) {
-    for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
+  auto launch = [&](hipStream_t s) {
     if (by_struct)
-      hipLaunchKernelGGL(hrr_pinned_triple_struct, dim3(1), dim3(kPinnedN), 0, nullptr,
+      hipLaunchKernelGGL(hrr_pinned_triple_struct, dim3(1), dim3(kPinnedN), 0, s,
                          dout, PinnedIn{dev_in, kPinnedN});
     else
-      hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, nullptr,
-                         dout, dev_in, kPinnedN);
+      hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, s, dout, dev_in, kPinnedN);
     HRR_HIP_CHECK(hipGetLastError());
+  };
+  for (int it = 0; it < kPinnedIters; ++it) {
+    for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
+    if (it == 2) {  // replay restores nothing in a graph capture; the next launch still must
+      hipStream_t s = nullptr;
+      hipGraph_t g  = nullptr;
+      HRR_HIP_CHECK(hipStreamCreate(&s));
+      HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+      launch(s);
+      HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
+      HRR_HIP_CHECK(hipGraphDestroy(g));
+      HRR_HIP_CHECK(hipStreamDestroy(s));
+    }
+    launch(nullptr);
     HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kPinnedN * sizeof(int), hipMemcpyDeviceToHost));
     for (int i = 0; i < kPinnedN; ++i) REQUIRE(hout[i] == pinned_value(it, i) * 3 + 1);
   }
@@ -100,17 +112,6 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostUnregister(in.data()));
 }
 
-// A hipHostFree that fails, as on registered memory, leaves it tracked.
-TEST_CASE("Unit_HRR_PinnedHostFailedFree_Direct", "[.][hrr-direct]") {
-  HRR_HIP_CHECK(hipSetDevice(0));
-  std::vector<int> in(kPinnedN);
-  HRR_HIP_CHECK(hipHostRegister(in.data(), kPinnedN * sizeof(int), hipHostRegisterDefault));
-  REQUIRE(hipHostFree(in.data()) != hipSuccess);
-  (void)hipGetLastError();
-  hrr_pinned_workload(in.data());
-  HRR_HIP_CHECK(hipHostUnregister(in.data()));
-}
-
 #ifndef _WIN32
 // The struct case from pinned memory whose low 32 bits are zero, an address
 // replay's device-pointer shape check rejects.
@@ -133,7 +134,6 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
                              "Unit_HRR_PinnedHostRegister_Direct",
-                             "Unit_HRR_PinnedHostFailedFree_Direct",
 #ifndef _WIN32
                              "Unit_HRR_PinnedHostStructLowBits_Direct",
 #endif
@@ -153,7 +153,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
         CHECK(ret == 0);
         CHECK(pass == kPinnedIters);
         CHECK(fail == 0);
-        CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused") != std::string::npos);
+        CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused, 1 skipped") !=
+              std::string::npos);
       } else {
         CHECK(ret != 0);
         CHECK(fail > 0);

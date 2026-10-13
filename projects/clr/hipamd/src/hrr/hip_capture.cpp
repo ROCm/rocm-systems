@@ -198,34 +198,12 @@ static void pinned_track(void* p, size_t size) {
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
-// Runs the call that releases p with no snapshot of it reading meanwhile, and
-// stops tracking p only if the call succeeded.
-static hipError_t pinned_release(hipError_t (*release)(void*), void* p) {
-  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
-  if (p && g_pinned_count.load(std::memory_order_relaxed) != 0) {
-    lk.lock();
-    if (!g_pinned.count(reinterpret_cast<uintptr_t>(p))) lk.unlock();
-  }
-  const hipError_t r = release(p);
-  if (r == hipSuccess && lk.owns_lock()) {
-    g_pinned.erase(reinterpret_cast<uintptr_t>(p));
-    g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
-  }
-  return r;
-}
-
-// fork() takes g_pinned_mu before the writer's locks, the order a launch takes
-// them in, so a child never inherits it held by a snapshot on a thread it does
-// not have. Registered after writer::open() registers the writer's handlers:
-// prepare handlers run in reverse order of registration.
-static void pinned_install_atfork() {
-#ifndef _WIN32
-  static std::once_flag once;
-  std::call_once(once, [] {
-    pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
-                   [] { g_pinned_mu.unlock(); });
-  });
-#endif
+// Called before the memory is released, so no snapshot reads it afterwards.
+static void pinned_untrack(void* p) {
+  if (!p || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  g_pinned.erase(reinterpret_cast<uintptr_t>(p));
+  g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
 static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
@@ -656,7 +634,13 @@ static void serialize_kernel_launch(
     return;
   }
   // A record becomes the allocation's last only once its event is written, in
-  // the same order as the events.
+  // the same order as the events. Replay restores nothing while any graph
+  // capture is open, so a record written then does not become the last.
+  bool capturing = false;
+  if (!t_snaps.empty()) {
+    amd::ScopedLock cl(hip::g_streamSetLock);
+    capturing = !hip::g_allCapturingStreams.empty();
+  }
   std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
   if (!t_snaps.empty()) lk.lock();
   hrr_cap::writer::write_event_raw(api_id,
@@ -664,7 +648,7 @@ static void serialize_kernel_launch(
                                    static_cast<uint32_t>(payload.size()));
   for (const HostSnap& s : t_snaps) {
     auto it = g_pinned.find(s.base);
-    if (s.record && it != g_pinned.end()) it->second.last = s.hash;
+    if (s.record && !capturing && it != g_pinned.end()) it->second.last = s.hash;
   }
 }
 
@@ -1701,7 +1685,8 @@ hipError_t capture_hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int
 }
 
 hipError_t capture_hipHostUnregister(void* hostPtr) {
-  hipError_t r = pinned_release(g_real_table.hipHostUnregister_fn, hostPtr);
+  pinned_untrack(hostPtr);
+  hipError_t r = g_real_table.hipHostUnregister_fn(hostPtr);
   if (r == hipSuccess) {
     hrr_args_hipHostUnregister a{};
     a.ret     = static_cast<int32_t>(r);
@@ -1731,9 +1716,9 @@ static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int fla
   if (r == hipSuccess && ptr) pinned_track(*ptr, size);
   return r;
 }
-static hipError_t pinned_hipHostFree(void* p) { return pinned_release(g_next_hipHostFree, p); }
-static hipError_t pinned_hipFreeHost(void* p) { return pinned_release(g_next_hipFreeHost, p); }
-static hipError_t pinned_hipFree(void* p)     { return pinned_release(g_next_hipFree, p); }
+static hipError_t pinned_hipHostFree(void* p) { pinned_untrack(p); return g_next_hipHostFree(p); }
+static hipError_t pinned_hipFreeHost(void* p) { pinned_untrack(p); return g_next_hipFreeHost(p); }
+static hipError_t pinned_hipFree(void* p)     { pinned_untrack(p); return g_next_hipFree(p); }
 
 static void pinned_wrap_table() {
   static bool done = false;
@@ -2950,7 +2935,6 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
-    pinned_install_atfork();
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

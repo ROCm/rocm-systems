@@ -525,8 +525,7 @@ At playback:
 A kernel can read pinned host memory that the host filled with plain stores, which no HIP
 call records; replay would run it on whatever its fresh buffer holds. Capture tracks the
 ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
-`hipFree` and `hipHostUnregister` once the call succeeds; no snapshot reads it during the
-call). Before each launch it reads the 8-byte-aligned words of
+`hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
 the arguments, by-value structs included; for each tracked allocation a word points into,
 it writes the whole allocation as a blob and adds a record (base, offset 0, length, blob
 hash, direction 0) to the launch event, unless the hash equals that of the allocation's
@@ -545,7 +544,8 @@ Kept deliberately simple:
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
   `unreplayable_apis`.
 - Replay restores nothing for a launch replayed into a graph capture, and capture does not
-  snapshot at graph launch.
+  snapshot at graph launch. A record written while any stream captures does not become the
+  allocation's last, so the next launch outside the capture records again.
 - `hipHostAlloc`, `hipMallocHost` and `hipMemAllocHost` are not tracked, since replay makes
   no buffer for them, nor is a `hipHostRegister` device alias that differs from the host
   address.
@@ -553,7 +553,8 @@ Kept deliberately simple:
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for.
+  the buffer is not waited for. A `fork()` while another thread snapshots can leave the
+  child's tracking lock held.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
