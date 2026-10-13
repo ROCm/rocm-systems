@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# rccl_dsn_mapper.sh — Build inter-switch-link mapping for RCCL topology inference
+# rccl_bcm_isl_discover.sh — Build inter-switch-link mapping for RCCL topology inference
 #
 # Discovers Broadcom PEX multi-host switch partitions by reading the PCIe Device
 # Serial Number (DSN) from extended config space. All upstream ports sharing the
@@ -12,7 +12,7 @@
 #   /sys/kernel/pci_switch_link/virtual_switch_links/<busid>/<peer_busid>
 #
 # Usage:
-#   sudo ./rccl_dsn_mapper.sh [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH]
+#   sudo ./rccl_bcm_isl_discover.sh [--discover] [--populate] [--clean] [--sysfs-base PATH] [--log-file PATH]
 #
 # Modes:
 #   --discover     Print discovered switch groups and peer links (default)
@@ -21,7 +21,7 @@
 #
 # Options:
 #   --sysfs-base   Override the base path (default: /sys/kernel/pci_switch_link/virtual_switch_links)
-#   --log-file     Override the change log path (default: /var/run/rccl_dsn_mapper.log)
+#   --log-file     Override the change log path (default: /var/run/rccl_bcm_isl_discover.log)
 #
 # Modeled after /apps/shared/disable_acs.sh — intended to run as a privileged
 # step during NIC bring-up, before RCCL initializes.
@@ -31,7 +31,7 @@ set -euo pipefail
 
 # --- Configuration ---
 SYSFS_BASE="/var/run/rccl_bcm_links"
-CHANGE_LOG="/var/run/rccl_dsn_mapper.log"
+CHANGE_LOG="/var/run/rccl_bcm_isl_discover.log"
 MODE="discover"        # discover | populate | clean
 BCM_VENDOR="1000"      # Broadcom vendor ID
 BCM_SWITCH_DEV="c030"  # PEX890xx device ID
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --sysfs-base   Override base path (default: /sys/kernel/pci_switch_link/virtual_switch_links)"
-            echo "  --log-file     Override change log path (default: /var/run/rccl_dsn_mapper.log)"
+            echo "  --log-file     Override change log path (default: /var/run/rccl_bcm_isl_discover.log)"
             exit 0
             ;;
         *)
@@ -100,7 +100,7 @@ if [ "${MODE}" = "clean" ]; then
         if [ -e "${ENTRY_PATH}" ]; then
             rm -f "${ENTRY_PATH}"
             echo "  Removed file: ${ENTRY_PATH}"
-            logger "rccl_dsn_mapper: Cleaned file ${ENTRY_PATH}"
+            logger "rccl_bcm_isl_discover: Cleaned file ${ENTRY_PATH}"
             REMOVED=$((REMOVED + 1))
         else
             echo "  Already absent: ${ENTRY_PATH}"
@@ -117,7 +117,7 @@ if [ "${MODE}" = "clean" ]; then
             if [ -z "$(ls -A "${ENTRY_PATH}" 2>/dev/null)" ]; then
                 rmdir "${ENTRY_PATH}"
                 echo "  Removed dir:  ${ENTRY_PATH}"
-                logger "rccl_dsn_mapper: Cleaned directory ${ENTRY_PATH}"
+                logger "rccl_bcm_isl_discover: Cleaned directory ${ENTRY_PATH}"
                 REMOVED=$((REMOVED + 1))
             else
                 echo "  Skipped non-empty dir: ${ENTRY_PATH}"
@@ -141,7 +141,7 @@ fi
 
 # --- Platform identification ---
 PLATFORM=$(dmidecode --string system-product-name 2>/dev/null || echo "unknown")
-logger "rccl_dsn_mapper: PLATFORM=${PLATFORM}"
+logger "rccl_bcm_isl_discover: PLATFORM=${PLATFORM}"
 
 # --- Phase 1: Discover Broadcom upstream ports and read DSN ---
 
@@ -164,7 +164,7 @@ for BDF in $(lspci -D -d ${BCM_VENDOR}:${BCM_SWITCH_DEV} | awk '{print $1}'); do
 
     # Skip if DSN read failed (returns all-ones without root)
     if [ "${DSN_LO}" = "ffffffff" ] && [ "${DSN_HI}" = "ffffffff" ]; then
-        logger "rccl_dsn_mapper: WARNING: Cannot read DSN for ${BDF} (permission denied?)"
+        logger "rccl_bcm_isl_discover: WARNING: Cannot read DSN for ${BDF} (permission denied?)"
         continue
     fi
 
@@ -264,7 +264,7 @@ if [ "${MODE}" = "populate" ]; then
     if [ ! -d "${SYSFS_BASE}" ]; then
         mkdir -p "${SYSFS_BASE}"
         echo "${TIMESTAMP} CREATE_DIR ${SYSFS_BASE}" >> "${CHANGE_LOG}"
-        logger "rccl_dsn_mapper: Created base directory ${SYSFS_BASE}"
+        logger "rccl_bcm_isl_discover: Created base directory ${SYSFS_BASE}"
         echo "  Created base directory: ${SYSFS_BASE}"
     fi
 
@@ -284,7 +284,7 @@ if [ "${MODE}" = "populate" ]; then
             touch "${LINK_ENTRY}"
             echo "${TIMESTAMP} CREATE_FILE ${LINK_ENTRY}" >> "${CHANGE_LOG}"
             CREATED=$((CREATED + 1))
-            logger "rccl_dsn_mapper: Created link ${BDF_A} -> ${BDF_B}"
+            logger "rccl_bcm_isl_discover: Created link ${BDF_A} -> ${BDF_B}"
         else
             EXISTED=$((EXISTED + 1))
         fi
@@ -300,7 +300,7 @@ if [ "${MODE}" = "populate" ]; then
             touch "${LINK_ENTRY}"
             echo "${TIMESTAMP} CREATE_FILE ${LINK_ENTRY}" >> "${CHANGE_LOG}"
             CREATED=$((CREATED + 1))
-            logger "rccl_dsn_mapper: Created link ${BDF_B} -> ${BDF_A}"
+            logger "rccl_bcm_isl_discover: Created link ${BDF_B} -> ${BDF_A}"
         else
             EXISTED=$((EXISTED + 1))
         fi
