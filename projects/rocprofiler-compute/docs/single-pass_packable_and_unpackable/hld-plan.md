@@ -8,7 +8,7 @@ The packing algorithm is in [Metric grouping (SPP / SPU)](lld-metrics-grouping-a
 
 **Related design:**
 
-- [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — Layer 1.5 collectables. This plan uses that idea on today’s panel YAML.
+- [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — A collectable is one part of a split metric. Its counters fit in one hardware pass. This plan uses that idea on today’s panel YAML.
 - [Three-layer analysis config LLD](../design/analysis-config-redesign/lld-index.md) and [metric library LLD](../design/analysis-config-redesign/lld-phase1-metric-library.md) — the migration this plan does not do.
 
 Older planning drafts are on branch `users/feizheng10/aiprofcomp-865-docs-backup`.
