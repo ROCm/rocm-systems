@@ -4383,6 +4383,74 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
       });
 }
 
+// (e) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=1024. Message is below min.
+//     252 floats * sizeof(float) = 1008 bytes < 1024 -- must not pick CE 2-shot.
+//     (rcclUseCeAr2Shot has no min-bound check; the bound lives in twoShotWindow
+//     inside rcclSelectAllReduce, so the test must call rcclSelectAllReduce.)
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBound) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBound",
+      []() {
+        constexpr int64_t kMin = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 4;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 252 * sizeof(float) = 1008 bytes < kMin(1024), divisible by nRanks=4.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/252, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &decision));
+EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// (f) Env-override min: RCCL_CE_AR_2SHOT_MIN_BYTES=1024. Message is at the min.
+//     256 floats * sizeof(float) = 1024 bytes == min -- must pick CE 2-shot.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound",
+      []() {
+        constexpr int64_t kMin = 1024;
+        g_loadParam = [](const char* env, int64_t deft) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)          return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0)    return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
+          return deft;
+        };
+        ScopedHook symRequested(g_isSymmetricKernelRequested,
+                               [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                  size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeCommWithArch("gfx950");
+        comm->nRanks           = 4;
+        comm->nNodes           = 1;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        // 256 * sizeof(float) = 1024 bytes == kMin, divisible by nRanks=4.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/256, ncclFloat32, ncclSum,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA fabric LL128: LL not eligible, LL128 is, and RCCL_DDA_LL128 is on --
 // distinct from the LL test above, proving the LL arm's own eligibility
 // check (not just DDA-path-taken) gates which fabric tier is chosen.
