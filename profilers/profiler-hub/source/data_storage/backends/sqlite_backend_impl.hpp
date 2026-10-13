@@ -9,15 +9,13 @@
 #include "debug.hpp"
 #include "directory.hpp"
 
-#include <fmt/format.h>
-
+#include <array>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
-
-#include <regex>
 
 #include "schema/data_views.hpp"
 #include "schema/rocpd_metadata.hpp"
@@ -52,6 +50,16 @@ create_directory_for_database_file(const std::string& db_file)
     }
 }
 
+void
+replace_all(std::string& text, std::string_view placeholder, std::string_view value)
+{
+    for(auto pos = text.find(placeholder); pos != std::string::npos;
+        pos      = text.find(placeholder, pos + value.size()))
+    {
+        text.replace(pos, placeholder.size(), value);
+    }
+}
+
 [[maybe_unused]] std::string
 get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 {
@@ -81,31 +89,24 @@ get_schema_query(rocpd_sql_schema_kind_t schema_kind, const std::string& uuid)
 
     std::string query_str = std::string(schema_content);
 
-    std::regex upid_pattern("\\{\\{uuid\\}\\}");
-    std::regex guid_pattern("\\{\\{guid\\}\\}");
-    std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
-
     constexpr auto schema_version = profiler_hub::data_storage::rocpd_schema_version;
-    std::regex     schema_version_pattern("\\{\\{schema_version\\}\\}");
-    std::regex     schema_version_major_pattern("\\{\\{schema_version_major\\}\\}");
-    std::regex     schema_version_minor_pattern("\\{\\{schema_version_minor\\}\\}");
-    std::regex     schema_version_patch_pattern("\\{\\{schema_version_patch\\}\\}");
+    const std::array<std::pair<std::string_view, std::string>, 7> substitutions{ {
+        { "{{uuid}}", "_" + uuid },
+        { "{{guid}}", uuid },
+        { "{{view_upid}}", "" },
+        { "{{schema_version}}",
+          std::to_string(schema_version.major) + "." +
+              std::to_string(schema_version.minor) + "." +
+              std::to_string(schema_version.patch) },
+        { "{{schema_version_major}}", std::to_string(schema_version.major) },
+        { "{{schema_version_minor}}", std::to_string(schema_version.minor) },
+        { "{{schema_version_patch}}", std::to_string(schema_version.patch) },
+    } };
 
-    query_str = std::regex_replace(query_str, upid_pattern, "_" + uuid);
-    query_str = std::regex_replace(query_str, guid_pattern, uuid);
-    query_str = std::regex_replace(query_str, view_upid_pattern, "");
-    query_str = std::regex_replace(query_str,
-                                   schema_version_pattern,
-                                   fmt::format("{}.{}.{}",
-                                               schema_version.major,
-                                               schema_version.minor,
-                                               schema_version.patch));
-    query_str = std::regex_replace(
-        query_str, schema_version_major_pattern, std::to_string(schema_version.major));
-    query_str = std::regex_replace(
-        query_str, schema_version_minor_pattern, std::to_string(schema_version.minor));
-    query_str = std::regex_replace(
-        query_str, schema_version_patch_pattern, std::to_string(schema_version.patch));
+    for(const auto& [placeholder, value] : substitutions)
+    {
+        replace_all(query_str, placeholder, value);
+    }
 
     return query_str;
 }

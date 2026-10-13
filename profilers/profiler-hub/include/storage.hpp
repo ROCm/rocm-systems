@@ -27,7 +27,8 @@ public:
     /**
      * Returns the RocPD schema version stamped in the trace's metadata.
      * @return {0,0,0} if the trace does not exist yet or its metadata cannot be read.
-     * @note Does not create the file; the result is cached once read.
+     * @note Does not create the file and reads it on every call, so data a writer has not
+     *       flushed yet is not visible.
      */
     [[nodiscard]] profiler_hub::version_t get_storage_version() const;
 

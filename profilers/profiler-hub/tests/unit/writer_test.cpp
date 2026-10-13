@@ -15,6 +15,9 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <tuple>
+#include <vector>
 
 namespace
 {
@@ -46,12 +49,21 @@ protected:
         writer->flush_in_memory_data_to_disk();
     }
 
+    [[nodiscard]] version_t version_after(const std::string& sql) const
+    {
+        flush_empty_trace();
+        execute_on_trace(sql);
+        return storage_t{ m_db_path, m_uuid }.get_storage_version();
+    }
+
     void execute_on_trace(const std::string& sql) const
     {
         data_storage::sqlite_backend::create(
             m_db_path, m_uuid, data_storage::sqlite_backend::storage_mode_t::on_disk)
             ->execute(sql);
     }
+
+    static constexpr version_t zero_version{ .major = 0, .minor = 0, .patch = 0 };
 
     static void expect_version(const version_t& actual, const version_t& expected)
     {
@@ -126,53 +138,105 @@ TEST_F(writer_test, get_storage_version_reads_schema_version_from_trace)
 
 TEST_F(writer_test, get_storage_version_is_zero_when_the_trace_has_no_metadata)
 {
-    flush_empty_trace();
-    execute_on_trace("DROP TABLE rocpd_metadata_" + m_uuid);
-
-    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+    expect_version(version_after("DROP TABLE rocpd_metadata_" + m_uuid), zero_version);
 }
 
 TEST_F(writer_test, get_storage_version_is_zero_when_a_component_is_malformed)
 {
-    flush_empty_trace();
-    execute_on_trace("UPDATE rocpd_metadata_" + m_uuid +
-                     " SET value = 'x' WHERE tag = 'schema_version_minor'");
-
-    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+    expect_version(version_after("UPDATE rocpd_metadata_" + m_uuid +
+                                 " SET value = 'x' WHERE tag = 'schema_version_minor'"),
+                   zero_version);
 }
 
 TEST_F(writer_test, get_storage_version_is_zero_when_a_component_is_missing)
 {
-    flush_empty_trace();
-    execute_on_trace("DELETE FROM rocpd_metadata_" + m_uuid +
-                     " WHERE tag = 'schema_version_patch'");
-
-    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(), {});
+    expect_version(version_after("DELETE FROM rocpd_metadata_" + m_uuid +
+                                 " WHERE tag = 'schema_version_patch'"),
+                   zero_version);
 }
 
 TEST_F(writer_test, get_storage_version_is_zero_for_a_corrupt_file)
 {
-    std::ofstream{ m_db_path } << "this is not a sqlite database, just some text";
+    std::ofstream corrupt{ m_db_path };
+    corrupt << "this is not a sqlite database, just some text";
+    corrupt.close();
 
     storage_t storage{ m_db_path, m_uuid };
-    version_t version{ 1, 1, 1 };
+    version_t version{ .major = 1, .minor = 1, .patch = 1 };
     EXPECT_NO_THROW(version = storage.get_storage_version());
-    expect_version(version, {});
+    expect_version(version, zero_version);
 }
 
-TEST_F(writer_test, get_storage_version_does_not_create_the_file_or_pin_the_writer)
+TEST_F(writer_test, get_storage_version_does_not_create_the_file)
+{
+    storage_t storage{ m_db_path, m_uuid };
+
+    expect_version(storage.get_storage_version(), zero_version);
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+TEST_F(writer_test, get_storage_version_does_not_pin_the_writer_to_the_disk)
 {
     auto storage = std::make_unique<storage_t>(m_db_path, m_uuid);
-    expect_version(storage->get_storage_version(), {});
-    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+    std::ignore  = storage->get_storage_version();
 
     writer_t writer{ std::move(storage) };
     writer.register_node_info({ 1, 42, "machine-1" });
-    EXPECT_FALSE(std::filesystem::exists(m_db_path));
 
-    writer.flush_in_memory_data_to_disk();
-    expect_version(storage_t{ m_db_path, m_uuid }.get_storage_version(),
+    EXPECT_FALSE(std::filesystem::exists(m_db_path));
+}
+
+TEST_F(writer_test, get_storage_version_reads_the_trace_once_it_appears)
+{
+    storage_t storage{ m_db_path, m_uuid };
+    expect_version(storage.get_storage_version(), zero_version);
+
+    flush_empty_trace();
+
+    expect_version(storage.get_storage_version(), data_storage::rocpd_schema_version);
+}
+
+TEST_F(writer_test, get_storage_version_recovers_once_an_unreadable_trace_is_replaced)
+{
+    std::ofstream corrupt{ m_db_path };
+    corrupt << "this is not a sqlite database, just some text";
+    corrupt.close();
+
+    storage_t storage{ m_db_path, m_uuid };
+    expect_version(storage.get_storage_version(), zero_version);
+
+    std::filesystem::remove(m_db_path);
+    flush_empty_trace();
+
+    expect_version(storage.get_storage_version(), data_storage::rocpd_schema_version);
+}
+
+TEST_F(writer_test, get_storage_version_reads_the_uuid_of_the_trace_it_is_given)
+{
+    flush_empty_trace();
+
+    expect_version(storage_t{ m_db_path, "anotheruuid" }.get_storage_version(),
                    data_storage::rocpd_schema_version);
+}
+
+TEST_F(writer_test, get_storage_version_can_be_called_from_several_threads)
+{
+    flush_empty_trace();
+    const storage_t storage{ m_db_path, m_uuid };
+
+    constexpr size_t          thread_count = 8;
+    std::vector<version_t>    versions(thread_count);
+    std::vector<std::jthread> threads;
+    for(size_t i = 0; i < thread_count; ++i)
+    {
+        threads.emplace_back([&, i] { versions[i] = storage.get_storage_version(); });
+    }
+    threads.clear();
+
+    for(const auto& version : versions)
+    {
+        expect_version(version, data_storage::rocpd_schema_version);
+    }
 }
 
 TEST_F(writer_test, register_process_info_is_readable_after_flush)
