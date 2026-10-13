@@ -490,11 +490,12 @@ protected:
         std::string reason = agreeOn(failed, "symmetric buffer allocation failed");
         if(!reason.empty()) return reason;
         symComm_ = comm;
-        failed = ncclCommWindowRegister(comm, symSend_, count * sizeof(float), &symWins_[0],
-                                        NCCL_WIN_COLL_SYMMETRIC) != ncclSuccess ||
-                 ncclCommWindowRegister(comm, symRecv_, count * sizeof(float), &symWins_[1],
-                                        NCCL_WIN_COLL_SYMMETRIC) != ncclSuccess;
-        return agreeOn(failed, "symmetric window registration failed");
+        // Both calls are collective, so every rank makes both whatever the first returns.
+        ncclResult_t sendRes =
+            ncclCommWindowRegister(comm, symSend_, count * sizeof(float), &symWins_[0], NCCL_WIN_COLL_SYMMETRIC);
+        ncclResult_t recvRes =
+            ncclCommWindowRegister(comm, symRecv_, count * sizeof(float), &symWins_[1], NCCL_WIN_COLL_SYMMETRIC);
+        return agreeOn(sendRes != ncclSuccess || recvRes != ncclSuccess, "symmetric window registration failed");
     }
 
     // Windows go before their communicator, so TearDown calls this ahead of the
