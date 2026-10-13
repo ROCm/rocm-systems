@@ -212,12 +212,17 @@ jobs:
             NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
           fi
 
+          # Arithmetic in bash, not in a ${{ }} expression: GitHub Actions
+          # expressions have no arithmetic operators, and `... - 30` there is
+          # a parse error that rejects the whole workflow file at dispatch.
+          SCRIPT_TIMEOUT=$(( ${{ inputs.timeout_minutes }} - 30 ))
+
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \
             --workload "${{ inputs.workload }}" \
             --cluster "${CLUSTER}" \
             --nodes "${{ inputs.nodes }}" \
-            --timeout-minutes ${{ fromJSON(inputs.timeout_minutes) - 30 }} \
+            --timeout-minutes "${SCRIPT_TIMEOUT}" \
             --results-dir "${RESULTS_DIR}" \
             --work-dir "${WORK_DIR}" \
             $NOTIFY_ARGS
