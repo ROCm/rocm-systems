@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "decode_test_util.h"
 #include "test_paths.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -114,7 +115,11 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result =
+        config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
@@ -366,7 +371,11 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result =
+      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Single-threaded counterpart to the _MultiThreaded test below; pin one worker
@@ -420,7 +429,11 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result =
+      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;

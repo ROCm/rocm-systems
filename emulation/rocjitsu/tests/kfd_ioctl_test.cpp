@@ -18,6 +18,8 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
+#include "util/diagnostic.h"
+#include <stdexcept>
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -266,7 +268,14 @@ int daemon_debug_enable(rocjitsu::SimulatedKfd &daemon, uint32_t debugger,
 }
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -304,7 +313,14 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
 }
 
 std::unique_ptr<rocjitsu::SoC> load_standalone_soc(const std::string &config_path) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return nullptr;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -321,7 +337,11 @@ protected:
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path) {
     setenv("RJ_CONFIG", config_path.c_str(), 1);
-    loaded_ = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic diagnostic;
+    auto loaded_result = rocjitsu::config::load_config(
+        config_path.c_str(), rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
+    loaded_ = std::move(loaded_result).value();
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);

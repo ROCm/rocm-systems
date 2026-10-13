@@ -6,6 +6,7 @@
 
 #include "aql_queue.h"
 #include "test_paths.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -87,10 +88,13 @@ struct XcdDistributionFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
 
-  explicit XcdDistributionFixture(Threading threading = Threading::Single,
-                                  uint32_t dispatch_threads = 1,
-                                  const std::string &config_path = CONFIG_PATH)
-      : loaded(config::load_config(config_path, rocjitsu::kEmbeddedSchema)) {
+  void initialize(Threading threading = Threading::Single, uint32_t dispatch_threads = 1,
+                  const std::string &config_path = CONFIG_PATH) {
+    util::StringDiagnostic diagnostic;
+    auto loaded_result =
+        config::load_config(config_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
+    loaded = std::move(loaded_result).value();
     soc = loaded.soc();
     memory = loaded.memory();
     soc->set_dispatch_threads(dispatch_threads);
@@ -131,8 +135,12 @@ struct Cdna5ScratchTopologyFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *memory = nullptr;
 
-  Cdna5ScratchTopologyFixture()
-      : loaded(config::load_config(CDNA5_CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+  void initialize() {
+    util::StringDiagnostic diagnostic;
+    auto loaded_result =
+        config::load_config(CDNA5_CONFIG_PATH, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
+    loaded = std::move(loaded_result).value();
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;
@@ -525,6 +533,7 @@ private:
 // in is what spreads it; see FanoutQueueGridSpreadsOverAllXcds.
 TEST(XcdDistributionTest, QueueWithoutFanoutKeepsGridOnOneXcd) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   ASSERT_EQ(fx.soc->all_cus().size(), kTotalCus);
 
@@ -555,6 +564,7 @@ TEST(XcdDistributionTest, QueueWithoutFanoutKeepsGridOnOneXcd) {
 // i % num_xcds.
 TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
@@ -573,7 +583,8 @@ TEST(XcdDistributionTest, FanoutQueueGridSpreadsOverAllXcds) {
 
 TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
   for (Threading threading : {Threading::Single, Threading::ThreadPerXcd}) {
-    XcdDistributionFixture fx(threading);
+    XcdDistributionFixture fx;
+    ASSERT_NO_FATAL_FAILURE(fx.initialize(threading));
     auto *owner = fx.soc->xcd(3)->command_processor();
     auto queue = test::make_fanout_queue(fx.memory, owner);
     amdgpu::QueueCuSelection selected(std::in_place);
@@ -591,7 +602,8 @@ TEST(XcdDistributionTest, CuMaskRoutesGridAwayFromOwningXcd) {
 }
 
 static void run_cu_mask_transition(Threading threading, bool explicit_barrier) {
-  XcdDistributionFixture fx(threading);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(threading));
   if (threading == Threading::ThreadPerXcd) {
     ASSERT_GT(fx.loaded.engine_config.num_threads, 1u);
   }
@@ -644,23 +656,26 @@ static void run_cu_mask_transition(Threading threading, bool explicit_barrier) {
 }
 
 TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrdering) {
-  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/false);
+  ASSERT_NO_FATAL_FAILURE(run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/false));
 }
 
 TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierBitOrderingThreaded) {
-  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/false);
+  ASSERT_NO_FATAL_FAILURE(
+      run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/false));
 }
 
 TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrdering) {
-  run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/true);
+  ASSERT_NO_FATAL_FAILURE(run_cu_mask_transition(Threading::Single, /*explicit_barrier=*/true));
 }
 
 TEST(XcdDistributionTest, CuMaskTransitionPreservesBarrierPacketOrderingThreaded) {
-  run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/true);
+  ASSERT_NO_FATAL_FAILURE(
+      run_cu_mask_transition(Threading::ThreadPerXcd, /*explicit_barrier=*/true));
 }
 
 TEST(XcdDistributionTest, EmptyCuMaskDefersFetchUntilQueueIsEnabled) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   auto *owner = fx.soc->xcd(0)->command_processor();
   auto queue = test::make_fanout_queue(fx.memory, owner);
   owner->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
@@ -677,6 +692,7 @@ TEST(XcdDistributionTest, EmptyCuMaskDefersFetchUntilQueueIsEnabled) {
 
 TEST(XcdDistributionTest, FanoutPreservesAddressSpaceIdentityThroughEveryWave) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   auto vm_access = std::make_shared<SparseGpuVmAccess>(*fx.memory);
   const amdgpu::AddressSpaceHandle address_space =
       fx.soc->gpu_vm().register_translated(/*vmid=*/0, vm_access, vm_access);
@@ -720,6 +736,7 @@ TEST(XcdDistributionTest, FanoutPreservesAddressSpaceIdentityThroughEveryWave) {
 // own index, so the workgroup-to-XCD mapping is the same for every queue.
 TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   // Ask for an ordinal that lands the queue on an XCD other than xcd0.
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/3);
@@ -741,6 +758,7 @@ TEST(XcdDistributionTest, FanoutIsIndependentOfOwningXcd) {
 // what keep every XCD's view of the queue in step, so ordering still works.
 TEST(XcdDistributionTest, GridSmallerThanXcdCountSpreadsOnePerXcd) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
@@ -763,6 +781,7 @@ TEST(XcdDistributionTest, GridSmallerThanXcdCountSpreadsOnePerXcd) {
 // that breaks if empty shares are skipped as an optimization.
 TEST(XcdDistributionTest, BarrierAfterSmallDispatchStillOrders) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -791,7 +810,8 @@ TEST(XcdDistributionTest, BarrierAfterSmallDispatchStillOrders) {
 // publish that share, advance past the packet, and wait for grid-wide retirement
 // before it exposes the completion signal or admits a barrier'd follower.
 TEST(XcdDistributionTest, EmptyOwnerShardCompletesAndOrdersBarrieredFollower) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd));
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -848,6 +868,7 @@ TEST(XcdDistributionTest, EmptyOwnerShardCompletesAndOrdersBarrieredFollower) {
 // barrier was still stalled.
 TEST(XcdDistributionTest, BarrierOnPriorDispatchOrdersEveryXcd) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -899,6 +920,7 @@ TEST(XcdDistributionTest, BarrierOnPriorDispatchOrdersEveryXcd) {
 // the copies carry no signal, or an IB would decrement its signal once per XCD.
 TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   // amd_signal_t::value lives 8 bytes into the signal object. Not 1, so a signal
   // written rather than decremented is also visible.
@@ -926,7 +948,8 @@ TEST(XcdDistributionTest, FanoutReplicatesNonKernelPacketsButSignalsThemOnce) {
 // without requiring them to coexist there: with one thread per XCD, a peer may
 // legitimately retire its kernel shard before the owner fans out the IB behind it.
 TEST(XcdDistributionTest, EveryXcdAcceptsNonKernelPacketsInQueueOrder) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd));
 
   auto *cp = fx.soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
   ASSERT_NE(cp, nullptr);
@@ -955,7 +978,8 @@ TEST(XcdDistributionTest, EveryXcdAcceptsNonKernelPacketsInQueueOrder) {
 // ahead of the barrier'd packet in its own queue, so unless the IB is placed there
 // too the peer decides against a shorter prefix than the owner's.
 TEST(XcdDistributionTest, BarrierdKernelBehindAnIbOrdersOnEveryXcd) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd));
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -989,6 +1013,7 @@ TEST(XcdDistributionTest, BarrierdKernelBehindAnIbOrdersOnEveryXcd) {
 // dispatches on queues owned by different XCDs rather than the id counter alone.
 TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcds) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -1032,6 +1057,7 @@ TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcds) {
 // dispatch retired anywhere".
 TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShare) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
   auto *order = plugin.get();
@@ -1065,6 +1091,7 @@ TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShare) {
 // where the work runs, but it does spread ring reads and completion signalling.
 TEST(XcdDistributionTest, QueuesRotateAcrossXcds) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   ASSERT_EQ(fx.soc->all_cus().size(), kTotalCus);
 
@@ -1094,6 +1121,7 @@ TEST(XcdDistributionTest, QueuesRotateAcrossXcds) {
 // dispatch and checks the delta as well as the accumulated total.
 TEST(XcdDistributionTest, CounterAccumulatesAcrossDispatchesOnOneQueue) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   ASSERT_EQ(fx.soc->all_cus().size(), kTotalCus);
 
@@ -1170,7 +1198,8 @@ TEST(XcdDistributionTest, DispatchIdClassesStayDisjointAcrossTheWrap) {
 // that is not a peer. Defeating either alone still yields one decrement, so this
 // pins the property rather than either implementation of it.
 void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads = 1) {
-  XcdDistributionFixture fx(threading, dispatch_threads);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(threading, dispatch_threads));
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   // amd_signal_t::value lives 8 bytes into the signal object.
@@ -1212,7 +1241,7 @@ void run_fanout_completion_signal(Threading threading, uint32_t dispatch_threads
 }
 
 TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnce) {
-  run_fanout_completion_signal(Threading::Single);
+  ASSERT_NO_FATAL_FAILURE(run_fanout_completion_signal(Threading::Single));
 }
 
 // The same, with one engine thread per XCD. On a single thread the XCD that
@@ -1220,12 +1249,13 @@ TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnce) {
 // drain loop, so the wake that rouses a parked owner is never actually needed.
 // Here they are on different threads and it is.
 TEST(XcdDistributionTest, FanoutFiresTheCompletionSignalExactlyOnceThreaded) {
-  run_fanout_completion_signal(Threading::ThreadPerXcd);
+  ASSERT_NO_FATAL_FAILURE(run_fanout_completion_signal(Threading::ThreadPerXcd));
 }
 
 TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded) {
   // Eight XCD engines share three pool workers and join their batches independently.
-  run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4);
+  ASSERT_NO_FATAL_FAILURE(
+      run_fanout_completion_signal(Threading::ThreadPerXcd, /*dispatch_threads=*/4));
 }
 
 // The two ordering regressions above run on a single engine thread, where every
@@ -1239,7 +1269,8 @@ TEST(XcdDistributionTest, SharedPoolFiresTheCompletionSignalExactlyOnceThreaded)
 // the callbacks WorkgroupOrderPlugin records, so the observations stay valid.
 
 TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcdsThreaded) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd));
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
@@ -1269,7 +1300,8 @@ TEST(XcdDistributionTest, DispatchIdsAreDisjointAcrossXcdsThreaded) {
 }
 
 void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd, dispatch_threads);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd, dispatch_threads));
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<WorkgroupOrderPlugin>();
@@ -1300,12 +1332,12 @@ void run_threaded_fanout_barrier(uint32_t dispatch_threads) {
 }
 
 TEST(XcdDistributionTest, BarrierBitWaitsForEveryXcdsShareThreaded) {
-  run_threaded_fanout_barrier(/*dispatch_threads=*/1);
+  ASSERT_NO_FATAL_FAILURE(run_threaded_fanout_barrier(/*dispatch_threads=*/1));
 }
 
 TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
   // Exercise barrier ordering when peer XCDs execute and join shared-pool work concurrently.
-  run_threaded_fanout_barrier(/*dispatch_threads=*/4);
+  ASSERT_NO_FATAL_FAILURE(run_threaded_fanout_barrier(/*dispatch_threads=*/4));
 }
 
 // One matched begin/end pair is owed per packet, not per share, and the pair
@@ -1316,7 +1348,8 @@ TEST(XcdDistributionTest, SharedPoolBarrierBitWaitsForEveryXcdsShareThreaded) {
 // while end stays with the owner. Threaded, so the two are genuinely different
 // CPs on different threads and the claim is a real race rather than a formality.
 TEST(XcdDistributionTest, FanoutReportsOneExecutionPairWhenTheOwnerShareIsEmpty) {
-  XcdDistributionFixture fx(Threading::ThreadPerXcd);
+  XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize(Threading::ThreadPerXcd));
   ASSERT_GT(fx.loaded.engine_config.num_threads, 1u) << "fixture did not actually go concurrent";
 
   auto plugin = std::make_unique<ExecutionSpanPlugin>();
@@ -1358,6 +1391,7 @@ TEST(XcdDistributionTest, FanoutReportsOneExecutionPairWhenTheOwnerShareIsEmpty)
 
 TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   KfdProcess process(7);
   class Reporter : public amdgpu::MemoryFaultReporter {
   public:
@@ -1464,6 +1498,7 @@ TEST(XcdDistributionTest, ScratchAllocationProbeDoesNotFaultAndReusesBacking) {
 // reaches this path at all. Record what the allocator is actually asked for.
 TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   constexpr uint32_t kPrivateBytes = 64;
@@ -1535,6 +1570,7 @@ TEST(XcdDistributionTest, FanoutSizesScratchForTheWholeGridNotOneShare) {
 // aliases corresponding wave slots across all eight XCDs.
 TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
   Cdna5ScratchTopologyFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
 
   auto plugin = std::make_unique<ScratchAddressPlugin>();
@@ -1576,6 +1612,7 @@ TEST(XcdDistributionTest, Cdna5FanoutUsesDistinctScratchSlicesAcrossXcds) {
 
 TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
   Cdna5ScratchTopologyFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   auto *cp = fx.soc->xcd(0)->command_processor();
   ASSERT_NE(cp, nullptr);
   ASSERT_EQ(cp->compute_units().size(), 32u);
@@ -1615,6 +1652,7 @@ TEST(XcdDistributionTest, Cdna5ScratchCapacityKeepsEveryCuAddressable) {
 
 TEST(XcdDistributionTest, Cdna5QueueAdmissionCapsScratchButKeepsGeneralWaveSlots) {
   Cdna5ScratchTopologyFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   auto *cp = fx.soc->xcd(0)->command_processor();
   ASSERT_NE(cp, nullptr);
 
@@ -1652,8 +1690,9 @@ TEST(XcdDistributionTest, Cdna5QueueAdmissionCapsScratchButKeepsGeneralWaveSlots
 TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
   for (const bool cdna5 : {false, true}) {
     SCOPED_TRACE(cdna5 ? "gfx1250 physical scratch slots" : "gfx950 logical scratch slots");
-    XcdDistributionFixture fx(Threading::Single, 1,
-                              cdna5 ? test::config_path("gfx1250_mi455x.json") : CONFIG_PATH);
+    XcdDistributionFixture fx;
+    ASSERT_NO_FATAL_FAILURE(fx.initialize(
+        Threading::Single, 1, cdna5 ? test::config_path("gfx1250_mi455x.json") : CONFIG_PATH));
     const auto &cus = fx.soc->all_cus();
     ASSERT_FALSE(cus.empty());
     const uint32_t wave_size = cus.front()->wf_size();
@@ -1740,6 +1779,7 @@ TEST(XcdDistributionTest, GrowingScratchPreservesAlreadyAdmittedWaves) {
 
 TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
   install_scratch_kernel(*fx.memory, kPrivateBytes);
 
@@ -1773,6 +1813,7 @@ TEST(XcdDistributionTest, ScratchAllocatorFailureStopsBeforeWaveAdmission) {
 
 TEST(XcdDistributionTest, ScratchRequiresTheCompleteWaveSlice) {
   XcdDistributionFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   constexpr uint32_t kPrivateBytes = 64;
   install_scratch_kernel(*fx.memory, kPrivateBytes);
 

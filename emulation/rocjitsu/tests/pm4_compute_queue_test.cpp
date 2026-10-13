@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/simulation.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -125,14 +126,18 @@ protected:
     address_space = gpu_vm.register_translated(1, memory, memory);
     ASSERT_TRUE(address_space);
     memory->store<uint32_t>(kReadPointer, 0);
-    auto loaded = config::load_config_from_string(R"({"max_ticks":100000,"num_threads":1,
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result =
+        config::load_config_from_string(R"({"max_ticks":100000,"num_threads":1,
       "vm":{"arch":"cdna3"},"topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[
       {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
       {"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit"}]}]}]},
       "links":[{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}]}})",
-                                                  kEmbeddedSchema);
+                                        kEmbeddedSchema, loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     cp = loaded.soc()->xcd(0)->command_processor();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());

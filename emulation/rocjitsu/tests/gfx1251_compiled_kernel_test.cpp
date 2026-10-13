@@ -48,8 +48,11 @@ constexpr uint32_t kWorkgroupSize = 64;
 class Gfx1251CompiledKernelTest : public testing::Test {
 protected:
   void SetUp() override {
-    config::LoadedConfig loaded =
-        config::load_config(test::config_path("gfx1251_synthetic.json"), kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result = config::load_config(test::config_path("gfx1251_synthetic.json"),
+                                             kEmbeddedSchema, loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     ASSERT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1251);
     soc_ = loaded.soc();
     memory_ = loaded.memory();

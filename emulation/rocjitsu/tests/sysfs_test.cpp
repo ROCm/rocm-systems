@@ -11,6 +11,7 @@
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "util/diagnostic.h"
 
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
@@ -34,7 +35,6 @@ RJ_DIAGNOSTIC_POP
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
@@ -87,8 +87,11 @@ TEST(SysfsTopologyTest, DefaultGpuInfoHasCoherentSdmaCounts) {
 
 TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
   Sysfs sysfs;
-  const auto identity = config::load_device_identity(
-      std::string(CONFIG_DIR) + "/gfx1100_w7900.json", kEmbeddedSchema);
+  util::StringDiagnostic diagnostic;
+  auto identity_result = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1100_w7900.json", kEmbeddedSchema, diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+  const auto &identity = identity_result.value();
   auto gpu = gpu_info_from_config(identity.device, 1);
   gpu.drm_render_minor = 129;
   ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -110,8 +113,11 @@ TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
 
 TEST(SysfsTopologyTest, R9700PublishesComputeIpDiscoveryVersions) {
   Sysfs sysfs;
-  const auto identity = config::load_device_identity(
-      std::string(CONFIG_DIR) + "/gfx1201_r9700.json", kEmbeddedSchema);
+  util::StringDiagnostic diagnostic;
+  auto identity_result = config::load_device_identity(
+      std::string(CONFIG_DIR) + "/gfx1201_r9700.json", kEmbeddedSchema, diagnostic.emitter());
+  ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+  const auto &identity = identity_result.value();
   auto gpu = gpu_info_from_config(identity.device, 1);
   gpu.drm_render_minor = 128;
   ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -145,8 +151,11 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
   for (const auto &profile : profiles) {
     SCOPED_TRACE(profile.filename);
     Sysfs sysfs;
-    const auto identity = config::load_device_identity(
-        std::string(CONFIG_DIR) + "/" + profile.filename, kEmbeddedSchema);
+    util::StringDiagnostic diagnostic;
+    auto identity_result = config::load_device_identity(
+        std::string(CONFIG_DIR) + "/" + profile.filename, kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(identity_result.succeeded()) << diagnostic.message();
+    const auto &identity = identity_result.value();
     auto gpu = gpu_info_from_config(identity.device, profile.num_xcc);
     gpu.drm_render_minor = 128;
     ASSERT_FALSE(sysfs.generate(gpu).empty());
@@ -163,17 +172,20 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
 }
 
 TEST(SysfsTopologyTest, IpDiscoveryUsesOwnedConfigVersions) {
+  util::StringDiagnostic diagnostic;
   const auto device = config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{
         "gfx_target_version":110000, "num_sdma_engines":0,
         "ip_versions":[{"hardware_id":11,"major":11,"minor":0,"revision":7}]
       }}}})",
-      kEmbeddedSchema, [](const fb::SimulationConfig *parsed) {
-        return config::kfd_device_from_fb(parsed->vm()->gpu()->device(), "vm.gpu.device");
+      kEmbeddedSchema, diagnostic.emitter(), [&diagnostic](const fb::SimulationConfig *parsed) {
+        return config::kfd_device_from_fb(parsed->vm()->gpu()->device(), "vm.gpu.device",
+                                          diagnostic.emitter());
       });
+  ASSERT_TRUE(device.succeeded()) << diagnostic.message();
   // The parser and its storage have been destroyed before sysfs consumes the data.
   Sysfs sysfs;
-  ASSERT_FALSE(sysfs.generate(gpu_info_from_config(device, 1)).empty());
+  ASSERT_FALSE(sysfs.generate(gpu_info_from_config(device.value(), 1)).empty());
   const std::string base = sysfs.drm_path() + "/card0/device/ip_discovery/die/0/";
   EXPECT_EQ(read_sysfs_file(base + "11/0/revision"), "7\n");
   EXPECT_FALSE(std::filesystem::exists(base + "42"));
@@ -187,26 +199,43 @@ TEST(SysfsTopologyTest, OmittedIpVersionsDoNotInventDiscoveryBlocks) {
 }
 
 TEST(SysfsTopologyTest, RejectsInvalidIpVersionsInVmAndGuestConfigs) {
-  for (const std::string entries :
-       {R"({"hardware_id":0,"major":11})", R"({"hardware_id":11,"major":0})",
-        R"({"hardware_id":11,"major":256})", R"({"hardware_id":11,"major":11,"revision":256})",
-        R"({"hardware_id":11,"major":11},{"hardware_id":11,"major":12})"}) {
-    SCOPED_TRACE(entries);
+  struct InvalidVersions {
+    const char *entries;
+    const char *error;
+  };
+  const InvalidVersions cases[] = {
+      {R"({"hardware_id":0,"major":11})", ".ip_versions requires nonzero hardware_id and major"},
+      {R"({"hardware_id":11,"major":0})", ".ip_versions requires nonzero hardware_id and major"},
+      {R"({"hardware_id":11,"major":256})", nullptr},
+      {R"({"hardware_id":11,"major":11,"revision":256})", nullptr},
+      {R"({"hardware_id":11,"major":11},{"hardware_id":11,"major":12})",
+       ".ip_versions contains a duplicate hardware_id"},
+  };
+  for (const auto &invalid : cases) {
+    SCOPED_TRACE(invalid.entries);
     for (bool guest : {false, true}) {
       SCOPED_TRACE(guest);
+      const std::string json_path = guest ? "dbt_guest.guest_device" : "vm.gpu.device";
       const std::string json =
           (guest ? R"({"dbt_guest":{"guest_device":)" : R"({"vm":{"gpu":{"device":)") +
-          std::string(R"({"num_sdma_engines":0,"ip_versions":[)") + entries +
+          std::string(R"({"num_sdma_engines":0,"ip_versions":[)") + invalid.entries +
           (guest ? "]}}}" : "]}}}}");
-      EXPECT_THROW(config::with_parsed_simulation_config_json(
-                       json, kEmbeddedSchema,
-                       [guest](const fb::SimulationConfig *parsed) {
-                         const auto *device = guest ? parsed->dbt_guest()->guest_device()
-                                                    : parsed->vm()->gpu()->device();
-                         (void)config::kfd_device_from_fb(device, guest ? "dbt_guest.guest_device"
-                                                                        : "vm.gpu.device");
-                       }),
-                   std::runtime_error);
+      util::StringDiagnostic diagnostic;
+      auto result = config::with_parsed_simulation_config_json(
+          json, kEmbeddedSchema, diagnostic.emitter(),
+          [guest, &json_path, &diagnostic](const fb::SimulationConfig *parsed) {
+            const auto *device =
+                guest ? parsed->dbt_guest()->guest_device() : parsed->vm()->gpu()->device();
+            return config::kfd_device_from_fb(device, json_path, diagnostic.emitter());
+          });
+      EXPECT_TRUE(result.failed());
+      if (invalid.error) {
+        EXPECT_EQ(diagnostic.message(), json_path + invalid.error);
+      } else {
+        // Byte-valued version fields are rejected by FlatBuffers before conversion.
+        EXPECT_TRUE(diagnostic.message().starts_with("Failed to parse JSON config: "))
+            << diagnostic.message();
+      }
     }
   }
 }
@@ -387,8 +416,11 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
-  auto loaded = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
-                                    rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
+                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+  auto loaded = std::move(loaded_result).value();
   ASSERT_TRUE(loaded.device.present);
   ASSERT_EQ(loaded.device.revision_id, 1u);
 
@@ -454,7 +486,11 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
   for (const char *cfg : kMi300xConfigs) {
     SCOPED_TRACE(cfg);
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
+                                             loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     ASSERT_TRUE(loaded.device.present);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
     ASSERT_EQ(num_xcc, 8u);
@@ -503,7 +539,11 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
+                                             loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     ASSERT_TRUE(loaded.device.present);
     ASSERT_NE(loaded.soc(), nullptr);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
@@ -550,7 +590,11 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 // must not be treated as exact rocminfo parity.
 TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
   const std::string config_dir = CONFIG_DIR;
-  auto loaded = config::load_config(config_dir + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = config::load_config(config_dir + "/gfx1250_mi455x.json",
+                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+  auto loaded = std::move(loaded_result).value();
   ASSERT_TRUE(loaded.device.present);
   ASSERT_NE(loaded.soc(), nullptr);
 
@@ -608,7 +652,11 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
       continue;
     SCOPED_TRACE(name);
 
-    auto loaded = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
+                                             loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     if (!loaded.device.present || loaded.soc() == nullptr)
       continue;
     ++checked;
@@ -700,7 +748,11 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   for (const char *cfg : kConfigs) {
     SCOPED_TRACE(cfg);
 
-    auto loaded = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic loaded_diagnostic;
+    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
+                                             loaded_diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+    auto loaded = std::move(loaded_result).value();
     ASSERT_TRUE(loaded.device.present);
 
     const DebugCapExpectation *e = find_expectation(loaded.device.gfx_target_version);

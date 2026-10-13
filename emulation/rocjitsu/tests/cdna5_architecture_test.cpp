@@ -7,6 +7,9 @@
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "util/data_types.h"
+#include "util/diagnostic.h"
+
+#include <gtest/gtest-spi.h>
 
 #include <set>
 
@@ -14,6 +17,15 @@ namespace {
 
 using namespace rocjitsu;
 using namespace rocjitsu::test::cdna5;
+
+TEST(Gfx1250FixtureSetupTest, MalformedConfigRecordsFatalFailure) {
+  EXPECT_FATAL_FAILURE(
+      {
+        Gfx1250Sim sim;
+        sim.initialize("{");
+      },
+      "Failed to parse JSON config:");
+}
 
 template <typename T> void append_bytes(std::vector<uint8_t> &bytes, const T &value) {
   auto *src = reinterpret_cast<const uint8_t *>(&value);
@@ -223,7 +235,11 @@ std::vector<uint8_t> make_minimal_cdna5_elf(uint32_t elf_machine, std::span<cons
 }
 
 TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
-  auto loaded = config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema,
+                                           loaded_diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
@@ -1116,6 +1132,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleRejectsIllegalScaleSources) {
 
 TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1163,6 +1180,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
 
 TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1222,6 +1240,7 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
 
 TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1281,6 +1300,7 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
 
 TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBlock) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1314,6 +1334,7 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
 
 TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1343,6 +1364,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
 
 TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
@@ -1411,6 +1433,7 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
 
 TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBlockScales) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);

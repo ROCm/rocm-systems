@@ -7,6 +7,7 @@
 #include "aql_queue.h"
 #include "scaling_thread_counts.h"
 #include "test_paths.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -72,7 +73,14 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   if (!co)
     return -1;
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result =
+      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    std::cerr << loaded_diagnostic.message() << '\n';
+    return -1;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;

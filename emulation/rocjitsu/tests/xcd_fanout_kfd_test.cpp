@@ -23,6 +23,7 @@
 /// needs a daemon-mode regression, not this fixture.
 
 #include "test_paths.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -90,7 +91,12 @@ struct KfdFanoutFixture {
   SimulatedKfd *driver = nullptr;
   std::thread sim_thread;
 
-  KfdFanoutFixture() : loaded(config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema)) {
+  void initialize() {
+    util::StringDiagnostic diagnostic;
+    auto loaded_result =
+        config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
+    loaded = std::move(loaded_result).value();
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
     soc = loaded.soc();
@@ -225,6 +231,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   ASSERT_NE(co, nullptr);
 
   KfdFanoutFixture fx;
+  ASSERT_NO_FATAL_FAILURE(fx.initialize());
   ASSERT_NE(fx.soc, nullptr);
   ASSERT_EQ(fx.soc->num_xcds(), kTotalXcds);
   fx.driver->setup_topology(fx.loaded.device, kTotalXcds);

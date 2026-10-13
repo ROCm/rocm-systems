@@ -10,6 +10,8 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/virtual_machine.h"
+#include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -73,9 +75,14 @@ struct TestVM {
   }
 };
 
-TestVM create_test_vm() {
+util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
+                                       const std::string &config_path = CONFIG_PATH) {
   TestVM t;
-  t.loaded = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
+  auto loaded_result =
+      rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema, emit_error);
+  if (loaded_result.failed())
+    return util::Result::failure();
+  t.loaded = std::move(loaded_result).value();
   auto *soc = t.loaded.soc();
 
   // These tests drive the engine directly and inspect single-partition state, so
@@ -105,13 +112,28 @@ protected:
   void SetUp() override { setenv("RJ_CONFIG", CONFIG_PATH.c_str(), 1); }
 };
 
+TEST_F(SimulatedKfdTest, MissingConfigReturnsFailureWithoutThrowing) {
+  const rocjitsu::test::ScopedTempDirectory directory("rocjitsu-test-vm-missing-config-");
+  const std::string path = directory.path() + "/missing.json";
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter(), path);
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot open file: " + path);
+}
+
 TEST_F(SimulatedKfdTest, CreateDefault) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
 }
 
 TEST_F(SimulatedKfdTest, OpenAndClose) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
 
   int fd = t.driver()->open();
@@ -122,7 +144,10 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 }
 
 TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecycles) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -198,7 +223,10 @@ TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecy
 }
 
 TEST_F(SimulatedKfdTest, AdditionalDoorbellMmapKeepsEarlierClientViewLive) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -250,7 +278,10 @@ TEST_F(SimulatedKfdTest, AdditionalDoorbellMmapKeepsEarlierClientViewLive) {
 /// without passing through it, so they have to take it themselves. Standing in
 /// for an in-flight atomic by holding the lock shared here.
 TEST_F(SimulatedKfdTest, FixedAllocationMmapWaitsForInFlightHostAccesses) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -298,7 +329,10 @@ TEST_F(SimulatedKfdTest, FixedAllocationMmapWaitsForInFlightHostAccesses) {
 /// Routed through the driver rather than the interposer, so the interposer's own
 /// lock never sees it.
 TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -344,7 +378,10 @@ TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
 /// @details The interposer hands a MAP_FIXED mmap straight to the driver, so
 /// this replacement never passes through the interposer's lock either.
 TEST_F(SimulatedKfdTest, FixedDoorbellMmapWaitsForInFlightHostAccesses) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -381,7 +418,10 @@ TEST_F(SimulatedKfdTest, FixedDoorbellMmapWaitsForInFlightHostAccesses) {
 }
 
 TEST_F(SimulatedKfdTest, FirstFixedDoorbellMmapKeepsMonitorAliasPrivate) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -414,7 +454,10 @@ TEST_F(SimulatedKfdTest, FirstFixedDoorbellMmapKeepsMonitorAliasPrivate) {
 }
 
 TEST_F(SimulatedKfdTest, FailedMonitorMmapPreservesFixedTarget) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -457,7 +500,10 @@ TEST_F(SimulatedKfdTest, FailedMonitorMmapPreservesFixedTarget) {
 }
 
 TEST_F(SimulatedKfdTest, ClientDoorbellUnmapPreservesMonitorAndRemapContents) {
-  auto fixture = create_test_vm();
+  util::StringDiagnostic fixture_diagnostic;
+  auto fixture_result = create_test_vm(fixture_diagnostic.emitter());
+  ASSERT_TRUE(fixture_result.succeeded()) << fixture_diagnostic.message();
+  auto fixture = std::move(fixture_result.value());
   auto *driver = fixture.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -485,7 +531,10 @@ TEST_F(SimulatedKfdTest, ClientDoorbellUnmapPreservesMonitorAndRemapContents) {
 }
 
 TEST_F(SimulatedKfdTest, ContainingUnmapRetiresEveryClientDoorbellView) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result.value());
   auto *driver = t.driver();
   ASSERT_GE(driver->open(), 0);
   const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
@@ -517,7 +566,10 @@ TEST_F(SimulatedKfdTest, ContainingUnmapRetiresEveryClientDoorbellView) {
 TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentEventPage) {
   for (bool doorbell_first : {false, true}) {
     SCOPED_TRACE(doorbell_first);
-    auto t = create_test_vm();
+    util::StringDiagnostic t_diagnostic;
+    auto t_result = create_test_vm(t_diagnostic.emitter());
+    ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+    auto t = std::move(t_result.value());
     auto *driver = t.driver();
     ASSERT_GE(driver->open(), 0);
     const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
@@ -566,7 +618,10 @@ TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentEventPage) {
 TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentAllocation) {
   for (bool userptr : {false, true}) {
     SCOPED_TRACE(userptr);
-    auto t = create_test_vm();
+    util::StringDiagnostic t_diagnostic;
+    auto t_result = create_test_vm(t_diagnostic.emitter());
+    ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+    auto t = std::move(t_result.value());
     auto *driver = t.driver();
     ASSERT_GE(driver->open(), 0);
     const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
@@ -623,7 +678,10 @@ TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentAllocation) {
 }
 
 TEST_F(SimulatedKfdTest, DoorbellMonitorRejectsOverlappingMunmapWhileQueueIsLive) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -681,7 +739,10 @@ TEST_F(SimulatedKfdTest, DoorbellMonitorRejectsOverlappingMunmapWhileQueueIsLive
 }
 
 TEST_F(SimulatedKfdTest, FixedAnonymousMmapRetiresOnlyReplacedDoorbellView) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -734,7 +795,10 @@ TEST_F(SimulatedKfdTest, FixedAnonymousMmapRetiresOnlyReplacedDoorbellView) {
 }
 
 TEST_F(SimulatedKfdTest, PartialFixedMmapKeepsMultiPageDoorbellView) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -817,7 +881,10 @@ TEST_F(SimulatedKfdTest, GuestFixedMmapRetiresSimulatedDoorbellView) {
 }
 
 TEST_F(SimulatedKfdTest, ProcessAddressedDoorbellMmapPublishesCanonicalMemfd) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   const uint32_t process_id = driver->open_process();
@@ -838,7 +905,10 @@ TEST_F(SimulatedKfdTest, ProcessAddressedDoorbellMmapPublishesCanonicalMemfd) {
 }
 
 TEST_F(SimulatedKfdTest, FailedDaemonSdmaPointerInitializationRecyclesDoorbell) {
-  auto test_vm = create_test_vm();
+  util::StringDiagnostic test_vm_diagnostic;
+  auto test_vm_result = create_test_vm(test_vm_diagnostic.emitter());
+  ASSERT_TRUE(test_vm_result.succeeded()) << test_vm_diagnostic.message();
+  auto test_vm = std::move(test_vm_result).value();
   rocjitsu::SimulatedKfd daemon(*test_vm.soc(), /*daemon_mode=*/true);
   const uint32_t process_id = daemon.open_process();
   ASSERT_NE(process_id, 0u);
@@ -889,7 +959,10 @@ TEST_F(SimulatedKfdTest, FailedDaemonSdmaPointerInitializationRecyclesDoorbell) 
 }
 
 TEST_F(SimulatedKfdTest, UnknownDoorbellGpuDoesNotUseCanonicalBacking) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -917,7 +990,10 @@ TEST_F(SimulatedKfdTest, UnknownDoorbellGpuDoesNotUseCanonicalBacking) {
 }
 
 TEST_F(SimulatedKfdTest, FixedDoorbellMmapCannotReplaceMonitorAlias) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   auto *driver = t.driver();
   ASSERT_NE(driver, nullptr);
   ASSERT_GE(driver->open(), 0);
@@ -1285,7 +1361,10 @@ TEST_F(SimulatedKfdTest, ReopenDuringADeferredCloseCancelsTheDeferral) {
 }
 
 TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
 
   const auto &path = t.driver()->topology().path();
@@ -1308,7 +1387,10 @@ TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
 // dereferences the address -- corrupting the host -- or swallows it, and the
 // failure resurfaces somewhere unrelated with nothing tying it to its cause.
 TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
   auto *soc = t.soc();
@@ -1422,7 +1504,10 @@ TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
 // KFD ABI reports it in a different field than a missing page. The runtime
 // reads the two separately, so collapsing them misstates the cause.
 TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
   auto *soc = t.soc();
@@ -1478,7 +1563,10 @@ TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
 // violation would send the runtime looking for a permission problem on memory
 // that is not mapped at all.
 TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
   auto *soc = t.soc();
@@ -1537,7 +1625,10 @@ TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
 // The reporting path must stay quiet for addresses that do resolve, or every
 // local-mode workload would raise faults for its ordinary pageable pointers.
 TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
   auto *soc = t.soc();
@@ -1587,7 +1678,10 @@ TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
 }
 
 TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
 
@@ -1645,7 +1739,10 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownLeavesSignaledEventPageIntact) {
 // sentinel. The wake must therefore leave the page alone even in this state. There is
 // no rollback any more, but the property is what makes that safe, so pin it.
 TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
   ASSERT_GE(drv->open(), 0);
@@ -1714,7 +1811,10 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
 // come back as a benign timeout (rc 0) rather than -EBADF, which is not a legal
 // answer for a driver that is still serving.
 TEST_F(SimulatedKfdTest, BeginLocalShutdownReleasesIndefiniteWaitAsTimeout) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
 
@@ -1771,7 +1871,10 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownReleasesIndefiniteWaitAsTimeout) {
 // dismantled process. This drives that race in-process, many times, under TSan/
 // ASan in the sanitizer CI job.
 TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
-  auto t = create_test_vm();
+  util::StringDiagnostic t_diagnostic;
+  auto t_result = create_test_vm(t_diagnostic.emitter());
+  ASSERT_TRUE(t_result.succeeded()) << t_diagnostic.message();
+  auto t = std::move(t_result).value();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
 
