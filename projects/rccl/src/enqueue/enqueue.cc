@@ -3070,6 +3070,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   }
   // Honor Tuner config if available
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
+    rcclUpdateCollectiveAlgorithm(comm, nBytes, info, table);
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
@@ -3122,6 +3123,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
     }
     INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
+    rcclUpdateCollectiveChannels(comm, nBytes, info, nc);
   }
 
 #ifdef ENABLE_ROCSHMEM
@@ -4765,8 +4767,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                    opDev));
 
       } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
-                 rcclParamForceCe() && CeScratchAvailable && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+                 rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+                 comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
                                    comm->ddaPeerPtrsHost, opDev));
