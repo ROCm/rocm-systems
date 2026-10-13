@@ -322,6 +322,25 @@ test_categories:
       - "RCCL_IB_QP_DEPTH_MULTIPLIER=96"
       - "NCCL_IB_QPS_PER_CONNECTION=1"
       - "QPSHARE_TEST_NCONNS=2"
+  quick_env_bootstrap_tls_unidir:
+    description: "Communicator lifecycle over TLS-encrypted bootstrap/proxy sockets with the unidirectional bootstrap ring AllGather. Skips on builds without TLS_BACKEND=OPENSSL3, except the no-TLS-support check."
+    test_patterns: &bootstrap_tls_patterns
+      - "BootstrapTlsMPITest.*"
+      - "BootstrapStrayPeerMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=WARN"
+      - "NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0"
+  quick_env_bootstrap_tls_bidir:
+    description: "Same as quick_env_bootstrap_tls_unidir with the bidirectional bootstrap ring AllGather forced on for every payload size."
+    test_patterns: *bootstrap_tls_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=WARN"
+      - "NCCL_BOOTSTRAP_BIDIR_ALLGATHER=1"
+      - "NCCL_BOOTSTRAP_BIDIR_THRESHOLD=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -749,6 +768,8 @@ execution_settings:
     quick_env_qpshare_ngroups2: 1200
     quick_env_qpshare_ngroups16: 1200
     quick_env_qpshare_depth_ceiling: 1200
+    quick_env_bootstrap_tls_unidir: 1200
+    quick_env_bootstrap_tls_bidir: 1200
     standard: 1200
     standard_env_gdr_flush_flag: 1200
     standard_env_gdr_flush_flag_4qps: 1200
