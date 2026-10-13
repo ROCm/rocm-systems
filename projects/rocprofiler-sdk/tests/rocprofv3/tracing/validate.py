@@ -409,8 +409,7 @@ def test_perfetto_data(pftrace_data, json_data):
     memory_copies = pftrace_data.loc[pftrace_data["category"] == "memory_copy"]
     invalid_copies = memory_copies.loc[memory_copies["dur"].astype(int) <= 0]
     assert invalid_copies.empty, (
-        "Expected positive duration for every memory-copy slice:\n"
-        f"{invalid_copies}"
+        "Expected positive duration for every memory-copy slice:\n" f"{invalid_copies}"
     )
 
 
