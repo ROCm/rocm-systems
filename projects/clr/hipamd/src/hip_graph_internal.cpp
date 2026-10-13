@@ -414,43 +414,56 @@ void GraphExecSegmented::BuildSyncPlan() {
   sync_plan_.seg_to_child_entry_hw_event.assign(segments_.size(), -1);
   sync_plan_.num_hw_events = 0;
   sync_plan_.num_unordered_segments = 0;
+  entry_hw_slot_ = -1;
 
   auto* device = g_devices[captureDeviceId_]->devices()[0];
 
-  // PASS 1: Assign a compact HW-event slot only to segments whose completion
-  // signal is consumed — cross-device/stream successor, or leaf when
-  // leaf-sync is required. Same-stream successors are ordered by the
-  // in-order queue and need no signal.
-  // needs_completion_signal is pre-computed by PrecomputeStreamAssignment()
-  // using the same criteria, so we reuse it directly.
+  // PASS 1: Assign a compact HW-event slot to each signal this graph uses at launch.
+  //  - seg_to_hw_event: completion signal of a segment with a successor on another
+  //    stream or device, or of a leaf when leaf sync is required
+  //    (needs_completion_signal, set by ComputeCompletionSignalFlags()). Same-stream
+  //    successors rely on in-order queue execution. For a child-graph segment this
+  //    is the whole-child completion signal, completed by its trailing batch.
+  //  - seg_to_child_entry_hw_event: for a child-graph segment whose child has a
+  //    root off this segment's stream. This segment's leading batch completes it to
+  //    release those roots. The child's BuildSyncPlan has already run.
+  //  - entry_hw_slot_: when this graph is itself a child with a root off the parent
+  //    child-node stream. Bound at launch to the parent's signal described above.
   for (size_t i = 0; i < segments_.size(); ++i) {
     if (segments_[i].needs_completion_signal) {
       sync_plan_.seg_to_hw_event[i] = sync_plan_.num_hw_events++;
     }
-    if (segments_[i].needs_child_entry_signal) {
-      sync_plan_.seg_to_child_entry_hw_event[i] = sync_plan_.num_hw_events++;
+    if (segments_[i].child_graph_ptr != nullptr) {
+      auto* child = static_cast<GraphExecSegmented*>(segments_[i].child_graph_ptr);
+      if (child->entry_hw_slot_ >= 0) {
+        sync_plan_.seg_to_child_entry_hw_event[i] = sync_plan_.num_hw_events++;
+      }
+    }
+  }
+  for (const auto& segment : segments_) {
+    if (inherited_exec_stream_id_ >= 0 && segment.dependency_level == 0 &&
+        segment.stream_id != inherited_exec_stream_id_) {
+      entry_hw_slot_ = sync_plan_.num_hw_events++;
+      break;
     }
   }
 
   // PASS 2: Eliminate redundant cross-stream dependency barriers.
   //
-  // Segments dispatch level-by-level and, within a level, round-robin across the
-  // stream pool (see PrecomputeStreamAssignment / EnqueueSegmentedGraph), so
-  // multiple segments can land on the same (device, stream). Because each stream
-  // is an in-order HW queue, once an earlier-dispatched segment on a stream has
-  // waited (via a barrier) for a producer's completion signal, every later
-  // segment on that same stream is already ordered after that producer finishes
-  // and must NOT re-wait for it. e.g. two level-1 segments that share the same
-  // level-0 dependencies and land on the same stream: only the first needs the
-  // dep barrier; the second inherits the ordering for free.
+  // EnqueueSegmentedGraph dispatches segments level by level, and stream
+  // assignment can place several segments on the same (device, stream). Because
+  // each stream is an in-order HW queue, once an earlier-dispatched segment on a
+  // stream has waited (via a barrier) for a producer's completion signal, every
+  // later segment on that same stream is already ordered after that producer
+  // finishes and must NOT re-wait for it. e.g. two level-1 segments that share the
+  // same level-0 dependencies and land on the same stream: only the first needs
+  // the dep barrier; the second inherits the ordering for free.
   //
   // effective_barrier_deps[seg.id] holds the minimal set of cross-stream
-  // producers each segment must still wait on. Default to the full cross-stream
-  // set (safe for any segment not reached by the dispatch-order walk below),
-  // then reduce. NOTE: a segment's id equals its position in segments_ (ids are
-  // assigned sequentially at creation and pushed in order). The whole sync plan
-  // relies on this (e.g. segments_[dep_id]), so assert it once and index
-  // effective_barrier_deps by segment.id consistently below.
+  // producers each segment must still wait on. Every segment appears in
+  // segments_per_level_, so the dispatch-order walk below fills every entry.
+  // A segment's id equals its position in segments_ (ids are assigned in creation
+  // order); the whole sync plan relies on this (e.g. segments_[dep_id]).
   std::vector<std::vector<int>> effective_barrier_deps(segments_.size());
 
   // An ext kernel dispatch can carry one dependency in its own dep_signal, so a segment whose
@@ -477,7 +490,9 @@ void GraphExecSegmented::BuildSyncPlan() {
   // needs no wait packet: no remaining dependency, or one carried in its first kernel's
   // dep_signal. Restricted to graphs whose nodes are all AQL-captured: SDMA and other
   // individually executed commands wait on the compute queue's latest signal, which assumes the
-  // last packet on a stream completes after everything queued ahead of it.
+  // last packet on a stream completes after everything queued ahead of it. Child graphs are
+  // excluded too: they dispatch on the parent's streams, where the parent can queue such
+  // commands right after the child's packets.
   std::vector<bool> follows_level_peer(segments_.size(), false);
   const bool all_nodes_captured =
       std::none_of(segmentBatches_.begin(), segmentBatches_.end(),
@@ -524,7 +539,7 @@ void GraphExecSegmented::BuildSyncPlan() {
         // Without its barrier bit the segment may start before same-level peers' waits on
         // this stream complete, so only waits from earlier levels still cover it: the level's
         // first segment on the stream keeps its barrier bit and starts after those complete.
-        if (all_nodes_captured && !first_at_level) {
+        if (all_nodes_captured && inherited_exec_stream_id_ < 0 && !first_at_level) {
           std::vector<int> uncovered_deps;
           for (int dep_id : cross_stream_deps) {
             const bool waited_at_earlier_level =
@@ -569,9 +584,21 @@ void GraphExecSegmented::BuildSyncPlan() {
   // PASS 3: Materialize barrier packets and patch entries using the compact
   // hw_event slot indices computed in PASS 1.
   for (const auto& segment : segments_) {
-    // Minimal cross-stream/device dependency set computed in PASS 2 (redundant
-    // same-stream barriers already removed).
-    const std::vector<int>& barrier_dep_indices = effective_barrier_deps[segment.id];
+    // HW-event slots this segment waits on: the minimal cross-stream/device
+    // producers from PASS 2 (redundant same-stream waits already removed).
+    std::vector<int> wait_slots;
+    for (int dep_id : effective_barrier_deps[segment.id]) {
+      wait_slots.push_back(sync_plan_.seg_to_hw_event[dep_id]);
+    }
+    // Child graph root off the parent child-node stream: wait on the parent's
+    // entry signal, bound to entry_hw_slot_ at launch. Roots on that stream are
+    // ordered after the parent's leading batch by the in-order queue. Level-0
+    // segments have no in-graph dependencies, so this is the root's only wait.
+    const bool entry_wait = inherited_exec_stream_id_ >= 0 && segment.dependency_level == 0 &&
+                            segment.stream_id != inherited_exec_stream_id_;
+    if (entry_wait) {
+      wait_slots.push_back(entry_hw_slot_);
+    }
 
     auto segBatchIt = segmentBatches_.find(segment.id);
     if (segBatchIt == segmentBatches_.end()) {
@@ -591,14 +618,14 @@ void GraphExecSegmented::BuildSyncPlan() {
     // is handled by the cheapest form the device offers: embedded in the first
     // captured packet's dep_signal when that packet is an ext kernel dispatch,
     // else a barrier-value packet, else a barrier-AND.
-    if (!barrier_dep_indices.empty()) {
-      int num_deps = static_cast<int>(barrier_dep_indices.size());
+    if (!wait_slots.empty()) {
+      int num_deps = static_cast<int>(wait_slots.size());
       const bool use_ext_dep = num_deps == 1 && starts_with_ext_dispatch(firstBatch);
 
       if (use_ext_dep) {
         uint8_t* first_dispatch = firstBatch.dispatchPackets[0];
         // hw_event_index uses the compact slot; dep producer always has one (PASS 1).
-        const int dep_hw_slot = sync_plan_.seg_to_hw_event[barrier_dep_indices[0]];
+        const int dep_hw_slot = wait_slots[0];
         sync_plan_.patch_list.push_back(
             {first_dispatch, nullptr, dep_hw_slot,
              amd::Device::HwEventPatch::kExtDispatchDepSignal});
@@ -621,9 +648,7 @@ void GraphExecSegmented::BuildSyncPlan() {
 
           for (int d = start_dep; d < end_dep; ++d) {
             sync_plan_.patch_list.push_back(
-                {barrier_pkt, nullptr,
-                 sync_plan_.seg_to_hw_event[barrier_dep_indices[d]],
-                 d - start_dep});
+                {barrier_pkt, nullptr, wait_slots[d], d - start_dep});
           }
 
           firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
@@ -648,8 +673,11 @@ void GraphExecSegmented::BuildSyncPlan() {
       ++sync_plan_.num_unordered_segments;
     }
 
-    // Child-graph segment: completion on the leading batch gates parallel child roots.
-    if (segment.child_graph_ptr != nullptr && segment.needs_child_entry_signal) {
+    // Child-graph segment: the leading batch completes the child entry
+    // signal so off-stream child roots can start. The whole-child completion
+    // signal is completed by the trailing batch below, after the child's
+    // accumulate has joined its off-stream leaves.
+    if (segment.child_graph_ptr != nullptr) {
       const int entry_hw_slot = sync_plan_.seg_to_child_entry_hw_event[segment.id];
       if (entry_hw_slot >= 0) {
         if (firstBatch.dispatchPackets.empty()) {
@@ -720,114 +748,11 @@ void GraphExecSegmented::BuildSyncPlan() {
     signalManager_->Prepopulate(device, sync_plan_.num_hw_events, kPrecreatedSets);
   }
 
-  // PASS 4: Parallel child roots on streams other than the parent child-node stream
-  // wait on the parent's leading-batch entry signal (patched at recursive launch).
-  parent_boundary_patches_.clear();
-  parent_boundary_segment_ids_.clear();
-  for (auto& segment : segments_) {
-    segment.parent_entry_hw_event_index = -1;
-  }
-  if (inherited_exec_stream_id_ >= 0) {
-    auto level0_it = segments_per_level_.find(0);
-    if (level0_it != segments_per_level_.end()) {
-      for (int seg_id : level0_it->second) {
-        const auto& root_seg = segments_[seg_id];
-        if (root_seg.stream_id == inherited_exec_stream_id_) {
-          continue;
-        }
-        auto segBatchIt = segmentBatches_.find(seg_id);
-        if (segBatchIt == segmentBatches_.end()) {
-          continue;
-        }
-        auto& segBatch = segBatchIt->second;
-        if (segBatch.packet_batches.empty()) {
-          segBatch.packet_batches.emplace_back();
-        }
-        auto& firstBatch = segBatch.packet_batches[0];
-        uint8_t* barrier_pkt = device->CreateBarrierPacket();
-        sync_plan_.barrier_packets.push_back(barrier_pkt);
-        parent_boundary_patches_.push_back({barrier_pkt, nullptr, 0, 0});
-        parent_boundary_segment_ids_.push_back(seg_id);
-        firstBatch.dispatchPackets.insert(firstBatch.dispatchPackets.begin(), barrier_pkt);
-        firstBatch.dispatchKernelNames.insert(firstBatch.dispatchKernelNames.begin(),
-                                              kBarrierKernelNamePtr);
-        firstBatch.dispatchMetadataPackets.insert(firstBatch.dispatchMetadataPackets.begin(),
-                                                  nullptr);
-        for (auto& nodeRange : firstBatch.nodeRanges) {
-          nodeRange.startIndex += 1;
-        }
-      }
-    }
-  }
-
-  // Child root AQL waits reference parent entry slots assigned above.
-  FinalizeChildParentBoundaries();
-
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
           "[hipGraph] BuildSyncPlan: %d segments, %zu barrier packets, %d completion signals, "
           "%d segments overlap a same-level peer",
           sync_plan_.num_segments, sync_plan_.barrier_packets.size(), sync_plan_.num_hw_events,
           sync_plan_.num_unordered_segments);
-}
-
-// ================================================================================================
-bool GraphExecSegmented::HasOffStreamRoots(int exec_stream_id) const {
-  auto level_it = segments_per_level_.find(0);
-  if (level_it == segments_per_level_.end()) {
-    return false;
-  }
-  for (int seg_id : level_it->second) {
-    if (segments_[seg_id].stream_id != exec_stream_id) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// ================================================================================================
-void GraphExecSegmented::FinalizeChildParentBoundaries() {
-  for (const auto& segment : segments_) {
-    if (segment.child_graph_ptr == nullptr || !segment.needs_child_entry_signal) {
-      continue;
-    }
-    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-    const int parent_entry_slot = sync_plan_.seg_to_child_entry_hw_event[segment.id];
-    if (parent_entry_slot < 0) {
-      continue;
-    }
-    for (size_t i = 0; i < child->parent_boundary_patches_.size(); ++i) {
-      child->parent_boundary_patches_[i].hw_event_index = parent_entry_slot;
-      const int child_segment_id = child->parent_boundary_segment_ids_[i];
-      child->segments_[child_segment_id].parent_entry_hw_event_index = parent_entry_slot;
-    }
-  }
-
-  for (const auto& segment : segments_) {
-    if (segment.child_graph_ptr != nullptr) {
-      auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-      child->FinalizeChildParentBoundaries();
-    }
-  }
-}
-
-// ================================================================================================
-void GraphExecSegmented::AssignNestedChildStreamPlans() {
-  for (auto& segment : segments_) {
-    if (segment.child_graph_ptr == nullptr) {
-      continue;
-    }
-
-    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-    child->max_streams_dev_ = max_streams_dev_;
-    child->inherited_exec_stream_id_ = segment.stream_id;
-    if (DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING == 2) {
-      child->DFSStreamAssignment();
-    } else {
-      child->RoundRobinStreamAssignment();
-    }
-    segment.needs_child_entry_signal = child->HasOffStreamRoots(segment.stream_id);
-    child->AssignNestedChildStreamPlans();
-  }
 }
 
 // ================================================================================================
@@ -1537,6 +1462,16 @@ void GraphExecSegmented::RoundRobinStreamAssignment() {
   }
 
   ComputeCompletionSignalFlags();
+
+  for (auto& segment : segments_) {
+    if (segment.child_graph_ptr == nullptr) {
+      continue;
+    }
+    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+    child->max_streams_dev_ = max_streams_dev_;
+    child->inherited_exec_stream_id_ = segment.stream_id;
+    child->RoundRobinStreamAssignment();
+  }
 }
 
 // ================================================================================================
@@ -1638,6 +1573,16 @@ void GraphExecSegmented::DFSStreamAssignment() {
   }
 
   ComputeCompletionSignalFlags();
+
+  for (auto& segment : segments_) {
+    if (segment.child_graph_ptr == nullptr) {
+      continue;
+    }
+    auto* child = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+    child->max_streams_dev_ = max_streams_dev_;
+    child->inherited_exec_stream_id_ = segment.stream_id;
+    child->DFSStreamAssignment();
+  }
 }
 
 // ================================================================================================
@@ -1653,8 +1598,6 @@ void GraphExecSegmented::SelectStreamAssignment() {
             "[hipGraph] SelectStreamAssignment: round-robin (%zu segs)", segments_.size());
     RoundRobinStreamAssignment();
   }
-
-  AssignNestedChildStreamPlans();
 }
 
 // Carries the per-launch state needed by the completion callback: the graph
@@ -1930,69 +1873,13 @@ void GraphExecSegmented::PacketBatch::setEnabled(GraphNode* node, bool enabled) 
 }
 
 // ================================================================================================
-void GraphExecSegmented::PacketBatch::retargetPatchesToFilteredBuffer(
-    std::vector<amd::Device::HwEventPatch>& patches,
-    const std::unordered_map<const void*, size_t>& packet_to_filtered_index,
-    const std::unordered_map<const void*, size_t>& disabled_batch_packets) {
-  for (auto& patch : patches) {
-    auto it = packet_to_filtered_index.find(patch.packet);
-    if (it != packet_to_filtered_index.end()) {
-      patch.flat_packet = filteredFlatPacketData.data() + it->second * kAqlPktSize;
-      continue;
-    }
-
-    // Reserved dependency barrier not spliced in: patch its standalone copy, which is never
-    // dispatched, rather than a stale slot of an earlier filtered buffer.
-    if (patch.packet == fallbackDepBarrier) {
-      patch.flat_packet = nullptr;
-      continue;
-    }
-
-    // The patch's owning packet is not in the filtered buffer. Only touch patches
-    // this batch owns whose packet was disabled; patches for other batches are
-    // resolved when those batches rebuild.
-    auto disabled_it = disabled_batch_packets.find(patch.packet);
-    if (disabled_it == disabled_batch_packets.end()) {
-      continue;
-    }
-
-    // Only completion signals are relocatable here. Any other patch on a disabled packet
-    // (its dependency is covered by fallbackDepBarrier) goes to the unfiltered copy, which is
-    // not dispatched while nodes are disabled; a pointer left in an earlier filtered buffer
-    // could now land on a different packet. Parent-boundary waits are standalone barrier
-    // packets and are never filtered as part of a node range.
-    if (patch.dep_slot != amd::Device::HwEventPatch::kCompletionSignal) {
-      patch.flat_packet = flatPacketData.data() + disabled_it->second * kAqlPktSize;
-      continue;
-    }
-
-    if (!enabledPackets.empty()) {
-      // Relocate the signal to the last still-enabled packet of this batch.
-      const size_t last_idx = enabledPackets.size() - 1;
-      patch.flat_packet = filteredFlatPacketData.data() + last_idx * kAqlPktSize;
-    } else if (fallbackBarrier != nullptr) {
-      // Every node packet in this batch is disabled: no packet remains to host
-      // the signal. Splice the reserved standalone barrier into the *filtered*
-      // buffer only — dispatchPackets/flatPacketData stay untouched.
-      const size_t fallback_idx = enabledPackets.size();
-      enabledPackets.push_back(fallbackBarrier);
-      enabledKernelNames.push_back(nullptr);
-      appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
-                               filteredValidPacketFullHeaders, filteredFlatMetadataData);
-      patch.flat_packet = filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
-    }
-  }
-}
-
-// ================================================================================================
 // Rebuild cached filtered lists of enabled packets.
 // Barrier packets (prepended/appended by BuildSyncPlan) live in dispatchPackets
 // but are not tracked in nodeRanges.  A linear scan with a per-index enabled
 // bitmap preserves them while filtering out disabled node packets.
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
-    std::vector<amd::Device::HwEventPatch>& patch_list,
-    std::vector<amd::Device::HwEventPatch>& parent_boundary_patches) {
+    std::vector<amd::Device::HwEventPatch>& patch_list) {
   if (filteredCacheValid) {
     return;
   }
@@ -2065,11 +1952,56 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
     clearFirstBarrierBit(filteredValidPacketFullHeaders);
   }
 
-  retargetPatchesToFilteredBuffer(patch_list, packetToFilteredIndex, disabledBatchPackets);
-  // Child graphs with off-stream roots keep their parent-entry wait patches in a
-  // separate list; retarget those waits too when this filtered buffer is used.
-  retargetPatchesToFilteredBuffer(parent_boundary_patches, packetToFilteredIndex,
-                                  disabledBatchPackets);
+  // Re-point flat_packet pointers in patch_list into filteredFlatPacketData.
+  for (auto& patch : patch_list) {
+    auto it = packetToFilteredIndex.find(patch.packet);
+    if (it != packetToFilteredIndex.end()) {
+      patch.flat_packet =
+          filteredFlatPacketData.data() + it->second * kAqlPktSize;
+      continue;
+    }
+
+    // Reserved dependency barrier not spliced in: patch its standalone copy, which is never
+    // dispatched, rather than a stale slot of an earlier filtered buffer.
+    if (patch.packet == fallbackDepBarrier) {
+      patch.flat_packet = nullptr;
+      continue;
+    }
+
+    // The patch's owning packet is not in the filtered buffer. Only touch patches
+    // this batch owns whose packet was disabled; patches for other batches are
+    // resolved when those batches rebuild.
+    auto disabled_it = disabledBatchPackets.find(patch.packet);
+    if (disabled_it == disabledBatchPackets.end()) {
+      continue;
+    }
+
+    // Only completion signals are relocatable here. Any other patch on a disabled packet
+    // (its dependency is covered by fallbackDepBarrier) goes to the unfiltered copy, which is
+    // not dispatched while nodes are disabled; a pointer left in an earlier filtered buffer
+    // could now land on a different packet.
+    if (patch.dep_slot != amd::Device::HwEventPatch::kCompletionSignal) {
+      patch.flat_packet = flatPacketData.data() + disabled_it->second * kAqlPktSize;
+      continue;
+    }
+
+    if (!enabledPackets.empty()) {
+      // Relocate the signal to the last still-enabled packet of this batch.
+      const size_t last_idx = enabledPackets.size() - 1;
+      patch.flat_packet = filteredFlatPacketData.data() + last_idx * kAqlPktSize;
+    } else if (fallbackBarrier != nullptr) {
+      // Every node packet in this batch is disabled: no packet remains to host
+      // the signal. Splice the reserved standalone barrier into the *filtered*
+      // buffer only — dispatchPackets/flatPacketData stay untouched.
+      const size_t fallback_idx = enabledPackets.size();
+      enabledPackets.push_back(fallbackBarrier);
+      enabledKernelNames.push_back(nullptr);
+      appendPacketToFlatBuffer(fallbackBarrier, nullptr, filteredFlatPacketData,
+                               filteredValidPacketFullHeaders, filteredFlatMetadataData);
+      patch.flat_packet =
+          filteredFlatPacketData.data() + fallback_idx * kAqlPktSize;
+    }
+  }
 
   filteredCacheValid = true;
 }
@@ -2080,8 +2012,7 @@ void GraphExecSegmented::PacketBatch::rebuildFilteredLists(
 // ApplyHwEventPatches writes into the buffer the dispatch path will use.
 // ================================================================================================
 void GraphExecSegmented::PacketBatch::restorePatchListPointers(
-    std::vector<amd::Device::HwEventPatch>& patch_list,
-    std::vector<amd::Device::HwEventPatch>& parent_boundary_patches) {
+    std::vector<amd::Device::HwEventPatch>& patch_list) {
   for (auto& patch : patch_list) {
     // The reserved dependency barrier is not in flatPacketData; its filtered slot is stale.
     if (patch.packet == fallbackDepBarrier) {
@@ -2095,20 +2026,10 @@ void GraphExecSegmented::PacketBatch::restorePatchListPointers(
       }
     }
   }
-
-  for (auto& patch : parent_boundary_patches) {
-    for (size_t i = 0; i < dispatchPackets.size(); ++i) {
-      if (patch.packet == dispatchPackets[i]) {
-        patch.flat_packet = flatPacketData.data() + i * kAqlPktSize;
-        break;
-      }
-    }
-  }
 }
 
 // ================================================================================================
 hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSlots) {
-  // Fixme: Only single stream child graph nodes are supported.
   hipError_t status = hipSuccess;
 
   // Clear previous batches
@@ -2123,7 +2044,7 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
       auto& childSegBatch = it->second;
       childSegBatch.node_capture_status.resize(segment.nodes.size(), false);
       childSegBatch.has_uncaptured_nodes = true;
-      childSegBatch.packet_batches.emplace_back();  // leading: dep barriers
+      childSegBatch.packet_batches.emplace_back();  // leading: dep barriers, child entry
       childSegBatch.packet_batches.emplace_back();  // trailing: completion barrier
       continue;
     }
@@ -2291,17 +2212,11 @@ hipError_t GraphExecSegmented::CaptureAndFormPacketsForGraph(bool reuseKernargSl
       patch.flat_packet = it->second;
     }
   }
-  for (auto& patch : parent_boundary_patches_) {
-    auto it = pktToFlat.find(patch.packet);
-    if (it != pktToFlat.end()) {
-      patch.flat_packet = it->second;
-    }
-  }
 
   for (auto& [seg_id, segBatch] : segmentBatches_) {
     for (auto& batch : segBatch.packet_batches) {
       if (batch.disabledNodeCount > 0) {
-        batch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
+        batch.rebuildFilteredLists(sync_plan_.patch_list);
       }
     }
   }
@@ -2535,9 +2450,9 @@ void GraphExecSegmented::EndAQLPacketUpdates() {
 
 void GraphExecSegmented::RebuildAQLPacketBatch(PacketBatch& packetBatch) {
   packetBatch.rebuildFlatBuffer();
-  packetBatch.restorePatchListPointers(sync_plan_.patch_list, parent_boundary_patches_);
+  packetBatch.restorePatchListPointers(sync_plan_.patch_list);
   if (packetBatch.disabledNodeCount > 0) {
-    packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
+    packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
   }
 }
 
@@ -2651,11 +2566,11 @@ hipError_t GraphExecSegmented::UpdatePacketBatchesForNodeEnableDisable(hip::Grap
       if (packetBatch.disabledNodeCount > 0) {
         // Eagerly rebuild filtered lists and re-resolve patch_list flat_packet
         // pointers so the launch path doesn't need to scan all segment batches.
-        packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
+        packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
       } else {
         // All nodes re-enabled: restore flat_packet pointers back to
         // flatPacketData so ApplyHwEventPatches patches the correct buffer.
-        packetBatch.restorePatchListPointers(sync_plan_.patch_list, parent_boundary_patches_);
+        packetBatch.restorePatchListPointers(sync_plan_.patch_list);
       }
       return hipSuccess;
     }
@@ -2721,21 +2636,21 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     return launch_stream;
   };
 
-  // Child roots wait on the immediate parent's entry completion signal.
-  if (parent_hw_events != nullptr && !parent_hw_events->empty() &&
-      !parent_boundary_patches_.empty()) {
-    for (size_t i = 0; i < parent_boundary_patches_.size(); ++i) {
-      parent_boundary_patches_[i].hw_event_index = parent_entry_hw_event_index;
-      segments_[parent_boundary_segment_ids_[i]].parent_entry_hw_event_index =
-          parent_entry_hw_event_index;
-    }
-    device->ApplyHwEventPatches(parent_boundary_patches_, *parent_hw_events);
+  // Child entry barriers are part of the normal patch list. Bind their child-local
+  // slot to the immediate parent's entry event without changing signal ownership:
+  // segment_hw_events remains the child manager's set for cleanup and recycling.
+  std::vector<void*> patch_hw_events;
+  const std::vector<void*>* hw_events_for_patching = &segment_hw_events;
+  if (entry_hw_slot_ >= 0) {
+    patch_hw_events = segment_hw_events;
+    patch_hw_events[entry_hw_slot_] = (*parent_hw_events)[parent_entry_hw_event_index];
+    hw_events_for_patching = &patch_hw_events;
   }
 
   // Apply pre-computed patches -- writes HW events directly into flatPacketData
   // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
   if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
+    device->ApplyHwEventPatches(sync_plan_.patch_list, *hw_events_for_patching);
   }
 
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
@@ -2879,7 +2794,7 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
     } else {
       // Guard against stale filtered buffers: rebuildFlatBuffer (called from
       // UpdateAQLPacket) invalidates the cache. This is a no-op when valid.
-      packetBatch.rebuildFilteredLists(sync_plan_.patch_list, parent_boundary_patches_);
+      packetBatch.rebuildFilteredLists(sync_plan_.patch_list);
       flatData = &packetBatch.filteredFlatPacketData;
       flatHdrs = &packetBatch.filteredValidPacketFullHeaders;
       if (!packetBatch.filteredFlatMetadataData.empty()) {
@@ -2901,40 +2816,39 @@ hipError_t GraphExecSegmented::EnqueueSegment(const Segment& segment, hip::Strea
 
   // Handle child graph segments - recursively enqueue the entire child graph
   if (segment.child_graph_ptr != nullptr) {
-    // Dispatch dependency barriers before child graph execution
+    // Leading batch: parent predecessor waits, and the child entry signal when
+    // this child has off-stream roots. It is submitted before any child packet.
     status = dispatchCurrentBatch();
     if (status != hipSuccess) return status;
 
-    auto childGraphExec = dynamic_cast<GraphExecSegmented*>(segment.child_graph_ptr);
-    if (childGraphExec != nullptr) {
-      // Child graphs share the same kernel arg manager as parent (for packet capture)
-      if (childGraphExec->GetKernelArgManager() == nullptr) {
-        auto kernArgMgr = GetKernelArgManager();
-        if (kernArgMgr != nullptr) {
-          kernArgMgr->retain();
-          childGraphExec->SetKernelArgManager(kernArgMgr);
-        }
+    auto* childGraphExec = static_cast<GraphExecSegmented*>(segment.child_graph_ptr);
+    // Child graphs share the same kernel arg manager as parent (for packet capture)
+    if (childGraphExec->GetKernelArgManager() == nullptr) {
+      auto kernArgMgr = GetKernelArgManager();
+      if (kernArgMgr != nullptr) {
+        kernArgMgr->retain();
+        childGraphExec->SetKernelArgManager(kernArgMgr);
       }
+    }
 
-      // Recursively enqueue the child and collect its borrowed signal set for
-      // recycling by the root launch-completion callback.
-      hipError_t child_status = hipSuccess;
-      const int child_entry_hw_event_index =
-          sync_plan_.seg_to_child_entry_hw_event[segment.id];
-      amd::Command* child_last_cmd = childGraphExec->EnqueueSegmentedGraph(
-          stream, streams, &child_status, signal_sets, parent_segment_hw_events,
-          child_entry_hw_event_index, false);
+    // Recursively enqueue the child and collect its borrowed signal set for
+    // recycling by the root launch-completion callback.
+    hipError_t child_status = hipSuccess;
+    const int child_entry_hw_event_index =
+        sync_plan_.seg_to_child_entry_hw_event[segment.id];
+    amd::Command* child_last_cmd = childGraphExec->EnqueueSegmentedGraph(
+        stream, streams, &child_status, signal_sets, parent_segment_hw_events,
+        child_entry_hw_event_index, false);
 
-      if (child_status != hipSuccess) {
-        ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
-                "[hipGraph] EnqueueSegment: Failed to enqueue child graph, status=%d",
-                child_status);
-        return child_status;
-      }
+    if (child_status != hipSuccess) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "[hipGraph] EnqueueSegment: Failed to enqueue child graph, status=%d",
+              child_status);
+      return child_status;
+    }
 
-      if (child_last_cmd != nullptr) {
-        child_last_cmd->release();
-      }
+    if (child_last_cmd != nullptr) {
+      child_last_cmd->release();
     }
 
     // Dispatch completion barrier after child graph — signals parent's HW event

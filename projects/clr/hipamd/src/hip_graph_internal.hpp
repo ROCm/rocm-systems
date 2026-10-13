@@ -917,9 +917,6 @@ class Graph {
       if (segment.dependency_level != -1) {
         fout << "\\nLevel: " << segment.dependency_level;
       }
-      if (segment.parent_entry_hw_event_index >= 0) {
-        fout << "\\nParent entry event: " << segment.parent_entry_hw_event_index;
-      }
       fout << "\";" << std::endl;
       fout << "style=\"rounded,filled\";" << std::endl;
       fout << "fillcolor=\"lightblue\";" << std::endl;
@@ -1009,8 +1006,8 @@ class Graph {
   bool IsLeafNodeSyncRequired() const {
     // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
     // For all multi-segment graphs we always require leaf sync: a single leaf segment
-    // can still be on a different HW queue (e.g. child-graph segments dispatch on their
-    // own stream pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply.
+    // can still be on a different HW queue (e.g. child-graph segments dispatch on
+    // streams from the parent's pool).  EnqueueSegmentedGraph skips same-stream leaves cheaply.
     return segments_.size() > 1;
   }
 
@@ -1043,12 +1040,6 @@ class Graph {
 
     // Most urgent declared priority across this segment's nodes.
     int declared_priority = hip::Stream::Priority::Normal;
-    //! Parent child-graph segment: emit a completion on the leading barrier batch so
-    //! parallel child roots on other streams can wait via AQL before starting.
-    bool needs_child_entry_signal = false;
-    //! Immediate parent's compact HW-event slot waited on by this child root.
-    //! -1 means this segment has no cross-stream parent boundary.
-    int parent_entry_hw_event_index = -1;
   };
 
   //! Segment information for batch scheduling
@@ -1373,24 +1364,14 @@ class GraphExecSegmented : public GraphExecBase {
     PacketBatch() {}
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
-    // Rebuild cached filtered lists if cache is stale. Updates  flat_packet pointers (including
-    // parent-boundary ) into filteredFlatPacketData.
-    void rebuildFilteredLists(
-        std::vector<amd::Device::HwEventPatch>& patch_list,
-        std::vector<amd::Device::HwEventPatch>& parent_boundary_patches);
-    // Point this batch's patches into filteredFlatPacketData, relocating a completion
-    // signal when its original packet belongs to a disabled node.
-    void retargetPatchesToFilteredBuffer(
-        std::vector<amd::Device::HwEventPatch>& patches,
-        const std::unordered_map<const void*, size_t>& packet_to_filtered_index,
-        const std::unordered_map<const void*, size_t>& disabled_batch_packets);
+    // Rebuild cached filtered lists if cache is stale.
+    // Updates flat_packet pointers in patch_list to point into filteredFlatPacketData.
+    void rebuildFilteredLists(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Rebuild the flat buffer from the current dispatchPackets contents.
     void rebuildFlatBuffer();
-    // Restore ordinary and parent-boundary flat_packet pointers back to
-    // flatPacketData when all nodes are re-enabled (disabledNodeCount == 0).
-    void restorePatchListPointers(
-        std::vector<amd::Device::HwEventPatch>& patch_list,
-        std::vector<amd::Device::HwEventPatch>& parent_boundary_patches);
+    // Restore flat_packet pointers in patch_list back to flatPacketData when
+    // all nodes are re-enabled (disabledNodeCount == 0).
+    void restorePatchListPointers(std::vector<amd::Device::HwEventPatch>& patch_list);
     // Append one 64-byte AQL packet to a flat buffer: copies the body, saves the
     // full_header dword, and invalidates the header. Zeroes completion_signal
     // (ApplyHwEventPatches re-patches it directly via flat_packet pointers at launch).
@@ -1428,14 +1409,18 @@ class GraphExecSegmented : public GraphExecBase {
 
   struct SyncPlan {
     int num_segments = 0;   // total segment count (used for bounds checks)
-    int num_hw_events = 0;  // HW event slots to allocate (one per ncs=true segment)
+    int num_hw_events = 0;  // HW event slots to allocate per launch (BuildSyncPlan PASS 1)
     int num_unordered_segments = 0;  // segments whose first packet drops the barrier bit
 
     // Dense index into segment_hw_events for each segment.
     // seg_to_hw_event[seg_id] == -1  ->  no completion signal emitted.
     // seg_to_hw_event[seg_id] >= 0  ->  index into the compact hw_events vector.
+    // For a child-graph segment this is the whole-child completion signal,
+    // completed by its trailing batch after the recursive child enqueue.
     std::vector<int> seg_to_hw_event;
-    //! HW slot for a child-graph segment's leading-batch entry gate (parent graph only).
+    //! Slot for a child-graph segment's child entry signal. Allocated only when the
+    //! child's entry_hw_slot_ >= 0 (an off-stream child root must wait). This
+    //! segment's leading batch completes it; the child borrows it at launch.
     std::vector<int> seg_to_child_entry_hw_event;
 
     std::vector<amd::Device::HwEventPatch> patch_list;
@@ -1451,21 +1436,13 @@ class GraphExecSegmented : public GraphExecBase {
 
   void BuildSyncPlan();
   void RebuildAQLPacketBatch(PacketBatch& packetBatch);
-  //! After the parent sync plan is built, wire child root boundary patches to parent entry slots.
-  void FinalizeChildParentBoundaries();
-  //! Return whether any level-0 segment runs on a stream other than the child graph node's
-  //! execution stream and therefore needs a parent-entry wait.
-  bool HasOffStreamRoots(int exec_stream_id) const;
-  //! Recursively assign child segments absolute IDs in the shared parent stream pool and
-  //! mark child graph nodes whose off-stream roots need an entry signal.
-  void AssignNestedChildStreamPlans();
 
   //! Absolute stream in the parent pool for this child graph node (-1 = root exec).
   int inherited_exec_stream_id_ = -1;
-  //! Patches applied at child launch using the immediate parent's segment_hw_events.
-  std::vector<amd::Device::HwEventPatch> parent_boundary_patches_;
-  //! Child segment corresponding to each parent_boundary_patches_ entry.
-  std::vector<int> parent_boundary_segment_ids_;
+  //! Child-local patch slot bound to the immediate parent's child entry signal at
+  //! launch. -1 when every level-0 segment already runs on inherited_exec_stream_id_
+  //! and in-order queue order is enough. >= 0 means off-stream roots wait on it.
+  int entry_hw_slot_ = -1;
 };
 
 
