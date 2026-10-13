@@ -709,7 +709,7 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   // Default sysfs path populated by switch_discovery kernel module
   static const char defaultBase[] = "/sys/kernel/pci_switch_link/virtual_switch_links";
   // Fallback: if the default path doesn't exist, check RCCL_BCM_LINKS_PATH env var
-  // (e.g. populated by rccl_dsn_mapper.sh userspace tool)
+  // (e.g. populated by rccl_bcm_isl_discover.sh userspace tool)
   const char* base = defaultBase;
   struct stat st;
   if (stat(defaultBase, &st) != 0 || !S_ISDIR(st.st_mode)) {
