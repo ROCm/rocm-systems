@@ -206,8 +206,8 @@ template <class S> class symbol_section_accessor_template {
     if (section_name == nullptr) {
       return true;
     }
-    // Reserved indices (SHN_ABS, SHN_COMMON, SHN_XINDEX, ...) never name a section.
-    if (section_index >= SHN_LORESERVE) {
+    // SHN_UNDEF and reserved indices (SHN_ABS, SHN_XINDEX, ...) never name a section.
+    if (section_index == SHN_UNDEF || section_index >= SHN_LORESERVE) {
       return false;
     }
     const section* target_section = elf_file.sections[section_index];
