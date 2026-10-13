@@ -1375,7 +1375,7 @@ def _join_keys_for_marker_and_dispatch(
     marker_df: pd.DataFrame,
     dispatch_df: pd.DataFrame,
 ) -> list[str]:
-    """Correlation_ID, plus GUID when both frames have that column."""
+    """Correlation_ID and GUID."""
     join_keys = ["Correlation_ID"]
     if "GUID" in marker_df.columns and "GUID" in dispatch_df.columns:
         join_keys.append("GUID")
