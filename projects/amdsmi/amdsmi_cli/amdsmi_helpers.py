@@ -3002,6 +3002,7 @@ class AMDSMIHelpers:
 
         fabric_has_more = False
         while True:
+            prev_fabric_cursor = fabric_cursors[gpu_idx]
             try:
                 fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
                     amdsmi_interface.amdsmi_get_fabric_cper_entries(
@@ -3059,12 +3060,13 @@ class AMDSMIHelpers:
                     cper_counter,
                 )
 
-            # Stop pagination when we got no entries and the library signals no more data
-            if len(fabric_entries) == 0 and not fabric_has_more:
+            if not fabric_has_more:
                 break
 
-        # If both GPU and fabric CPER are unavailable, raise now
-        if gpu_cper_unavailable and num_entries == 0:
+            if len(fabric_entries) == 0 and fabric_cursors[gpu_idx] == prev_fabric_cursor:
+                break
+
+        if gpu_cper_unavailable and num_entries == 0 and not args.follow:
             raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                 logger.format,
                 gpu_cper_error_code,

@@ -15,9 +15,11 @@
 
 namespace {
 
-// Tests invalid parameter combinations return AMDSMI_STATUS_INVAL
-TEST(GpuUnit, FabricCperInvalidParams) {
-  amdsmi_processor_handle handle = nullptr;
+// A non-null (unregistered) handle so each null-argument case isolates its own
+// check instead of all short-circuiting on the handle==nullptr guard.
+TEST(GpuUnit, FabricCperNullArguments) {
+  int sentinel = 0;
+  amdsmi_processor_handle handle = reinterpret_cast<amdsmi_processor_handle>(&sentinel);
   uint32_t severity_mask = 0xFFFFFFFF;
   std::vector<char> cper_data(4096);
   uint64_t buf_size = cper_data.size();
@@ -54,9 +56,21 @@ TEST(GpuUnit, FabricCperInvalidParams) {
   EXPECT_EQ(amdsmi_get_fabric_cper_entries(handle, severity_mask, cper_data.data(), &buf_size,
                                            cper_hdrs.data(), &entry_count, nullptr),
             AMDSMI_STATUS_INVAL);
+}
+
+// entry_count outside (0, kMaxUaloeEntries] yields AMDSMI_STATUS_INVAL; the
+// non-null handle isolates the count check from the handle check.
+TEST(GpuUnit, FabricCperEntryCountBounds) {
+  int sentinel = 0;
+  amdsmi_processor_handle handle = reinterpret_cast<amdsmi_processor_handle>(&sentinel);
+  uint32_t severity_mask = 0xFFFFFFFF;
+  std::vector<char> cper_data(4096);
+  uint64_t buf_size = cper_data.size();
+  std::vector<amdsmi_cper_hdr_t*> cper_hdrs(16);
+  uint64_t cursor = 0;
 
   // entry_count = 0
-  entry_count = 0;
+  uint64_t entry_count = 0;
   EXPECT_EQ(amdsmi_get_fabric_cper_entries(handle, severity_mask, cper_data.data(), &buf_size,
                                            cper_hdrs.data(), &entry_count, &cursor),
             AMDSMI_STATUS_INVAL);
@@ -66,28 +80,6 @@ TEST(GpuUnit, FabricCperInvalidParams) {
   EXPECT_EQ(amdsmi_get_fabric_cper_entries(handle, severity_mask, cper_data.data(), &buf_size,
                                            cper_hdrs.data(), &entry_count, &cursor),
             AMDSMI_STATUS_INVAL);
-}
-
-// Test that buf_size smaller than header expansion headroom returns OUT_OF_RESOURCES
-TEST(GpuUnit, FabricCperInsufficientBufferForExpansion) {
-  amdsmi_processor_handle handle = nullptr;
-  uint32_t severity_mask = 0xFFFFFFFF;
-  std::vector<char> cper_data(128);  // Small buffer
-  uint64_t buf_size = cper_data.size();
-  std::vector<amdsmi_cper_hdr_t*> cper_hdrs(16);
-  uint64_t entry_count = cper_hdrs.size();
-  uint64_t cursor = 0;
-
-  // With entry_count=16, expansion_headroom = 16 * (128 - 24) = 1664 bytes
-  // buf_size=128 < 1664, should return OUT_OF_RESOURCES (or INVAL/NOT_SUPPORTED
-  // depending on whether handle is valid)
-  amdsmi_status_t status = amdsmi_get_fabric_cper_entries(
-      handle, severity_mask, cper_data.data(), &buf_size, cper_hdrs.data(), &entry_count, &cursor);
-
-  // Since handle is nullptr, we expect INVAL first; but if handle validation passes,
-  // the expansion check would return OUT_OF_RESOURCES. For this test, we document
-  // the behavior: null handle → INVAL takes precedence.
-  EXPECT_EQ(status, AMDSMI_STATUS_INVAL);
 }
 
 }  // namespace

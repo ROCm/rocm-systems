@@ -30,30 +30,58 @@ _PKG = "amdsmi_source_under_test"
 
 
 def _load_source_interface():
-    if _PKG not in sys.modules:
-        pkg = types.ModuleType(_PKG)
-        pkg.__path__ = [_PY_INTERFACE]
-        sys.modules[_PKG] = pkg
-    try:
+    """Load the interface modules under test, preferring the in-tree sources.
+
+    The in-tree ``py-interface`` copy carries the local changes, so exercise it
+    when present. When that tree is absent (installed-only CI legs ship no
+    ``py-interface`` directory), fall back to the installed ``amdsmi`` package,
+    which already reflects the build under test. Returns the four modules plus a
+    bool that is True when they came from the installed package.
+    """
+    if os.path.isfile(os.path.join(_PY_INTERFACE, "amdsmi_interface.py")):
+        if _PKG not in sys.modules:
+            pkg = types.ModuleType(_PKG)
+            pkg.__path__ = [_PY_INTERFACE]
+            sys.modules[_PKG] = pkg
+        # An import failure here is a real error (e.g. a broken amdsmi_interface),
+        # so let it propagate rather than silently skipping.
         return (
             importlib.import_module(f"{_PKG}.amdsmi_interface"),
             importlib.import_module(f"{_PKG}.amdsmi_exception"),
             importlib.import_module(f"{_PKG}.amdsmi_wrapper"),
             importlib.import_module(f"{_PKG}.amdsmi_interface_utils"),
+            False,
+        )
+    try:
+        from amdsmi import (
+            amdsmi_interface as installed_interface,
+            amdsmi_exception as installed_exception,
+            amdsmi_wrapper as installed_wrapper,
+            amdsmi_interface_utils as installed_utils,
         )
     except (ModuleNotFoundError, ImportError):
-        # When the sources are present, an import failure is a real error
-        # (e.g. a broken amdsmi_interface). When py-interface is absent
-        # (installed-only test runs), skip.
-        if os.path.isfile(os.path.join(_PY_INTERFACE, "amdsmi_interface.py")):
-            raise
-        for name in [n for n in list(sys.modules) if n == _PKG or n.startswith(_PKG + ".")]:
-            del sys.modules[name]
-        return None, None, None, None
+        return None, None, None, None, False
+    return (installed_interface, installed_exception, installed_wrapper, installed_utils, True)
 
 
-amdsmi_interface, amdsmi_exception, amdsmi_wrapper, amdsmi_interface_utils = (
-    _load_source_interface()
+(
+    amdsmi_interface,
+    amdsmi_exception,
+    amdsmi_wrapper,
+    amdsmi_interface_utils,
+    _loaded_from_install,
+) = _load_source_interface()
+
+
+# _patch_fabric_symbol() binds the C entry point with create=True, which would
+# fabricate it even on an installed build that predates this API and let the
+# patched tests pass without the feature present. Guard only the installed
+# fallback: a source checkout binds the symbol solely when libamd_smi.so is
+# built, so requiring it there would skip the tests on every source-only run.
+_fabric_symbol_missing = (
+    _loaded_from_install
+    and amdsmi_wrapper is not None
+    and not hasattr(amdsmi_wrapper, "amdsmi_get_fabric_cper_entries")
 )
 
 
@@ -72,6 +100,7 @@ def _set_out(ref, value):
 
 
 @unittest.skipIf(amdsmi_interface is None, "amdsmi_interface not available")
+@unittest.skipIf(_fabric_symbol_missing, "installed amdsmi build predates the fabric CPER API")
 class TestFabricCperInterface(unittest.TestCase):
     """Test amdsmi_interface.amdsmi_get_fabric_cper_entries()"""
 
@@ -133,15 +162,16 @@ class TestFabricCperInterface(unittest.TestCase):
             struct.pack_into("<I", cper_header, 12, 1)  # AMDSMI_CPER_SEV_FATAL
             struct.pack_into("<I", cper_header, 16, 0x01)  # valid_bits: timestamp
             struct.pack_into("<I", cper_header, 20, 128)  # record_length, no payload
-            # Timestamp: 2026-08-24 12:00:00, as the Python layer reads it.
-            cper_header[24] = 0  # seconds
-            cper_header[25] = 0  # minutes
-            cper_header[26] = 12  # hours
+            # Timestamp 2026-08-24 12:00:00 in BCD, the encoding the Python layer
+            # decodes (each nibble is a decimal digit, so 24 is 0x24, not 0x18).
+            cper_header[24] = 0x00  # seconds
+            cper_header[25] = 0x00  # minutes
+            cper_header[26] = 0x12  # hours
             cper_header[27] = 1  # flag
-            cper_header[28] = 24  # day
-            cper_header[29] = 8  # month
-            cper_header[30] = 26  # year
-            cper_header[31] = 20  # century
+            cper_header[28] = 0x24  # day
+            cper_header[29] = 0x08  # month
+            cper_header[30] = 0x26  # year
+            cper_header[31] = 0x20  # century
             cper_header[96:100] = b"IFoE"  # creator_id
             # notify_type at 72:88 stays all zeros: the IFoE placeholder GUID.
 

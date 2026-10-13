@@ -879,13 +879,16 @@ amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray
 }
 
 // Convert POSIX timespec to the BCD-encoded timestamp UEFI CPER records use.
-static void timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
+static bool timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
   static constexpr auto to_bcd = [](int v) -> uint8_t {
     return static_cast<uint8_t>(((v / 10) << 4) | (v % 10));
   };
 
   struct tm utc;
-  gmtime_r(&ts->tv_sec, &utc);
+  if (gmtime_r(&ts->tv_sec, &utc) == nullptr) {
+    memset(out, 0, sizeof(*out));
+    return false;
+  }
 
   out->seconds = to_bcd(utc.tm_sec);
   out->minutes = to_bcd(utc.tm_min);
@@ -897,6 +900,7 @@ static void timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_ti
   out->year = to_bcd(year % 100);
   out->century = to_bcd(year / 100);
   out->flag = 0;
+  return true;
 }
 
 // Synthesize a full amdsmi_cper_hdr_t from a UALoE ualoe_cper_hdr_t
@@ -912,11 +916,11 @@ static void synthesize_amdsmi_cper_header(const ualoe_cper_hdr_t* ualoe_hdr, uin
   // The UALoE and amdsmi severity enumerators share their values.
   amdsmi_hdr->error_severity = static_cast<amdsmi_cper_sev_t>(ualoe_hdr->severity);
 
-  // No platform_id or partition_id is synthesized, so only the timestamp is valid.
-  amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
-
   amdsmi_hdr->record_length = static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + payload_size);
-  timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp);
+
+  if (timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp)) {
+    amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
+  }
 
   // creator_id and notify_type are 16-byte fields; the memset above zero-pads them.
   memcpy(amdsmi_hdr->creator_id, "IFoE", 4);
@@ -967,8 +971,17 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
   constexpr uint64_t kMaxUaloeBufSize = 1048576;  // 1 MB cap on the intermediate buffer
   const size_t ualoe_buf_size =
       static_cast<size_t>(std::min<uint64_t>(*buf_size - expansion_headroom, kMaxUaloeBufSize));
-  std::vector<char> ualoe_buf(ualoe_buf_size);
-  std::vector<ualoe_cper_hdr_t*> ualoe_hdrs(max_ualoe_entries);
+
+  // Allocation sizes derive from caller-supplied counts; a bad_alloc must not
+  // escape this extern "C" entry point as an exception.
+  std::vector<char> ualoe_buf;
+  std::vector<ualoe_cper_hdr_t*> ualoe_hdrs;
+  try {
+    ualoe_buf.resize(ualoe_buf_size);
+    ualoe_hdrs.resize(max_ualoe_entries);
+  } catch (const std::bad_alloc&) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
 
   uint64_t ualoe_buf_size_var = ualoe_buf_size;
   uint64_t ualoe_entry_count = max_ualoe_entries;
@@ -1076,6 +1089,12 @@ amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor
   }
 
   if (ret == ENOBUFS) {
+    // No forward progress is possible if nothing was transformed: signaling
+    // MORE_DATA here would make a paging caller re-request the same cursor
+    // forever. Report the buffer shortfall instead.
+    if (transformed_entries == 0) {
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    }
     return AMDSMI_STATUS_MORE_DATA;
   }
 
