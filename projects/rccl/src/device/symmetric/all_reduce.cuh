@@ -347,7 +347,9 @@ static __device__ void allreduce(ncclSymkArgsHandler const& handler, int tn, int
     constexpr int BytePerChunk = ncclSymkGetBytesPerChunk(ncclSymkMinWarpsPerBlock, UnrollPacks);
     uint32_t chunks = (nBytes - cursor) / BytePerChunk;
 #if !defined(__gfx950__)
-    chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
+    // Trimming the wide TDM chunks to whole waves would hand up to nRanks*nBlocks of them to the
+    // tiers below, which move them far slower than an uneven last wave costs.
+    if NCCL_IF_CONSTEXPR (!AsyncTile) chunks -= imodFast32(chunks, nRanks * nBlocks, nRanks_nBlocks_rcp32);
 #endif
     if (chunks >= chunkFloor) {
       uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
