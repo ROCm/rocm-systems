@@ -80,6 +80,8 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # plugin/tuner/csv_tuner.cc
+      - "CsvTunerMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -102,6 +104,7 @@ test_categories:
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

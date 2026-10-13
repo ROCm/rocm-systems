@@ -20,6 +20,7 @@
 
 #include <hip_test_common.hh>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -197,7 +198,7 @@ unsigned long long WallClockTicksPerUs() {
   int wall_clock_khz = 0;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, device));
-  return static_cast<unsigned long long>(wall_clock_khz) / 1000;
+  return std::max(1ULL, static_cast<unsigned long long>(wall_clock_khz) / 1000);
 }
 
 constexpr int kButterflyStages = 6;
@@ -538,6 +539,88 @@ HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_LongChainBatches) {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipFree(sequence));
+  HIP_CHECK(hipFree(violations));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Graph with a join-and-fork EMPTY node (E0) whose successors land on a different stream.
+ *    The EMPTY-only segment must emit a completion signal so the downstream barrier does not
+ *    block forever. Reproduces the hang reported in ROCM-32125. Also covers a leaf EMPTY node
+ *    (E1) that forks to the two output kernels.
+ *
+ *    Shape (K* are kernel nodes, E* are hipGraphAddEmptyNode nodes):
+ *      K0 -> K1 -> E0 <- K0   (redundant K0->E0 makes E0 a join)
+ *      E0 -> G0 -> G1 -> E1
+ *      E1 -> P, F
+ *
+ *    Run with DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2 to force multi-stream assignment even on
+ *    shallow graphs where the default scheduler would collapse to one stream.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphSegmentOrdering.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipGraphSegmentOrdering_EmptyNodeCrossStreamCompletion) {
+  if (!UsesSegmentedGraphPath()) HIP_SKIP_TEST("Requires the segmented graph executor");
+
+  hipGraph_t g;
+  HIP_CHECK(hipGraphCreate(&g, 0));
+  unsigned* violations = nullptr;
+  HIP_CHECK(hipMalloc(&violations, sizeof(unsigned)));
+  HIP_CHECK(hipMemset(violations, 0, sizeof(unsigned)));
+
+  // Use ChainStep as a lightweight sequence checker for this topology test.
+  // Each kernel writes its own sequence slot; we just need all 100 launches to complete.
+  unsigned* sequence = nullptr;
+  HIP_CHECK(hipMalloc(&sequence, sizeof(unsigned)));
+  HIP_CHECK(hipMemset(sequence, 0, sizeof(unsigned)));
+
+  // Build the graph: K0->K1->E0<-K0, E0->G0->G1->E1->P, E1->F
+  hipGraphNode_t nK0, nK1, nG0, nG1, nP, nF, nE0, nE1;
+  constexpr int kChainLen = 1;
+  int self0 = 0, len = kChainLen;
+  void* args0[] = {&sequence, &self0, &len, &violations};
+  hipKernelNodeParams kp{};
+  kp.func = reinterpret_cast<void*>(ChainStep);
+  kp.gridDim = dim3(1); kp.blockDim = dim3(1);
+  kp.kernelParams = args0;
+
+  HIP_CHECK(hipGraphAddKernelNode(&nK0, g, nullptr, 0, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nK1, g, &nK0, 1, &kp));
+  hipGraphNode_t e0_deps[] = {nK0, nK1};
+  HIP_CHECK(hipGraphAddEmptyNode(&nE0, g, e0_deps, 2));
+  HIP_CHECK(hipGraphAddKernelNode(&nG0, g, &nE0, 1, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nG1, g, &nG0, 1, &kp));
+  HIP_CHECK(hipGraphAddEmptyNode(&nE1, g, &nG1, 1));
+  HIP_CHECK(hipGraphAddKernelNode(&nP, g, &nE1, 1, &kp));
+  HIP_CHECK(hipGraphAddKernelNode(&nF, g, &nE1, 1, &kp));
+
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  constexpr unsigned kLaunches = 100;
+  for (unsigned i = 0; i < kLaunches; ++i) {
+    HIP_CHECK(hipMemsetAsync(sequence, 0, sizeof(unsigned), stream));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+  }
+  // If E0 or E1's completion signal is never emitted this synchronize hangs forever.
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  unsigned host_violations = 0;
+  HIP_CHECK(hipMemcpy(&host_violations, violations, sizeof(unsigned), hipMemcpyDeviceToHost));
+  REQUIRE(host_violations == 0);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(g));
   HIP_CHECK(hipFree(sequence));
   HIP_CHECK(hipFree(violations));
 }

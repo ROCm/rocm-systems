@@ -90,6 +90,7 @@ function(rccl_define_micro_source_lists)
     ras-param-test.cc                    # src/ras/ras_param.cc
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
+    csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     ras-client-test.cc
     group-test.cc
     devcomm-test.cc
@@ -383,6 +384,12 @@ function(rccl_add_micro_binary _name)
     rccl_apply_hip_compile_only(${_name})
     target_link_libraries(${_name} PRIVATE ${MICRO_TEST_LINK_LIBS})
     add_dependencies(${_name} hipify_all copy_nccl_device_headers)
+    # csv-tuner-test.cc includes csv_tuner.cc, which includes the generated
+    # embedded-tuner header. These targets do not link rccl, so without this the
+    # header may not exist yet in a clean parallel build.
+    if(TARGET rccl_embedded_tuner_configs)
+      add_dependencies(${_name} rccl_embedded_tuner_configs)
+    endif()
     rccl_apply_host_only_flags(${_name})
     rocm_install(TARGETS ${_name} COMPONENT tests)
     if(_ramb_CATEGORIES_YAML)
@@ -481,6 +488,23 @@ function(rccl_standalone_setup)
 
   if(NOT EXISTS "${RCCL_HIPIFY_DIR}/src/graph/search.cc")
     message(FATAL_ERROR "Hipified sources not found at ${RCCL_HIPIFY_DIR}. Run the RCCL build first.")
+  endif()
+
+  # csv_tuner.cc needs the embedded-tuner header. The RCCL build normally emits
+  # it; generate it here so a standalone test build works against an older tree.
+  if(NOT EXISTS "${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h")
+    # No COMMAND_ERROR_IS_FATAL here: that needs CMake 3.19 and this project
+    # declares 3.16, so check the result explicitly or a FATAL_ERROR from the
+    # generator is swallowed and the build fails later on a missing include.
+    execute_process(COMMAND ${CMAKE_COMMAND}
+      -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../../tuner
+      -DOUT_FILE=${RCCL_BUILD_DIR}/include/rccl_tuner_embedded_configs.h
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/GenerateEmbeddedTunerConfigs.cmake
+      RESULT_VARIABLE _gen_tuner_result
+      ERROR_VARIABLE _gen_tuner_error)
+    if(_gen_tuner_result)
+      message(FATAL_ERROR "GenerateEmbeddedTunerConfigs.cmake failed: ${_gen_tuner_error}")
+    endif()
   endif()
   message(STATUS "hipcc: ${CMAKE_CXX_COMPILER}")
   message(STATUS "Hipified sources: ${RCCL_HIPIFY_DIR}")
@@ -830,6 +854,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # graph/tuning.cc keeps the basename, so add_file_unique() renames this one.
     TUNING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_tmp.cc"
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
+    CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
+    # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
+    RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -938,11 +965,25 @@ endif()
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
 # ---------------------------------------------------------------------------
+# In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
+set(_MICRO_CE_BATCH_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
+    set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
+  endif()
+endif()
 rccl_add_micro_binary(rccl-UnitTestsMicroCe
   SOURCES ${TEST_MICRO_CE_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    ${_MICRO_CE_BATCH_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
     CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")

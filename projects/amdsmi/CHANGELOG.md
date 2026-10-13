@@ -8,56 +8,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
-  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
-  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
-  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
-  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
 
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
 
-### Changed
-
-- **`amd-smi`, `amd-smi version`, and `amd-smi static --driver` include the DKMS build in the amdgpu version**.  
-  - For example `6.19.14.31400000-2370381`. Labels and JSON/CSV keys are unchanged.
-
-### Resolved Issues
-
-- **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
-  - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
-
-- **Fixed runtime fatal CPERs reporting no AFIDs**.  
-  - `amd-smi ras --cper` showed an empty `list afids` column for fatal records, `amd-smi ras --afid --cper-file` printed `-`, and `amdsmi_get_afids_from_cper()` returned no AFIDs. amdgpu writes fatal crashdump sections 32 bytes shorter than `sizeof(cper_sec_crashdump)`, and the section bounds check required the full struct, so every such section was skipped. The check now requires only the dump member the record type uses.
-
-- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
-  - A reading of exactly 255 or 65,535 in any power or voltage field was treated as unavailable.
-
-- **Fixed wrong overdrive clock and voltage values in the Python library**.  
-  - The memory clock range showed the fabric clock range, and the clock limits and voltage curve were also wrong.
-
-- **Fixed wrong CPU DIMM power and temperature values on Python 3.14 and later**.
-
-## amd_smi_lib for ROCm 10.1.0
-
-### Added
-
-- **Exposed `BOOT_FIRMWARE` field in `amd-smi static --ifwi` output**.  
-  - The `boot_firmware` value returned by `amdsmi_get_gpu_vbios_info()` now appears under the `IFWI` section alongside `NAME`, `BUILD_DATE`, `PART_NUMBER` and `VERSION` (`--vbios` remains available as a legacy alias).
-
-- **Added an experimental, opt-in WSL (WDDM/dxg) GPU backend**.  
-  - Built only with `-DENABLE_WSL_BACKEND=ON` (off by default); native builds and packages are unchanged.
-  - Reads GPU telemetry through `librocdxg`; queries with no WDDM equivalent return `AMDSMI_STATUS_NOT_SUPPORTED`. See [Using AMD SMI under WSL](https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/amdsmi-wsl-mode.html).
-
-- **Added UALoE-backed physical accelerator ID and tray info**.  
-  - `physical_acc_id` added to `amdsmi_asic_info_t` and `amdsmi_enumeration_info_t`, populated by `amdsmi_get_gpu_asic_info()` and `amdsmi_get_gpu_enumeration_info()`.
-  - New node-scoped `amdsmi_get_tray_info()` reports compute tray type and accelerator count via `amdsmi_tray_info_t` and `amdsmi_compute_tray_type_t`.
-  - Without an active UALoE session these report `AMDSMI_STATUS_NOT_SUPPORTED`, or `UINT32_MAX` for `physical_acc_id`.
-  - CLI: `amd-smi static --asic` and `amd-smi list --enumeration` show `PHYSICAL_ACC_ID`; new `amd-smi node --tray`/`-T` prints tray type and accelerator count.
-
-- **Added `CACHE_ACRONYM` and `TOTAL_CACHE_SIZE` to `amd-smi metric --cache`**.  
-  - Each `CACHE_<N>` entry now reports a short type label (`L1D`, `L1I`, `L2`, `L3`) and the total size across all instances at that level.
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
@@ -170,6 +133,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A section named on the command line is never emptied. Plain `amd-smi metric` drops a section the version can populate nothing of, which on a metrics v1.3 GPU removes the whole `throttle` section; `amd-smi metric --throttle` prints all 31 rows instead. A named section that is only partly suppressed is still filtered. `--partition` scopes the data rather than naming a section, so `amd-smi metric --partition` protects nothing and filters like plain `amd-smi metric`.
   - A field the version does carry but the ASIC or driver leaves unpopulated still prints `N/A`, a field reporting a real value is never removed, and an unrecognized metrics version or an unreadable header suppresses nothing.
 
+- **`amd-smi static` shows NUMA information on Linux guests**.  
+  - `--numa` was previously limited to Linux baremetal and passthrough guests.
+  - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -210,6 +177,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi static --clock` printing a Python traceback for an unknown clock name**.  
   - It now reports the invalid parameter and exits `195` (`INVALID_PARAMETER`).
 
+- **Fixed `amd-smi static --numa --csv` dropping socket affinity**.  
+  - When NUMA-node CPU affinity was unavailable, as on guests, the CSV row printed `N/A` for the socket columns that human-readable and JSON output showed. It also no longer fails when only the socket affinity is unavailable.
+
 - **Fixed crashes when several threads start or stop AMD SMI at the same time**.  
   - Programs that initialize and shut down the library from more than one thread could crash, find no GPUs, or leave the library initialized after every thread had shut it down.
 
@@ -218,6 +188,14 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
   - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
+
+- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
+  - A reading of exactly 255 or 65,535 in any power or voltage field was treated as unavailable.
+
+- **Fixed wrong overdrive clock and voltage values in the Python library**.  
+  - The memory clock range showed the fabric clock range, and the clock limits and voltage curve were also wrong.
+
+- **Fixed wrong CPU DIMM power and temperature values on Python 3.14 and later**.
 
 ## amd_smi_lib for ROCm 10.1.0
 
