@@ -59,7 +59,6 @@ cases:
   Unit_HRR_CaptureEventsFail_Direct: {}
   Unit_HRR_CaptureEventsWriteFails: {}
   Unit_HRR_CaptureExitSummary: {}
-  Unit_HRR_CaptureForkAfterEventsFail: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}

@@ -42,7 +42,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -85,12 +84,6 @@ static std::int64_t hrr_seek_end(int fd) {
   return static_cast<std::int64_t>(_lseeki64(fd, 0, SEEK_END));
 }
 
-// Write all of buf at offset off. Moves the file position, unlike pwrite.
-static bool hrr_pwrite_fd(int fd, const void* buf, size_t len, std::int64_t off) {
-  return _lseeki64(fd, off, SEEK_SET) == off &&
-         _write(fd, buf, static_cast<unsigned>(len)) == static_cast<int>(len);
-}
-
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
   return cached;
@@ -122,15 +115,6 @@ static int hrr_ftruncate_fd(int fd, std::int64_t len) {
 
 static std::int64_t hrr_seek_end(int fd) {
   return static_cast<std::int64_t>(lseek(fd, 0, SEEK_END));
-}
-
-// Write all of buf at offset off.
-static bool hrr_pwrite_fd(int fd, const void* buf, size_t len, std::int64_t off) {
-  ssize_t n;
-  do {
-    n = ::pwrite(fd, buf, len, static_cast<off_t>(off));
-  } while (n < 0 && errno == EINTR);
-  return n == static_cast<ssize_t>(len);
 }
 
 static inline uint64_t current_thread_id() {
@@ -224,7 +208,7 @@ static std::atomic<bool> g_capture_incomplete{false};
 
 // Set when a write, fsync or close of events.bin failed, so records may be
 // missing or torn. Only an atomic store, so the crash callback can set it too;
-// the other paths turn it into mark_incomplete() through
+// the other paths turn it into an incomplete archive through
 // note_events_io_locked().
 static std::atomic<bool> g_events_io_failed{false};
 
@@ -360,36 +344,14 @@ static void sync_events_locked() {
 static void mark_incomplete_locked(const char* reason);
 
 // Mark the archive incomplete once a write, fsync or close of events.bin has
-// failed, and say whether one has. Logs, so not for the crash callback. Unlike
-// mark_incomplete(), this counts after flush() too: its callers there take the
-// trailer back and write the manifest from the flag. Caller holds g_file_mu,
-// which comes before g_blob_mu.
+// failed, and say whether one has. Unlike mark_incomplete(), this counts after
+// flush() too: its callers there take the trailer back and write the manifest
+// from the flag. Caller holds g_file_mu, which comes before g_blob_mu.
 static bool note_events_io_locked() {
   if (!g_events_io_failed.load(std::memory_order_relaxed)) return false;
   std::lock_guard<std::mutex> lk(g_blob_mu);
   mark_incomplete_locked("a write, fsync or close of events.bin failed, so records may be missing");
   return true;
-}
-
-// Take back the trailer that starts at trailer_at in events.bin, once a failure
-// means it claims nothing: the reader takes a file that ends in a trailer for
-// a whole capture, whatever the manifest says. Cut it off, or if that fails,
-// overwrite its magic so it no longer reads as a trailer. Either change is
-// synced, since the trailer itself may already be on disk. False if neither
-// could be made and synced. Caller holds g_file_mu, or g_buf_busy in the crash
-// callback: only async-signal-safe calls.
-static bool drop_trailer_locked(int fd, std::int64_t trailer_at) {
-  int rc;
-  do {
-    rc = hrr_ftruncate_fd(fd, trailer_at);
-  } while (rc != 0 && errno == EINTR);
-  if (rc != 0) {
-    const uint32_t no_magic = 0;
-    if (!hrr_pwrite_fd(fd, &no_magic, sizeof(no_magic),
-                       trailer_at + static_cast<std::int64_t>(offsetof(hrr_eof_record, eof_magic))))
-      return false;
-  }
-  return HRR_FSYNC(fd) == 0;
 }
 
 // Append `len` bytes of one complete record to the buffer, flushing first if it
@@ -1464,14 +1426,10 @@ bool open(const char* output_dir) {
     g_parent_pid = parent_pid;
     snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
     // Buffer/checkpoint state is reset here so it is consistent for this
-    // process's pid-<pid> sub-archive. So is a failure of an earlier events.bin,
-    // which a forked child inherits from its parent: it says nothing about this
-    // one.
+    // process's pid-<pid> sub-archive.
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
-    g_events_io_failed.store(false, std::memory_order_relaxed);
-    g_trailer_at        = -1;
     g_seq_id.store(next_seq, std::memory_order_relaxed);
     g_event_count.store(ev_count, std::memory_order_relaxed);
     if (!exists)
@@ -1610,28 +1568,20 @@ void flush(const char* /*output_dir*/) {
       // absence is exactly how the reader detects a non-faithful archive.
       if (!incomplete) {
         const std::int64_t trailer_at = hrr_seek_end(g_events_fd);
-        if (trailer_at < 0) {
-          // A trailer at an unknown offset could not be taken back if closing
-          // the file failed later, so none is written.
-          std::lock_guard<std::mutex> blk(g_blob_mu);
-          mark_incomplete_locked("the end of events.bin cannot be found, so no trailer is written");
+        hrr_eof_record rec = hrr_make_eof_record(
+            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+        rec.hdr.timestamp_ns = amd::Os::timeNanos();
+        rec.hdr.thread_id    = current_thread_id();
+        buffer_append_locked(&rec, sizeof(rec));
+        flush_buffer_locked();
+        sync_events_locked();
+        // A trailer that may not have reached the disk claims nothing.
+        if (note_events_io_locked()) {
+          if (trailer_at < 0 || hrr_ftruncate_fd(g_events_fd, trailer_at) != 0)
+            LogPrintfError("[HRR capture] Cannot cut the clean-shutdown trailer off %s/events.bin, "
+                           "so only its manifest says the archive is incomplete", out_dir.c_str());
         } else {
-          hrr_eof_record rec = hrr_make_eof_record(
-              g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-          rec.hdr.timestamp_ns = amd::Os::timeNanos();
-          rec.hdr.thread_id    = current_thread_id();
-          buffer_append_locked(&rec, sizeof(rec));
-          flush_buffer_locked();
-          sync_events_locked();
-          if (note_events_io_locked()) {
-            // A trailer that may not have reached the disk claims nothing.
-            if (!drop_trailer_locked(g_events_fd, trailer_at))
-              LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
-                             "%s/events.bin, so only its manifest says the archive is incomplete",
-                             out_dir.c_str());
-          } else {
-            g_trailer_at = trailer_at;
-          }
+          g_trailer_at = trailer_at;
         }
       }
     }
@@ -1667,31 +1617,21 @@ void close() {
     // past a failed close, so the trailer is cut off the file that holds it,
     // never off whatever the path names by then.
     const int keep = trailer_at >= 0 ? HRR_DUP(g_events_fd) : -1;
-    // Without one, a failed close would leave the trailer for good, so it is
-    // taken back before the close, and the archive is incomplete.
-    const bool undup = trailer_at >= 0 && keep < 0;
-    if (undup) {
-      cut = drop_trailer_locked(g_events_fd, trailer_at);
-      std::lock_guard<std::mutex> blk(g_blob_mu);
-      mark_incomplete_locked("events.bin could not be kept open past its close, so its "
-                             "trailer was taken back");
-    }
     if (HRR_CLOSE(g_events_fd) != 0)
       g_events_io_failed.store(true, std::memory_order_relaxed);
     g_events_fd = -1;
     const bool failed = note_events_io_locked();
-    if (failed && keep >= 0) cut = drop_trailer_locked(keep, trailer_at);
+    if (failed && keep >= 0) cut = hrr_ftruncate_fd(keep, trailer_at) == 0;
     if (keep >= 0) HRR_CLOSE(keep);
-    if (!(failed || undup) || trailer_at < 0) return;
+    if (!failed || trailer_at < 0) return;
     out_dir = g_output_dir;
   }
   // flush() already wrote the trailer and a manifest saying complete, before
-  // the file failed or could not be kept open. Take both back.
+  // the file failed. Take both back.
   if (out_dir.empty()) return;
   if (!cut)
-    LogPrintfError("[HRR capture] Cannot take the clean-shutdown trailer back out of "
-                   "%s/events.bin, so only its manifest says the archive is incomplete",
-                   out_dir.c_str());
+    LogPrintfError("[HRR capture] Cannot cut the clean-shutdown trailer off %s/events.bin, so "
+                   "only its manifest says the archive is incomplete", out_dir.c_str());
   write_manifest_stdio(out_dir.c_str(), /*complete=*/false);
   update_root_manifest();
 }
@@ -1730,51 +1670,31 @@ void emergency_finalize(bool clean_shutdown) {
   // already-written bytes; if it was clear we now own it and can safely flush.
   // clear() releases it on the way out.
   bool locked = !g_buf_busy.test_and_set(std::memory_order_acquire);
-  bool synced = false;  // the trailer below synced events.bin, or was taken back
   if (locked) {
     flush_buffer_locked();
     // Clean shutdowns append the fixed-size trailer so the reader does not treat
     // the archive as crash-truncated. The CLR crash callback passes
-    // clean_shutdown=false; normal shutdown uses flush(). As in flush(), there
-    // is no trailer for a capture known incomplete, after a failure of
-    // events.bin, or where its end cannot be found; one that cannot be written
-    // or synced is taken back. Only atomic stores here, no mark_incomplete().
+    // clean_shutdown=false; normal shutdown uses flush().
     if (clean_shutdown && !g_events_finalized) {
-      std::int64_t trailer_at = -1;
-      if (!g_capture_incomplete.load(std::memory_order_relaxed) &&
-          !g_events_io_failed.load(std::memory_order_relaxed)) {
-        trailer_at = hrr_seek_end(g_events_fd);
-        if (trailer_at < 0) g_capture_incomplete.store(true, std::memory_order_relaxed);
-      }
-      if (trailer_at >= 0) {
-        hrr_eof_record rec = hrr_make_eof_record(
-            g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
-        if (!write_all_fd(g_events_fd, &rec, sizeof(rec)) || HRR_FSYNC(g_events_fd) != 0) {
-          g_events_io_failed.store(true, std::memory_order_relaxed);
-          (void)drop_trailer_locked(g_events_fd, trailer_at);
-        }
-        synced = true;
-      }
+      hrr_eof_record rec = hrr_make_eof_record(
+          g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
+      write_all_fd(g_events_fd, &rec, sizeof(rec));
       g_events_finalized = true;
     }
     g_buf_busy.clear(std::memory_order_release);
   }
   // After a space stop there is no descriptor, and on Windows _commit(-1) calls
   // the CRT invalid parameter handler, which ends the process by default.
-  if (g_events_fd >= 0 && !synced && HRR_FSYNC(g_events_fd) != 0)
-    g_events_io_failed.store(true, std::memory_order_relaxed);
+  if (g_events_fd >= 0) HRR_FSYNC(g_events_fd);
 
   // Best-effort manifest via raw open/write only. A clean shutdown writes
-  // complete:true (the trailer is present) unless the capture is incomplete or
-  // events.bin failed; a crash writes complete:false — its absence-of-trailer
-  // is how the reader detects truncation.
+  // complete:true (the trailer is present); a crash writes complete:false — its
+  // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
   // Concurrent crash callbacks must not share the emergency buffer. A second
   // entrant skips the manifest.
   if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
-  bool complete = clean_shutdown && locked &&
-                  !g_events_io_failed.load(std::memory_order_relaxed) &&
-                  !g_capture_incomplete.load(std::memory_order_relaxed);
+  bool complete = clean_shutdown && locked;
   int mfd = HRR_OPEN(g_manifest_path);
   if (mfd < 0) {
     g_emergency_manifest_busy.clear(std::memory_order_release);
