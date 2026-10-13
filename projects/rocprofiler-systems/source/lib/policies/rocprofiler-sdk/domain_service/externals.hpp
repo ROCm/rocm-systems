@@ -255,6 +255,7 @@ concept externals =
     requires(std::string_view text, Externals::region_sample sample,
              Externals::rocm_hip_api_category hip_category) {
         { Externals::is_active() } -> std::convertible_to<bool>;
+        { Externals::is_finalized() } -> std::convertible_to<bool>;
         { Externals::get_use_timemory() } -> std::convertible_to<bool>;
         { Externals::tracing_push_timemory(hip_category, text) };
         { Externals::tracing_pop_timemory(hip_category, text) };

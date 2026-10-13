@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/defines.h"
+#include "common/static_object.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/control/clocks/timeline.hpp"
@@ -19,9 +20,12 @@
 #include "library/tracing/annotation.hpp"
 #include <cstdint>
 
+#include <algorithm>
 #include <charconv>
 #include <concepts>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <system_error>
 #include <thread>
@@ -110,10 +114,16 @@ struct thread_metadata_source
     // Reads the current thread's system_value and registers its metadata
     std::uint64_t resolve_current_thread() const
     {
+        return resolve_thread(std::this_thread::get_id());
+    }
+
+    // Like resolve_current_thread(), but for a given thread id rather than the caller's.
+    // Lets the finalizing thread resolve the owner of orphaned regions it is draining
+    std::uint64_t resolve_thread(std::thread::id tid) const
+    {
         std::uint64_t thread_id = 0;
 
-        const auto& extended_info =
-            rocprofsys::thread_info::get(std::this_thread::get_id());
+        const auto& extended_info = rocprofsys::thread_info::get(tid);
         if(extended_info.has_value() && extended_info->index_data.has_value())
         {
             constexpr size_t UNKNOWN_TIME = 0;
@@ -141,9 +151,55 @@ struct real_region_policy
 template <typename Policy = real_region_policy>
 struct category_region
 {
+    // Global directory of every thread's category_region instance, so finalization can
+    // drain threads other than the caller. Never destroyed so the thread-local handles
+    // that deregister at process exit can never touch a freed registry
+    struct registry_t
+    {
+        std::vector<category_region*> instances = {};
+        std::mutex                    mutex;
+
+        static registry_t& instance()
+        {
+            // registry_t is used as the context type so that every translation unit
+            // including this header shares a single registry
+            static auto*& registry =
+                common::static_object<registry_t, registry_t>::construct(
+                    common::do_not_destroy{});
+            return *registry;
+        }
+    };
+
+    // Registers the owning thread's instance on first use and removes it on thread exit
+    struct registry_handle_t
+    {
+        explicit registry_handle_t(category_region* owner)
+        : self{ owner }
+        {
+            auto&                       registry = registry_t::instance();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            registry.instances.push_back(self);
+        }
+
+        ~registry_handle_t()
+        {
+            auto&                       registry = registry_t::instance();
+            std::lock_guard<std::mutex> lock{ registry.mutex };
+            std::erase(registry.instances, self);
+        }
+
+        registry_handle_t(const registry_handle_t&)            = delete;
+        registry_handle_t& operator=(const registry_handle_t&) = delete;
+
+        category_region* self = nullptr;
+    };
+
     static category_region& instance()
     {
         thread_local category_region inst;
+        // Registers this thread's instance so a cross-thread finalization flush can reach
+        // it, and removes it again when the thread exits
+        thread_local registry_handle_t handle{ &inst };
         return inst;
     }
 
@@ -363,7 +419,11 @@ struct category_region
     void cache_start(const char* name, std::string_view category,
                      std::string args_str = {})
     {
-        const auto start_ts = clock_.now();
+        const auto                  start_ts = clock_.now();
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        // Record the owning thread's std::thread::id at push time in case no end is
+        // received
+        owner_tid_ = std::this_thread::get_id();
         map_name_to_args[entry_key{ .name = name, .category = std::string{ category } }]
             .push_back(pending_cache_entry{ start_ts, std::move(args_str) });
     }
@@ -376,6 +436,7 @@ struct category_region
             return;
         }
 
+        std::lock_guard<std::mutex> lock{ mutex_ };
         auto const key = entry_key{ .name = name, .category = std::string{ category } };
         auto const itr = map_name_to_args.find(key);
         if(itr != map_name_to_args.end() && !itr->second.empty())
@@ -402,6 +463,7 @@ struct category_region
 
     void cache_stop(const char* name, std::string_view category)
     {
+        std::lock_guard<std::mutex> lock{ mutex_ };
         const entry_key key{ .name = name, .category = std::string{ category } };
         auto const      x = map_name_to_args.find(key);
         if(x != map_name_to_args.end() && !x->second.empty())
@@ -428,8 +490,9 @@ struct category_region
     /// never popped still produce one region per outstanding push.
     void flush_pending_cached_entries()
     {
-        const auto          end_ts    = clock_.now();
-        const std::uint64_t thread_id = thread_meta_.resolve_current_thread();
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        const auto                  end_ts    = clock_.now();
+        const std::uint64_t         thread_id = thread_meta_.resolve_current_thread();
 
         for(const auto& [key, entry_stack] : map_name_to_args)
         {
@@ -442,6 +505,24 @@ struct category_region
         map_name_to_args.clear();
     }
 
+    /// Drains every registered thread's outstanding frames during finalization. Each
+    /// orphaned push is emitted with a synthetic end timestamp and tagged "[incomplete]"
+    /// (excluding the main thread's program-entry frame, which is open by design).
+    static void flush_all_pending_cached_entries()
+    {
+        const auto end_ts = typename Policy::clock_type{}.now();
+
+        auto&                       registry = registry_t::instance();
+        std::lock_guard<std::mutex> lock{ registry.mutex };
+        for(auto* instance : registry.instances)
+        {
+            if(instance != nullptr)
+            {
+                instance->flush_pending_incomplete(end_ts);
+            }
+        }
+    }
+
 private:
     void cache_region(std::uint64_t thread_id, const std::string& name,
                       std::uint64_t start_ts, std::uint64_t end_ts,
@@ -451,10 +532,37 @@ private:
                            args_str.c_str());
     }
 
+    // Emits this thread's outstanding frames with the "[incomplete]" suffix. May run from
+    // a different (finalizing) thread, so it resolves the owner from the std::thread::id
+    // captured in cache_start() (not the current thread) and guards the map with mutex_
+    void flush_pending_incomplete(timestamp_t end_ts)
+    {
+        static constexpr std::string_view incomplete_suffix{ "incomplete" };
+        const auto&                       exe_name = rocprofsys::config::get_exe_name();
+
+        std::lock_guard<std::mutex> lock{ mutex_ };
+        const std::uint64_t         thread_id = thread_meta_.resolve_thread(owner_tid_);
+
+        for(const auto& [key, entry_stack] : map_name_to_args)
+        {
+            const auto name = (key.name == exe_name)
+                                  ? key.name
+                                  : fmt::format("{} [{}]", key.name, incomplete_suffix);
+            for(const auto& entry : entry_stack)
+            {
+                cache_region(thread_id, name, entry.start_ts, end_ts, key.category,
+                             entry.args);
+            }
+        }
+        map_name_to_args.clear();
+    }
+
     Policy::clock_type                                    clock_{};
     Policy::region_sink_type                              sink_{};
     Policy::thread_metadata_type                          thread_meta_{};
     std::map<entry_key, std::vector<pending_cache_entry>> map_name_to_args;
+    std::mutex                                            mutex_;
+    std::thread::id                                       owner_tid_{};
 };
 
 }  // namespace rocprofsys::utility
