@@ -1472,13 +1472,30 @@ void VirtualGPU::ringQueueDoorbell(uint64_t index) {
 
 // ================================================================================================
 AqlSlotReservation VirtualGPU::ReserveAqlSlots(size_t packet_count) {
-  assert(packet_count > 0);
+  const uint64_t capacity = gpu_queue_->size - 1;
+  assert(packet_count > 0 && packet_count <= capacity);
   assert(largest_aql_barrier_bit_slot_ != nullptr);
 
-  const uint64_t barrier_bit_slot_before_reservation =
-      largest_aql_barrier_bit_slot_->load(std::memory_order_acquire);
-  const uint64_t start_slot = Hsa::queue_add_write_index_screlease(gpu_queue_, packet_count);
-  return {start_slot, packet_count, barrier_bit_slot_before_reservation};
+  uint64_t write_index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+  while (true) {
+    if (write_index + packet_count - cached_read_dispatch_id_ > capacity) {
+      // Load the read index before the write index so the pair never shows read > write.
+      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      write_index = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+      if (write_index + packet_count - cached_read_dispatch_id_ > capacity) {
+        amd::Os::yield();
+        continue;
+      }
+    }
+    const uint64_t barrier_bit_slot_before_reservation =
+        largest_aql_barrier_bit_slot_->load(std::memory_order_acquire);
+    const uint64_t observed_write_index = Hsa::queue_cas_write_index_screlease(
+        gpu_queue_, write_index, write_index + packet_count);
+    if (observed_write_index == write_index) {
+      return {write_index, packet_count, barrier_bit_slot_before_reservation};
+    }
+    write_index = observed_write_index;
+  }
 }
 
 // ================================================================================================
@@ -1526,7 +1543,6 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
                                           bool blocking, bool attach_signal) {
   const uint32_t queueSize = gpu_queue_->size;
   const uint32_t queueMask = queueSize - 1;
-  const uint32_t sw_queue_size = queueMask;
 
   const bool header_requested_barrier = (header & kBarrierBit) != 0;
   AqlSlotReservation reservation = ReserveAqlSlots(1);
@@ -1555,11 +1571,8 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
     }
   }
 
-  // Make sure the slot is free for usage
-  WaitForQueueSlot(index, sw_queue_size);
-
   // Add blocking command if the original value of read index was behind of the queue size.
-  // Note: direct dispatch relies on the slot stall above to keep the forward progress
+  // Note: direct dispatch relies on the slot stall in ReserveAqlSlots to keep the forward progress
   // of the app if a dispatched kernel requires some CPU input for completion
   if (blocking) {
     if (packet->completion_signal.handle == 0) {
@@ -1802,17 +1815,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
 
   const bool use_movdir64b = use_movdir64b_;
-  // Reserve ALL slots with a single wptr bump, then submit in kPeriod-sized chunks.
-  // Per-chunk: yield if the queue is full (handles graphs larger than the queue), then
-  // memcpy + per-packet fixups + headers + doorbell.  For graphs that fit in the queue
-  // the yield never fires.
-  AqlSlotReservation reservation = ReserveAqlSlots(numPackets);
-  const uint64_t startIndex = reservation.start_slot;
-  if (firstHeaderRequestedBarrier) {
-    OptimizeStreamOrderingBarrier(firstHeader, reservation);
-  }
-
-  CompleteAqlSubmission(reservation);
   setFenceDirty(true);
 
   // Update cached fence state from the last packet's release scope.
@@ -1827,7 +1829,8 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  const size_t kPeriod = DEBUG_HIP_GRAPH_BATCH_SIZE;
+  // A chunk is reserved whole, so it can never exceed the ring capacity.
+  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, sw_queue_size);
   // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
   // copying only kLead packets instead of a full kPeriod, then double the chunk
   // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
@@ -1836,8 +1839,6 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // the previous chunk; jumping from kLead straight to kPeriod lets the GPU drain
   // the lead and idle until the full kPeriod chunk is published.
   constexpr size_t kLead = 8;
-  auto* first_loc = reinterpret_cast<uint32_t*>(
-      queueBase + (startIndex & queueMask) * kPacketSize);
 
   // A pre-patched packet already carries the completion signal ApplyHwEventPatches
   // wrote, so it never goes through ActiveSignal and nothing has registered it with
@@ -2002,17 +2003,27 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
   };
 
-  size_t chunk_size = kLead;
+  // Slots are reserved one chunk at a time, and only once the ring can hold the whole chunk.
+  // Reserving the full batch up front lets the write index lead the read index by a full
+  // ring or more, which the CP cannot tell apart from an empty queue.
+  uint64_t lastIndex = 0;
+  size_t chunk_size = std::min(kLead, kPeriod);
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
     const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
 
-    // Yield until this chunk's physical slots are free.
-    WaitForQueueSlot(startIndex + chunkEnd - 1, sw_queue_size);
+    AqlSlotReservation reservation = ReserveAqlSlots(thisChunk);
+    const uint64_t chunkFirstIndex = reservation.start_slot;
+    const uint64_t chunkLastIndex = chunkFirstIndex + thisChunk - 1;
+    if (isFirstChunk && firstHeaderRequestedBarrier) {
+      OptimizeStreamOrderingBarrier(firstHeader, reservation);
+    }
+    CompleteAqlSubmission(reservation);
+    lastIndex = chunkLastIndex;
 
-    const size_t chunkSlot = (startIndex + chunkStart) & queueMask;
+    const size_t chunkSlot = chunkFirstIndex & queueMask;
 
     // Publish Bodies with invalid headers for NT store only. MOVDIR64B may not need this
     if (!use_movdir64b) {
@@ -2038,7 +2049,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     if (flatMetadataData != nullptr && metadata_preloader_.HasMetadataQueue()) {
       auto* metaBase = static_cast<uint8_t*>(metadata_preloader_.GetQueueBase());
       for (size_t j = 0; j < thisChunk; ++j) {
-        const uint64_t slot = (startIndex + chunkStart + j) & queueMask;
+        const uint64_t slot = (chunkFirstIndex + j) & queueMask;
         writeMetadataPacketToRing(metaBase + slot * kMetaPktSize,
                                   flatMetadataData->data() + (chunkStart + j) * kMetaPktSize,
                                   use_movdir64b);
@@ -2050,7 +2061,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       // Non-temporal publish: signals patched in place, then armed headers
       // Attach signal to the last packet when requested (before per-packet logging).
       auto* lastSlotPtr = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-          queueBase + ((startIndex + chunkEnd - 1) & queueMask) * kPacketSize);
+          queueBase + (chunkLastIndex & queueMask) * kPacketSize);
       if (isLastChunk && (attach_signal || blocking) && timestamp_ == nullptr) {
         lastSlotPtr->completion_signal = Barriers().ActiveSignal();
       }
@@ -2058,7 +2069,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       // Per-packet fixups: profiling signals, kernel-name printing, inline barrier logging.
       if (timestamp_ != nullptr || needKernelNamesReported || needBarriersReported || kLogBatch) {
         for (size_t i = chunkStart; i < chunkEnd; ++i) {
-          const uint64_t slotIdx = (startIndex + i) & queueMask;
+          const uint64_t slotIdx = (chunkFirstIndex + (i - chunkStart)) & queueMask;
           auto* slot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
               queueBase + slotIdx * kPacketSize);
           ProfilingSignal* packetSignal = nullptr;
@@ -2079,7 +2090,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       // GPU sees a fully-committed batch before starting (AQL protocol). Subsequent chunks
       // write in forward order — packet 0 is already committed.
       for (size_t i = (isFirstChunk ? 1 : chunkStart); i < chunkEnd; ++i) {
-        const uint64_t idx = startIndex + i;
+        const uint64_t idx = chunkFirstIndex + (i - chunkStart);
         auto* aql_loc =
             reinterpret_cast<uint32_t*>(queueBase + (idx & queueMask) * kPacketSize);
         const uint32_t dword = validFullHeaders[i];
@@ -2087,6 +2098,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
         packet_store_release(aql_loc, hdr, static_cast<uint16_t>(dword >> 16));
       }
       if (isFirstChunk) {
+        auto* first_loc = reinterpret_cast<uint32_t*>(queueBase + chunkSlot * kPacketSize);
         packet_store_release(first_loc, firstHeader, firstSetup);
       }
     } else {
@@ -2094,11 +2106,11 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       // sfence orders the preceding metadata MOVDIR64B writes (WC-ordered) so they
       // are globally visible before any dispatch packet becomes visible to the CP.
       // Every reserved slot already carries an INVALID header from the CP's previous
-      // consumption (guaranteed by WaitForQueueSlot), so publish order is irrelevant —
+      // consumption (guaranteed by ReserveAqlSlots), so publish order is irrelevant —
       // the CP stalls on any not-yet-written slot — and no packet-0-last dance is needed.
       amd::nontemporalStoreFence();
       for (size_t i = chunkStart; i < chunkEnd; ++i) {
-        const uint64_t slotIdx = (startIndex + i) & queueMask;
+        const uint64_t slotIdx = (chunkFirstIndex + (i - chunkStart)) & queueMask;
         alignas(64) hsa_kernel_dispatch_packet_t stg;
         std::memcpy(&stg, flatPacketData.data() + i * kPacketSize, kPacketSize);
         ProfilingSignal* packetSignal =
@@ -2118,9 +2130,9 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     if (doorbell_ptr_) {
-      amd::ringDoorbell(doorbell_ptr_, startIndex + chunkEnd - 1);
+      amd::ringDoorbell(doorbell_ptr_, chunkLastIndex);
     } else {
-      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, startIndex + chunkEnd - 1);
+      Hsa::signal_store_screlease(gpu_queue_->doorbell_signal, chunkLastIndex);
     }
 
     chunkStart = chunkEnd;
@@ -2130,7 +2142,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   SetStateFlag(kHasPendingDispatch);
 
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
-      queueBase + ((startIndex + numPackets - 1) & queueMask) * kPacketSize);
+      queueBase + (lastIndex & queueMask) * kPacketSize);
 
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
@@ -2138,7 +2150,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     ClearStateFlag(kHasPendingDispatch);
   }
 
-  TrackQueueProgress(*finalLastSlot, startIndex + numPackets - 1, pre_patched);
+  TrackQueueProgress(*finalLastSlot, lastIndex, pre_patched);
 
   if (blocking) {
     LogInfo("Running serialized as blocking is requested");
@@ -2228,7 +2240,6 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
     setFenceDirty(false);
   }
 
-  WaitForQueueSlot(index, queueMask);
   hsa_barrier_and_packet_t* aql_loc =
       &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
 
@@ -2311,7 +2322,6 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
 
   TrackQueueProgress(barrier_value_packet_, index, external_signal);
 
-  WaitForQueueSlot(index, queueMask);
   hsa_amd_barrier_value_packet_t* aql_loc = &(reinterpret_cast<hsa_amd_barrier_value_packet_t*>(
       gpu_queue_->base_address))[index & queueMask];
   writePacketToRingBuffer(aql_loc, &barrier_value_packet_, packetHeader, rest, index & queueMask);
