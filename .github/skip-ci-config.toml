@@ -45,9 +45,6 @@ common = [
 
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
-
-    # WSL support files (should these still be excluded?)
-    "projects/rocr-runtime/libhsakmt/src/dxg/*",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)

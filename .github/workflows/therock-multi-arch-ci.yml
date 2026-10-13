@@ -105,7 +105,6 @@ jobs:
     outputs:
       changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
-      skip_tests: ${{ steps.configure-pr.outputs.skip_tests || steps.configure-manual.outputs.skip_tests }}
       test_type: ${{ steps.configure-pr.outputs.test_type || steps.configure-manual.outputs.test_type }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
@@ -156,7 +155,6 @@ jobs:
         run: |
           echo "changed_projects=" >> "${GITHUB_OUTPUT}"
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
-          echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
           echo "test_type=quick" >> "${GITHUB_OUTPUT}"
 
       # Map the changed projects to the minimal allowlist of TheRock build
@@ -230,8 +228,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.linux_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
     with:
@@ -256,8 +253,7 @@ jobs:
     if: >-
       ${{
         needs.setup.outputs.windows_build_config != '' &&
-        needs.setup.outputs.enable_build_jobs == 'true' &&
-        needs.configure.outputs.skip_tests != 'true'
+        needs.setup.outputs.enable_build_jobs == 'true'
       }}
     uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
     with:
