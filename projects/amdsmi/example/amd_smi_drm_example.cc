@@ -1363,7 +1363,6 @@ int main() {
       // Get temperature measurements
       // amdsmi_temperature_t edge_temp, hotspot_temp, vram_temp,
       // plx_temp;
-      // Zero-initialized: entries stay unset (and unread) when a type is NOT_SUPPORTED.
       int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1] = {};
       amdsmi_temperature_type_t temp_types[4] = {
           AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
