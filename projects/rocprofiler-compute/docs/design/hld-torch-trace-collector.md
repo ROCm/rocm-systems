@@ -83,9 +83,9 @@ backend remains a trailing marker token, and profile preserves the Function
 cell unchanged.
 
 The wire syntax and storage contract are detailed in the
-[low-level design](lld-torch-trace-collector.md). Consumers of the earlier
-stacked labels need the one-level parser; the collector does not translate
-between those formats.
+[low-level design](lld-torch-trace-collector.md). The collector does not
+translate stacked labels. A stacked Function first token (`:#` or `@`)
+makes analyze exit during parse.
 
 ## Analysis path
 
