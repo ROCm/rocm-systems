@@ -259,7 +259,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_DYNINST "Build dyninst from subm
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_ELFUTILS "Build elfutils from submodule"
     OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Build libiberty from submodule"
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBIBERTY "Always download and build libiberty instead of using the system one"
     OFF
 )
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_LIBUNWIND
