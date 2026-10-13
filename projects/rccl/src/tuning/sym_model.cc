@@ -52,6 +52,21 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
 
+// A call forced NaN hands to the Simple Tma kernels leaves its NaN kernels out wherever one of those
+// survives and the buffers are registered as it needs, rather than racing it on predicted time.
+static bool rcclSymkNanYieldsToRegisteredTma(struct ncclTuningInput_t* const inputs, uint32_t tuning_kmask,
+                                             uint32_t valid_kmask) {
+  uint32_t tunable = (uint32_t)(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+  if ((tuning_kmask & ncclSymkNanKernelMask()) == 0 || (valid_kmask & tunable & ncclSymkTmaKernelMask()) == 0)
+    return false;
+  bool sendReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendRegRecvNonreg;
+  bool recvReg = inputs->winRegType == ncclSymSendRegRecvReg || inputs->winRegType == ncclSymSendNonregRecvReg;
+  bool regOk = inputs->func == ncclFuncAllGather     ? recvReg :
+               inputs->func == ncclFuncReduceScatter ? sendReg :
+                                                       sendReg && recvReg;
+  return regOk && rcclSymkNanYieldsToTma(inputs->comm, inputs->func, inputs->datatype, inputs->countMax);
+}
+
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
   struct ncclComm* comm = inputs->comm;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
@@ -116,7 +131,8 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+  if (rcclSymkNanYieldsToRegisteredTma(inputs, tuning_kmask, valid_kmask) ||
+      rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

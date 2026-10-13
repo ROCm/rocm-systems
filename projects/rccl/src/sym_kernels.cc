@@ -191,6 +191,10 @@ bool ncclSymkTmaForced(struct ncclComm* comm) {
 // 1 always TDM where available, -1 (default) whichever the tuner predicts faster.
 RCCL_PARAM(SymNanEnable, "SYM_NAN_ENABLE", 1);
 RCCL_PARAM(SymNanTdm, "SYM_NAN_TDM", -1);
+// RCCL_SYM_NAN_SIMPLE_TMA=1 hands forced NaN calls from rcclSymkNanTmaMinBytes() up to the Simple Tma
+// kernels, which are faster there but order ranks by barriers instead of the sentinel. They run only
+// with NCCL_SYM_TMA_ENABLE=1 and buffers registered as they need; the NaN kernels keep the call otherwise.
+RCCL_PARAM(SymNanSimpleTma, "SYM_NAN_SIMPLE_TMA", 0);
 
 // Readiness is "no dword is all-ones", which only these types guarantee. Keep in sync with nan_tys
 // in src/device/symmetric/generate.py.
@@ -205,6 +209,30 @@ static bool rcclSymkNanTdmAvailable(struct ncclComm* comm) {
   (void)comm;
   return false;
 #endif
+}
+
+// Where the Simple Tma kernels overtake the NaN kernels, from sweeps on 4 gfx1250 ranks.
+// ReduceScatter's and AllGather's are bus bytes since their counts are per rank. On 2-byte types
+// Simple Tma ReduceScatter at best ties the NaN kernel.
+static size_t rcclSymkNanTmaMinBytes(ncclFunc_t coll, ncclDataType_t ty) {
+  switch (coll) {
+  case ncclFuncAllReduce:
+    return size_t(36) << 20;
+  case ncclFuncAllGather:
+    return size_t(48) << 20;
+  case ncclFuncReduceScatter:
+    return ncclTypeSize(ty) == 4 ? size_t(16) << 20 : SIZE_MAX;
+  default:
+    return SIZE_MAX;
+  }
+}
+
+bool rcclSymkNanYieldsToTma(struct ncclComm* comm, ncclFunc_t coll, ncclDataType_t ty, size_t nElts) {
+  if (!rcclParamSymNanSimpleTma() || !comm->symkState.hasNanScratch || !ncclSymkTmaAvailable(comm)) return false;
+  if (!rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, ty) || !rcclNanProtoFunc(coll) || !rcclSymkNanDtype(ty))
+    return false;
+  size_t nBusBytes = (coll == ncclFuncAllReduce ? 1 : comm->nRanks) * nElts * ncclTypeSize(ty);
+  return nBusBytes >= rcclSymkNanTmaMinBytes(coll, ty);
 }
 
 static constexpr size_t ncclSymkRsGinDefaultChunkBytes = 128 << 10;
@@ -455,8 +483,10 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   if (!hasLDMC) kmask &= ~kernelMask_LDMC;
 
   // [RCCL] Forced NaN takes only the NaN-flag kernels, and nothing else takes them. A NaN dtype they
-  // do not serve (f64) is left to the NaN DDA and ring kernels.
+  // do not serve (f64) is left to the NaN DDA and ring kernels. A call handed to the Simple Tma
+  // kernels keeps those too, and the tuner drops the NaN kernels where the buffers let them run.
   if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, ty) && rcclNanProtoFunc(coll)) {
+    uint32_t tmaMask = rcclSymkNanYieldsToTma(comm, coll, ty, nElts) ? kmask & kernelMask_Tma : 0;
     kmask &= kernelMask_NaN;
     if (!comm->symkState.hasNanScratch || !rcclSymkNanDtype(ty)) kmask = 0;
     // Their element counts and indices are 32-bit.
@@ -466,6 +496,7 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
     } else if (rcclParamSymNanTdm() == 1) {
       kmask &= kernelMask_NaNTdm;
     }
+    kmask |= tmaMask;
   } else {
     kmask &= ~kernelMask_NaN;
   }
