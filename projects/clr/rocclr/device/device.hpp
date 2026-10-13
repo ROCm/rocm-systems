@@ -2264,7 +2264,11 @@ class Device : public RuntimeObject {
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  //! batched allocates all events together, which is slower to create; use it for sets that are
+  //! pooled and reused. A device that keeps graph signals in device memory batches regardless.
+  virtual bool CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+    return false;
+  }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   //! Re-arm already-allocated HW event signals so they can be reused by a new

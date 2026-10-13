@@ -2726,7 +2726,8 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
   if (sync_plan_.num_hw_events > 0) {
     const bool ok = recycle
         ? signalManager_->AcquireSet(device, sync_plan_.num_hw_events, segment_hw_events)
-        : device->CreateHwEvents(sync_plan_.num_hw_events, segment_hw_events);
+        : device->CreateHwEvents(sync_plan_.num_hw_events, /*batched=*/false,
+                                 segment_hw_events);
     if (!ok) {
       if (out_status != nullptr) {
         *out_status = hipErrorOutOfMemory;
@@ -3530,7 +3531,7 @@ bool GraphSignalManager::Prepopulate(amd::Device* device, int count, int num_set
   // would grow the pool without bound across re-instantiations.
   for (int i = static_cast<int>(pool.size()); i < num_sets; ++i) {
     std::vector<void*> set;
-    if (!device->CreateHwEvents(count, set)) {
+    if (!device->CreateHwEvents(count, /*batched=*/true, set)) {
       return false;
     }
     pool.push_back(std::move(set));
@@ -3558,7 +3559,7 @@ bool GraphSignalManager::AcquireSet(amd::Device* device, int count,
 
   // Fallback only: more launches in flight than pre-created sets. Create one
   // (armed to 1 by CreateHwEvents); it joins the pool when released.
-  return device->CreateHwEvents(count, out_set);
+  return device->CreateHwEvents(count, /*batched=*/true, out_set);
 }
 
 void GraphSignalManager::ReleaseSet(amd::Device* device, std::vector<void*>& set) {
