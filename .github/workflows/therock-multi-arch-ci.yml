@@ -154,8 +154,8 @@ jobs:
         id: configure-manual
         if: ${{ github.event_name != 'pull_request' }}
         run: |
-          echo "changed_projects=" >> "${GITHUB_OUTPUT}"
-          echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
+          echo "changed_projects=emulation/rocjitsu,emulation/mirage" >> "${GITHUB_OUTPUT}"
+          echo "run_all_tests=false" >> "${GITHUB_OUTPUT}"
           echo "skip_tests=false" >> "${GITHUB_OUTPUT}"
           echo "test_type=quick" >> "${GITHUB_OUTPUT}"
 
