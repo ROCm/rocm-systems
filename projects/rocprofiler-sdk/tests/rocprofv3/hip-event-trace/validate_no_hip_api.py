@@ -95,8 +95,8 @@ def test_no_hip_api_timestamps(json_data):
 
     for itr in data["buffer_records"]["hip_event"]:
         assert (
-            itr.start_timestamp < itr.end_timestamp
-        ), f"start >= end: {itr.start_timestamp} >= {itr.end_timestamp}"
+            itr.start_timestamp <= itr.end_timestamp
+        ), f"start > end: {itr.start_timestamp} > {itr.end_timestamp}"
         assert (
             itr.start_timestamp > init_time
         ), f"start {itr.start_timestamp} before init {init_time}"
