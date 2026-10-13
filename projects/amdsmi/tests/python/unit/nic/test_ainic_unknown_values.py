@@ -14,7 +14,7 @@ _U16_MAX = 0xFFFF
 _U32_MAX = 0xFFFFFFFF
 
 
-def _detail(bus, numa, port):
+def _detail(bus, numa, port, driver=None):
     """Return amdsmi_get_ainic_info_detail() output for a NIC with one port."""
     handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
 
@@ -36,7 +36,7 @@ def _detail(bus, numa, port):
         amdsmi.amdsmi_wrapper,
         amdsmi_get_nic_asic_info=_filled({}),
         amdsmi_get_nic_bus_info=_filled(bus),
-        amdsmi_get_nic_driver_info=_filled({}),
+        amdsmi_get_nic_driver_info=_filled(driver or {}),
         amdsmi_get_nic_numa_info=_filled(numa),
         amdsmi_get_nic_port_info=_one_port,
         amdsmi_get_nic_rdma_dev_info=_filled({}),
@@ -100,3 +100,10 @@ class TestAinicUnknownValues(unittest.TestCase):
                 "ACTIVE_FEC": "8",
             },
         )
+
+    def test_fw_fields_do_not_repeat_the_driver(self):
+        info = _detail(
+            bus={}, numa={}, port={}, driver={"name": b"ionic", "version": b"25.12.15.001"}
+        )
+        self.assertEqual(info["DRIVER"], {"NAME": "ionic", "VERSION": "25.12.15.001"})
+        self.assertEqual(info["FW"], {"FW_0": "N/A", "FW_HEARTBEAT": "N/A"})

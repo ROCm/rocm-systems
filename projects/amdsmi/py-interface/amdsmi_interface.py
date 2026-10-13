@@ -2553,10 +2553,8 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "NODE": _validate_if_max_uint(ainic_info_struct.numa.node, MaxUIntegerTypes.UINT8_T),
             "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8"),
         },
-        "FW": {
-            "FW_0": ainic_info_struct.driver.name.decode("utf-8"),
-            "FW_HEARTBEAT": ainic_info_struct.driver.version.decode("utf-8"),
-        },
+        # AI NIC firmware details are not collected yet.
+        "FW": {"FW_0": "N/A", "FW_HEARTBEAT": "N/A"},
         "PORTS": {},
         "RDMA_DEVICES": {},
     }

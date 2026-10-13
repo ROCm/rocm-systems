@@ -184,6 +184,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi static --json` printing nothing when AI NICs are selected with `-N`**.  
   - It now prints the same `nic_data` JSON that `amd-smi static --json` prints without `-N`.
 
+- **Fixed AMD AI NIC firmware fields showing the driver name and version**.  
+  - `FW_0` and `FW_HEARTBEAT` in `amd-smi static` and the Python interface now show `N/A`. The NIC firmware version is available as `FW_VER` under `RDMA_DEVICES`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
