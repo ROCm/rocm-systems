@@ -195,6 +195,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` answered `AMDSMI_STATUS_UNEXPECTED_DATA` on APUs such as gfx1103, which also left PLX temperature and the `amd-smi metric` output empty. These devices now return the values they provide with everything else marked N/A, and a metrics version amd-smi cannot read reports `AMDSMI_STATUS_NOT_SUPPORTED`.
 
+- **Fixed `amdsmi_init()` printing a scsi_host error on kernels built without SCSI support**.  
+  - With no `/sys/class/scsi_host` (`CONFIG_SCSI` unset), every init wrote `Failed to open scsi_host root directory ...: No such file or directory` to stderr although init succeeded. A missing scsi_host class now just means there are no switches to discover.
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.
