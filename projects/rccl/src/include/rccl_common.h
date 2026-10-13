@@ -351,8 +351,10 @@ size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
-// Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
-// lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
+// This rank's DDA VMM AllReduce / ReduceScatter block count: maxBlocks, lowered on
+// large comms per rcclArchThresholds::ddaVmmBlockBudget. Fabric init min-reduces it across the clique.
+int rcclDdaFabricLocalVmmBlocks(const ncclComm* comm, int maxBlocks);
+// Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the clique-agreed count from fabric init.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,

@@ -316,7 +316,7 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// rccl-UnitTestsMicro compiles ENABLE_LL128, as production librccl does; the #else arm covers a build that omits it.
+// rccl-UnitTestsMicro compiles ENABLE_LL128, as production librccl does, so no micro target builds the #else arm.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -5279,7 +5279,7 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
       });
 }
 
-// VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
+// Local VMM blocks: clamp(2048 / nRanks, 32, 128), never above the init cap; small comms,
 // no budget or no table keep the init cap.
 TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
   RUN_ISOLATED_TEST(
@@ -5288,20 +5288,37 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
         rcclArchThresholds table = MakeRankScaledTable();
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = &table;
-        comm->ddaFabricMaxBlocks = 192;
         const std::pair<int, int> cases[] = {{4, 192}, {8, 128}, {16, 128}, {32, 64}, {64, 32}, {128, 32}};
         for (const auto& c : cases) {
           comm->nRanks = c.first;
-          EXPECT_EQ(c.second, rcclDdaFabricVmmBlocks(comm)) << c.first;
+          EXPECT_EQ(c.second, rcclDdaFabricLocalVmmBlocks(comm, 192)) << c.first;
         }
         comm->nRanks = 8;
-        comm->ddaFabricMaxBlocks = 48;
-        EXPECT_EQ(48, rcclDdaFabricVmmBlocks(comm)) << "init cap still bounds it";
-        comm->ddaFabricMaxBlocks = 192;
+        EXPECT_EQ(48, rcclDdaFabricLocalVmmBlocks(comm, 48)) << "init cap still bounds it";
         table.ddaVmmBlockBudget = 0;
-        EXPECT_EQ(192, rcclDdaFabricVmmBlocks(comm));
+        EXPECT_EQ(192, rcclDdaFabricLocalVmmBlocks(comm, 192));
         comm->archThresholds = nullptr;
-        EXPECT_EQ(192, rcclDdaFabricVmmBlocks(comm));
+        EXPECT_EQ(192, rcclDdaFabricLocalVmmBlocks(comm, 192));
+        EXPECT_EQ(0, rcclDdaFabricLocalVmmBlocks(nullptr, 192));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The launch count is the clique-agreed value fabric init stored, not this rank's table or env.
+TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_LaunchUsesAgreedCount) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricVmmBlocks_LaunchUsesAgreedCount",
+      []() {
+        // This rank ignores the table (the param caches on first read), so it alone would launch 192.
+        g_loadParam = ForceParam("RCCL_IGNORE_ARCH_TABLE", int64_t(1));
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = Gfx1250Table();
+        comm->nRanks = 32;
+        comm->ddaFabricMaxBlocks = 192;
+        comm->ddaFabricVmmBlocks = 64;
+        ASSERT_EQ(192, rcclDdaFabricLocalVmmBlocks(comm, comm->ddaFabricMaxBlocks));
+        EXPECT_EQ(64, rcclDdaFabricVmmBlocks(comm));
+        EXPECT_EQ(0, rcclDdaFabricVmmBlocks(nullptr));
         DeleteCommWithArch(comm);
       });
 }
@@ -5657,11 +5674,13 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithmThenProtocol_Gfx1250AllRedu
 }
 
 namespace {
-int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank, int nc = 192) {
+int CappedChannels(ncclComm* comm, ncclFunc_t func, int proto, size_t perRank, int nc = 192,
+                   ncclDataType_t dt = ncclFloat32) {
   ncclTaskColl info{};
   info.func = func;
   info.algorithm = NCCL_ALGO_RING;
   info.protocol = proto;
+  info.datatype = dt;
   rcclUpdateCollectiveChannels(comm, perRank * (size_t)comm->nRanks, &info, nc);
   return nc;
 }
@@ -5689,6 +5708,29 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_ReduceScatterSimpleBand) {
         DeleteCommWithArch(comm);
         comm = MakeTuningComm(16, "gfx950");
         EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB)) << "gfx950";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The band starts at the datatype's LL128 edge: 1-byte types hold LL128 to 32 MiB per rank, so their band is empty.
+TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_BandStartsAtDatatypeLL128Edge) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveChannels_BandStartsAtDatatypeLL128Edge",
+      []() {
+        ncclComm* comm = MakeTuningComm(16);
+        for (ncclDataType_t dt : {ncclFloat8e4m3, ncclFloat8e5m2, ncclInt8}) {
+          EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB + 16, 192, dt)) << dt;
+          EXPECT_EQ(192, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB, 192, dt)) << dt;
+        }
+        for (ncclDataType_t dt : {ncclBfloat16, ncclFloat16, ncclFloat32}) {
+          EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 8 * kMiB + 16, 192, dt)) << dt;
+          EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB, 192, dt)) << dt;
+        }
+        // Without a 1-byte edge, 1-byte types share the 2/4-byte band.
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.rsRingLL128MaxPerRank1B = 0;
+        comm->archThresholds = &table;
+        EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB, 192, ncclFloat8e4m3));
         DeleteCommWithArch(comm);
       });
 }

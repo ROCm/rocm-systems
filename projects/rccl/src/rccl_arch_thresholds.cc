@@ -226,7 +226,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
   .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
   .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
-  .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024, // 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
+  // 128 channels beat 192 by 1.1-1.3x in (8M, 32M] for 2/4-byte types; fp8 stays on LL128 there, so its band is empty.
+  .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,
   .rsRingSimpleCappedChannels = 128,
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).

@@ -3303,6 +3303,7 @@ void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
     comm.ddaPeerPtrsDev        = reinterpret_cast<void*>(0x4);
     comm.ddaScratchBytes       = std::numeric_limits<size_t>::max();
     comm.ddaFabricMaxBlocks    = DDA_FABRIC_MAXBLOCKS;
+    comm.ddaFabricVmmBlocks    = rcclDdaFabricLocalVmmBlocks(&comm, DDA_FABRIC_MAXBLOCKS);
     comm.ddaFabricBarrierState =
         reinterpret_cast<nccl_dda_detail::DdaFabricBarrierState*>(0x5);
     comm.ddaLLEpochDev         = reinterpret_cast<uint32_t*>(0x6);

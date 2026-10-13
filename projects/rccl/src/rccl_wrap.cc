@@ -189,6 +189,14 @@ static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, 
   return t;
 }
 
+// Top of the arch table's ReduceScatter Ring LL128 band for this datatype, per rank.
+static size_t rcclRsRingLL128MaxPerRank(const rcclArchThresholds* t, ncclDataType_t datatype) {
+  if (ncclTypeSize(datatype) == 1 && t->rsRingLL128MaxPerRank1B != 0) {
+    return t->rsRingLL128MaxPerRank1B;
+  }
+  return t->rsRingLL128MaxPerRank;
+}
+
 // Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
 static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
                                 uint64_t& ll128Min, uint64_t& ll128Max) {
@@ -205,8 +213,7 @@ static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTa
   } else if (info->func == ncclFuncReduceScatter && t->rsRingLL128MaxPerRank != 0) {
     // The table's band replaces the model's outright (it is narrower at the bottom).
     ll128Min = t->rsRingLL128MinPerRank;
-    ll128Max = (ncclTypeSize(info->datatype) == 1 && t->rsRingLL128MaxPerRank1B != 0) ? t->rsRingLL128MaxPerRank1B
-                                                                                      : t->rsRingLL128MaxPerRank;
+    ll128Max = rcclRsRingLL128MaxPerRank(t, info->datatype);
   }
 }
 
@@ -369,8 +376,9 @@ void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const st
   if (t->rsRingSimpleCappedChannels < comm->config.minCTAs) {
     return;
   }
-  const size_t perRank = nBytes / (size_t)comm->nRanks;
-  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank) {
+  // The capped band starts where this datatype's LL128 band ends.
+  const size_t perRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+  if (perRank > rcclRsRingLL128MaxPerRank(t, info->datatype) && perRank <= t->rsRingSimpleCappedMaxPerRank) {
     nc = std::min(nc, t->rsRingSimpleCappedChannels);
   }
 }
@@ -1125,18 +1133,21 @@ inline bool rcclDdaArVmmFirstTab(const rcclArchThresholds* table, int nRanks, si
   return msgBytes > table->ddaArVmmFirstMinBytes && msgBytes <= (size_t)nRanks * table->ddaArVmmFirstMaxPerRank;
 }
 
-int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
+int rcclDdaFabricLocalVmmBlocks(const ncclComm* comm, int maxBlocks) {
   if (comm == nullptr) {
     return 0;
   }
-  const int cap = comm->ddaFabricMaxBlocks;
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (!rcclDdaRankScaled(table, comm->nRanks) || table->ddaVmmBlockBudget <= 0) {
-    return cap;
+    return maxBlocks;
   }
   const int want =
     std::min(table->ddaVmmMaxBlocks, std::max(table->ddaVmmMinBlocks, table->ddaVmmBlockBudget / comm->nRanks));
-  return std::min(cap, want);
+  return std::min(maxBlocks, want);
+}
+
+int rcclDdaFabricVmmBlocks(const ncclComm* comm) {
+  return comm != nullptr ? comm->ddaFabricVmmBlocks : 0;
 }
 
 // Widest window any enabled DDA tier can serve for this collective. The entry

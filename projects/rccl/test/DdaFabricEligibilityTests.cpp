@@ -1261,15 +1261,19 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_CeilingFromArchTable)
         mockComm_.get(), sendbuff_, recvbuff_, 16777248, ncclFloat32, ncclSum));
 }
 
-// The VMM AllReduce launch uses the rank-scaled block count: 128 blocks at 8 ranks and
-// 64 at 32 for a message large enough to fill every block, from a 256-block init cap.
+// The rank-scaled VMM block count is 128 blocks at 8 ranks and 64 at 32 from a 256-block init cap,
+// and the AllReduce launch uses the clique-agreed count stored at init for a message that fills every block.
 TEST_F(DdaFabricEligibilityTest, AllReduceVmm_BlocksFollowRankBudget)
 {
     const size_t count = 64u * 1024u * 1024u;  // 256 MiB of float32
-    ASSERT_GE(mockComm_.comm.ddaFabricMaxBlocks, 128);
+    const int maxBlocks = mockComm_.comm.ddaFabricMaxBlocks;
+    ASSERT_GE(maxBlocks, 128);
     mockComm_.comm.nRanks = 8;
+    EXPECT_EQ(rcclDdaFabricLocalVmmBlocks(mockComm_.get(), maxBlocks), 128);
     EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 128u);
     mockComm_.comm.nRanks = 32;
+    EXPECT_EQ(rcclDdaFabricLocalVmmBlocks(mockComm_.get(), maxBlocks), 64);
+    mockComm_.comm.ddaFabricVmmBlocks = 64;
     EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 64u);
 }
 

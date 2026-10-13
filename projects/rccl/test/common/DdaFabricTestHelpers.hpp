@@ -13,6 +13,7 @@
 #include "comm.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
@@ -36,6 +37,8 @@ struct DdaFabricMockComm
         comm.ddaScratchBytes    = std::numeric_limits<size_t>::max();
         comm.ddaFabricMaxBlocks = DDA_FABRIC_MAXBLOCKS;
         comm.archName            = const_cast<char*>("gfx1250");
+        // Fabric init stores this clique-agreed count; one rank agrees with itself.
+        comm.ddaFabricVmmBlocks = rcclDdaFabricLocalVmmBlocks(&comm, DDA_FABRIC_MAXBLOCKS);
         setFabricResourcesPresent(true);
     }
 
