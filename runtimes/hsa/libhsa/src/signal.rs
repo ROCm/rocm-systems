@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use crate::platform::event::{SignalEvent, SignalEventPage, create_signal_event};
 use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
-use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -52,13 +52,13 @@ fn system_frequency() -> u64 {
         return cached;
     }
     let retained = lock().ok().and_then(|guard| {
-        guard.as_ref().and_then(|runtime| {
-            let gpu = runtime.gpus.first()?;
-            let token = runtime.inflight.enter()?;
-            Some((gpu.device.clone(), token))
-        })
+        let generation = guard.active_generation()?;
+        let runtime = guard.as_ref()?;
+        let gpu = runtime.gpus.first()?;
+        let token = runtime.inflight.enter()?;
+        Some((gpu.device.clone(), generation, token))
     });
-    let Some((device, _call)) = retained else {
+    let Some((device, generation, _call)) = retained else {
         return 0;
     };
     let frequency = device
@@ -69,16 +69,12 @@ fn system_frequency() -> u64 {
     if frequency == 0 {
         return 0;
     }
-    // Shutdown can clear the cache while the ioctl runs. Publish only for
-    // the same active native VM, while holding the registry lock.
+    // Shutdown can clear the cache while the ioctl runs. Publish only while
+    // the runtime generation that started the query is still active.
     let Ok(guard) = lock() else {
         return 0;
     };
-    if guard
-        .as_ref()
-        .and_then(|runtime| runtime.gpus.first())
-        .is_some_and(|gpu| gpu.device.shares_address_domain(&device))
-    {
+    if guard.active_generation() == Some(generation) {
         SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
         frequency
     } else {

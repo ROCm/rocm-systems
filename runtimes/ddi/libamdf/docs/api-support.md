@@ -6,8 +6,9 @@
 This map describes the implementation in this tree. Hardware results are
 recorded separately in the [validation record](../tests/README.md).
 
-The [vendored headers](../../../api-headers/README.md) synchronized from
-`hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d` define the sole public contract.
+The [vendored headers](../../../api-headers/README.md), based on
+`hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d` with local pre-beta
+API changes, define the sole public contract.
 This page records implementation support; it does not define another ABI or
 promise every service described by those headers. The libamdf frontend translates
 the ABI to private rocddi Rust types and its private platform `Driver`.
@@ -32,7 +33,7 @@ symbol compatibility adapter is required.
 | Slots | Current behavior and limits | Implementation |
 |---|---|---|
 | `query_extension` | GPU v1 negotiated independently; unknown/XDNA extension unsupported. | [lib.rs](../src/lib.rs) |
-| `instance_create`, `instance_destroy` | Explicit callback allocator and driver context lifetime policy; inert creation. Both PROCESS and INSTANCE requests work for CPU services. An inherited instance rejects work before touching callbacks, files, or locks. KFD shutdown disables only an owned runtime before closing its file; failed shutdown preserves retry ownership. | [instance.rs](../src/instance.rs) |
+| `instance_create`, `instance_destroy` | Explicit driver context lifetime policy; inert creation. Both PROCESS and INSTANCE requests work for CPU services. An inherited instance rejects work before touching files or locks. KFD shutdown disables only an owned runtime before closing its file; failed shutdown preserves retry ownership. | [instance.rs](../src/instance.rs) |
 | `endpoint_enumerate`, `endpoint_open`, `endpoint_query_info`, `endpoint_close`, `endpoint_query_queue_family_info` | Passive Linux KFD discovery and cached GPU/family facts. Opening does not activate a device. Endpoint info includes the Linux DRM major/minor identity for inter-provider correlation. Family facts include the exact native queue encoding feature mask. Endpoint IDs describe discovery identities, not native file descriptors. | [instance.rs](../src/instance.rs) |
 | `device_destroy` | Explicit teardown with queue-child BUSY checks. Memory dependencies are caller-enforced, as the header requires. | [instance.rs](../src/instance.rs) |
 | `instance_enumerate_memory_scopes`, `device_enumerate_memory_scopes`, `memory_scope_query_info` | Instance SYSTEM scope and live-device enumeration of endpoint-owned LOCAL scopes where storage is reported. | [memory.rs](../src/memory.rs) |
@@ -78,10 +79,10 @@ before later GPU allocation and queue work. Queue creation rechecks admission;
 runtime disable precedes KFD close and is retryable after failure. Native
 `EBUSY` or `EEXIST` admission leaves the runtime unowned and close does not
 disable it. An ambiguous activation result blocks replay and requires cleanup.
-The native backend rejects inherited work before touching its allocator
-callbacks, filesystem state, or locks that may have been held across `fork`.
-Callback allocation failure must leave no partially published object. There is
-no global allocator selector, task scheduler, journal, pool cache, or allocation
+The native backend rejects inherited work before touching filesystem state or
+locks that may have been held across `fork`. Metadata allocation failure must
+leave no partially published object. There is no global allocator selector,
+task scheduler, journal, pool cache, or allocation
 registry for general allocations; the instance has a cold list only for
 recognizing its own SYSTEM host views during registration. The HSA runtime is a
 peer under `hsa/libhsa/`. HIP,

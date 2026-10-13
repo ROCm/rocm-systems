@@ -75,6 +75,34 @@ target_compile_definitions(
 target_link_libraries(rdc_diag_kernel_tests PRIVATE GTest::gtest_main pthread)
 add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
 
+# rdc_client_tests: standalone (client) mode as rdci uses it. rdc_connect()
+# dlopens librdc_client.so (gRPC); needs no GPU and no rdcd. Built only when the
+# client library is.
+if(TARGET rdc_client)
+    add_executable(rdc_client_tests ${SRC_DIR}/test_client_shutdown.cc)
+    target_include_directories(rdc_client_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(
+        rdc_client_tests
+        PRIVATE rdc_bootstrap GTest::gtest_main pthread ${CMAKE_DL_LIBS}
+    )
+    add_dependencies(rdc_client_tests rdc_client)
+    set_target_properties(
+        rdc_client_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+    )
+    add_test(NAME rdc_client_tests COMMAND rdc_client_tests)
+    # librdc_bootstrap dlopens librdc_client.so by name; find it in the build tree.
+    set_tests_properties(
+        rdc_client_tests
+        PROPERTIES ENVIRONMENT "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rdc_client>"
+    )
+    install(
+        TARGETS rdc_client_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+endif()
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
