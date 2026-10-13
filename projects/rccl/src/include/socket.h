@@ -150,7 +150,11 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock);
 ncclResult_t ncclSocketReady(struct ncclSocket* sock, int* running);
 // Accept an incoming connection from listenSock->socketDescriptor and keep the file descriptor in
 // sock->socketDescriptor, with the remote side IP/port in sock->addr.
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retry = true);
+// [RCCL] deadlineNs bounds the wait for a peer to show up, on the clockNano() clock. 0 waits indefinitely,
+// which is upstream's behaviour and what every caller but the destroy barrier wants. On expiry the socket is
+// left untouched and ncclRemoteError is returned, so the caller can retry or give up.
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* ulistenSock, bool retry = true,
+                              int64_t deadlineNs = 0);
 ncclResult_t ncclSocketGetFd(struct ncclSocket* sock, ncclSocketDescriptor* socketDescriptor);
 ncclResult_t ncclSocketSetFd(ncclSocketDescriptor socketDescriptor, struct ncclSocket* sock);
 

@@ -12,6 +12,8 @@
 #include <cstdint>
 #include <functional>
 
+#include <vector>
+
 #include "nccl.h"
 
 struct ncclBootstrapHandle;
@@ -29,6 +31,19 @@ extern std::function<ncclResult_t(uint64_t /*commHash*/, struct ncclComm* /*comm
 extern std::function<ncclResult_t(struct ncclBootstrapHandle* /*handle*/, bool /*idFromEnv*/)> g_bootstrapCreateRoot;
 
 extern bool g_bootstrapNetInitFail;
+
+// commDestroySync()'s bounded host-local rendezvous. Records what the caller asked for so a test can assert the
+// membership and the timeout, and can script an expiry.
+struct BootstrapIntraNodeBarrierCall {
+  int  calls       = 0;
+  int  rank        = -1;
+  int  nranks      = -1;
+  int  tag         = -1;
+  int64_t timeoutMsec = -1;
+  std::vector<int> ranks;
+};
+extern BootstrapIntraNodeBarrierCall g_bootstrapIntraNodeBarrierCall;
+extern ncclResult_t g_bootstrapIntraNodeBarrierResult;
 
 // A std::function, not a result code: tests must write the allgathered (color, key) table into allData.
 extern std::function<ncclResult_t(void* /*commState*/, void* /*allData*/, int /*size*/)> g_bootstrapAllGather;

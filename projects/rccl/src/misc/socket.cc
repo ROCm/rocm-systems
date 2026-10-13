@@ -484,8 +484,9 @@ ncclResult_t ncclSocketConnect(struct ncclSocket* sock) {
   }
 }
 
-ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
+ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry, int64_t deadlineNs) {
   ncclResult_t ret = ncclSuccess;
+  bool timedOut = false;
 
   if (listenSock == NULL || sock == NULL) {
     WARN("ncclSocketAccept: pass NULL socket");
@@ -515,11 +516,23 @@ ncclResult_t ncclSocketAccept(struct ncclSocket* sock, struct ncclSocket* listen
       sock->state = ncclSocketStateAccepting;
       if (!retry) break;
     }
+    // [RCCL] Only a caller that passed a deadline can time out; everyone else keeps upstream's unbounded spin.
+    if (deadlineNs != 0 && clockNano() > deadlineNs) {
+      timedOut = true;
+      break;
+    }
   } while (sock->asyncFlag == 0 &&
            (sock->abortFlag == NULL || COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire) == 0) &&
            (sock->state == ncclSocketStateAccepting || sock->state == ncclSocketStateAccepted));
 
   if (sock->abortFlag && COMPILER_ATOMIC_LOAD(sock->abortFlag, std::memory_order_acquire)) return ncclInternalError;
+
+  // [RCCL] Must precede the switch: it maps a still-Accepting socket to ncclSuccess for the asyncFlag callers,
+  // so falling through would report a peer that never arrived as a completed accept.
+  if (timedOut) {
+    ret = ncclRemoteError;
+    goto exit;
+  }
 
   switch (sock->state) {
   case ncclSocketStateAccepting:

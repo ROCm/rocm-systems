@@ -74,6 +74,19 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
 
 ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
 
+BootstrapIntraNodeBarrierCall g_bootstrapIntraNodeBarrierCall;
+ncclResult_t g_bootstrapIntraNodeBarrierResult = ncclSuccess;
+ncclResult_t bootstrapIntraNodeBarrierTimeout(void*, int* ranks, int rank, int nranks, int tag, int64_t timeoutMsec) {
+  BootstrapIntraNodeBarrierCall& rec = g_bootstrapIntraNodeBarrierCall;
+  rec.calls++;
+  rec.rank = rank;
+  rec.nranks = nranks;
+  rec.tag = tag;
+  rec.timeoutMsec = timeoutMsec;
+  rec.ranks.assign(ranks, ranks + (nranks > 0 ? nranks : 0));
+  return g_bootstrapIntraNodeBarrierResult;
+}
+
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =
     DefaultBootstrapSplit;

@@ -125,6 +125,8 @@ NCCL_PARAM(GroupCudaStream, "GROUP_CUDA_STREAM", NCCL_GROUP_CUDA_STREAM);
 NCCL_PARAM(CheckPointers, "CHECK_POINTERS", 0);
 NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
+// [RCCL] Deadline for the host-local rendezvous in commDestroySync(). 0 restores upstream's unbounded wait.
+RCCL_PARAM(DestroyBarrierTimeoutMsec, "DESTROY_BARRIER_TIMEOUT_MSEC", 120000);
 // When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
 NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
 // When enabled (default), PAT ReduceScatter and AllGather share one connection set.
@@ -639,7 +641,6 @@ static ncclResult_t commFree(ncclComm_t comm) {
   free(comm->topParentLocalRanks);
   free(comm->gproxyConn);
   free(comm->archName);
-  free(comm->abortExcludedRanks);
 
   NCCLCHECK(ncclRegCleanup(comm));
 
@@ -4226,14 +4227,6 @@ fail:
   goto exit;
 }
 
-// RCCL: true if rank was removed from comm by an NCCL_SHRINK_ABORT, and so still carries a non-zero abortFlag.
-static bool commRankWasAbortExcluded(struct ncclComm* comm, int rank) {
-  for (int i = 0; i < comm->nAbortExcludedRanks; i++) {
-    if (comm->abortExcludedRanks[i] == rank) return true;
-  }
-  return false;
-}
-
 static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -4269,15 +4262,23 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
-    // RCCL: the barrier below is a cross-process rendezvous with no cancellation protocol, so a rank that does not
-    // arrive strands every peer that did, forever (AICOMRCCL-2467 / AICOMRCCL-2468).  Two extra conditions keep that
-    // from happening.  First, only run it when PXN is actually enabled for this comm -- it exists solely to protect
-    // PXN connection establishment, and RCCL (unlike upstream) defaults NCCL_PXN_DISABLE=1, so on most comms it was
-    // pure deadlock risk for no benefit.  ncclPxnDisable() is derived from arch, nRanks and env and is agreed by
-    // construction, which matters here because a barrier some ranks enter and others skip is exactly what hangs.
-    // Second, leave out the ranks an NCCL_SHRINK_ABORT removed from this comm: they keep a non-zero abortFlag and
-    // take the branch below, so they will never arrive.  Every survivor saw the same exclude list and so computes
-    // the same membership and the same root.
+    // RCCL: two changes to the upstream barrier below, both because it is a cross-process rendezvous that upstream
+    // gives no way out of -- a rank that does not arrive strands every peer that did, forever
+    // (AICOMRCCL-2467 / AICOMRCCL-2468).
+    //
+    // 1. Only run it when PXN is actually enabled for this comm.  The barrier exists solely to protect PXN
+    //    connection establishment, and RCCL (unlike upstream) defaults NCCL_PXN_DISABLE=1 and only auto-enables PXN
+    //    at nRanks >= 64 (gfx942) / >= 32 (gfx950), so on the overwhelming majority of comms it was deadlock risk
+    //    protecting nothing.  ncclPxnDisable() is derived from arch, nRanks and env and is therefore agreed by every
+    //    rank by construction, which is what matters here: a barrier some ranks enter and others skip is itself a
+    //    hang.  For the same reason we do not try to vary the membership -- e.g. dropping ranks an
+    //    NCCL_SHRINK_ABORT excluded.  Only the shrink survivors know about that exclusion; the excluded rank still
+    //    holds its own parent handle and would enter the full barrier, so filtering just moves the hang onto it.
+    //
+    // 2. When it does run, bound it.  A peer can fail to arrive for reasons no membership calculation can predict
+    //    (ncclCommAbort elsewhere in the process, a rank that died outright), so the barrier gets a deadline and
+    //    reports an error instead of blocking forever.  Expiry is already non-fatal here: the result is logged and
+    //    teardown continues, which degrades a deadlock into a late PXN connection failure on the peer.
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && ncclPxnDisable(comm) != 1) {
       int* hostRanks;
       int hostRank = 0;
@@ -4288,14 +4289,14 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
       // strictly host-local.
       NCCLCHECKGOTO(ncclCalloc(&hostRanks, comm->localRanks), ret, fail);
       for (int i = 0; i < comm->localRanks; i++) {
-        int const peer = comm->localRankToRank[i];
-        if (comm->peerInfo[peer].hostHash != comm->peerInfo[comm->rank].hostHash) continue;
-        if (peer != comm->rank && commRankWasAbortExcluded(comm, peer)) continue;
-        if (i == comm->localRank) hostRank = nHostRanks;
-        hostRanks[nHostRanks++] = peer;
+        if (comm->peerInfo[comm->localRankToRank[i]].hostHash == comm->peerInfo[comm->rank].hostHash) {
+          if (i == comm->localRank) hostRank = nHostRanks;
+          hostRanks[nHostRanks++] = comm->localRankToRank[i];
+        }
       }
       ncclResult_t barrierRet = ncclSuccess;
-      NCCLCHECKIGNORE(bootstrapIntraNodeBarrier(comm->bootstrap, hostRanks, hostRank, nHostRanks, hostRanks[0]),
+      NCCLCHECKIGNORE(bootstrapIntraNodeBarrierTimeout(comm->bootstrap, hostRanks, hostRank, nHostRanks, hostRanks[0],
+                                                       rcclParamDestroyBarrierTimeoutMsec()),
                       barrierRet);
       if (barrierRet != ncclSuccess) {
         INFO(NCCL_DESTROY, "comm 0x%" PRIx64 " rank %d intranode barrier error %d", comm->commHash, comm->rank,
@@ -4786,17 +4787,6 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
     job->excludeRanksCount = excludeRanksCount;
     NCCLCHECKGOTO(ncclCalloc(&job->excludeRanksList, excludeRanksCount), res, fail);
     memcpy(job->excludeRanksList, excludeRanksList, excludeRanksCount * sizeof(int));
-    // Only NCCL_SHRINK_ABORT leaves behind an excluded rank that will never reach the destroy barrier:
-    // it keeps a non-zero abortFlag and skips it.  Under NCCL_SHRINK_DEFAULT the excluded rank is
-    // healthy and still destroys its parent normally, so it does enter the barrier and must still be
-    // expected there.  Record the aborted ranks so commDestroySync() can leave them out.  Every
-    // survivor sees the same excludeRanksList, so they all derive the same barrier membership.
-    if (flags & NCCL_SHRINK_ABORT) {
-      int const oldCount = comm->nAbortExcludedRanks;
-      NCCLCHECKGOTO(ncclRealloc(&comm->abortExcludedRanks, oldCount, oldCount + excludeRanksCount), res, fail);
-      memcpy(comm->abortExcludedRanks + oldCount, excludeRanksList, excludeRanksCount * sizeof(int));
-      comm->nAbortExcludedRanks = oldCount + excludeRanksCount;
-    }
   } else {
     // each split has to lead to a unique comm, so increment the childCount
     job->childCount = ++comm->childCount;

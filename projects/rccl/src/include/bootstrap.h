@@ -29,9 +29,16 @@ ncclResult_t bootstrapSplit(uint64_t magic, struct ncclComm* comm, struct ncclCo
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size);
 ncclResult_t bootstrapSend(void* commState, int peer, int tag, void* data, int size);
 ncclResult_t bootstrapRecv(void* commState, int peer, int tag, void* data, int size);
+// [RCCL] As bootstrapRecv, but gives up with ncclRemoteError if no peer connects by deadlineNs (clockNano clock).
+// 0 waits indefinitely.
+ncclResult_t bootstrapRecvDeadline(void* commState, int peer, int tag, void* data, int size, int64_t deadlineNs);
 ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag);
 ncclResult_t bootstrapBroadcast(void* commState, int rank, int nranks, int root, void* bcastData, int size);
 ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag);
+// [RCCL] As bootstrapIntraNodeBarrier, but returns ncclRemoteError instead of blocking forever when a host-local
+// peer never arrives. timeoutMsec <= 0 restores the unbounded wait.
+ncclResult_t bootstrapIntraNodeBarrierTimeout(void* commState, int* ranks, int rank, int nranks, int tag,
+                                              int64_t timeoutMsec);
 ncclResult_t bootstrapIntraNodeAllGather(void* commState, int* ranks, int rank, int nranks, void* allData, int size);
 ncclResult_t bootstrapIntraNodeBroadcast(void* commState, int* ranks, int rank, int nranks, int root, void* bcastData,
                                          int size);
