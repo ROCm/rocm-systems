@@ -1,7 +1,7 @@
 # Busy Instruction Pipes
 
-When STALL is the largest wave state, instructions were not accepted by their pipe, usually
-because the unit was busy or its queue full
+When stall holds most of the waves' time, instructions were not accepted by their pipe,
+usually because the unit was busy
 ([stalls.md](stalls.md#stall-the-pipe-did-not-accept-the-instruction)). The class that holds
 the stall names the kind of instruction that stalled (on gfx9, FLAT covers `flat_*`,
 `global_*`, and `scratch_*` instructions, and `flat_*` can reach LDS or memory); `pipes` also
@@ -9,8 +9,9 @@ shows how much of the time each class was issuing.
 
 ## What the trace shows
 
-- `summary`: STALL is the largest wave state, or EXEC once `summary`'s idle between
-  instructions is set apart (the waves spend more time issuing than in any other state).
+- `summary`: in `wave_time`, stall holds the largest share (with the class that holds it in
+  `stall by class`), or issue does (the waves spend more time issuing than waiting,
+  stalling, or idle).
 - `pipes`: one instruction class holds most of the stall (`stall_share`), and `top_stalled`
   names the opcodes that stalled most ([reading-the-trace.md](reading-the-trace.md#commands)
   defines the columns).
@@ -29,11 +30,12 @@ resident and lower it.
 
 - **Near 100%:** vector issue is the likely limit on the traced SIMDs. Fewer or cheaper
   vector instructions are the change most likely to shorten the kernel (time it);
-  scheduling or extra independent work cannot add issue cycles. A high share also results
+  reordering instructions or overlapping more vector work has few idle vector issue cycles
+  left to fill. A high share also results
   when one wave issues while the others wait, for example at a barrier (`barriers`); then
   that wave's serial work, not issue, limits the kernel.
-- **Well below 100%, with STALL still the largest state:** go by the class that holds the
-  stall (above).
+- **Well below 100%, with stall still the largest share of wave time:** go by the class
+  that holds the stall (above).
 - **Well below 100% in any case:** this measures the instructions the kernel uses now. It
   does not show that doing the work with other instructions (for example matrix instead of
   VALU) or another algorithm would not be faster.
@@ -56,6 +58,9 @@ Suggestions, each for a pattern the trace shows:
   instruction, `duration - stall` in the decoded records, which is issue cycles on gfx9 and
   execution cycles on gfx10 and later; [python-api.md](python-api.md)):
   where the result allows, use fewer of them on the hot lines.
+- **Atomic instructions (`global_atomic_*`, `ds_*` atomics) hold the stall:** issue fewer
+  of them, for example by combining updates to the same address in registers or LDS before
+  issuing one atomic for them.
 - **None of these fits, for example a fixed number of matrix instructions:** the trace does
   not settle what would help. Try changes to how the work is divided (work per wave, waves
   per workgroup, the loop structure) and time each one.
@@ -64,5 +69,5 @@ Suggestions, each for a pattern the trace shows:
 
 Capture again: `compare` should show the lines you targeted losing cost, per unit of work
 (it is per wave), and `pipes` should show fewer instructions of that class per wave
-(`per_wave`). The class's `busy_share` falls only if the class was not the limit, and stays
-near 100% if it was, so time the kernel.
+(`per_wave`). The class's `busy_share` stays near 100% while the class is still the limit,
+and falls if it was not the limit or stops being it after the change, so time the kernel.

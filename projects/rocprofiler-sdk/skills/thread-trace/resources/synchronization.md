@@ -1,13 +1,12 @@
-# Barriers and Atomics
+# Barriers
 
-Waves of a workgroup wait for each other at `s_barrier`, and wait instructions after
-atomic instructions that return a value hold the wave until those atomics complete. ATT shows how long each wave spent on these instructions.
+Waves of a workgroup wait for each other at `s_barrier` (on gfx12, which has no `s_barrier`,
+at `s_barrier_signal` and `s_barrier_wait`). ATT shows how long each wave spent there.
 
 ## What the trace shows
 
-- `stats`, `hotspots`, and `lines`: `s_barrier` or the wait instruction right after an
-  atomic that returns a value holds the time (in `wait`), or `global_atomic_*` instructions
-  do (in `stall`).
+- `summary`: in `wave_time`, barrier holds a large share.
+- `stats`, `hotspots`, and `lines`: `s_barrier` holds the time (in `wait`).
 - `barriers`: names, in each workgroup, the wave that spent the least of its time at
   `s_barrier`; when the others spent much more, that wave is often, not always, the one the
   others wait for
@@ -20,7 +19,7 @@ atomic instructions that return a value hold the wave until those atomics comple
   each wave spent at each barrier, and the instructions a wave ran between two barriers.
 - Many barriers per iteration, each costing a little, show in `lines` as several `s_barrier`
   lines with a modest `wait` each; together they show in the `wait_share` of the
-  `barrier (s_barrier)` row of `pipes`, and as part of WAIT in `summary`.
+  `barrier (s_barrier)` row of `pipes`, and as the barrier share of `summary`'s `wave_time`.
 - `hotspots` can rank `s_barrier` low even when barriers hold most of the wave time: the
   work that hides one wave's wait can be the work the others wait for. Read barrier time
   with `summary` and `barriers`.
@@ -34,10 +33,8 @@ Suggestions, each for a pattern the trace shows:
   out of the loop.
 - **Many barriers per iteration, each costing a little:** synchronize less often per unit of
   work: fewer barriers per iteration where correctness allows, or more work per iteration.
-- **Atomic instructions, or the waits after them, hold the time:** issue fewer atomic
-  instructions, for example by combining updates before issuing them.
 
 ## Checking a change
 
-Capture again: `compare` should show the barrier and atomic lines losing cost, and wave
-lifetime should fall for the same work.
+Capture again: `compare` should show the barrier lines losing cost, and wave lifetime
+should fall for the same work.

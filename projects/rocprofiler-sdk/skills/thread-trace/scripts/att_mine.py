@@ -6,15 +6,15 @@ usage: att_mine.py <capture_dir> <command> [--top N] [--json]
 
 commands:
   stats      the stats_*.csv rocprofv3 writes, ranked by instruction and by source line
-             (reads only the CSV; no decoder needed; the CSV names only the innermost
-             source line of inlined code)
-  summary    decoder warnings, waves, the traced dispatch's resources, wave-state split, idle
-             between instructions, active waves
+             (reads only the CSV; no decoder needed)
+  summary    decoder warnings, waves, the traced dispatch's resources, how the waves' time
+             splits into wait, barrier, other immediate, stall, issue, idle, and time outside
+             any instruction (from the instruction records), active waves
   hotspots   instructions ranked by non-hidden cost (latency plus idle, minus hidden), with
              per-hit p50/p90 of cost
   lines      the same ranking grouped by source line, with the number of distinct
              instructions each line ran
-  pipes      per instruction class (VALU, matrix, LDS, memory, waits, ...): issue cycles per
+  pipes      per instruction class (VALU, matrix, LDS, VMEM, FLAT, SMEM, waits, ...): issue cycles per
              instruction (execution cycles on gfx10 and later), share of resident time issuing, and shares of stall and wait
              cycles; the opcodes that stalled most; and how much of the SIMDs' resident time
              VALU instructions (matrix included) were issuing
@@ -34,7 +34,7 @@ s_barrier). barriers estimates workgroups from launch times. For your own querie
 skill's resources/python-api.md.
 
 Needs Python 3.10 or later, pyelftools, llvm-objdump, and the decoder's Python package and
-library, set up as in the skill's resources/capture.md (Setup).
+library, which ship with ROCm (the skill's resources/capture.md, Setup).
 """
 
 from __future__ import annotations
@@ -69,7 +69,8 @@ class Inst:
 
     @property
     def latency(self) -> int:
-        """Stall plus issue cycles: the decoder's duration, which includes the stall."""
+        """The decoder's duration: stall plus issue cycles on gfx9, stall plus execution
+        cycles on gfx10 and later."""
         return self.duration
 
     @property
@@ -88,7 +89,6 @@ class WaveTrace:
     end: int
     contexts: int
     insts: list[Inst] = field(default_factory=list)
-    states: Counter = field(default_factory=Counter)
     dispatch: object = None  # the decoder Dispatch record the wave belongs to, if known
     # Identifies the dispatch across files: rocprofv3 writes one .att file per shader engine,
     # each with its own record of the same dispatch.
@@ -191,8 +191,10 @@ def assign_dispatches(waves: list, dispatches: list, file_key: object = None) ->
         k = bisect.bisect_right(times, w.begin) - 1
         if w.dispatcher is not None:
             queue = [
-                j for j, d in enumerate(ordered)
-                if (d.me_id & 0x7) << 4 | (d.pipe_id & 0xF) == w.dispatcher and times[j] <= w.begin
+                j
+                for j, d in enumerate(ordered)
+                if (d.me_id & 0x7) << 4 | (d.pipe_id & 0xF) == w.dispatcher
+                and times[j] <= w.begin
             ]
             if queue:
                 k = queue[-1]
@@ -209,11 +211,47 @@ def waves_per_workgroup(dispatch, wave_size: int) -> int:
 
 
 def short_source(source: str) -> str:
-    """file:line without directories; for inlined code, the call site in your file first."""
+    """file:line without directories. The decoder writes inlined code as the instruction's
+    line followed by the call sites, innermost first ("h.h:5 -> f.h:12 -> k.hip:9"); this
+    gives the outermost call site first and then the rest of the chain inward, ending with
+    the instruction's line ("k.hip:9 (inlined f.h:12 > h.h:5)")."""
     if not source:
         return "?"
     chain = [part.rsplit("/", 1)[-1] for part in source.split(" -> ")]
-    return chain[-1] if len(chain) == 1 else f"{chain[-1]} (inlined {chain[0]})"
+    if len(chain) == 1:
+        return chain[0]
+    return f"{chain[-1]} (inlined {' > '.join(reversed(chain[:-1]))})"
+
+
+def merge_barrier_pairs(insts: list[Inst]) -> list[Inst]:
+    """One record per executed s_barrier. On gfx9 the decoder records a barrier as two
+    instructions at the same pc: a MESSAGE when the wave reaches it and an IMMED, holding
+    the wait, when it leaves. The pair becomes one IMMED that spans both, so hit counts and
+    per-hit percentiles describe executions; its stall is the sum of the two and its idle
+    that of the first, so the cost is unchanged."""
+    merged: list[Inst] = []
+    for i in insts:
+        prev = merged[-1] if merged else None
+        if (
+            prev is not None
+            and prev.category == "MESSAGE"
+            and prev.pc == i.pc
+            and i.category != "MESSAGE"
+            and prev.text.startswith("s_barrier")
+        ):
+            merged[-1] = Inst(
+                prev.time,
+                i.time + i.duration - prev.time,
+                prev.stall + i.stall,
+                prev.idle,
+                i.category,
+                i.text,
+                i.source,
+                i.pc,
+            )
+        else:
+            merged.append(i)
+    return merged
 
 
 RESOURCES = Path(__file__).resolve().parents[1] / "resources"
@@ -229,7 +267,32 @@ GUARD = (
     "it does not show how the work would run with other instructions or another algorithm. "
     "Time a candidate change rather than ruling it out from the trace."
 )
-ALSO_READ_SHARE = 20.0  # heuristic: a wave state this large also gets its page named
+# heuristic: a kind of wave time this large also gets its page named
+ALSO_READ_SHARE = 20.0
+WAIT, BARRIER, OTHER_IMMED = (
+    "wait (s_waitcnt, s_wait_*)",
+    "barrier (s_barrier)",
+    "other immediate",
+)
+STALL, ISSUE, IDLE = "stall", "issue", "idle between instructions"
+BEFORE_FIRST, AFTER_LAST = "before the first instruction", "after the last instruction"
+NO_INSTRUCTIONS = "waves without instructions"
+# The page for each kind of wave time, and how the next: line names it.
+TIME_PAGES = {
+    WAIT: ("latency.md", "wait instructions (s_waitcnt, s_wait_*) hold"),
+    BARRIER: ("synchronization.md", "s_barrier holds"),
+    OTHER_IMMED: (
+        "stalls.md#per-instruction",
+        "other immediate instructions (such as s_nop) hold",
+    ),
+    STALL: ("compute.md", "stall (instructions their pipe did not accept) holds"),
+    ISSUE: ("compute.md#ceiling-check", "issue holds"),
+    IDLE: ("stalls.md#idle-cycles", "idle between instructions holds"),
+    BEFORE_FIRST: (
+        "stalls.md#before-the-first-instruction",
+        "the time from each wave's start to its first instruction holds",
+    ),
+}
 FEW_WAVES_FRACTION = 0.5  # heuristic: below this fraction of the maximum waves per SIMD
 LAUNCH_SLACK = 8  # cycles per wave within which the waves of one workgroup are launched
 
@@ -270,108 +333,93 @@ def page_lists(page: str) -> str:
     )
 
 
-def wait_page(pipes: dict | None) -> tuple[str, str]:
-    """latency.md for waits on earlier instructions, synchronization.md when s_barrier holds
-    more of the waiting than the wait instructions."""
-    waited = {
-        c["class"]: c.get("wait_share", c.get("stall_share", 0))
-        for c in (pipes or {}).get("classes", [])
-    }
-    if waited.get("barrier (s_barrier)", 0) > waited.get("wait (s_waitcnt, s_wait_*)", 0):
-        return (
-            "synchronization.md",
-            "s_barrier waited longer than the wait instructions; `barriers` shows which wave "
-            "waited least at s_barrier",
-        )
-    return "latency.md", ""
-
-
-def next_read(
-    states: dict,
-    pipes: dict | None = None,
-    idle_share: float = 0.0,
-    waves: dict | None = None,
-) -> str:
-    """Which page of resources/ covers what the trace shows, and why. The decoder counts the
-    idle cycles between a wave's instructions as EXEC; `idle_share` (from `summary`) moves them
-    to IDLE, so that idle before instructions decides as much as the other states. The page for
-    the largest state comes first; WAIT or idle time of at least ALSO_READ_SHARE, and few
-    resident waves (`waves`, from `summary`), add their pages."""
-    if not states:
-        return ""
-    raw_wait = states.get("WAIT", 0)
-    raw_state = max(states, key=states.get)
-    if idle_share:
-        states = dict(states)
-        states["EXEC"] = max(states.get("EXEC", 0) - idle_share, 0)
-        states["IDLE"] = states.get("IDLE", 0) + idle_share
-    state = max(states, key=states.get)
-    # summary prints the states before idle is moved out of EXEC; say so when that changed
-    # which state is largest.
-    basis = (
-        " (with idle between instructions counted apart from EXEC)"
-        if state != raw_state
-        else ""
+def wave_time(waves: list[WaveTrace]) -> dict:
+    """How the traced waves' time splits, from their instruction records, as shares of the
+    waves' summed lifetime: the latency of wait, barrier, and other immediate instructions
+    (the time they waited); the stall of the other instructions, also by class; their issue
+    cycles (execution cycles on gfx10 and later); the idle between instructions; and the time
+    before a wave's first instruction and after its last one. Instruction latencies can
+    overlap, so the shares can add up to a little more than 100."""
+    life = sum(w.lifetime for w in waves)
+    parts: Counter = Counter()
+    stall_by_class: Counter = Counter()
+    for w in waves:
+        if not w.insts:
+            parts[NO_INSTRUCTIONS] += w.lifetime
+            continue
+        parts[BEFORE_FIRST] += max(w.insts[0].time - w.begin, 0)
+        parts[AFTER_LAST] += max(w.end - max(i.time + i.latency for i in w.insts), 0)
+        for k, i in enumerate(w.insts):
+            c = inst_class(i)
+            if c in WAIT_CLASSES:
+                parts[OTHER_IMMED if c == "IMMED" else c] += i.latency
+            else:
+                parts[STALL] += i.stall
+                parts[ISSUE] += max(i.latency - i.stall, 0)
+                stall_by_class[c] += i.stall
+            if k:
+                parts[IDLE] += i.idle
+    share = lambda v: round(100 * v / life, 1) if life else 0.0
+    explained = sum(
+        v
+        for k, v in parts.items()
+        if k not in (BEFORE_FIRST, AFTER_LAST, NO_INSTRUCTIONS)
     )
-    classes = (pipes or {}).get("classes", [])
-    held = {c["class"]: c.get("stall_share", 0) for c in classes}
-    if state == "WAIT":
-        page, detail = wait_page(pipes)
-        why = f"WAIT is the largest wave state{basis}" + (
-            f" and {detail}" if detail else ""
-        )
-    elif state == "IDLE":
-        page, why = (
-            "stalls.md#idle-cycles",
-            "idle time before instructions holds the most wave time",
-        )
-    elif state == "EXEC":
-        page, why = (
-            "compute.md#ceiling-check",
-            f"EXEC is the largest wave state{basis}: the waves spend more time issuing than in "
-            "any other state",
-        )
-    else:
-        page = "compute.md"
-        why = f"{state} is the largest wave state{basis}"
-        busy = [c for c in held if c not in WAIT_CLASSES and c != "MESSAGE" and held[c]]
-        if state == "STALL" and busy:
+    return {
+        "shares": {k: share(v) for k, v in parts.most_common() if share(v)},
+        "stall_by_class": {
+            k: share(v) for k, v in stall_by_class.most_common() if share(v)
+        },
+        "instructions_cover": share(explained),
+    }
+
+
+def next_read(summary: dict, pipes: dict | None = None) -> str:
+    """Which page of resources/ covers what the trace shows, and why, from `summary`'s
+    wave_time: the page for the largest kind of wave time comes first; other kinds of at least
+    ALSO_READ_SHARE, few resident waves, and a busy vector unit add their pages."""
+    time = summary.get("wave_time") or {}
+    shares = {k: v for k, v in (time.get("shares") or {}).items() if k in TIME_PAGES}
+    if not shares:
+        return ""
+    main = max(shares, key=shares.get)
+    page, holds = TIME_PAGES[main]
+    why = f"{holds} {shares[main]}% of wave time, more than any other kind"
+    if main == BARRIER:
+        why += "; `barriers` shows which wave waited least at s_barrier"
+    elif main == ISSUE:
+        why += ": the waves spend more time issuing than waiting, stalling, or idle"
+    elif main == BEFORE_FIRST:
+        why += "; no instruction accounts for it"
+    elif main == STALL:
+        held = time.get("stall_by_class") or {}
+        busy = [c for c in held if c != "MESSAGE"] or list(held)
+        if busy:
             top = max(busy, key=held.get)
             ops = next(
-                (c.get("top_stalled", "") for c in pipes["classes"] if c["class"] == top),
+                (
+                    c.get("top_stalled", "")
+                    for c in (pipes or {}).get("classes", [])
+                    if c["class"] == top
+                ),
                 "",
             )
             why += (
                 f"; {top} instructions hold the largest share of the stall"
                 + (f" (most stalled: {ops})" if ops else "")
-                + ": their pipe did not accept them, usually because the unit was busy or its "
-                "queue full"
+                + ": their pipe did not accept them, usually because the unit was busy"
             )
-    if (
-        pipes
-        and pipes.get("valu_busy", 0) >= VALU_BUSY_ROUTE
-        and state in ("STALL", "EXEC")
-    ):
-        why += (
-            f"; VALU instructions were issuing during {pipes['valu_busy']}% of the SIMDs' "
-            "resident time"
-        )
+    valu_busy = (pipes or {}).get("valu_busy", 0)
+    if valu_busy >= VALU_BUSY_ROUTE and main in (STALL, ISSUE):
+        why += f"; VALU instructions were issuing during {valu_busy}% of the SIMDs' resident time"
         page = "compute.md#ceiling-check"
-    also = []
-    if raw_wait >= ALSO_READ_SHARE and state != "WAIT":
-        also.append((wait_page(pipes)[0], f"WAIT is {raw_wait}% of wave time"))
-    if idle_share >= ALSO_READ_SHARE and state != "IDLE":
-        also.append(
-            (
-                "stalls.md#idle-cycles",
-                f"idle between instructions is {idle_share}% of wave time",
-            )
-        )
-    if (
-        waves
-        and waves.get("max")
-        and waves.get("peak", 0) < FEW_WAVES_FRACTION * waves["max"]
-    ):
+    also = [
+        (TIME_PAGES[k][0], f"{k} is {v}% of wave time")
+        for k, v in sorted(shares.items(), key=lambda kv: -kv[1])
+        if k != main and v >= ALSO_READ_SHARE
+    ]
+    waves = summary.get("waves_per_simd") or {}
+    if waves.get("max") and waves.get("peak", 0) < FEW_WAVES_FRACTION * waves["max"]:
         also.append(
             (
                 "latency.md#few-waves",
@@ -379,19 +427,15 @@ def next_read(
                 f"{waves['max']}",
             )
         )
-    if (
-        pipes
-        and pipes.get("valu_busy", 0) >= VALU_BUSY_ROUTE
-        and state not in ("STALL", "EXEC")
-    ):
+    if valu_busy >= VALU_BUSY_ROUTE and main not in (STALL, ISSUE):
         also.append(
             (
                 "compute.md#ceiling-check",
-                f"VALU instructions were issuing during {pipes['valu_busy']}% of the SIMDs' "
-                "resident time",
+                f"VALU instructions were issuing during {valu_busy}% of the SIMDs' resident time",
             )
         )
-    also = [(p, w) for p, w in also if p != page]
+    seen = {page}
+    also = [(p, w) for p, w in also if not (p in seen or seen.add(p))]
     text = f"{why}. Before changing the kernel, read {page_ref(page)}{page_lists(page)}"
     same = [(p, w) for p, w in also if p.partition("#")[0] == page.partition("#")[0]]
     other = [(p, w) for p, w in also if (p, w) not in same]
@@ -415,10 +459,11 @@ def next_read_from_stats(stats: dict) -> str:
             f"`summary` and `pipes` show where the time goes. {GUARD}"
         )
     if op.startswith("s_endpgm"):
-        # The decoder counts the time the wave takes to complete as the idle time of s_endpgm.
+        # An instruction's idle is the gap since the previous instruction ended.
         return (
-            f"{op} holds the most time, as the idle time of the wave completing, which is not "
-            f"a stall; `summary` and `pipes` show where the time goes. {GUARD}"
+            f"{op} holds the most time, as idle before it (the gap after the wave's previous "
+            f"instruction), which is not a stall; `summary` and `pipes` show where the time "
+            f"goes. {GUARD}"
         )
     if rows[0].get("idle", 0) > rows[0].get("latency", 0):
         page, why = (
@@ -477,8 +522,9 @@ class Capture:
                     "the decoder's Python package needs pyelftools: pip install pyelftools"
                 ) from None
             raise SystemExit(
-                f"cannot import rocprof_trace_decoder ({err}); set PYTHONPATH to the "
-                "decoder's python directory (see the skill's resources/capture.md)"
+                f"cannot import rocprof_trace_decoder ({err}); it ships with ROCm under "
+                "<rocm>/lib/python3/site-packages: put that directory on PYTHONPATH (see the "
+                "skill's resources/capture.md, Setup)"
             ) from None
         try:
             from rocprof_trace_decoder import HiddenLatency, analyze_hidden_latency
@@ -524,9 +570,10 @@ class Capture:
             decoder = Decoder()
         except OSError as err:
             raise SystemExit(
-                f"cannot load the decoder library ({err}); set "
-                "ROCPROF_TRACE_DECODER_LIB to librocprof-trace-decoder.so (see the "
-                "skill's resources/capture.md)"
+                f"cannot load the decoder library ({err}); it is looked for in "
+                "$ROCM_PATH/lib and /opt/rocm/lib; for a decoder elsewhere, set "
+                "ROCPROF_TRACE_DECODER_LIB to its librocprof-trace-decoder.so (see the "
+                "skill's resources/capture.md, Setup)"
             ) from None
         with decoder:
             for index, att in enumerate(att_files):
@@ -580,7 +627,7 @@ class Capture:
         return cap
 
     def _wave(self, se: int, w) -> WaveTrace:
-        from rocprof_trace_decoder import InstCategory, WaveStateType
+        from rocprof_trace_decoder import InstCategory
 
         trace = WaveTrace(
             se,
@@ -618,17 +665,12 @@ class Capture:
             )
             prev_end = max(prev_end, i.time + inst.latency)
             trace.insts.append(inst)
-        for state in w.timeline:
-            trace.states[WaveStateType(state.type).name] += state.duration
+        trace.insts = merge_barrier_pairs(trace.insts)
         return trace
 
     # ------------------------------------------------------------------ summary
 
     def summary(self) -> dict:
-        states = Counter()
-        for w in self.waves:
-            states += w.states
-        total_state = sum(states.values()) or 1
         traced = Counter(w.dispatch_key for w in self.waves if w.dispatch is not None)
         main_key = traced.most_common(1)[0][0] if traced else None
         dispatch = next(
@@ -651,20 +693,12 @@ class Capture:
             "waves_with_context_switch": sum(w.contexts != 0 for w in self.waves),
             # Every .att file under the directory is decoded together.
             "dispatches_with_traced_waves": len(traced),
-            # Idle cycles between instructions, which the decoder's wave states count as EXEC
-            # (the idle before a wave's first instruction is its IDLE state).
-            "idle_between_instructions": round(
-                100 * sum(i.idle for w in self.waves for i in w.insts[1:]) / total_state,
-                1,
-            ),
             "warnings": sorted(warnings),
             "unresolved_instructions": self.unresolved,
             "wave_lifetime_median": (
                 statistics.median(w.lifetime for w in self.waves) if self.waves else 0
             ),
-            "wave_states": {
-                k: round(100 * v / total_state, 1) for k, v in states.most_common()
-            },
+            "wave_time": wave_time(self.waves),
             "dispatch": (
                 None
                 if dispatch is None
@@ -1064,8 +1098,9 @@ class Capture:
 def read_stats(path: str | Path, top: int = 15) -> dict:
     """Rank the per-instruction stats_*.csv rocprofv3 writes next to a capture.
 
-    Each row sums over the traced waves: Hitcount executions, Latency cycles (issue plus
-    stall), Stall cycles, and Idle cycles before the instruction. Cost is Latency + Idle.
+    Each row sums over the traced waves: Hitcount executions, Latency cycles (stall plus
+    issue on gfx9, stall plus execution on gfx10 and later), Stall cycles, and Idle cycles
+    before the instruction. Cost is Latency + Idle.
     """
     files = sorted(Path(path).rglob("stats_*.csv"))
     if not files:
@@ -1139,7 +1174,10 @@ def print_rows(rows: list[dict], columns: list[str]) -> None:
         print("(none)")
         return
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) for c in columns}
-    widths = {c: min(w, 60) for c, w in widths.items()}
+    # Source columns carry whole inline chains.
+    widths = {
+        c: min(w, 120 if c in ("source", "line") else 60) for c, w in widths.items()
+    }
     print("  ".join(c.ljust(widths[c]) for c in columns))
     for r in rows:
         print("  ".join(str(r.get(c, ""))[: widths[c]].ljust(widths[c]) for c in columns))
@@ -1203,13 +1241,7 @@ def main() -> int:
     cap = Capture(args.capture)
     hint = ""
     if args.command in ("summary", "pipes", "hotspots", "lines"):
-        summ = cap.summary()
-        hint = next_read(
-            summ["wave_states"],
-            cap.pipes(),
-            summ["idle_between_instructions"],
-            summ["waves_per_simd"],
-        )
+        hint = next_read(cap.summary(), cap.pipes())
     if args.command == "summary":
         result = cap.summary()
         result["next"] = hint
@@ -1259,7 +1291,20 @@ def main() -> int:
         return 0
     if args.command in ("summary", "occupancy"):
         for k, v in result.items():
-            if k != "next":
+            if k == "wave_time":
+                print(
+                    "wave_time (share of the waves' lifetime, from their instructions): "
+                    + ", ".join(f"{name} {share}%" for name, share in v["shares"].items())
+                )
+                if v["stall_by_class"]:
+                    print(
+                        "  stall by class: "
+                        + ", ".join(f"{c} {s}%" for c, s in v["stall_by_class"].items())
+                    )
+                print(
+                    f"  instructions cover {v['instructions_cover']}% of the waves' lifetime"
+                )
+            elif k != "next":
                 print(f"{k}: {v}")
     elif args.command == "pipes":
         print(
@@ -1288,7 +1333,7 @@ def main() -> int:
             "instruction type rather than measured); stall_share: share of the "
             "stall cycles of all classes but wait, barrier, and IMMED, the cycles the pipe did not accept the "
             "class's instructions, usually "
-            "because the unit was busy or its queue full; wait_share: share of the latency of "
+            "because the unit was busy; wait_share: share of the latency of "
             "wait, barrier, and other immediate instructions."
             + (
                 ""  # the next: line below already gives it, or there are no waves

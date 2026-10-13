@@ -16,12 +16,14 @@ which instructions the time went to.
 ## Prerequisites
 
 - rocprofv3 from ROCm 10.0 or later, with thread trace support for your GPU.
-- The rocprof-trace-decoder library and, for `scripts/att_mine.py`, its Python package.
-- The kernel built as you run it (keep its optimization flags, such as `-O3`) plus
-  `-gline-tables-only`, so instructions map to source lines; a debug build (`-O0`) runs
-  different code and timing.
+- The rocprof-trace-decoder library and its Python package both ship with ROCm 10.0 and
+  later.
 
-[capture.md](resources/capture.md#setup) covers each one, including building the decoder.
+[capture.md](resources/capture.md#setup) covers each one. Build the kernel as you run it
+(keep its optimization flags, such as `-O3`; a debug build, `-O0`, runs different code and
+timing). Debug information is optional: ATT works at the instruction level, and `-g` or
+`-gline-tables-only` adds the source line of each instruction
+([capture.md](resources/capture.md#source-lines-optional)).
 
 ## How to use ATT
 
@@ -30,7 +32,9 @@ rocprofv3 --att --kernel-include-regex '<kernel name regex>' -d capture -- ./app
 ```
 
 - Only the first dispatch of each matching kernel is traced. To skip warm-up, run the kernel
-  in a loop and add `--kernel-iteration-range N-N` to trace the Nth dispatch.
+  in a loop and add `--kernel-iteration-range N` to trace the Nth dispatch, or
+  `--kernel-iteration-range N-M` for dispatches N to M (the decoder-based reports pool their
+  waves; `stats` lists each dispatch's CSV rows separately).
 - Use a new directory for each capture, with one kernel in it: `att_mine.py` decodes every
   `.att` file under a directory together, so several kernels from one run are mixed, and a
   second run in the same directory stops it, because each run numbers its code objects
@@ -45,12 +49,13 @@ covers them. A capture can match several rows; read each page that applies.
 
 | What you see | Possible causes | Read |
 | --- | --- | --- |
-| Wait instructions (`s_waitcnt`, or `s_wait_*` on gfx12 and later) hold the time (the `wait` column of `hotspots` and `lines`); WAIT is a large wave state | Latency of memory or LDS instructions not covered by other work, or bandwidth (the trace cannot tell which) | [latency.md](resources/latency.md) |
-| `s_barrier`, `global_atomic_*`, or the waits after atomics that return a value hold the time | Waves reaching a barrier at different times, many barriers, or atomics that take long to complete | [synchronization.md](resources/synchronization.md) |
-| STALL is the largest wave state; VALU, matrix, LDS, or memory instructions hold the stall, or VALU instructions (matrix included) are issuing most of the time | Instructions their pipe did not accept, usually because the unit was busy with earlier instructions or its queue was full | [compute.md](resources/compute.md) |
-| The idle column dominates the top instructions, or `summary`'s idle between instructions is large | A source or destination register dependency (waiting for an earlier result), arbiter loss, or instruction cache misses | [stalls.md](resources/stalls.md#idle-cycles) |
+| Wait instructions (`s_waitcnt`, or `s_wait_*` on gfx12 and later) hold the time: the wait share of `summary`'s `wave_time`, and the `wait` column of `hotspots` and `lines` | Latency of memory or LDS instructions not covered by other work, or bandwidth (the trace cannot tell which) | [latency.md](resources/latency.md) |
+| `s_barrier` holds the time (the barrier share of `wave_time`) | Waves reaching a barrier at different times, or many barriers | [synchronization.md](resources/synchronization.md) |
+| Stall holds the time (`wave_time`, with the class in `stall by class`): VALU, matrix, LDS, or memory instructions, atomics included, or VALU instructions (matrix included) are issuing most of the time | Instructions their pipe did not accept, usually because the unit was busy with earlier instructions | [compute.md](resources/compute.md) |
+| The idle column dominates the top instructions, or idle between instructions is large in `wave_time` | A source or destination register dependency (waiting for an earlier result), arbiter loss, or instruction cache misses | [stalls.md](resources/stalls.md#idle-cycles) |
 | Few waves are resident for most of the kernel (`summary`'s `waves_per_simd` against its `max`) | Registers per wave, LDS per workgroup (which limits how many workgroups fit, so few waves in each leaves few resident), or too few workgroups | [latency.md](resources/latency.md#few-waves) |
-| EXEC is the largest wave state, after `summary`'s idle between instructions is set apart | The waves spend more time issuing than in any other state: more instructions than the work needs, or vector issue near its limit (`pipes`) | [compute.md](resources/compute.md#ceiling-check) |
+| Issue holds the most time in `wave_time` | The waves spend more time issuing than waiting, stalling, or idle: more instructions than the work needs, or vector issue near its limit (`pipes`) | [compute.md](resources/compute.md#ceiling-check) |
+| The time before the waves' first instruction holds the most time in `wave_time` (`instructions_cover` well below 100%) | Short or few waves; no instruction accounts for it | [stalls.md](resources/stalls.md#before-the-first-instruction) |
 
 The trace shows where the time went in the code that ran, not whether a change will help:
 a large stall or wait share does not show that the time cannot be reduced or that a unit is
@@ -62,9 +67,10 @@ it rather than ruling it out.
 
 - For each instruction, summed over the traced waves: how often it ran, its latency, stall,
   and idle cycles ([stalls.md](resources/stalls.md#per-instruction)), and its source line.
-- For each wave: when it started and ended, its time in each state (STALL, WAIT, EXEC, and
-  IDLE; [stalls.md](resources/stalls.md#wave-states)), and its instructions in order with
-  their category (VALU, SALU, SMEM, VMEM, FLAT, LDS, and others).
+- For each wave: when it started and ended, and its instructions in order with their
+  category (VALU, SALU, SMEM, VMEM, FLAT, LDS, and others), from which `summary` splits the
+  waves' time into wait, barrier, other immediate, stall, issue, and idle, plus the time
+  outside any instruction ([stalls.md](resources/stalls.md#wave-time)).
 - How many waves were resident over time, and the dispatch's VGPR allocation per wave and
   LDS per workgroup.
 - An estimate of how many of an instruction's cycles overlapped issue on related
@@ -74,10 +80,10 @@ ATT does not show which threads of a wave were active, the addresses instruction
 cache or HBM traffic, host-side work such as API calls and launch overhead, or interconnect
 traffic, and its per-instruction and per-wave detail covers only the traced compute units
 (the occupancy records can span more). With `--att-consecutive-kernels` it
-records several dispatches, including the gaps between them on the GPU; on gfx9,
-`--att-activity`, or `--att-perfcounters` with `--att-perfcounter-ctrl`, adds SQ counters to the
-trace ([python-api.md](resources/python-api.md#sq-counters-gfx9)). Say so
-when a question needs what the trace lacks.
+records several dispatches, including the gaps between them on the GPU. Markers the kernel
+writes time its phases per iteration
+([python-api.md](resources/python-api.md#phase-markers)). Say so when a question needs what
+the trace lacks.
 
 ## Reading a capture
 
@@ -95,16 +101,18 @@ the lines that hold it, read against the source. Adapt it to the task.
    ([capture.md](resources/capture.md#troubleshooting)).
 3. **Broad: what kind of time it is.** Each command decodes the capture again, which takes
    longer as the trace grows (time the first one to see what each will cost):
-   - `summary`: the share of wave time in EXEC, WAIT, STALL, and IDLE, and the idle time
-     between instructions (may be counted inside EXEC, depending on the architecture);
-   - `pipes`: issue and stall cycles by instruction class (VALU, matrix, LDS, memory,
-     waits, barriers), the opcodes that stalled most, and the ceiling check
+   - `summary`: `wave_time`, the share of the waves' time in wait instructions, barriers,
+     stall (by class), issue, idle between instructions, and before the first instruction,
+     summed from the instruction records;
+   - `pipes`: issue and stall cycles by instruction class (VALU, matrix, LDS, the memory
+     classes VMEM, FLAT, and SMEM, waits, barriers), the opcodes that stalled most, and the ceiling check
      ([compute.md](resources/compute.md#ceiling-check));
    - `lifetime` and `occupancy`: what grows with wave lifetime, and how many waves were
      resident.
 4. **Narrow: where in the source.** `lines` and `hotspots` rank source lines and
-   instructions by the part of their cost that issue on related pipes on the SIMD did not
-   overlap ([stalls.md](resources/stalls.md#hidden-cost)); `stats` ranks the stats CSV; `barriers`
+   instructions by the part of their cost that issue on related pipes on the SIMD (and, on
+   gfx11 and later, memory issue on the other SIMD) did not overlap
+   ([stalls.md](resources/stalls.md#hidden-cost)); `stats` ranks the stats CSV; `barriers`
    shows which wave, by launch order, waited least at `s_barrier` (often, not always, the
    one the others wait for), and in what share of the workgroups (estimated). When no line stands out, the cost is spread over many
    instructions: go back to `pipes`, which shows which classes hold it. When a question is
@@ -128,7 +136,7 @@ the lines that hold it, read against the source. Adapt it to the task.
    earlier trace set aside.
 7. **Report.** Keep it short; state each finding once, in the item it belongs to. Leave out
    the commands you ran and raw cycle and instruction counts. Give the user, in this order:
-   1. the bottleneck: the kind of time (wave states and the instruction class), with the two
+   1. the bottleneck: the kind of time (`wave_time` and the instruction class), with the two
       or three figures that show it;
    2. where: file:line and share, for the lines that hold most of the cost; read each line
       in the source before describing it;
@@ -144,17 +152,17 @@ the lines that hold it, read against the source. Adapt it to the task.
 
 - A high cost on an instruction does not say why: `hotspots` shows how much of it is
   `stall`, `wait` (wait, barrier, and other immediate instructions), and `idle` cycles, the
-  rest being issue cycles (execution on gfx10 and later), and `summary` shows which state
-  the waves were in.
+  rest being issue cycles (execution on gfx10 and later), and `summary`'s `wave_time` shows
+  the same split for the whole kernel.
 - One source line can compile to many instructions, especially a call inlined from a header,
   such as a math function: `insts` in `lines` counts the distinct instructions the line ran,
   and the disassembly shows them. Check it before treating a line as one instruction.
 - Read the disassembly of the captured code object before concluding what an instruction
   belongs to; `hipcc --offload-device-only -S` also writes it to a `.s` file.
-- Inlined code carries two lines: `att_mine.py` prints `kernel.hip:23 (inlined
-  kernel.hip:13)`, where the first is the call site in the kernel and the second the line
-  inside the inlined function. Name both: the cycles are spent on the inner line, and the
-  change may belong at either. `stats` may name only the inner line; `lines` shows both.
+- Inlined code carries its call chain: `att_mine.py` prints `kernel.hip:23 (inlined
+  f.h:12 > g.h:5)`, from the call site in the kernel through each inlined call to the line
+  that ran. Name the lines that matter: the cycles are spent on the last one, and the change
+  may belong at any of them.
 
 ## Reference
 
@@ -162,8 +170,8 @@ the lines that hold it, read against the source. Adapt it to the task.
 | --- | --- |
 | [capture.md](resources/capture.md) | Decoder setup, capture options, output files, troubleshooting |
 | [reading-the-trace.md](resources/reading-the-trace.md) | The stats CSV and every `att_mine.py` command |
-| [python-api.md](resources/python-api.md) | Using the decoder's Python API: decoding a capture, the calls and what they return, the records' fields, worked queries, SQ counters, wall-clock time, and markers written by the kernel |
-| [stalls.md](resources/stalls.md) | What latency, stall, idle, hidden cycles, and wave states mean |
+| [python-api.md](resources/python-api.md) | Using the decoder's Python API: decoding a capture, the calls and what they return, the records' fields, worked queries, and phase markers written by the kernel |
+| [stalls.md](resources/stalls.md) | What latency, stall, idle, hidden cycles, and the split of wave time mean |
 | [latency.md](resources/latency.md) | Waves waiting on earlier memory instructions, and too few waves |
 | [compute.md](resources/compute.md) | Waves stalled: instructions their pipe did not accept |
-| [synchronization.md](resources/synchronization.md) | Waves waiting at barriers and on atomics |
+| [synchronization.md](resources/synchronization.md) | Waves waiting at barriers |

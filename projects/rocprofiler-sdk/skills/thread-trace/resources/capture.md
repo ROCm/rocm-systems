@@ -4,32 +4,27 @@
 
 - rocprofv3 from ROCm 10.0 or later, with thread trace support for your GPU. The
   [supported devices](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-thread-trace.html#supported-devices)
-  table lists the validated architectures and what each supports (counters inside the
-  trace, for example, only on some); treat hardware not listed there as unverified until a
-  capture works.
-- The rocprof-trace-decoder library. Check
-  `ls ${ROCM_PATH:-/opt/rocm}/lib/librocprof-trace-decoder.so*`; if your ROCm does not ship
-  it, build it from rocm-systems:
+  table lists the validated architectures; treat hardware not listed there as unverified
+  until a capture works.
+- The rocprof-trace-decoder library and its Python package, which ship with ROCm 10.0 and
+  later; rocprofv3 and `att_mine.py` find them in ROCm's `lib` directory without setup.
+  Check with `ls ${ROCM_PATH:-/opt/rocm}/lib/librocprof-trace-decoder.so*`. If
+  `import rocprof_trace_decoder` fails, put `${ROCM_PATH:-/opt/rocm}/lib/python3/site-packages`
+  on `PYTHONPATH` (ROCm's environment setup does this). `att_mine.py` also needs Python 3.10
+  or later, `pyelftools` 0.31 or later, and `llvm-objdump` (from ROCm or on `PATH`).
+- A decoder outside ROCm's `lib` directory (one built from
+  `projects/rocprof-trace-decoder` in rocm-systems, for example): always pass its directory
+  to rocprofv3 with `--att-library-path <dir>`, and point `att_mine.py` to it with
+  `ROCPROF_TRACE_DECODER_LIB=<dir>/librocprof-trace-decoder.so`.
 
-```bash
-  git clone --depth 1 https://github.com/ROCm/rocm-systems.git
-  cmake -S rocm-systems/projects/rocprof-trace-decoder -B decoder-build
-  cmake --build decoder-build -j
-  export ROCPROF_TRACE_DECODER_LIB=$PWD/decoder-build/lib/librocprof-trace-decoder.so
-  export PYTHONPATH=$PWD/rocm-systems/projects/rocprof-trace-decoder/python
-```
+### Source lines (optional)
 
-  Pass the library's directory to rocprofv3 with
-  `--att-library-path $PWD/decoder-build/lib`. Some rocprofv3 releases do not honour the
-  `ROCPROF_ATT_LIBRARY_PATH` variable and search the whole filesystem for a decoder instead, so use
-  the option. `ROCPROF_TRACE_DECODER_LIB` and `PYTHONPATH` are for `att_mine.py`, which
-  also needs Python 3.10 or later, `pyelftools` 0.31 or later, and `llvm-objdump` (from ROCm or on
-  `PATH`).
-- The kernel built as you run it, with its optimization flags, plus line tables so
-  instructions map to source lines: add `-gline-tables-only`, which does not change the
-  generated code (`-g` can). Kernels built without line tables are still traced; their
-  instructions then have no source line, and the disassembly of the captured code object
-  places them.
+Build the kernel as you run it, with its optimization flags (a debug build, `-O0`, runs
+different code and timing). ATT works at the instruction level without debug information.
+To map instructions to source lines, add `-g` or `-gline-tables-only` (which emits only
+the line tables). Without either, instructions have no
+source line: `lines` and `compare` group them all under `?`, so read `hotspots` and the
+disassembly of the captured code object instead.
 
 ## Capture
 
@@ -37,7 +32,7 @@ Add these to the command in [SKILL.md](../SKILL.md#how-to-use-att):
 
 | Need | Option |
 | --- | --- |
-| A steady-state dispatch rather than the first | `--kernel-iteration-range N-N` (the Nth dispatch of each matching kernel; the application must launch it at least N times) |
+| A steady-state dispatch rather than the first | `--kernel-iteration-range N` (the Nth dispatch of each matching kernel; the application must launch it at least N times), or `N-M` for dispatches N to M, whose waves the decoder-based reports pool (`stats` lists each dispatch's CSV rows separately) |
 | Several consecutive kernels in one trace | `--att-consecutive-kernels N` |
 | A different compute unit (a WGP on RDNA; default 1) | `--att-target-cu N` |
 | More shader engines (default only the first) | `--att-shader-engine-mask 0x...` |
@@ -71,13 +66,14 @@ numbers them from 1). `summary` reports how many dispatches the traced waves cam
 
 | File | What it holds |
 | --- | --- |
-| `se*_sm*_sl*_wv*.json` | One traced wave, under its `wave` key: `instructions` (`[time, category, stall, duration, line]`, where `line` is the instruction's row in `code.json`), `timeline` (`[state, duration]`), and `waitcnt`: for executed waits, per counter, the earlier memory instructions each required to complete (`[wait line, [[line, 0], ...]]`). rocprofv3 works these out from the wave's instruction sequence, assuming each counter's memory instructions complete in order; scalar and flat memory instructions can complete out of order, so after one, waits on the counters it uses are listed only when they wait for zero, until one does. Only `s_load` and `s_store` count as scalar memory instructions, so in a kernel with others (such as `s_buffer_load`) the list can name the wrong instructions. Waits matched to no instruction are left out, and the list stops at the first instruction rocprofv3 cannot resolve |
+| `se*_sm*_sl*_wv*.json` | One traced wave, under its `wave` key: `instructions` (`[time, category, stall, duration, line]`, where `line` is the instruction's row in `code.json`), `timeline` (`[state, duration]`), and `waitcnt`: for executed waits, per counter, the earlier memory instructions each required to complete (`[wait line, [[line, 0], ...]]`). rocprofv3 works these out from the wave's instruction sequence, assuming each counter's memory instructions complete in order; scalar and flat memory instructions can complete out of order, so after one, waits on the counters it uses are listed only when they wait for zero, until one does. Only `s_load` and `s_store` count as scalar memory instructions, so in a kernel with others (such as `s_buffer_load`) the list can name the wrong instructions. Waits matched to no instruction are left out. Instructions without an address (code object 0, address 0) are skipped, and the list stops, with the warning `Analysis failed!`, at the first instruction whose address is not in the disassembly |
 | `code.json` | The disassembly: one row per instruction with its source line and totals over the traced waves, plus a `; <kernel>` row before each kernel; `header` names the columns |
-| `wstates<k>.json` | How many traced waves were in wave state `k` over time (`time`, `state`); `k` is the state's `WaveStateType` value (1 IDLE, 2 EXEC, 3 WAIT, 4 STALL) |
+| `wstates<k>.json` | How many traced waves were in wave state `k` over time (`time`, `state`); `k` is the state's `WaveStateType` value (1 IDLE, 2 EXEC, 3 WAIT, 4 STALL). `att_mine.py` uses the instruction records instead ([stalls.md](stalls.md#wave-time)) |
 | `occupancy.json` | Wave starts and ends on the traced shader engines (`occupancy_fields` names the fields), dispatches and other trace events per shader engine (`events`), and kernel names by `kernel_id` (`dispatches`) |
 | `filenames.json` | The GPU generation, the requested counter names, and an index of the wave, marker, and other-SIMD files |
 | `source_*`, `snapshots.json` | Copies of the source files the code objects refer to, when they exist on this machine |
-| `shaderdata_*.json`, `se*_perfcounter.json`, `realtime.json`, `other_simd_se*.json` | Markers, SQ counters, clock pairs, and (gfx11 and later) memory instructions (VMEM, FLAT, LDS) issued on the other SIMD, when the capture has them ([python-api.md](python-api.md#counters-wall-clock-time-and-markers)) |
+| `shaderdata_*.json` | Markers the kernel wrote, when it has them ([python-api.md](python-api.md#phase-markers)) |
+| `realtime.json`, `other_simd_se*.json` | Shader clock and reference clock pairs, and (gfx11 and later) memory instructions (VMEM, FLAT, LDS) issued on the other SIMD |
 
 The code objects are also the kernel's ISA: `llvm-objdump -d` the one whose symbols
 include your kernel (`llvm-objdump -t <file> | grep <name>`).
@@ -89,7 +85,7 @@ except the buffer-full warning, which rocprofv3 prints during the capture.
 
 | Symptom | Meaning and remedy |
 | --- | --- |
-| `Data Lost` | The profiler dropped part of the trace because of bandwidth limits. The rest is still decoded, but the totals miss what was dropped. When counters are streamed into the trace, a low `--att-perfcounter-ctrl` can cause it; raise it, or capture without counters. |
+| `Data Lost` | The profiler dropped part of the trace because of bandwidth limits. The rest is still decoded, but the totals miss what was dropped. Trace fewer shader engines or a smaller problem. |
 | `Thread trace buffer full!` (rocprofv3) | The trace buffer filled before the kernel ended. Raise `--att-buffer-size`, or trace a smaller problem that keeps the per-wave work unchanged. |
 | `Wave incomplete` | The trace ended before some waves did; their lifetimes and totals are cut short. A full buffer can show only as this warning and fewer waves than expected. |
 | `Stitch Incomplete` or unresolved instructions | Some trace tokens could not be matched to the disassembly, and instructions that could not be resolved are left out of the per-instruction totals. Check that the capture's code objects belong to the binary that ran. |

@@ -1,22 +1,25 @@
 # Waiting on Memory Instructions
 
-When waves spend most of their time in WAIT and wait instructions (`s_waitcnt`, or
-`s_wait_*` on gfx12 and later) hold the time, the waves are waiting for memory instructions
-they issued earlier.
+When wait instructions (`s_waitcnt`, or `s_wait_*` on gfx12 and later) hold most of the
+waves' time, the waves are waiting for instructions they issued earlier to complete: memory
+and LDS instructions for the memory counters, or other work for waits such as
+`s_wait_expcnt` (exports) and `s_wait_idle`. `hotspots` names the waits that hold the time,
+and each wait's operand names the counters it waits on.
 
 ## What the trace shows
 
-- `summary`: WAIT is the largest wave state. WAIT counts every immediate instruction, so
-  check in `hotspots` that wait instructions, not `s_barrier` or `s_nop`, hold it.
+- `summary`: in `wave_time`, wait holds the largest share (barriers and other immediate
+  instructions are counted apart).
 - `pipes`: the wait class holds most of `wait_share`, and VALU instructions are issuing
   during a small share of the time.
 - `hotspots` and `lines`: wait instructions lead, with most of their cost non-hidden
   (little issue on other pipes overlapped them).
-- `lifetime`: `s_wait` latency holds the largest share of wave lifetime; with many traced
-  waves, a positive slope and r also show that waves that waited longer tended to live longer.
-- The disassembly shows which memory instructions each costly wait follows, and each wave's
-  `waitcnt` list names those rocprofv3 works out it required to complete, assuming in-order
-  completion ([capture.md](capture.md#the-ui_output-directory)). When a wait
+- `lifetime`: `s_wait_latency` (`s_waitcnt` and `s_wait_*`) holds the largest share of wave
+  lifetime; with many traced waves, a positive slope and r also show that waves that waited longer tended to live longer.
+- The disassembly shows which memory instructions each costly wait follows (atomics that
+  return a value count toward the same counters as loads), and each
+  wave's `waitcnt` list names those rocprofv3 works out it required to complete, assuming
+  in-order completion ([capture.md](capture.md#the-ui_output-directory)). When a wait
   comes right after the memory instruction it needs, nothing was scheduled in between; when
   a memory instruction's address comes from an earlier load, each step of the chain waits in
   turn.
@@ -53,5 +56,5 @@ Suggestions, each for a pattern the trace shows:
 
 Capture again and run `att_mine.py <old capture> compare <new capture>`: the wait lines you
 targeted should lose cost, per unit of work (`compare` is per wave, so when a wave now does
-more work, compare kernel times). WAIT's share of wave time can stay high after a real
+more work, compare kernel times). The wait share of wave time can stay high after a real
 improvement, so check the kernel's time.
