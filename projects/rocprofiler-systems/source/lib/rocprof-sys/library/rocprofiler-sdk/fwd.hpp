@@ -10,7 +10,6 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
@@ -61,57 +60,23 @@ using agent_counter_profile_map_t =
     std::unordered_map<rocprofiler_agent_id_t,
                        std::optional<rocprofiler_profile_config_id_t>>;
 
-using counter_id_vec_t = std::vector<rocprofiler_counter_id_t>;
-
-using agent_counter_id_map_t =
-    std::unordered_map<rocprofiler_agent_id_t, counter_id_vec_t>;
-
 using backtrace_operation_map_t =
     std::unordered_map<rocprofiler_callback_tracing_kind_t,
                        std::unordered_set<rocprofiler_tracing_operation_t>>;
 
 struct client_data
 {
-    static constexpr size_t num_buffers  = 1;
-    static constexpr size_t num_contexts = 1;
-
-    using buffer_name_info_t   = rocprofiler::sdk::buffer_name_info_t<std::string_view>;
-    using callback_name_info_t = rocprofiler::sdk::callback_name_info_t<std::string_view>;
-    using buffer_id_vec_t      = std::array<rocprofiler_buffer_id_t, num_buffers>;
-    using context_id_vec_t     = std::array<rocprofiler_context_id_t, num_contexts>;
-    using agent_vec_t          = std::vector<rocprofiler_agent_v0_t>;
-
-    rocprofiler_client_id_t*      client_id                 = nullptr;
-    rocprofiler_client_finalize_t client_fini               = nullptr;
-    rocprofiler_context_id_t      counter_ctx               = { 0 };
-    rocprofiler_buffer_id_t       counter_collection_buffer = { 0 };
-    agent_counter_id_map_t        agent_events;
+    rocprofiler_client_id_t*      client_id   = nullptr;
+    rocprofiler_client_finalize_t client_fini = nullptr;
+    rocprofiler_context_id_t      counter_ctx = { 0 };
     agent_counter_info_map_t      agent_counter_info;
     agent_counter_profile_map_t   agent_counter_profiles;
-    buffer_name_info_t            buffered_tracing_info = {};
-    callback_name_info_t          callback_tracing_info = {};
     backtrace_operation_map_t     backtrace_operations;
 
     void                                   initialize_counter_info();
-    context_id_vec_t                       get_counter_contexts() const;
-    buffer_id_vec_t                        get_buffers() const;
     const rocprofiler_tool_counter_info_t* get_tool_counter_info(
         rocprofiler_agent_id_t _agent_id, rocprofiler_counter_id_t _counter_id) const;
 };
-
-inline client_data::context_id_vec_t
-client_data::get_counter_contexts() const
-{
-    return context_id_vec_t{ counter_ctx };
-}
-
-inline client_data::buffer_id_vec_t
-client_data::get_buffers() const
-{
-    return buffer_id_vec_t{
-        counter_collection_buffer,
-    };
-}
 
 inline const rocprofiler_tool_counter_info_t*
 client_data::get_tool_counter_info(rocprofiler_agent_id_t   _agent_id,

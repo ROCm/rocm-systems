@@ -59,7 +59,6 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <rocprofiler-sdk/version.h>
@@ -922,35 +921,11 @@ stop_context(rocprofiler_context_id_t ctx)
 }
 
 void
-start_context(const client_data::context_id_vec_t& ctxs)
-{
-    std::ranges::for_each(ctxs, [](const auto& ctx) { start_context(ctx); });
-}
-
-void
-stop_context(const client_data::context_id_vec_t& ctxs)
-{
-    std::ranges::for_each(ctxs, [](const auto& ctx) { stop_context(ctx); });
-}
-
-void
 flush()
 {
     if(!g_tool_data)
     {
         return;
-    }
-
-    for(const auto& itr : g_tool_data->get_buffers())
-    {
-        if(itr.handle > 0)
-        {
-            auto const status = rocprofiler_flush_buffer(itr);
-            if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-            {
-                ROCPROFILER_CALL(status);
-            }
-        }
     }
 
     if(g_domain_service)
@@ -1348,8 +1323,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             get_agent_manager_instance().get_agents_by_type(agent_type::gpu))
         {
             const auto& _agent_id = rocprofiler_agent_id_t{ itr->handle };
-            _data->agent_events.emplace(
-                _agent_id, create_agent_profile(_agent_id, _counter_events, _data));
+            create_agent_profile(_agent_id, _counter_events, _data);
         }
 
         // --- Dispatch-mode kernel counters ---
@@ -1377,16 +1351,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
     }
 #endif
-
-    for(const auto& itr : _data->get_buffers())
-    {
-        if(itr.handle > 0)
-        {
-            auto client_thread = rocprofiler_callback_thread_t{};
-            ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread));
-            ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr, client_thread));
-        }
-    }
 
     gpu::add_device_metadata();
 
@@ -1442,19 +1406,6 @@ tool_fini(void* callback_data)
     flush();
     stop();
     finalize_sdk_common();
-
-    // Destroy buffers to drain in-flight async flush callbacks before
-    // deleting tool_data, which those callbacks may still be accessing.
-    // rocprofiler_destroy_buffer returns BUFFER_BUSY if a flush is still
-    // in progress, so retry until it succeeds or buffer is not found.
-    for(auto const itr : g_tool_data->get_buffers())
-    {
-        while(itr.handle > 0 &&
-              rocprofiler_destroy_buffer(itr) == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-        {
-            std::this_thread::yield();
-        }
-    }
 
     auto* _data        = as_client_data(callback_data);
     _data->client_id   = nullptr;
@@ -1548,7 +1499,7 @@ start()
         return;
     }
 
-    start_context(g_tool_data->get_counter_contexts());
+    start_context(g_tool_data->counter_ctx);
 }
 
 void
@@ -1559,7 +1510,7 @@ stop()
         return;
     }
 
-    stop_context(g_tool_data->get_counter_contexts());
+    stop_context(g_tool_data->counter_ctx);
 }
 
 void
@@ -1571,7 +1522,7 @@ resume()
     {
         return;
     }
-    start_context(g_tool_data->get_counter_contexts());
+    start_context(g_tool_data->counter_ctx);
 
     if(g_domain_service != nullptr)
     {
@@ -1586,7 +1537,7 @@ pause()
     {
         return;
     }
-    stop_context(g_tool_data->get_counter_contexts());
+    stop_context(g_tool_data->counter_ctx);
 
     if(g_domain_service != nullptr)
     {

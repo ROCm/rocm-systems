@@ -11,7 +11,6 @@
 #include <exception>
 #include <memory>
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
