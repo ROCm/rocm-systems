@@ -42,6 +42,9 @@ library:
   Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelSetAttributeForDevice_Positive_FunctionOverride:
+    <<: *level_2
+    tags: [module]
   Unit_hipKernelSetAttributeForDevice_Negative_Parameters:
     <<: *level_2
     tags: [module]
