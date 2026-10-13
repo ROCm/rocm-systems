@@ -947,6 +947,7 @@ def make_dispatch_frame():
 def test_filter_dispatch_frame_retains_selected_rows(
     gpu_ids, kernel_ids, dispatch_ids, expected_rows
 ):
+    """Keep the expected rows after GPU, dispatch, and filtered kernel selection."""
     frame = make_dispatch_frame()
     filtered = filter_dispatch_frame(frame, gpu_ids, kernel_ids, dispatch_ids)
     pd.testing.assert_frame_equal(filtered, frame.iloc[expected_rows])
@@ -3541,6 +3542,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     evaluated_row_counts = []
 
     def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info):
+        """Record the per-kernel rows supplied to each roofline metric."""
         evaluated_row_counts.append(len(kernel_pmc_df))
         return 42.0
 

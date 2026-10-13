@@ -279,7 +279,10 @@ def test_run_benchmark_skips_unsupported_callbacks(bench_class, monkeypatch, tmp
     supported_metrics = benchmark_base.PerfMetrics(20.0, 19.0, 21.0)
 
     def callback(name):
+        """Create a benchmark callback that records supported metric runs."""
+
         def run(device):
+            """Record one supported benchmark run and return its metrics."""
             assert device == 0
             assert name not in bench.unsupported_data_types
             calls.append(name)

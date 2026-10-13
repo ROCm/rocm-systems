@@ -42,6 +42,7 @@ def counter_frame():
 
 @pytest.fixture
 def sysinfo_frame():
+    """One valid hardware metadata row for sysinfo validation tests."""
     return pd.DataFrame([
         dict(
             gpu_model="MI350",
@@ -211,8 +212,14 @@ def test_check_file_pattern_file_not_found():
         check_file_pattern("pattern", "/nonexistent/file/path.txt")
 
 
+# =============================================================================
+# COUNTER RESULT TESTS
+# =============================================================================
+
+
 @pytest.mark.parametrize("required", [(), ("SQ_WAVES",)])
 def test_check_counter_results_valid(counter_frame, required):
+    """Accept a valid counter row with or without a required counter list."""
     assert (
         check_counter_results(counter_frame, required_counters=required)
         is counter_frame
@@ -235,6 +242,7 @@ def test_check_counter_results_valid(counter_frame, required):
     ],
 )
 def test_check_counter_results_malformed(counter_frame, column, value):
+    """Reject invalid values, names, and timestamps in counter result rows."""
     counter_frame[column] = value
     with pytest.raises(AssertionError):
         check_counter_results(counter_frame)
@@ -242,21 +250,25 @@ def test_check_counter_results_malformed(counter_frame, column, value):
 
 @pytest.mark.parametrize("column", COUNTER_RESULT_COLUMNS)
 def test_check_counter_results_missing_column(counter_frame, column):
+    """Reject counter result frames missing any required field."""
     with pytest.raises(AssertionError, match="Missing counter columns"):
         check_counter_results(counter_frame.drop(columns=column))
 
 
 def test_check_counter_results_empty(counter_frame):
+    """Reject an empty counter result frame."""
     with pytest.raises(AssertionError, match="empty"):
         check_counter_results(counter_frame.iloc[:0])
 
 
 def test_check_counter_results_missing_required(counter_frame):
+    """Reject a counter result that omits a requested counter name."""
     with pytest.raises(AssertionError, match="Missing required counters"):
         check_counter_results(counter_frame, required_counters=("absent",))
 
 
 def test_read_counter_results_sorted(tmp_path, counter_frame):
+    """Read counter result files in pass order regardless of creation order."""
     for index in (2, 0, 1):
         frame = counter_frame.assign(Counter_Value=index)
         write_result_csv(tmp_path, frame.to_csv(index=False), pass_index=index)
@@ -265,8 +277,14 @@ def test_read_counter_results_sorted(tmp_path, counter_frame):
 
 
 def test_read_counter_results_missing(tmp_path):
+    """Report an error when a workload directory has no counter result files."""
     with pytest.raises(AssertionError, match="No counter result files"):
         read_counter_results(tmp_path)
+
+
+# =============================================================================
+# SYSINFO AND PROFILE ARTIFACT TESTS
+# =============================================================================
 
 
 @pytest.mark.parametrize(
@@ -283,6 +301,7 @@ def test_read_counter_results_missing(tmp_path):
     ],
 )
 def test_check_sysinfo_malformed_every_row(tmp_path, sysinfo_frame, column, value):
+    """Reject invalid hardware metadata even when only a later row is malformed."""
     frame = pd.concat([sysinfo_frame, sysinfo_frame], ignore_index=True)
     frame[column] = frame[column].astype(object)
     frame.loc[1, column] = value
@@ -296,6 +315,7 @@ def test_check_sysinfo_malformed_every_row(tmp_path, sysinfo_frame, column, valu
 
 @pytest.mark.parametrize("invalid", ["empty", "missing-column"])
 def test_check_sysinfo_incomplete(tmp_path, sysinfo_frame, invalid):
+    """Reject empty sysinfo data and data missing a required column."""
     frame = (
         sysinfo_frame.iloc[:0]
         if invalid == "empty"
@@ -310,6 +330,7 @@ def test_check_sysinfo_incomplete(tmp_path, sysinfo_frame, invalid):
 
 
 def test_profile_helpers_committed_mi350():
+    """Validate counter results and GPU metadata in the committed MI350 workload."""
     workload = Path(__file__).parents[1] / "workloads/vcopy/MI350"
     results = check_counter_results(
         read_counter_results(workload), required_counters=("SQ_WAVES",)
@@ -319,7 +340,13 @@ def test_profile_helpers_committed_mi350():
     assert set(check_sysinfo(workload / "sysinfo.csv").gpu_arch) == {"gfx950"}
 
 
+# =============================================================================
+# ANALYSIS DATABASE AND CSV TESTS
+# =============================================================================
+
+
 def test_check_analysis_db_valid(analysis_artifacts):
+    """Summarize valid workloads, kernels, and dispatches from an analysis DB."""
     db_path, _ = analysis_artifacts
     summary = check_analysis_db(db_path, expected_workloads=2)
 
@@ -334,6 +361,7 @@ def test_check_analysis_db_valid(analysis_artifacts):
 
 
 def test_check_analysis_db_missing(tmp_path):
+    """Reject a missing analysis database without creating the requested path."""
     path = tmp_path / "absent.db"
 
     with pytest.raises(AssertionError, match="Missing analysis database"):
@@ -344,6 +372,7 @@ def test_check_analysis_db_missing(tmp_path):
 
 @pytest.mark.parametrize("count", [0, 1, 3])
 def test_check_analysis_db_wrong_count(analysis_artifacts, count):
+    """Reject an analysis DB whose workload count differs from the expected count."""
     with pytest.raises(AssertionError, match="workload count"):
         check_analysis_db(analysis_artifacts[0], expected_workloads=count)
 
@@ -363,6 +392,7 @@ def test_check_analysis_db_wrong_count(analysis_artifacts, count):
     ],
 )
 def test_check_analysis_db_corrupt_copy(tmp_path, analysis_artifacts, sql):
+    """Reject databases with broken ownership, dispatch timing, or empty tables."""
     path = tmp_path / "corrupt.db"
     shutil.copyfile(analysis_artifacts[0], path)
 
@@ -374,6 +404,7 @@ def test_check_analysis_db_corrupt_copy(tmp_path, analysis_artifacts, sql):
 
 
 def test_check_analysis_db_equal_timestamps(analysis_artifacts):
+    """Accept dispatches whose start and end timestamps are equal."""
     path = analysis_artifacts[0]
 
     with sqlite3.connect(path) as connection:
@@ -383,6 +414,7 @@ def test_check_analysis_db_equal_timestamps(analysis_artifacts):
 
 
 def test_check_analysis_db_integrity_failure(tmp_path, analysis_artifacts):
+    """Reject a database whose SQLite schema points to an invalid root page."""
     path = tmp_path / "broken.db"
     shutil.copyfile(analysis_artifacts[0], path)
 
@@ -397,6 +429,7 @@ def test_check_analysis_db_integrity_failure(tmp_path, analysis_artifacts):
 
 
 def test_check_analysis_csv_valid_header_only_auxiliary(analysis_artifacts):
+    """Accept valid CSV exports with header-only auxiliary tables."""
     frames = check_analysis_csv_dir(analysis_artifacts[1])
 
     assert len(frames["kernel"]) == 2
@@ -406,6 +439,7 @@ def test_check_analysis_csv_valid_header_only_auxiliary(analysis_artifacts):
 
 @pytest.mark.parametrize("name", ANALYSIS_CSV_HEADERS)
 def test_check_analysis_csv_missing(analysis_artifacts, name):
+    """Reject an analysis CSV export that is missing from the output directory."""
     path = analysis_artifacts[1] / f"{name}.csv"
     path.unlink()
 
@@ -415,6 +449,7 @@ def test_check_analysis_csv_missing(analysis_artifacts, name):
 
 @pytest.mark.parametrize("name", ANALYSIS_CSV_HEADERS)
 def test_check_analysis_csv_wrong_headers(analysis_artifacts, name):
+    """Reject an analysis CSV export whose columns differ from its schema."""
     path = analysis_artifacts[1] / f"{name}.csv"
     frame = pd.read_csv(path).rename(columns={ANALYSIS_CSV_HEADERS[name][0]: "invalid"})
     frame.to_csv(path, index=False)
@@ -442,6 +477,7 @@ def test_check_analysis_csv_wrong_headers(analysis_artifacts, name):
 def test_check_analysis_csv_unknown_or_mismatched_owners(
     analysis_artifacts, name, workload, kernel
 ):
+    """Reject CSV rows with unknown workload or mismatched kernel ownership."""
     path = analysis_artifacts[1] / f"{name}.csv"
     row = dict.fromkeys(ANALYSIS_CSV_HEADERS[name], None)
     row["workload_id"] = workload
@@ -456,6 +492,7 @@ def test_check_analysis_csv_unknown_or_mismatched_owners(
 
 
 def test_check_analysis_csv_empty_kernel(analysis_artifacts):
+    """Reject an analysis CSV directory with no kernel rows."""
     path = analysis_artifacts[1] / "kernel.csv"
     pd.read_csv(path).iloc[:0].to_csv(path, index=False)
 
@@ -474,7 +511,7 @@ def test_check_analysis_csv_empty_kernel(analysis_artifacts):
 def test_check_analysis_db_rejects_orphans_without_foreign_keys(
     tmp_path, kernels, dispatches, message
 ):
-    """Explicit ownership checks also reject databases lacking FK constraints."""
+    """Reject orphan kernel and dispatch rows without relying on foreign keys."""
     db_path = tmp_path / "orphan.db"
 
     with sqlite3.connect(db_path) as connection:
@@ -498,8 +535,14 @@ def test_check_analysis_db_rejects_orphans_without_foreign_keys(
         check_analysis_db(db_path, expected_workloads=1)
 
 
+# =============================================================================
+# ROOFLINE CSV TESTS
+# =============================================================================
+
+
 @pytest.mark.parametrize("allowed", [(), ("UNSUPPORTED",)])
 def test_check_roofline_valid(tmp_path, allowed):
+    """Accept valid measurements and zero triplets explicitly marked unsupported."""
     frame = pd.DataFrame(
         [[0, 10, 9, 11]], columns=["device", "hbmBw", "hbmBwLow", "hbmBwHigh"]
     )
@@ -514,6 +557,7 @@ def test_check_roofline_valid(tmp_path, allowed):
 
 
 def test_check_roofline_legacy_i8_alias(tmp_path):
+    """Accept the legacy MFMA I8 column spelling used by older exports."""
     path = tmp_path / "roofline.csv"
     pd.DataFrame(
         [[0, 10, 9, 11]],
@@ -545,6 +589,7 @@ def test_check_roofline_legacy_i8_alias(tmp_path):
     ],
 )
 def test_check_roofline_malformed(tmp_path, columns, values):
+    """Reject malformed triplets, invalid measurements, and unordered bounds."""
     path = tmp_path / "roofline.csv"
     pd.DataFrame([values], columns=columns).to_csv(path, index=False)
 
@@ -553,6 +598,7 @@ def test_check_roofline_malformed(tmp_path, columns, values):
 
 
 def test_check_roofline_empty(tmp_path):
+    """Reject a roofline CSV containing only its header."""
     path = tmp_path / "roofline.csv"
     path.write_text("device,bw,bwLow,bwHigh\n")
 
@@ -561,11 +607,13 @@ def test_check_roofline_empty(tmp_path):
 
 
 def test_check_roofline_missing(tmp_path):
+    """Reject a roofline CSV path that does not exist."""
     with pytest.raises(AssertionError, match="Missing"):
         check_roofline_csv(tmp_path / "missing.csv")
 
 
 def test_check_roofline_zero_requires_matching_allowance(tmp_path):
+    """Reject zero measurements when their metric is not allowed to be zero."""
     path = tmp_path / "roofline.csv"
     path.write_text("device,unsupported,unsupportedLow,unsupportedHigh\n0,0,0,0\n")
 

@@ -57,6 +57,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 def test_pre_processing_assigns_filters_to_each_workload(
     tmp_path, monkeypatch, option_name, workload_attr, values, singleton
 ):
+    """Apply singleton filters to every workload and per-path filters in order."""
     common.patch_console(monkeypatch, MODULE, "debug", "log", "warning")
 
     paths = [str(tmp_path / name) for name in ("first", "second")]
