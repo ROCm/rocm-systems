@@ -189,7 +189,13 @@ WORKLOAD_CONFIGS = {
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
         # extract_maxtext_perf.py emits tok_per_s_per_gpu / TFLOPS_per_gpu /
-        # seconds_per_step; the first is already in _METRIC_ALIASES.
+        # seconds_per_step, and madengine copies those names through unchanged.
+        # The global alias accepts only `tok_per_s_per_gpu_avg`, which this
+        # extractor never writes -- its `tok_per_s_per_gpu` IS the average, of
+        # the last 10 steps. Accepted here and not in _METRIC_ALIASES because
+        # Megatron emits both names with different meanings, and widening the
+        # global table would score Llama-3.1-70B on its final iteration again.
+        "metric_aliases": {"tok_per_s_per_gpu"},
         "multiple_results": "primus_perf_output.csv",
         "training_precision": "fp8",
         "primus_config": "examples/maxtext/configs/MI355X/llama3.1_405B-fp8-pretrain.yaml",
@@ -205,6 +211,10 @@ WORKLOAD_CONFIGS = {
         },
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
+        # Enforced in main() before the allocation is taken: 4 is the scale
+        # MAD#228 validated, and per_device_batch_size=1 already sits at the
+        # memory ceiling there.
+        "required_nodes": 4,
         # MAD#228's template asks for 12:00:00 for a single run. 05:00:00 for
         # the A/B pair instead: a 4-node exclusive request with a 12 h limit
         # backfills badly on a shared partition, the measured 4N FP8 run is
@@ -966,6 +976,7 @@ def generate_manifest(
     run_dir: Path | None = None,
     pull_only: bool = False,
     dockerfile_name: str = OVERLAY_DOCKERFILE,
+    local_only: bool = False,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
 
@@ -1116,11 +1127,18 @@ def generate_manifest(
             "gpu_vendor": "AMD",
         }
     else:
+        # local_only images are built here and never pushed, so they must stay
+        # on the local-image path even when a registry is configured -- the
+        # maxtext baseline is built by build_maxtext_baseline_image(), which
+        # has nothing to push to. Marking it registry-backed would send every
+        # node to pull a tag that was never uploaded, instead of rebuilding
+        # from the Dockerfile advertised below.
+        via_registry = bool(registry) and not local_only
         image_entry = {
             "docker_image": overlay_image,
-            "local_image": not bool(registry),
-            "registry_image": overlay_image if registry else None,
-            "registry": registry or None,
+            "local_image": not via_registry,
+            "registry_image": overlay_image if via_registry else None,
+            "registry": registry if via_registry else None,
             "base_docker": workload_config["base_image"],
             "build_status": "SKIPPED",
             "build_duration": 0,
@@ -1480,7 +1498,11 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
-def collect_phase_results(run_dir: Path, metric_key: str) -> list[dict]:
+def collect_phase_results(
+    run_dir: Path,
+    metric_key: str,
+    extra_aliases: set[str] | None = None,
+) -> list[dict]:
     """Per-precision metrics for one phase.
 
     Prefers madengine's structured output and falls back to scraping the live
@@ -1495,7 +1517,15 @@ def collect_phase_results(run_dir: Path, metric_key: str) -> list[dict]:
         # value in the ``metric`` column, performance in ``performance``.
         # Filter to the configured metric_key (or its madengine alias)
         # and key by precision.
-        accepted_metrics = _METRIC_ALIASES.get(metric_key, {metric_key})
+        accepted_metrics = set(_METRIC_ALIASES.get(metric_key, {metric_key}))
+        # Per-workload, deliberately not merged into _METRIC_ALIASES: the
+        # MaxText extractor emits `tok_per_s_per_gpu`, already an average of
+        # the last 10 steps, while Megatron emits a per-iteration
+        # `tok_per_s_per_gpu` and an averaged `tok_per_s_per_gpu_avg`. Putting
+        # the un-suffixed name back in the global table would silently score
+        # Llama-3.1-70B on its final iteration again.
+        if extra_aliases:
+            accepted_metrics |= set(extra_aliases)
         for row in perf_results:
             if row.get("metric") not in accepted_metrics:
                 continue
@@ -1815,6 +1845,21 @@ def main() -> None:
 
     workload_config = WORKLOAD_CONFIGS[args.workload]
     cluster_config = CLUSTER_CONFIGS[args.cluster]
+
+    # Before anything takes an allocation. The workflow's `nodes` input
+    # defaults to 2, so a hand dispatch that picks a workload validated at a
+    # single scale and leaves the rest alone would otherwise burn exclusive
+    # cluster time and OOM in step 0.
+    required_nodes = workload_config.get("required_nodes")
+    if required_nodes is not None and args.nodes != required_nodes:
+        log.error(
+            "%s is only supported at %d nodes (got %d): its parallelism and "
+            "per_device_batch_size were validated at that scale and the memory "
+            "headroom does not survive a different one.",
+            args.workload, required_nodes, args.nodes,
+        )
+        sys.exit(1)
+
     scale = f"{args.nodes}N/{args.nodes * workload_config['gpus_per_node']}GPU"
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
@@ -1920,6 +1965,9 @@ def main() -> None:
                 if family == "maxtext" and phase == BASELINE
                 else OVERLAY_DOCKERFILE
             ),
+            # Built locally by build_maxtext_baseline_image() and never
+            # pushed, so it stays on the local-image path under --registry.
+            local_only=(family == "maxtext" and phase == BASELINE),
         )
         phases.append((phase, run_dir))
 
@@ -1958,7 +2006,10 @@ def main() -> None:
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     for phase, run_dir in phases:
         log.info("Collecting %s results from %s", phase, run_dir)
-        phase_results[phase] = collect_phase_results(run_dir, metric_key)
+        phase_results[phase] = collect_phase_results(
+            run_dir, metric_key,
+            extra_aliases=workload_config.get("metric_aliases"),
+        )
 
         # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
         run_artifacts = results_dir / "runs" / run_id / args.workload / phase
