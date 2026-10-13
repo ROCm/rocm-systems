@@ -2527,6 +2527,17 @@ testResult_t run() {
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+  const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
+  if (tlsPsk && tlsPsk[0]) {
+    ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+    encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
+    encryption.psk = tlsPsk;
+    NCCLCHECK(ncclSetEncryption(&encryption));
+    if (proc == 0) printf("# Socket encryption: TLS, %zu-byte pre-shared key\n", strlen(tlsPsk));
+  }
+#endif
+
   ncclUniqueId ncclId;
   if (ncclProc == 0) {
     NCCLCHECK(ncclGetUniqueId(&ncclId));
