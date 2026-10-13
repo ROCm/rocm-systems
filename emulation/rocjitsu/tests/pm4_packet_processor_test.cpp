@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -132,9 +133,10 @@ protected:
     };
     context.wake = [] {};
     context.flush_caches = [] {};
-    context.dispatch = [this](const std::array<uint32_t, 4> &dimensions) {
+    context.dispatch = [this](const std::array<uint32_t, 4> &dimensions, util::DiagnosticEmitter) {
       dispatches.push_back(dimensions);
       queue.dispatches.push_entry({});
+      return util::Result::success();
     };
   }
 
@@ -398,6 +400,24 @@ TEST_F(Pm4PacketProcessorTest, DispatchPausesInterpretationUntilCpRetiresIt) {
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0xdeadbeefu);
   EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReturnedDispatchFailureCancellationIsNotCaughtAgain) {
+  const std::array words{0xc0031500u, 2u, 3u, 4u, 1u};
+  submit(words);
+  context.dispatch = [](const std::array<uint32_t, 4> &,
+                        util::DiagnosticEmitter emit_error) -> util::Result {
+    return emit_error.emit() << "invalid test launch";
+  };
+  uint32_t cancellations = 0;
+  const std::function<void()> missing_callback;
+  context.fault_queue = [&] {
+    ++cancellations;
+    missing_callback();
+  };
+  EXPECT_THROW(service(), std::bad_function_call);
+  EXPECT_EQ(cancellations, 1u);
+  EXPECT_FALSE(completed);
 }
 
 TEST_F(Pm4PacketProcessorTest, QueueCancellationKeepsThePacketExceptionScope) {

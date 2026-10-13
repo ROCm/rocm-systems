@@ -29,10 +29,10 @@ RJ_DIAGNOSTIC_POP
 #include <condition_variable>
 #include <cstring>
 #include <elf.h>
+#include <exception>
 #include <format>
 #include <limits>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <thread>
@@ -94,12 +94,12 @@ CommandProcessor::QueueRegistrationTransaction::~QueueRegistrationTransaction() 
 }
 
 void CommandProcessor::set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space) {
-  if (gpu_vm != nullptr && default_address_space && !gpu_vm->lookup(default_address_space))
-    throw std::invalid_argument("command processor default address space is not registered");
+  assert((gpu_vm == nullptr || !default_address_space || gpu_vm->lookup(default_address_space)) &&
+         "command processor default address space is not registered");
   if (gpu_vm_ != gpu_vm || default_address_space_ != default_address_space) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    if (!compute_queues_.empty() || active_queue_registrations_ != 0)
-      throw std::logic_error("cannot replace the command processor VM while queues exist");
+    assert((compute_queues_.empty() && active_queue_registrations_ == 0) &&
+           "cannot replace the command processor VM while queues exist");
     gpu_vm_ = gpu_vm;
     default_address_space_ = gpu_vm_ ? default_address_space : AddressSpaceHandle{};
   }
@@ -839,8 +839,7 @@ void CommandProcessor::startup() {
            "CommandProcessor and its compute units must share one partition");
   // doorbell_event_'s handler is bound in the constructor (see there) so it is live
   // before register_queue() can start the poll thread; nothing to (re)bind here.
-  if (gpu_vm_ == nullptr)
-    throw std::logic_error("CommandProcessor requires a GPU VM before startup");
+  assert(gpu_vm_ != nullptr && "CommandProcessor requires a GPU VM before startup");
   completion_ = std::make_unique<CompletionTracker>(*gpu_vm_, cus_, l2_caches_);
   completion_->set_plugin_group(plugin_group_);
   completion_->set_dispatch_retirement_gate(
@@ -2270,11 +2269,8 @@ CommandProcessor::cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id, uint
       continue;
     uint32_t peer_wg_id = src.peer_wg_ids[rank];
     auto peer_it = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
-    if (peer_it == cluster_wg_placements_.end()) {
-      throw std::runtime_error(std::format(
-          "cluster multicast target is not resident: dispatch={} source_wg={} peer_wg={} rank={}",
-          dispatch_id, wg_id, peer_wg_id, rank));
-    }
+    assert(peer_it != cluster_wg_placements_.end() &&
+           "cluster multicast target must remain resident until cluster retirement");
     const auto &peer = peer_it->second;
     targets.push_back({peer.cu, peer_wg_id, peer.lds_base, peer.cluster_rank});
   }
@@ -3097,8 +3093,10 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
     auto it = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &queue) {
       return queue.queue_id == queue_id && queue.process_id == process_id;
     });
-    if (it == compute_queues_.end() || !it->submission_queue)
-      throw std::runtime_error("PM4 submission has no registered queue");
+    if (it == compute_queues_.end() || !it->submission_queue) {
+      util::Logger::warn("PM4 submission has no registered queue");
+      return false;
+    }
     if (it->faulted)
       return false;
     submission.failure->wake = [this] {
@@ -3116,17 +3114,18 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
   return true;
 }
 
-void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
-                                    const std::array<uint32_t, 4> &dimensions) {
+util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                                            const std::array<uint32_t, 4> &dimensions,
+                                            util::DiagnosticEmitter emit_error) {
   if (!queue.commands.submissions.front().allow_dispatch)
-    throw std::runtime_error("shader dispatch inside an AQL PM4 IB is unsupported");
+    return emit_error.emit() << "shader dispatch inside an AQL PM4 IB is unsupported";
   using namespace rocr::llvm::amdhsa;
   const auto &regs = queue.commands.sh_registers;
   const uint32_t initiator = dimensions[3];
   if (!(initiator & 1))
-    return;
+    return util::Result::success();
   if (cus_.empty())
-    throw std::runtime_error("PM4 dispatch requires a compute unit");
+    return emit_error.emit() << "PM4 dispatch requires a compute unit";
   const bool thread_dimensions = initiator & (1u << 5);
   const auto arch = cus_[0]->config().arch;
   const uint32_t rsrc1 = regs[kPm4ComputePgmRsrc1], rsrc2 = regs[kPm4ComputePgmRsrc2];
@@ -3146,7 +3145,7 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
                                  util::mask<uint32_t>(properties.compute_tmpring_wavesize_bits)) *
                                 properties.compute_tmpring_wavesize_granule;
     if (!dp.pm4_scratch_waves_per_se || !wave_bytes)
-      throw std::runtime_error("PM4 scratch enabled with an empty descriptor");
+      return emit_error.emit() << "PM4 scratch enabled with an empty descriptor";
     dp.private_segment_fixed_size = wave_bytes / dp.kernel_wave_size;
     dp.pm4_scratch_pool = std::make_shared<Pm4ScratchPool>(
         dp.pm4_scratch_waves_per_se *
@@ -3160,7 +3159,7 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   dp.kernel_entry_pc = static_cast<uint64_t>(static_cast<int64_t>(pc << 16) >> 16);
   dp.num_user_sgprs = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT);
   if (dp.num_user_sgprs > dp.user_sgprs.size())
-    throw std::runtime_error("PM4 launch exceeds compute user-data registers");
+    return emit_error.emit() << "PM4 launch exceeds compute user-data registers";
   dp.pm4_abi = true;
   dp.pm4_failure = queue.commands.submissions.front().failure;
   std::ranges::copy_n(regs.begin() + kPm4ComputeUserData0, dp.num_user_sgprs,
@@ -3168,11 +3167,11 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   dp.sgprs_per_wf = cus_[0]->config().sgprs_per_wf;
   const auto granule = descriptor_vgpr_count_granule_for_wavefront(arch, dp.kernel_wave_size);
   if (!granule)
-    throw std::runtime_error("unsupported PM4 wave size");
+    return emit_error.emit() << "unsupported PM4 wave size";
   dp.vgprs_per_wf =
       (AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * *granule;
   if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
-    throw std::runtime_error("PM4 launch exceeds available VGPRs");
+    return emit_error.emit() << "PM4 launch exceeds available VGPRs";
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(rsrc1, arch);
   dp.enable_wg_id_x = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);
   dp.enable_wg_id_y = AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
@@ -3184,19 +3183,19 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   for (uint32_t i = 0; i < 3; ++i)
     if (!(regs[kPm4ComputeNumThreadX + i] & 0xffff) ||
         (regs[kPm4ComputeNumThreadX + i] & 0xffff) > 1024)
-      throw std::runtime_error("invalid PM4 workgroup dimension");
+      return emit_error.emit() << "invalid PM4 workgroup dimension";
   dp.workgroup_size_x = regs[kPm4ComputeNumThreadX] & 0xffff;
   dp.workgroup_size_y = regs[kPm4ComputeNumThreadY] & 0xffff;
   dp.workgroup_size_z = regs[kPm4ComputeNumThreadZ] & 0xffff;
   uint64_t threads = uint64_t{dp.workgroup_size_x} * dp.workgroup_size_y * dp.workgroup_size_z;
   if (threads > 1024)
-    throw std::runtime_error("PM4 workgroup exceeds 1024 threads");
+    return emit_error.emit() << "PM4 workgroup exceeds 1024 threads";
   dp.wfs_per_workgroup = (threads + dp.kernel_wave_size - 1) / dp.kernel_wave_size;
   std::array<uint32_t, 3> counts{};
   for (uint32_t i = 0; i < 3; ++i) {
     dp.workgroup_origin[i] = (initiator & (1u << 2)) ? 0 : regs[kPm4ComputeStartX + i];
     if (thread_dimensions && dp.workgroup_origin[i])
-      throw std::runtime_error("thread-dimension PM4 dispatch requires a zero origin");
+      return emit_error.emit() << "thread-dimension PM4 dispatch requires a zero origin";
     const uint32_t full = regs[kPm4ComputeNumThreadX + i] & 0xffff;
     const uint32_t end =
         thread_dimensions ? dimensions[i] / full + (dimensions[i] % full != 0) : dimensions[i];
@@ -3209,25 +3208,25 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   uint64_t total = counts[0];
   for (uint32_t i = 1; i < 3; ++i) {
     if (counts[i] && total > UINT32_MAX / counts[i])
-      throw std::runtime_error("PM4 grid exceeds supported workgroup count");
+      return emit_error.emit() << "PM4 grid exceeds supported workgroup count";
     total *= counts[i];
   }
   dp.total_wgs = total;
   if (dp.pm4_scratch_pool && dp.total_wgs) {
     if (!dp.pm4_scratch_pool->available(dp.wfs_per_workgroup))
-      throw std::runtime_error("PM4 scratch cannot accommodate one workgroup");
+      return emit_error.emit() << "PM4 scratch cannot accommodate one workgroup";
     const uint64_t slots = uint64_t{dp.pm4_scratch_waves_per_se} *
                            std::max(scratch_wave_divisor_, scratch_shader_engine_count_);
     const uint64_t bytes = slots * dp.private_segment_fixed_size * dp.kernel_wave_size;
     const auto access = snapshot_gpu_access(queue.address_space);
     if (!access || access->query_access(dp.scratch_backing_addr, bytes, VmAccessKind::Atomic) !=
                        VmAccessOutcome::Complete)
-      throw std::runtime_error("PM4 scratch descriptor exceeds its mapped buffer");
+      return emit_error.emit() << "PM4 scratch descriptor exceeds its mapped buffer";
   }
   if (!thread_dimensions && ((dp.grid_wgs_x && dp.workgroup_size_x > UINT32_MAX / dp.grid_wgs_x) ||
                              (dp.grid_wgs_y && dp.workgroup_size_y > UINT32_MAX / dp.grid_wgs_y) ||
                              (dp.grid_wgs_z && dp.workgroup_size_z > UINT32_MAX / dp.grid_wgs_z)))
-    throw std::runtime_error("PM4 grid exceeds supported invocation count");
+    return emit_error.emit() << "PM4 grid exceeds supported invocation count";
   dp.grid_size_x = thread_dimensions ? dimensions[0] : dp.grid_wgs_x * dp.workgroup_size_x;
   dp.grid_size_y = thread_dimensions ? dimensions[1] : dp.grid_wgs_y * dp.workgroup_size_y;
   dp.grid_size_z = thread_dimensions ? dimensions[2] : dp.grid_wgs_z * dp.workgroup_size_z;
@@ -3237,7 +3236,7 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
       uint32_t partial = regs[kPm4ComputeNumThreadX + i] >> 16;
       uint32_t full = regs[kPm4ComputeNumThreadX + i] & 0xffff;
       if (partial > full)
-        throw std::runtime_error("invalid PM4 partial workgroup size");
+        return emit_error.emit() << "invalid PM4 partial workgroup size";
       if (partial && counts[i])
         *sizes[i] -= full - partial;
     }
@@ -3266,6 +3265,7 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   plugin_group_->onAmdgpuDispatchPacketProcessed(info);
   ++total_dispatched_;
   qs.push_entry(std::move(dp));
+  return util::Result::success();
 }
 
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
@@ -3303,8 +3303,9 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
           .xcc_id = scratch_xcc_id_,
           .flush_caches = [this] { flush_gpu_caches(); },
           .dispatch =
-              [this, &queue, &qs](const std::array<uint32_t, 4> &dimensions) {
-                dispatch_pm4(queue, qs, dimensions);
+              [this, &queue, &qs](const std::array<uint32_t, 4> &dimensions,
+                                  util::DiagnosticEmitter emit_error) {
+                return dispatch_pm4(queue, qs, dimensions, emit_error);
               },
           .retry =
               [this, &queue, now] {
@@ -4510,13 +4511,12 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
         .kernel_admission_enabled = !queue.enabled_cus || !queue.enabled_cus->empty(),
     });
     const PacketProcessResult &packet_result = result.packet_result();
-    if (!valid_packet_process_result(packet_result, packet_bytes.size(), kAqlPacketBytes))
-      throw std::logic_error("AQL processor returned an invalid common packet result");
+    assert(valid_packet_process_result(packet_result, packet_bytes.size(), kAqlPacketBytes) &&
+           "AQL processor returned an invalid common packet result");
 
     if (packet_result.status == PacketProcessStatus::Complete) {
-      if (packet_result.retirement_bytes != kAqlPacketBytes) {
-        throw std::logic_error("AQL processor completed without retiring exactly one packet");
-      }
+      assert(packet_result.retirement_bytes == kAqlPacketBytes &&
+             "AQL processor completed without retiring exactly one packet");
       ++read_idx;
       // HSA System Architecture 1.2, section 2.8.3: release the format field
       // using a 32-bit atomic transaction before exposing the slot for reuse.
@@ -4550,7 +4550,7 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
     } else if (packet_result.status == PacketProcessStatus::Unsupported) {
       queue.faulted = true;
     } else if (packet_result.status == PacketProcessStatus::NeedInput) {
-      throw std::logic_error("fixed-size AQL processor requested additional packet bytes");
+      assert(false && "fixed-size AQL processor requested additional packet bytes");
     } else {
       queue.faulted = true;
     }
