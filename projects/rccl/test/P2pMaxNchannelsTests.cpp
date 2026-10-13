@@ -171,10 +171,12 @@ TEST(P2pDirectMaxChannelsTests, RequestedPoolIsCappedAtValidatedMaximum)
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 256), 128);
 }
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 TEST(P2pDirectMaxChannelsTests, DefaultKernelArgsBudgetFits256ChannelBatches)
 {
     EXPECT_GE(ncclDevMaxChannelsForArgsBytes(ncclMaxKernelArgsSize(1250)), 256);
 }
+#endif
 
 void checkUpperBound(int expectedUpper, bool expectedOptedHigher)
 {

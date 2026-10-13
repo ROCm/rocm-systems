@@ -812,11 +812,19 @@ typedef ncclDevKernelArgsStorage<(4 << 10)> ncclDevKernelArgs4K;
 // typedef ncclDevKernelArgsStorage<(32<<10)-4> ncclDevKernelArgs31K;
 
 #ifdef ENABLE_WARP_SPEED
-// 8 KiB accommodates the kernel-args header plus one batch per channel at 256 channels.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// 8 KiB accommodates the kernel-args header plus one batch per channel at 256 channels on ROCm.
 typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
 #else
-// Keep the same budget for regular P2P plans, which also use one batch per channel.
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+#endif
+#else
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// Keep the same ROCm budget for regular P2P plans, which also use one batch per channel.
 typedef ncclDevKernelArgs8K ncclDevKernelArgsDefaultStorage;
+#else
+typedef ncclDevKernelArgs5K ncclDevKernelArgsDefaultStorage;
+#endif
 #endif
 __host__ __device__ constexpr int ncclMaxKernelArgsSize(/*int cudaDriver, */ int cudaArch = NCCL_CUDA_ARCH) {
   // return (cudaArch < 700 || cudaDriver < 12010) ? 4<<10 : (32<<10)-4;
