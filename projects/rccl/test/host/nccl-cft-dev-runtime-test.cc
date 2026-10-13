@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/cft_dev_runtime.cc: the CFT (confidential/
-// fault-tolerant?) logical-endpoint support-probe, size-computation, and
+// Host-only microtests for src/cft_dev_runtime.cc: the CFT (Compute Fabric
+// Transport) logical-endpoint support-probe, size-computation, and
 // bind/unbind helpers, plus the three public LE-info query functions. This
 // build's CUDA_VERSION is below 13030, so the real CUDA logical-endpoint
 // driver calls are compiled out everywhere in this file (no ROCm
@@ -120,6 +120,18 @@ TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftSize_NotSizedWithGpuCftSupport_Dele
   comm->gpuCftSupport = 13030;
   g_computeLsaSize = [](ncclComm*) { return 8; };
   EXPECT_EQ(computeCftSize(comm), 8);
+}
+
+TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftSizeAndMcSize_GpuCftSupportJustBelow13030_ReturnsOne) {
+  // Every other probe uses 0 or exactly 13030, far from the `>= 13030` edge at
+  // cft_dev_runtime.cc:54 and 61; 13029 is the first value it must reject.
+  comm->devrState.bigSize = 0;
+  comm->gpuCftSupport = 13029;
+  bool called = false;
+  g_computeLsaSize = [&](ncclComm*) { called = true; return 99; };
+  EXPECT_EQ(computeCftSize(comm), 1);
+  EXPECT_EQ(computeCftMcSize(comm), 1);
+  EXPECT_FALSE(called);
 }
 
 TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftMcSize_AlreadySized_ReturnsCftMcSizeWithoutCallingComputeLsaSize) {
@@ -249,8 +261,15 @@ protected:
   ncclDevrWindow winHost{};
   int dummyWindowTarget = 0;
   ncclWindow_t window = reinterpret_cast<ncclWindow_t>(&dummyWindowTarget);
+  // What the ncclDevrWinRegEnabled seam was last asked, and what it answers.
+  int sawWinFlags = -1;
+  ncclDevrRegisterCapability sawCapability = ncclDevrRegisterAll;
+  bool winRegEnabled = true;
 
   virtual size_t BigOffset() const = 0;
+  // Calls this suite's query function with its own extra arguments held fixed,
+  // so the shared prologue checks below run against all three functions.
+  virtual ncclResult_t Invoke(ncclWindow_t w, ncclCftLeId* leId, size_t* leOffset) = 0;
 
   void SetUp() override {
     NcclCftDevRuntimeMicrotest::SetUp();
@@ -259,6 +278,49 @@ protected:
     g_foundComm = comm;
     g_foundWinHost = &winHost;
     UseFoundCommAndWindow();
+    g_devrWinRegEnabled = [this](int winFlags, ncclDevrRegisterCapability capability) {
+      sawWinFlags = winFlags;
+      sawCapability = capability;
+      return winRegEnabled;
+    };
+  }
+
+  // The prologue below is identical across the three query functions
+  // (cft_dev_runtime.cc:295-309 and its two twins).
+  void ExpectNullArgsRejectedByPtrCheck() {
+    ncclCftLeId leId;
+    size_t leOffset;
+    EXPECT_EQ(Invoke(nullptr, &leId, &leOffset), ncclInvalidArgument);
+    EXPECT_EQ(Invoke(window, nullptr, &leOffset), ncclInvalidArgument);
+    EXPECT_EQ(Invoke(window, &leId, nullptr), ncclInvalidArgument);
+  }
+
+  void ExpectWindowNotCftRegisteredReturnsInvalidUsage() {
+    // Also pins what the registration check asks: this window's own flags,
+    // against the CFT capability rather than e.g. ncclDevrRegisterAll.
+    winHost.winFlags = 0x5a;
+    winRegEnabled = false;
+    ncclCftLeId leId;
+    size_t leOffset;
+    EXPECT_EQ(Invoke(window, &leId, &leOffset), ncclInvalidUsage);
+    EXPECT_EQ(sawWinFlags, 0x5a);
+    EXPECT_EQ(sawCapability, ncclDevrRegisterCft);
+  }
+
+  void ExpectNoGpuCftSupportReturnsInvalidArgument() {
+    comm->gpuCftSupport = 0;
+    ncclCftLeId leId;
+    size_t leOffset;
+    EXPECT_EQ(Invoke(window, &leId, &leOffset), ncclInvalidArgument);
+  }
+
+  void ExpectFindCommAndHostWindowFailurePropagates() {
+    g_findCommAndHostWindowFromDeviceWindow = [](ncclWindow_t, ncclComm_t*, ncclDevrWindow**) {
+      return ncclSystemError;
+    };
+    ncclCftLeId leId;
+    size_t leOffset;
+    EXPECT_EQ(Invoke(window, &leId, &leOffset), ncclSystemError);
   }
 };
 
@@ -269,37 +331,22 @@ protected:
 class NcclGetMultimemDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
   size_t BigOffset() const override { return 0x1000; }
+  ncclResult_t Invoke(ncclWindow_t w, ncclCftLeId* leId, size_t* leOffset) override {
+    return ncclGetMultimemDeviceLeInfo(w, 0, leId, leOffset);
+  }
 };
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, NullArgs_RejectedByPtrCheckBeforeAnyLookup) {
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(nullptr, 0, &leId, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, nullptr, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, nullptr), ncclInvalidArgument);
+  ExpectNullArgsRejectedByPtrCheck();
 }
-
 TEST_F(NcclGetMultimemDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, &leOffset), ncclInvalidUsage);
+  ExpectWindowNotCftRegisteredReturnsInvalidUsage();
 }
-
 TEST_F(NcclGetMultimemDeviceLeInfoTest, CommHasNoGpuCftSupport_ReturnsInvalidArgument) {
-  comm->gpuCftSupport = 0;
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, &leOffset), ncclInvalidArgument);
+  ExpectNoGpuCftSupportReturnsInvalidArgument();
 }
-
 TEST_F(NcclGetMultimemDeviceLeInfoTest, FindCommAndHostWindowFails_PropagatesErrorViaNcclcheck) {
-  g_findCommAndHostWindowFromDeviceWindow = [](ncclWindow_t, ncclComm_t*, ncclDevrWindow**) {
-    return ncclSystemError;
-  };
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, &leOffset), ncclSystemError);
+  ExpectFindCommAndHostWindowFailurePropagates();
 }
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, SymTeamObtainFails_PropagatesErrorViaNcclcheck) {
@@ -373,6 +420,29 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, UncountedWindow_ReadsMcLeIdZeroSlot) {
   EXPECT_EQ(leId, 55u);
 }
 
+TEST_F(NcclGetMultimemDeviceLeInfoTest, SymmetricOnlyWindow_IsUncountedAndReadsMcLeIdZeroSlot) {
+  // NCCL_WIN_COLL_SYMMETRIC without NCCL_WIN_CFT_COUNTED: a counted-bit mask
+  // that tested the companion bit instead would read the counted slot here.
+  comm->devrState.cftMcSize = 4;
+  comm->devrState.cftMcSelf = 0;
+  winHost.winFlags = NCCL_WIN_COLL_SYMMETRIC;
+
+  DevrTeamPtr team = MakeDevrTeam(ncclTeam_t{4, 0, 1}, /*mcLeId0=*/77, /*mcLeId1=*/88);
+  ncclDevrTeam* teamPtr = team.get();
+  g_symTeamObtain = [teamPtr](ncclComm*, ncclTeam, bool, bool counted, bool, bool, ncclDevrTeam** outTeam,
+                             bool* needBarrier) {
+    EXPECT_FALSE(counted);
+    *outTeam = teamPtr;
+    *needBarrier = false;
+    return ncclSuccess;
+  };
+
+  ncclCftLeId leId = 0;
+  size_t leOffset = 0;
+  ASSERT_EQ(ncclGetMultimemDeviceLeInfo(window, /*offset=*/0, &leId, &leOffset), ncclSuccess);
+  EXPECT_EQ(leId, 77u);
+}
+
 // ---------------------------------------------------------------------------
 // ncclGetCftDeviceLeInfo
 // ---------------------------------------------------------------------------
@@ -380,41 +450,22 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, UncountedWindow_ReadsMcLeIdZeroSlot) {
 class NcclGetCftDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
   size_t BigOffset() const override { return 0x2000; }
+  ncclResult_t Invoke(ncclWindow_t w, ncclCftLeId* leId, size_t* leOffset) override {
+    return ncclGetCftDeviceLeInfo(w, 0, /*peerCft=*/0, ncclTeam_t{4, 0, 1}, leId, leOffset);
+  }
 };
 
 TEST_F(NcclGetCftDeviceLeInfoTest, NullArgs_RejectedByPtrCheck) {
-  ncclTeam_t cftTeam{4, 0, 1};
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(nullptr, 0, 0, cftTeam, &leId, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, nullptr, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, &leId, nullptr), ncclInvalidArgument);
+  ExpectNullArgsRejectedByPtrCheck();
 }
-
 TEST_F(NcclGetCftDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
-  ncclTeam_t cftTeam{4, 0, 1};
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, &leId, &leOffset), ncclInvalidUsage);
+  ExpectWindowNotCftRegisteredReturnsInvalidUsage();
 }
-
 TEST_F(NcclGetCftDeviceLeInfoTest, CommHasNoGpuCftSupport_ReturnsInvalidArgument) {
-  comm->gpuCftSupport = 0;
-  ncclTeam_t cftTeam{4, 0, 1};
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, &leId, &leOffset), ncclInvalidArgument);
+  ExpectNoGpuCftSupportReturnsInvalidArgument();
 }
-
 TEST_F(NcclGetCftDeviceLeInfoTest, FindCommAndHostWindowFails_PropagatesErrorViaNcclcheck) {
-  g_findCommAndHostWindowFromDeviceWindow = [](ncclWindow_t, ncclComm_t*, ncclDevrWindow**) {
-    return ncclSystemError;
-  };
-  ncclTeam_t cftTeam{4, 0, 1};
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, &leId, &leOffset), ncclSystemError);
+  ExpectFindCommAndHostWindowFailurePropagates();
 }
 
 TEST_F(NcclGetCftDeviceLeInfoTest, BaseLeIdNotYetCreated_ReturnsInvalidUsage) {
@@ -465,37 +516,22 @@ TEST_F(NcclGetCftDeviceLeInfoTest, CountedWindow_UsesCountedBaseLeIdSlot) {
 class NcclGetPeerDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
   size_t BigOffset() const override { return 0x3000; }
+  ncclResult_t Invoke(ncclWindow_t w, ncclCftLeId* leId, size_t* leOffset) override {
+    return ncclGetPeerDeviceLeInfo(w, 0, /*peerWorld=*/0, leId, leOffset);
+  }
 };
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, NullArgs_RejectedByPtrCheck) {
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(nullptr, 0, 0, &leId, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, nullptr, &leOffset), ncclInvalidArgument);
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, &leId, nullptr), ncclInvalidArgument);
+  ExpectNullArgsRejectedByPtrCheck();
 }
-
 TEST_F(NcclGetPeerDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, &leId, &leOffset), ncclInvalidUsage);
+  ExpectWindowNotCftRegisteredReturnsInvalidUsage();
 }
-
 TEST_F(NcclGetPeerDeviceLeInfoTest, CommHasNoGpuCftSupport_ReturnsInvalidArgument) {
-  comm->gpuCftSupport = 0;
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, &leId, &leOffset), ncclInvalidArgument);
+  ExpectNoGpuCftSupportReturnsInvalidArgument();
 }
-
 TEST_F(NcclGetPeerDeviceLeInfoTest, FindCommAndHostWindowFails_PropagatesErrorViaNcclcheck) {
-  g_findCommAndHostWindowFromDeviceWindow = [](ncclWindow_t, ncclComm_t*, ncclDevrWindow**) {
-    return ncclSystemError;
-  };
-  ncclCftLeId leId;
-  size_t leOffset;
-  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, &leId, &leOffset), ncclSystemError);
+  ExpectFindCommAndHostWindowFailurePropagates();
 }
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, PeerOutsideFlatTeamBoundaries_ReturnsInvalidArgument) {
