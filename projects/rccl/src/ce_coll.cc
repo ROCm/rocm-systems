@@ -1150,17 +1150,38 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
   uint8_t* myRecvBuff = (uint8_t*)args->recvBuff;
   void* peerRecvBuff;
   size_t offset, winOff;
-  size_t totalBytes = 0;
+  const int freq = (int)comm->ceColl.intraBatchSyncFreq;
+  bool roundSync = false;
   struct ncclCeBatchOpsParams batchOpsParams = {};
   NCCLCHECKGOTO(ncclCeInitBatchOpsParams(&batchOpsParams, comm->nRanks), ret, fail);
 
   NCCLCHECKGOTO(ncclAlltoAllvValidateSizeMatrix(args->sizes, comm->nRanks), ret, fail);
+
+  // ncclMemOpSync is collective: decide intra-batch sync from the full size matrix, not this rank's nonzero peers.
+  for (int src = 0; freq > 0 && src < comm->nRanks && !roundSync; src++) {
+    size_t* srcSizes = ncclAlltoAllvSendSizes(args->sizes, src, comm->nRanks);
+    int ops = 0;
+    size_t bytes = 0;
+    for (int dst = 0; dst < comm->nRanks; dst++) {
+      if (srcSizes[dst] != 0) {
+        ops++;
+        bytes += srcSizes[dst];
+      }
+    }
+    roundSync = ops > freq && bytes >= comm->ceColl.intraBatchSyncMsgThreshold;
+  }
 
   // Ensure all ranks are ready before starting transfers
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
 
   // Copy data to other ranks: send variable-sized chunk for each destination rank
   for (int r = 0; r < comm->nRanks; r++) {
+    // Sync per round of freq destination slots, so every rank issues the same number of barriers.
+    if (roundSync && r > 0 && r % freq == 0) {
+      NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream, args), ret, fail);
+      batchOpsParams.numOps = 0;
+      NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+    }
     int dstRank = (comm->rank + r) % comm->nRanks;
     const size_t chunkBytes = sendSizes[dstRank];
     if (chunkBytes == 0) {
@@ -1169,7 +1190,6 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
 
     uint8_t* srcPtr = mySendBuff + sendDispls[dstRank];
     uint8_t* dstPtr = myRecvBuff + recvDispls[comm->rank];
-    totalBytes += chunkBytes;
 
     if (dstRank == comm->rank) {
       // Local copy for own data
@@ -1197,12 +1217,13 @@ ncclResult_t ncclCeAlltoAllv(struct ncclComm* comm, struct ncclCeCollArgs* args,
     }
   }
 
-  // Check if we need to perform intra-batch synchronization
-  batchOpsParams.intraBatchSync =
-    (batchOpsParams.numOps > comm->ceColl.intraBatchSyncFreq && totalBytes >= comm->ceColl.intraBatchSyncMsgThreshold);
-
-  // Launch the batch operations
+  // Launch the last round; intraBatchSync stays false so ncclCeLaunchBatchOps adds no rank-local barriers
   NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &batchOpsParams, stream, args), ret, fail);
+
+  // Graph replay needs an even barrier count so useCompletePtr returns to its pre-launch state.
+  if (roundSync && ncclCudaGraphValid(comm->planner.capturingGraph) && ((comm->nRanks - 1) / freq) % 2 != 0) {
+    NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+  }
 
   // Ensure all transfers are complete across all ranks
   NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);

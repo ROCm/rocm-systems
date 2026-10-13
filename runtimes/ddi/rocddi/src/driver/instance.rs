@@ -16,9 +16,9 @@ use super::{
 };
 use crate::device::event::DeviceEvent;
 use crate::device::gpu::profiling::ClockCounters;
-use crate::host_storage::Shared;
+use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -110,16 +110,14 @@ impl DriverInstance {
         }
     }
 
-    // A non-GPU driver variant needs the same fallible routing contract.
-    #[allow(clippy::unnecessary_wraps)]
-    pub(crate) fn gpu_presentation(&self, endpoint: &Endpoint) -> Result<GpuPresentation, Error> {
+    pub(crate) fn query_endpoint_details(
+        &self,
+        endpoint: &Endpoint,
+    ) -> Result<EndpointDetails, Error> {
         match self {
-            Self::LinuxKfd(driver) => Ok(driver.gpu_presentation(endpoint)),
+            Self::LinuxKfd(driver) => driver.query_endpoint_details(endpoint),
             #[cfg(test)]
-            Self::Test(_) => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "driver does not present GPU endpoints",
-            }),
+            Self::Test(driver) => driver.query_endpoint_details(endpoint),
         }
     }
 
@@ -127,7 +125,7 @@ impl DriverInstance {
         match self {
             Self::LinuxKfd(driver) => driver.supports_host_registration(endpoint),
             #[cfg(test)]
-            Self::Test(_) => false,
+            Self::Test(driver) => driver.supports_host_registration(endpoint),
         }
     }
 }
@@ -151,16 +149,24 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
-    /// Checks the exact installed driver owner of an activated device.
+    pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
+        match self {
+            Self::LinuxKfd { driver, .. } => driver.supports_host_registration(endpoint),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.supports_host_registration(endpoint),
+        }
+    }
+
+    /// Checks whether two activated devices retain the same driver instance.
     /// A matching numeric endpoint identity alone cannot establish ownership.
-    pub(crate) fn belongs_to(&self, instance: &DriverInstance) -> bool {
-        match (self, instance) {
-            (Self::LinuxKfd { driver, .. }, DriverInstance::LinuxKfd(installed)) => {
-                Shared::ptr_eq(driver, installed)
+    pub(crate) fn shares_driver_instance(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::LinuxKfd { driver: left, .. }, Self::LinuxKfd { driver: right, .. }) => {
+                Shared::ptr_eq(left, right)
             }
             #[cfg(test)]
-            (Self::Test { driver, .. }, DriverInstance::Test(installed)) => {
-                Shared::ptr_eq(driver, installed)
+            (Self::Test { driver: left, .. }, Self::Test { driver: right, .. }) => {
+                Shared::ptr_eq(left, right)
             }
             #[cfg(test)]
             _ => false,
@@ -193,28 +199,17 @@ impl DeviceDriverState {
     }
 
     pub(crate) fn shares_address_domain(&self, other: &Self) -> bool {
+        if !self.shares_driver_instance(other) {
+            return false;
+        }
         match (self, other) {
-            (
-                Self::LinuxKfd {
-                    driver: left,
-                    state: a,
-                },
-                Self::LinuxKfd {
-                    driver: right,
-                    state: b,
-                },
-            ) => Shared::ptr_eq(left, right) && AddressSpaceInfo::shares_address_domain(a, b),
+            (Self::LinuxKfd { state: a, .. }, Self::LinuxKfd { state: b, .. }) => {
+                AddressSpaceInfo::shares_address_domain(a, b)
+            }
             #[cfg(test)]
-            (
-                Self::Test {
-                    driver: left,
-                    state: a,
-                },
-                Self::Test {
-                    driver: right,
-                    state: b,
-                },
-            ) => Shared::ptr_eq(left, right) && AddressSpaceInfo::shares_address_domain(a, b),
+            (Self::Test { state: a, .. }, Self::Test { state: b, .. }) => {
+                AddressSpaceInfo::shares_address_domain(a, b)
+            }
             #[cfg(test)]
             _ => false,
         }
@@ -228,14 +223,6 @@ impl DeviceDriverState {
         }
     }
 
-    pub(crate) fn allocator(&self) -> crate::host_storage::Allocator {
-        match self {
-            Self::LinuxKfd { driver, .. } => driver.allocator(),
-            #[cfg(test)]
-            Self::Test { driver, .. } => driver.allocator(),
-        }
-    }
-
     // The Result rejects other driver variants when they are installed.
     #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn linux_kfd(&self) -> Result<(&Shared<KfdDriver>, &KfdDeviceState), Error> {
@@ -246,6 +233,16 @@ impl DeviceDriverState {
                 kind: ErrorKind::Unsupported,
                 detail: "device does not use the Linux KFD driver",
             }),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_driver(
+        &self,
+    ) -> Option<(&Shared<test_driver::TestDriver>, &test_driver::TestDevice)> {
+        match self {
+            Self::Test { driver, state } => Some((driver, state)),
+            Self::LinuxKfd { .. } => None,
         }
     }
 }
