@@ -65,6 +65,8 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         (static_cast<uint64_t>(words[literal_word + 1]) << 32) | words[literal_word];
     ssrc0 = Operand(64, OperandType::OPR_SIMM64, literal64, true);
   }
+  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
+    flags_ |= MISALIGNED_SCALAR_DATA;
   flags_ |= RESULT_COPY;
 }
 
