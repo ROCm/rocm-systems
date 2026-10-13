@@ -55,7 +55,10 @@ rdc_status_t rdc_connect(const char* ipAddress, rdc_handle_t* p_rdc_handle, cons
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  rdc_status_t status = rdc_client_loader.load("librdc_client.so", &func_make_handler);
+  // gRPC worker threads in librdc_client.so keep running after the channel is
+  // destroyed, so rdc_shutdown() must not unmap the code they execute.
+  rdc_status_t status =
+      rdc_client_loader.load("librdc_client.so", &func_make_handler, RTLD_LAZY | RTLD_NODELETE);
   if (status != RDC_ST_OK) {
     *p_rdc_handle = nullptr;
     return status;

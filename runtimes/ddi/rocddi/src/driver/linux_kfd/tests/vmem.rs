@@ -7,7 +7,6 @@
 
 use super::super::{memory, sys, sysfs};
 use super::*;
-use crate::host_storage::Allocator;
 use std::fs::{File, OpenOptions};
 use std::os::fd::AsRawFd;
 use std::sync::Arc;
@@ -41,19 +40,15 @@ fn fixture() -> (
     Owned<KfdVirtualAddress>,
     Owned<KfdVirtualMemory>,
 ) {
-    let allocator = Allocator::default();
-    let kfd = Shared::new(
-        sys::Kfd::with_hook(
-            File::open("/dev/null").unwrap(),
-            Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
-                    args.result = uapi::WAIT_TIMEOUT;
-                }
-                Ok(())
-            }),
-        ),
-        allocator,
-    )
+    let kfd = Shared::new(sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if let sys::Call::Wait(args, _) = call {
+                args.result = uapi::WAIT_TIMEOUT;
+            }
+            Ok(())
+        }),
+    ))
     .unwrap();
     let node = sysfs::KfdNode {
         node: 1,
@@ -71,10 +66,9 @@ fn fixture() -> (
     };
     let vm = memory::queue_fixture(kfd, backing_file(), node);
     let reservation =
-        KfdVirtualAddress::reserve((0x10000, isize::MAX as u64), page(), page(), 0, allocator)
-            .unwrap();
+        KfdVirtualAddress::reserve((0x10000, isize::MAX as u64), page(), page(), 0).unwrap();
     let source = backing_file();
-    let physical = KfdVirtualMemory::import(source.as_raw_fd(), allocator).unwrap();
+    let physical = KfdVirtualMemory::import(source.as_raw_fd()).unwrap();
     (vm, reservation, physical)
 }
 

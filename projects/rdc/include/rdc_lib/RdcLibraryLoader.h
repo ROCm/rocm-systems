@@ -47,7 +47,7 @@ class RdcLibraryLoader {
   rdc_status_t load_symbol(T* func_handler, const char* func_name);
 
   template <typename T>
-  rdc_status_t load(const char* filename, T* func_make_handler);
+  rdc_status_t load(const char* filename, T* func_make_handler, int dlopen_flags = RTLD_LAZY);
 
   rdc_status_t unload();
 
@@ -82,13 +82,13 @@ rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_nam
 }
 
 template <typename T>
-rdc_status_t RdcLibraryLoader::load(const char* filename, T* func_make_handler) {
+rdc_status_t RdcLibraryLoader::load(const char* filename, T* func_make_handler, int dlopen_flags) {
   if (filename == nullptr || func_make_handler == nullptr) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
   try {
-    rdc_status_t status = load(filename);
+    rdc_status_t status = load(filename, dlopen_flags);
     if (status != RDC_ST_OK) {
       return status;
     }
