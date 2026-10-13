@@ -517,17 +517,13 @@ hsa_status_t LoaderContext::SegmentAllocAt(amdgpu_hsa_elf_segment_t segment, hsa
   assert(0 < size);
   if (segment != AMDGPU_HSA_SEGMENT_CODE_AGENT) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  hsa_status_t status =
-      core::Runtime::runtime_singleton_->CheckExecutableMapping(address, size, agent);
-  if (status != HSA_STATUS_SUCCESS) return status;
-
   const core::MemoryRegion* region = RegionMemory::AgentLocal(agent, true);
   if (!region) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   RegionMemory* mem = new (std::nothrow) RegionMemory(region, true);
   if (!mem) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  status = mem->Adopt(address, size);
+  hsa_status_t status = mem->Adopt(address, size);
   if (status != HSA_STATUS_SUCCESS) {
     delete mem;
     return status;
