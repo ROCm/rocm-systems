@@ -3506,6 +3506,10 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   // a lie: deleting either call site was invisible.
   EXPECT_EQ(1, g_rcclOverrideAlgorithmCalls) << "rcclOverrideAlgorithm (:2733)";
   EXPECT_EQ(1, g_rcclOverrideProtocolCalls) << "rcclOverrideProtocol (:2734)";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveAlgorithmCalls) << "rcclUpdateCollectiveAlgorithm";
+  EXPECT_TRUE(g_rcclUpdateCollectiveAlgorithmBeforeProtocol)
+      << "rcclUpdateCollectiveAlgorithm must run before rcclUpdateCollectiveProtocol picks the Tree protocol";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
 // LATENT BUG (enqueue.cc:2659): rcclOverrideChannels returns ncclResult_t, but
