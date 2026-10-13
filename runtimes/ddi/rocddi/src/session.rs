@@ -147,19 +147,21 @@ impl Session {
             })
     }
 
-    /// Creates a session and its installed drivers without opening,
+    /// Creates one instance of every compiled driver backend without opening,
     /// enumerating, or activating an endpoint.
     ///
     /// # Errors
     /// Fails with `ResourceExhausted` if driver registry metadata cannot be allocated.
     pub fn new(lifetime: DriverContextLifetime) -> Result<Self, Error> {
         let mut drivers = Vec::new();
-        drivers.try_reserve(1).map_err(|_| Error::Capacity {
-            resource: "session drivers",
-        })?;
-        drivers.push(DriverInstance::LinuxKfd(Shared::new(
-            driver::KfdDriver::with_context_lifetime(lifetime),
-        )?));
+        drivers
+            .try_reserve_exact(driver::BUILTIN_DRIVER_FACTORIES.len())
+            .map_err(|_| Error::Capacity {
+                resource: "session drivers",
+            })?;
+        for construct in driver::BUILTIN_DRIVER_FACTORIES {
+            drivers.push(construct(lifetime)?);
+        }
         Self::from_drivers(drivers, lifetime)
     }
 
@@ -386,6 +388,33 @@ mod tests {
     };
     use crate::topology::{EndpointDetailsKind, EndpointKind};
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn builtin_catalog_constructs_independent_driver_instances() {
+        let mut first = Session::new(DriverContextLifetime::Session).unwrap();
+        let mut second = Session::new(DriverContextLifetime::Session).unwrap();
+        let shared = first.clone();
+
+        assert_eq!(
+            first.registry.drivers.len(),
+            driver::BUILTIN_DRIVER_FACTORIES.len()
+        );
+        assert_eq!(second.registry.drivers.len(), first.registry.drivers.len());
+        for ((first_driver, second_driver), shared_driver) in first
+            .registry
+            .drivers
+            .iter()
+            .zip(&second.registry.drivers)
+            .zip(&shared.registry.drivers)
+        {
+            assert_ne!(first_driver.instance_id(), second_driver.instance_id());
+            assert_eq!(first_driver.instance_id(), shared_driver.instance_id());
+        }
+
+        drop(shared);
+        first.destroy().unwrap();
+        second.destroy().unwrap();
+    }
 
     #[test]
     fn cloned_session_blocks_driver_shutdown_until_released() {

@@ -37,7 +37,8 @@ activation, driver context lifetime, and shutdown. It can discover and activate
 several devices; construction activates none. The AMDF and HSA frontends each
 use a `Session` as their rocddi root. A session owns a set of independently
 identified driver instances under one requested context lifetime. The
-current Linux constructor installs a KFD driver instance. Each activated
+current Linux catalog installs a KFD driver instance. The catalog is static;
+each session constructs its own instances from it. Each activated
 device retains only its owning driver instance and state. Session activation
 rejects an endpoint from another driver instance, and shutdown requires every
 device and resource owner to release its driver instance first. Clones share
@@ -73,8 +74,8 @@ occupancy, cleanup retry, and the order in which native owners and drivers are
 dropped.
 
 The common `Driver` trait imposes no GPU operations on non-GPU drivers. A new
-implementation adds a `DriverInstance` and `DeviceDriverState` variant and is
-installed by the session constructor. A GPU implementation satisfies
+implementation adds a `DriverInstance` and `DeviceDriverState` variant and an
+inert constructor to the compiled backend catalog. A GPU implementation satisfies
 `GpuDriver`; another device family implements only the shared resource
 contracts whose semantics it provides. Generic resource owners retain their
 concrete driver and cleanup state. Public allocation, virtual-memory, and

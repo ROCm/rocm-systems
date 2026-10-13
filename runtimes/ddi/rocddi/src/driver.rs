@@ -41,7 +41,7 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::ClockCounters;
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
-use crate::memory::storage::Owned;
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
     VirtualMemoryInfo,
@@ -49,6 +49,28 @@ use crate::memory::{
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
+
+/// Inert constructors for the driver backends compiled into this target.
+/// Each session constructs fresh instances from this immutable catalog.
+pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+
+pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    new_linux_kfd,
+];
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+    Ok(DriverInstance::LinuxKfd(Shared::new(
+        KfdDriver::with_context_lifetime(lifetime),
+    )?))
+}
 
 /// Address-space identity and bounds for devices that can map memory.
 ///
