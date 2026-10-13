@@ -135,6 +135,67 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
         )
 
 
+def override_bundled_hsa_runtime(artifact_lib_dir: Path) -> None:
+    """Replace pip-bundled libhsa-runtime64.so with TheRock's version.
+
+    override_bundled_hip_runtime() swaps in the CI-built libamdhip64.so,
+    which is built against the ROCr headers at the current develop HEAD.
+    When a commit adds a new hsa_amd_* entry point, that HIP runtime
+    references a symbol the older pip-pinned libhsa-runtime64.so does not
+    export, and the very first dlopen of libamdhip64.so fails with
+    "undefined symbol: ..., version ROCR_1" — before any test is collected,
+    so the suite reports no results at all rather than a failure.
+
+    HIP and ROCr must therefore be replaced as a pair, which keeps them
+    version-locked by construction instead of relying on the pip SDK
+    happening to be new enough.  TheRock's libhsa-runtime64.so is already
+    present in the artifact directory from the core-runtime_lib fetch.
+    """
+    import shutil
+
+    ci_hsa = artifact_lib_dir.resolve() / "libhsa-runtime64.so"
+    if not ci_hsa.exists():
+        raise FileNotFoundError(
+            f"TheRock libhsa-runtime64.so not found at {ci_hsa} — check artifact fetch"
+        )
+    log.info("TheRock ROCr runtime: %s (%d bytes)", ci_hsa, ci_hsa.stat().st_size)
+
+    bundled = []
+    for d in find_pip_sdk_lib_dirs():
+        bundled.extend(
+            f for f in d.glob("libhsa-runtime64.so*") if ".pip-original" not in f.name
+        )
+    if not bundled:
+        bundled = [
+            f for f in Path(sys.prefix).rglob("libhsa-runtime64.so*")
+            if ".pip-original" not in f.name
+        ]
+
+    replaced = 0
+    for target in bundled:
+        if target.is_symlink():
+            continue
+        backup = target.with_suffix(target.suffix + ".pip-original")
+        if not backup.exists():
+            shutil.copy2(str(target), str(backup))
+            log.info("Backed up original: %s", backup)
+        shutil.copy2(str(ci_hsa), str(target))
+        log.info("Replaced %s (%d bytes)", target, target.stat().st_size)
+        replaced += 1
+
+    if replaced == 0:
+        log.error(
+            "No bundled libhsa-runtime64.so found to replace — the CI-built HIP "
+            "runtime would be left to load against pip's ROCr"
+        )
+        sys.exit(1)
+    else:
+        log.info(
+            "Replaced %d bundled libhsa-runtime64.so file(s) with TheRock version",
+            replaced,
+        )
+
+
 def setup_kpack_device_code(artifact_dir: Path) -> None:
     """Replace pip-bundled kpack archives with CI-built versions.
 
