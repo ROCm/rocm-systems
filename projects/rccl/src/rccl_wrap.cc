@@ -121,6 +121,8 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
+// No production caller while single-node gfx120x defaults to Simple (see rcclUpdateCollectiveProtocol). Kept, with
+// its tests, to re-enable LL once the prims_ll.h loads are fixed for gfx120x.
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,

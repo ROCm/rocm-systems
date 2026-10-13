@@ -1193,7 +1193,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSi
       "Wrap_UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        // Totals, not per rank: rcclGetSizePerRank divides by nRanks for AllGather/ReduceScatter, not AllReduce.
+        // Totals, not per rank: rcclGetSizePerRank divides by nRanks for every func here except AllReduce.
         constexpr struct {
           ncclFunc_t func;
           size_t nBytes;
@@ -1201,6 +1201,8 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSi
             {ncclFuncAllGather, 60600 * 4},      // sizePerRank 60600 <= 98304
             {ncclFuncReduceScatter, 60600 * 4},  // sizePerRank 60600 <= 98304
             {ncclFuncAllReduce, 16000},          // sizePerRank 16000 <= 16384
+            {ncclFuncBroadcast, 4 * 4},          // sizePerRank 4 <= 1536
+            {ncclFuncReduce, 4 * 4},             // sizePerRank 4 <= 8192
         };
         for (const char* arch : {"gfx1200", "gfx1201"}) {
           ncclComm* comm = MakeCommWithArch(arch);
