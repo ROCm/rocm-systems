@@ -1139,12 +1139,13 @@
     "net_ib_rma_multisegment": {
       "extends": "net_ib_base",
       "timeout": 300,
-      "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests skip instead of exercising the per-segment path.",
+      "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests would skip instead of exercising the per-segment path, so RCCL_TEST_RMA_MSEG_REQUIRE turns that skip into a failure.",
       "env_variables": {
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
@@ -1233,6 +1234,38 @@
           "test_filter": "RmaMultiSegmentMPITest.SingleSegmentRegression"
         },
         {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_KeepsUpstreamPath",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: a multi-segment window stays on the upstream single-MR path and no rank logs the per-segment marker",
+          "test_filter": "RmaMultiSegmentMPITest.MultiSegmentRegisterOff_KeepsUpstreamPath",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_SingleSegmentRegression",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: an ordinary single-allocation buffer registers and transfers on the upstream path",
+          "test_filter": "RmaMultiSegmentMPITest.SingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_IFlushSingleSegmentRegression",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: iflush on an ordinary single-allocation buffer fences and verifies on the upstream path",
+          "test_filter": "RmaMultiSegmentMPITest.IFlushSingleSegmentRegression",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
+          "name": "NetIB_RMA_MultiSeg_RegisterOff_RmaBasics",
+          "description": "NCCL_MULTI_SEGMENT_REGISTER=0: the RMA put/get/signal basics (RegMr and DmaBuf) run on the upstream bodies",
+          "test_filter": "CtxAndSize/RmaMPITest.*:CtxOnly/RmaMPIFixedSizeTest.*",
+          "env_variables": {
+            "NCCL_MULTI_SEGMENT_REGISTER": "0"
+          }
+        },
+        {
           "name": "NetIB_RMA_MultiSeg_AsymmetricSegmentCountRejected",
           "description": "Negative: ranks registering windows with different physical segment counts are rejected collectively instead of running a mismatched-stride all-gather",
           "test_filter": "RmaMultiSegmentMPITest.RegisterAsymmetricSegmentCountRejected"
@@ -1285,12 +1318,12 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath",
           "description": "Post path at the default WR batch size (64): chains up to 31 WRs, aggregated and unaggregated requests in any wait order, interleaved single/multi-segment puts and gets, zero-size ops, per-context batches, rejected ops that must not leak request slots or sequence ids, and 100 registration cycles (RCCL_TEST_RMA_REG_CYCLES)",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         },
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch8",
           "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=8, so chains of 9+ WRs drain the batch and post directly",
-          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "8"
           }
@@ -1298,7 +1331,7 @@
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_WrBatch2",
           "description": "Post path with NCCL_RMA_IB_WR_BATCHSIZE=2 (the minimum): any multi-segment chain posts directly and every aggregated batch holds one op",
-          "test_filter": "RmaMultiSegmentPostMPITest.*",
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe",
           "env_variables": {
             "NCCL_RMA_IB_WR_BATCHSIZE": "2"
           }
@@ -1324,13 +1357,14 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_1x2",
           "description": "Post-path, all-pairs and many-to-one tests on 2 ranks of one node",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         }
       ]
     },
@@ -1345,13 +1379,14 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {
           "name": "NetIB_RMA_MultiSeg_PostPath_2x4",
           "description": "Post-path, all-pairs and many-to-one tests on 8 ranks across 2 nodes",
-          "test_filter": "RmaMultiSegmentPostMPITest.*"
+          "test_filter": "RmaMultiSegmentPostMPITest.*:-RmaMultiSegmentPostMPITest.IPutSignalSendQueueOversubscribe"
         }
       ]
     },
@@ -1366,7 +1401,8 @@
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
-        "RCCL_MPI_LOG_ALL_RANKS": "1"
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "RCCL_TEST_RMA_MSEG_REQUIRE": "1"
       },
       "tests": [
         {

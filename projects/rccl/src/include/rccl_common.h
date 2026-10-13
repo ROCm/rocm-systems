@@ -485,6 +485,8 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
 // GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
 ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGlobalNumSegments, int* ptrType,
                                        bool* needDmabuf);
+// True when NCCL_MULTI_SEGMENT_REGISTER is on and the RMA backend registers per segment (rccl_dev_runtime.cc).
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
