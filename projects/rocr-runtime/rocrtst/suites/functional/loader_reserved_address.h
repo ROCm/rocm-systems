@@ -28,8 +28,8 @@ class LoaderReservedAddressTest : public TestBase {
 
   virtual void DisplayTestInfo(void);
 
-  // A normal allocation is rejected. An executable vmem mapping accepts the
-  // image, and its bytes match a normal load.
+  // A misaligned address is rejected. An executable vmem mapping accepts the
+  // image, and its device bytes match a normal load.
   void LoadAtAddressTest(void);
 
  private:

@@ -54,6 +54,7 @@
 #include "core/util/os.h"
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
+#include "inc/amd_hsa_kernel_code.h"
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -541,6 +542,8 @@ hsa_status_t LoaderContext::SegmentAllocAt(amdgpu_hsa_elf_segment_t segment, hsa
                                            size_t size, void* address, void** seg) {
   assert(0 < size);
   if (segment != AMDGPU_HSA_SEGMENT_CODE_AGENT) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (reinterpret_cast<uintptr_t>(address) % AMD_ISA_ALIGN_BYTES)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   const core::MemoryRegion* region = RegionMemory::AgentLocal(agent, true);
   if (!region) return HSA_STATUS_ERROR_INVALID_AGENT;

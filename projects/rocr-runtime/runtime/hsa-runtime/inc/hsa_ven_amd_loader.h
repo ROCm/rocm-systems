@@ -565,8 +565,10 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  * ::HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE is @p address.
  *
  * @p address is an application-owned range, for example a virtual-memory
- * mapping or an mmap allocation. The runtime does not check that the range is
- * mapped or executable. The bytes occupied by the code object, as reported by
+ * mapping or an mmap allocation. It must be aligned to 256 bytes, the
+ * alignment the runtime uses when it allocates code itself. The runtime does
+ * not check that the range is mapped or executable. The bytes occupied by the
+ * code object, as reported by
  * ::hsa_ven_amd_loader_code_object_reader_get_load_size, must fit in @p size.
  * The range stays owned by the application. Destroying @p executable does not
  * unmap it.
@@ -583,7 +585,8 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  *
  * @param[in] options Standard and vendor-specific options. May be NULL.
  *
- * @param[in] address Address at which to place the loaded code object.
+ * @param[in] address Address at which to place the loaded code object. Must be
+ * aligned to 256 bytes.
  *
  * @param[in] size Number of bytes starting at @p address that the loaded code
  * object may occupy.
@@ -604,8 +607,8 @@ hsa_status_t hsa_ven_amd_loader_code_object_reader_get_load_size(
  * @retval ::HSA_STATUS_ERROR_INVALID_CODE_OBJECT_READER @p code_object_reader
  * is invalid.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p address is NULL, or the code
- * object does not fit in @p size.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p address is NULL, is not
+ * aligned to 256 bytes, or the code object does not fit in @p size.
  *
  * @retval ::HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS The code object is version
  * 1, or is incompatible with @p agent.
