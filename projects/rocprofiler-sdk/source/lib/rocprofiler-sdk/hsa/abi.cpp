@@ -374,7 +374,6 @@ ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_vmem_get_vmem_info_fn, 94);
 #if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
 ROCP_SDK_ENFORCE_ABI(::AmdExtTable, hsa_amd_enable_high_precision_timestamps_fn, 95);
 #endif
-#endif
 
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_get_capability_fn, 1);
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_data_get_info_fn, 2);
