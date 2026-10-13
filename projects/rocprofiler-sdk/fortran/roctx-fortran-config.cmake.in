@@ -1,0 +1,115 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+@PACKAGE_INIT@
+
+set(_roctx_built_dir "@ROCTX_FORTRAN_COMPILER_DIR@")
+set(_roctx_libdir "@PACKAGE_ROCTX_FORTRAN_LIBDIR@")
+set(_roctx_incdir "@PACKAGE_ROCTX_FORTRAN_INCLUDEDIR@")
+
+set(roctx_FORTRAN_FOUND FALSE)
+
+if(NOT CMAKE_Fortran_COMPILER_LOADED)
+  set(roctx-fortran_FOUND FALSE)
+  string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
+      "The rocTX Fortran bindings need Fortran enabled before find_package: "
+      "add Fortran to your project() languages, or call enable_language(Fortran).")
+  return()
+endif()
+
+if(CMAKE_Fortran_COMPILER_ID STREQUAL "GNU")
+  set(_roctx_fc "gfortran")
+elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
+  set(_roctx_fc "amdflang")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
+  set(_roctx_fc "ftn")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
+  set(_roctx_fc "ifx")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Intel")
+  set(_roctx_fc "ifort")
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+  set(_roctx_fc "nvfortran")
+else()
+  get_filename_component(_roctx_fc "${CMAKE_Fortran_COMPILER}" NAME_WE)
+  string(TOLOWER "${_roctx_fc}" _roctx_fc)
+endif()
+
+function(_roctx_dir_matches DIR FC OUT)
+  set(${OUT} FALSE PARENT_SCOPE)
+  if(DIR STREQUAL FC)
+    set(${OUT} TRUE PARENT_SCOPE)
+    return()
+  endif()
+  string(LENGTH "${FC}" _n)
+  string(LENGTH "${DIR}" _dn)
+  if(_dn GREATER _n)
+    string(SUBSTRING "${DIR}" 0 ${_n} _head)
+    string(SUBSTRING "${DIR}" ${_n} 1 _sep)
+    if(_head STREQUAL FC AND _sep MATCHES "^[-._]$")
+      set(${OUT} TRUE PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+file(GLOB _roctx_avail RELATIVE "${_roctx_incdir}" "${_roctx_incdir}/*")
+
+if(DEFINED ROCTX_FORTRAN_COMPILER_DIR)
+  set(_roctx_dir "${ROCTX_FORTRAN_COMPILER_DIR}")
+  if(NOT EXISTS "${_roctx_incdir}/${_roctx_dir}/roctx.mod"
+     OR NOT EXISTS "${_roctx_libdir}/${_roctx_dir}/libroctx_fortran.a")
+    set(roctx-fortran_FOUND FALSE)
+    string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
+        "ROCTX_FORTRAN_COMPILER_DIR is ${_roctx_dir}, but roctx.mod and "
+        "libroctx_fortran.a are not both installed for it under ${_roctx_incdir} "
+        "and ${_roctx_libdir}. Available: ${_roctx_avail}.")
+    return()
+  endif()
+else()
+  set(_roctx_dir "")
+  if(EXISTS "${_roctx_incdir}/${_roctx_fc}/roctx.mod")
+    set(_roctx_dir "${_roctx_fc}")
+  else()
+    _roctx_dir_matches("${_roctx_built_dir}" "${_roctx_fc}" _roctx_ok)
+    if(_roctx_ok)
+      set(_roctx_dir "${_roctx_built_dir}")
+    endif()
+  endif()
+
+  if(NOT _roctx_dir)
+    set(roctx-fortran_FOUND FALSE)
+    string(CONCAT roctx-fortran_NOT_FOUND_MESSAGE
+        "This project builds with ${_roctx_fc}, but no roctx.mod for it is installed "
+        "under ${_roctx_incdir}. Available: ${_roctx_avail}. "
+        "A Fortran .mod cannot be shared across compilers; rebuild the bindings "
+        "with ${_roctx_fc}, or set ROCTX_FORTRAN_COMPILER_DIR to the directory to use.")
+    return()
+  endif()
+endif()
+
+if(@ROCTX_FORTRAN_NEEDS_C_PACKAGE@)
+  if(NOT TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    if(NOT CMAKE_C_COMPILER_LOADED AND NOT CMAKE_CXX_COMPILER_LOADED)
+      enable_language(C)
+    endif()
+    include(CMakeFindDependencyMacro)
+    find_dependency(rocprofiler-sdk-roctx)
+  endif()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/roctx-fortran-targets.cmake")
+
+if(NOT _roctx_dir STREQUAL _roctx_built_dir)
+  set_target_properties(roc::roctx_fortran PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_roctx_incdir}/${_roctx_dir}")
+  get_target_property(_roctx_cfgs roc::roctx_fortran IMPORTED_CONFIGURATIONS)
+  foreach(_roctx_c IN LISTS _roctx_cfgs)
+    set_target_properties(roc::roctx_fortran PROPERTIES
+      IMPORTED_LOCATION_${_roctx_c}
+        "${_roctx_libdir}/${_roctx_dir}/libroctx_fortran.a")
+  endforeach()
+endif()
+
+set(roctx_FORTRAN_FOUND TRUE)
+
+check_required_components(roctx-fortran)
