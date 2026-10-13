@@ -10,12 +10,16 @@
 #include "dev_runtime_fakes.h"
 
 #include "dev_runtime.h"
+#include "fail_loud.h"
 #include "signature-drift.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_devrFindWindow, ncclDevrFindWindow);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowIsMultiSegment, ncclDevrWindowIsMultiSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrWindowHasSysmemSegment, ncclDevrWindowHasSysmemSegment);
 ASSERT_HOOK_MATCHES_PROD(g_devrInitOnce, ncclDevrInitOnce);
+ASSERT_HOOK_MATCHES_PROD(g_devrGetLsaRankPtr, ncclDevrGetLsaRankPtr);
+ASSERT_HOOK_MATCHES_PROD(g_devrWindowRegisterInGroup, ncclDevrWindowRegisterInGroup);
+ASSERT_HOOK_MATCHES_PROD(g_devrNcclCommWindowDeregister, ncclCommWindowDeregister);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 static ncclResult_t DefaultDevrFindWindow(struct ncclComm*, void const*, struct ncclDevrWindow** window) {
@@ -48,6 +52,42 @@ static ncclResult_t DefaultDevrInitOnce(struct ncclComm*) { return ncclSuccess; 
 std::function<ncclResult_t(struct ncclComm*)> g_devrInitOnce = DefaultDevrInitOnce;
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) { return g_devrInitOnce(comm); }
 
+static ncclResult_t DefaultDevrGetLsaRankPtr(struct ncclComm*, struct ncclDevrWindow*, size_t, int, void**) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaRankPtr");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevrWindow*, size_t, int, void**)> g_devrGetLsaRankPtr =
+    DefaultDevrGetLsaRankPtr;
+ncclResult_t ncclDevrGetLsaRankPtr(struct ncclComm* comm, struct ncclDevrWindow* winHost, size_t offset, int lsaRank,
+                                   void** outPtr) {
+  return g_devrGetLsaRankPtr(comm, winHost, offset, lsaRank, outPtr);
+}
+
+static ncclResult_t DefaultDevrWindowRegisterInGroup(struct ncclComm*, void*, size_t, int, ncclWindow_t*) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWindowRegisterInGroup");
+}
+std::function<ncclResult_t(struct ncclComm*, void*, size_t, int, ncclWindow_t*)> g_devrWindowRegisterInGroup =
+    DefaultDevrWindowRegisterInGroup;
+ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, size_t size, int winFlags,
+                                           ncclWindow_t* outWinDev) {
+  return g_devrWindowRegisterInGroup(comm, ptr, size, winFlags, outWinDev);
+}
+
+static ncclResult_t DefaultCommWindowDeregister(ncclComm_t, ncclWindow_t) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclCommWindowDeregister");
+}
+std::function<ncclResult_t(ncclComm_t, ncclWindow_t)> g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
+ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
+  return g_devrNcclCommWindowDeregister(comm, win);
+}
+
+// Floors for the LSA addressing ce_coll.cc's copy paths reach.
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int, int*) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWorldToLsaRank");
+}
+ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm*, struct ncclDevrWindow*, size_t, struct ncclTeam, void**) {
+  FailLoudUnfaked("dev_runtime_fakes", "ncclDevrGetLsaTeamPtrMC");
+}
+
 void ResetDevRuntimeFakes() {
   g_devrFindWindow = DefaultDevrFindWindow;
   g_devrWindowIsMultiSegmentValue = false;
@@ -55,4 +95,7 @@ void ResetDevRuntimeFakes() {
   g_devrWindowIsMultiSegment = DefaultDevrWindowIsMultiSegment;
   g_devrWindowHasSysmemSegment = DefaultDevrWindowHasSysmemSegment;
   g_devrInitOnce = DefaultDevrInitOnce;
+  g_devrGetLsaRankPtr = DefaultDevrGetLsaRankPtr;
+  g_devrWindowRegisterInGroup = DefaultDevrWindowRegisterInGroup;
+  g_devrNcclCommWindowDeregister = DefaultCommWindowDeregister;
 }

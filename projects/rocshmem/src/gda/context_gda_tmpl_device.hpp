@@ -1597,7 +1597,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
   if (ndim == 2) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, true);
+        ndim, element_size);
     const size_t src_s0 = view.src_s0;
     const size_t src_s1 = view.src_s1;
     const size_t dst_s0 = view.dst_s0;
@@ -1661,7 +1661,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
   } else if (ndim == 1) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, true);
+        ndim, element_size);
     const size_t ext = view.ext0;
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
@@ -1692,7 +1692,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
   if (ndim == 2) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, false);
+        ndim, element_size);
     const size_t src_s0 = view.src_s0;
     const size_t src_s1 = view.src_s1;
     const size_t dst_s0 = view.dst_s0;
@@ -1756,7 +1756,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
   } else if (ndim == 1) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, false);
+        ndim, element_size);
     const size_t ext = view.ext0;
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
@@ -1788,7 +1788,7 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
       dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
-      element_size, true);
+      element_size);
 
   if (view.ndim == 2) {
     switch (tile_classify(view)) {
@@ -1920,7 +1920,7 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
       dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
-      element_size, false);
+      element_size);
 
   if (view.ndim == 2) {
     switch (tile_classify(view)) {
