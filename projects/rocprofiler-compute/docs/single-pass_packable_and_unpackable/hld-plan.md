@@ -87,7 +87,7 @@ A PMC set that mixes GRBM with another block is still SPP when each block has ro
 
 - Counter limits are per hardware block, from `perfmon_config`. Copying a counter into a second pass is allowed when two PMC sets cannot share one bucket.
 - gfx942 is the reference count (408 / 374 / 358 / 16 / 34). Other arches use the same rules; their pass counts are a measurement, not a second design.
-- The final tree has one implementation: SPP packing and same-pass bind. No environment variable is in that tree. Cleanup PR [#12848](https://github.com/ROCm/rocm-systems/pull/12848) deletes the two remaining legacy env vars, `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` and `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE`. Phase 1 and Phase 2 still contain them until that PR. They are not a rollback path.
+- The final tree has one implementation: SPP packing and same-pass bind.
 
 Reported failures that this layout explains include [AIPROFCOMP-265](https://ontrack-internal.amd.com/browse/AIPROFCOMP-265) (CPC), [AIPROFCOMP-90](https://ontrack-internal.amd.com/browse/AIPROFCOMP-90) (L1 bandwidth above 100%), [AIPROFCOMP-268](https://ontrack-internal.amd.com/browse/AIPROFCOMP-268) (cache), [AIPROFCOMP-267](https://ontrack-internal.amd.com/browse/AIPROFCOMP-267) (TA/TD), [AIPROFCOMP-266](https://ontrack-internal.amd.com/browse/AIPROFCOMP-266) (Workgroup Manager utilization), and [ROCM-31864](https://ontrack-internal.amd.com/browse/ROCM-31864) (gfx950 L2-Fabric HBM / remote read traffic).
 
@@ -126,7 +126,7 @@ Priority is the order of delivery. Phase 1 is the packable set. Phase 2 is only 
 |----|-------------|
 | NFR-1 | The single-pass packer places the gfx942 default profile in **14** passes, against 13 in the shipping layout. The cost is extra replays of some counters, not a new counter set (still 274 PMCs). |
 | NFR-2 | SPU residual fill adds **0** passes on gfx942. Counters those 16 parents need are already in the Phase 1 layout. |
-| NFR-3 | The final tree is SPP packing and same-pass bind. No environment variable is in that tree. Phase 1 and Phase 2 still contain `ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC` and `ROCPROF_COMPUTE_ANALYZE_LEGACY_PASS_MERGE` until cleanup PR #12848 deletes them. Those variables are not a rollback path. |
+| NFR-3 | The final tree is SPP packing and same-pass bind. |
 | NFR-4 | No silent analyze-time cap. A value above 100% is intentional or a hardware defect. |
 
 ### Guidelines
