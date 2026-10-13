@@ -683,6 +683,47 @@ mod tests {
     }
 
     #[test]
+    fn allocation_keeps_its_driver_live_after_the_device_is_dropped() {
+        for lifetime in [
+            DriverContextLifetime::Session,
+            DriverContextLifetime::Process,
+        ] {
+            let id = [0x46; 16];
+            let driver = TestDriver::new(id, EndpointKind::Npu, lifetime).with_host_registration();
+            let shutdowns = driver.shutdowns.clone();
+            let mut session = Session::from_drivers(
+                vec![DriverInstance::Test(Shared::new(driver).unwrap())],
+                lifetime,
+            )
+            .unwrap();
+            let device = session
+                .activate(&session.open_endpoint(id).unwrap())
+                .unwrap();
+            let page = crate::memory::host_page_size().unwrap();
+            let mut host = HostAllocation::allocate(page, page).unwrap();
+            let mut registration = device
+                .register_host_allocation(
+                    &host,
+                    &[],
+                    crate::memory::HostMappingPolicy::Fine,
+                    page,
+                    DeviceAccess::READ,
+                )
+                .unwrap();
+
+            drop(device);
+            assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+            assert_eq!(shutdowns.load(Ordering::Relaxed), 0);
+            registration.free().unwrap();
+            assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+            drop(registration);
+            host.free().unwrap();
+            session.destroy().unwrap();
+            assert_eq!(shutdowns.load(Ordering::Relaxed), 1);
+        }
+    }
+
+    #[test]
     fn one_host_backing_supports_independent_driver_registrations() {
         let ids = [[0x11; 16], [0x22; 16]];
         let (mut session, _) = test_session_with_host_registration(&ids, true);
