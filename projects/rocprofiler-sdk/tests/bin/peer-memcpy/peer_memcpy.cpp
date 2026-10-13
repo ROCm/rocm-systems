@@ -44,7 +44,8 @@
 int
 main()
 {
-    // above ROC_P2P_SDMA_SIZE so HIP performs the peer copy with SDMA, not a blit kernel
+    // sized so HIP currently performs the peer copy with SDMA, validate.py fails if HIP uses a
+    // blit kernel instead
     constexpr size_t num_elements = 4 * 1024 * 1024;
     constexpr size_t num_bytes    = num_elements * sizeof(int);
 

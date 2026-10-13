@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import re
 import sys
 import pytest
 
@@ -42,6 +43,9 @@ expected_direction = {
     (AGENT_TYPE_GPU, AGENT_TYPE_GPU): MEMORY_COPY_DEVICE_TO_DEVICE,
 }
 
+# kernels HIP dispatches when it performs a copy with shaders instead of a DMA engine
+BLIT_KERN_REGEX = re.compile(r"__amd_rocclr_.*")
+
 
 def get_agent_types(sdk_data):
     return dict([(itr.id.handle, itr.type) for itr in sdk_data.agents])
@@ -55,16 +59,40 @@ def get_memory_copies(sdk_data):
         yield itr, itr.payload.src_agent_id.handle, itr.payload.dst_agent_id.handle
 
 
-def hip_api_called(sdk_data, name):
+def get_hip_api_correlation_ids(sdk_data, name):
     buffer_records = sdk_data.buffer_records
     for kind, itr in enumerate(buffer_records.names):
         if itr.kind == "HIP_RUNTIME_API":
             op = itr.operations.index(name)
-            return any(
-                x.kind == kind and x.operation == op
+            return set(
+                x.correlation_id.internal
                 for x in buffer_records.hip_api_traces
+                if x.kind == kind and x.operation == op
             )
-    return False
+    return set()
+
+
+def get_blit_kernels(sdk_data, correlation_ids=None):
+    """names of the blit kernels dispatched, only within the given API calls if provided"""
+    kernel_names = dict(
+        [
+            (itr.payload.kernel_id, itr.payload.kernel_name)
+            for itr in sdk_data.callback_records.kernel_symbols
+        ]
+    )
+    blit_kernels = set()
+    for itr in sdk_data.buffer_records.kernel_dispatch:
+        name = kernel_names.get(itr.dispatch_info.kernel_id, "")
+        if not BLIT_KERN_REGEX.search(name):
+            continue
+        corr_id = itr.correlation_id
+        if (
+            correlation_ids is None
+            or corr_id.internal in correlation_ids
+            or corr_id.ancestor in correlation_ids
+        ):
+            blit_kernels.add(name)
+    return sorted(blit_kernels)
 
 
 def is_peer_copy(agent_types, src, dst):
@@ -95,10 +123,17 @@ def test_peer_memory_copy(input_data):
 
     # the agent list includes GPUs hidden from the application by HIP_VISIBLE_DEVICES or
     # ROCR_VISIBLE_DEVICES, so skip based on what the workload actually did
-    if not hip_api_called(sdk_data, "hipMemcpyPeer"):
+    peer_copy_ids = get_hip_api_correlation_ids(sdk_data, "hipMemcpyPeer")
+    if not peer_copy_ids:
         pytest.skip(
             "hipMemcpyPeer was not called, two peer-accessible devices are required"
         )
+
+    blit_kernels = get_blit_kernels(sdk_data, peer_copy_ids)
+    assert not blit_kernels, (
+        f"HIP used blit kernel(s) {blit_kernels} for the peer copy instead of SDMA, "
+        "so the test no longer exercises the async-copy path"
+    )
 
     agent_types = get_agent_types(sdk_data)
     num_peer_copies = 0
@@ -110,7 +145,11 @@ def test_peer_memory_copy(input_data):
             itr.operation == MEMORY_COPY_DEVICE_TO_DEVICE
         ), f"ROCM-30981: copy between GPU agents {src} and {dst} is not D2D:\n{itr}"
 
-    assert num_peer_copies > 0, "no copy between two different GPU agents was traced"
+    # the other copies in the workload may also use blit kernels, so these are only a hint
+    assert num_peer_copies > 0, (
+        "no copy between two different GPU agents was traced, blit kernels dispatched "
+        f"by the workload: {get_blit_kernels(sdk_data)}"
+    )
 
 
 if __name__ == "__main__":
