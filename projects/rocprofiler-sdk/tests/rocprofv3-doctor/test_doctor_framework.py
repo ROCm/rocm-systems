@@ -472,6 +472,29 @@ def test_doctor_framework_json_covers_every_selected_check(framework, healthy_re
 # ----------------------------------------------------------------------
 # text rendering
 # ----------------------------------------------------------------------
+def test_doctor_framework_no_rocm_found_is_one_root_cause(framework):
+    """With no ROCm found, install.rocm-root fails and the library checks
+    SKIP, instead of each library failing with a reinstall hint."""
+    from rocprofv3 import doctor
+    from rocprofv3.doctor_layout import SOURCE_NOT_FOUND
+    from conftest import make_healthy_accessor
+
+    _, result_mod = framework
+    accessor = make_healthy_accessor(rocm_root_source=SOURCE_NOT_FOUND)
+    statuses = dict((check.id, result.status) for check, result in doctor.run(accessor))
+    assert statuses["install.rocm-root"] == result_mod.STATUS_FAIL
+    for check_id in (
+        "install.sdk-library",
+        "install.sdk-tool-library",
+        "install.roctx-library",
+        "install.avail-library",
+        "install.kokkosp-library",
+    ):
+        assert statuses[check_id] == result_mod.STATUS_SKIP, check_id
+    # the driver checks do not need a ROCm installation and still run
+    assert statuses["driver.kfd-device"] == result_mod.STATUS_PASS
+
+
 def test_doctor_framework_text_report_has_no_color_by_default(framework):
     from rocprofv3 import doctor
     from conftest import make_healthy_accessor

@@ -81,6 +81,32 @@ def test_doctor_checks_rocm_root_missing_fails(checks):
     assert result.remediation, "a failure must tell the user what to do"
 
 
+def test_doctor_checks_rocm_root_not_found_fails(checks, rocprofv3_package):
+    """Root detection fell back to a default: one FAIL names the cause."""
+    from rocprofv3.doctor_layout import SOURCE_NOT_FOUND
+
+    accessor = make_healthy_accessor(rocm_root_source=SOURCE_NOT_FOUND)
+    result = checks["install"].check_rocm_root(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "no ROCm installation found" in result.detail
+    assert "--rocm-root" in result.remediation
+
+
+def test_doctor_checks_rocm_root_without_rocm_libraries_fails(checks):
+    """An existing directory with no ROCm libraries is not a ROCm root."""
+    accessor = FakeAccessor(rocm_root="/fake/rocm", dirs=["/fake/rocm"])
+    result = checks["install"].check_rocm_root(accessor)
+    assert result.status == checks["status"].STATUS_FAIL
+    assert "not a ROCm installation" in result.detail
+
+
+def test_doctor_checks_sqlite_missing_warns(checks):
+    modules = dict(make_healthy_accessor()._modules)
+    del modules["sqlite3"]
+    result = checks["python"].check_sqlite3(make_healthy_accessor(modules=modules))
+    assert result.status == checks["status"].STATUS_WARN
+
+
 def test_doctor_checks_rocm_root_override_is_respected(checks):
     accessor = make_healthy_accessor(rocm_root="/fake/rocm")
     result = checks["install"].check_rocm_root(accessor)
@@ -593,6 +619,46 @@ def test_doctor_checks_gpu_visibility_minus_one_hides_every_gpu(checks):
     assert result.remediation == "unset HIP_VISIBLE_DEVICES"
 
 
+@pytest.mark.parametrize(
+    "env, effects",
+    [
+        # ROCr filters whenever ROCR_VISIBLE_DEVICES is set, even to ""
+        ({"ROCR_VISIBLE_DEVICES": ""}, ["hides-all"]),
+        # CLR treats an empty HIP/CUDA_VISIBLE_DEVICES as no restriction
+        ({"HIP_VISIBLE_DEVICES": ""}, ["no-effect"]),
+        ({"CUDA_VISIBLE_DEVICES": ""}, ["no-effect"]),
+        # -1 is an invalid ordinal everywhere: nothing after it survives
+        ({"ROCR_VISIBLE_DEVICES": "-1"}, ["hides-all"]),
+        ({"CUDA_VISIBLE_DEVICES": "-1"}, ["hides-all"]),
+        ({"HIP_VISIBLE_DEVICES": "0,1"}, ["restricts"]),
+        # a non-empty HIP_VISIBLE_DEVICES overrides CUDA_VISIBLE_DEVICES ...
+        (
+            {"HIP_VISIBLE_DEVICES": "0", "CUDA_VISIBLE_DEVICES": "-1"},
+            ["restricts", "no-effect"],
+        ),
+        # ... but an empty one falls back to it
+        (
+            {"HIP_VISIBLE_DEVICES": "", "CUDA_VISIBLE_DEVICES": "-1"},
+            ["no-effect", "hides-all"],
+        ),
+    ],
+)
+def test_doctor_checks_gpu_visibility_mask_effects(rocprofv3_package, env, effects):
+    """Each variable is read the way CLR or ROCr reads it."""
+    from rocprofv3.doctor_env import gpu_visibility_masks
+
+    masks = gpu_visibility_masks(env.get)
+    assert [effect for _, _, effect in masks] == effects
+
+
+def test_doctor_checks_gpu_visibility_empty_hip_restricts_nothing(checks):
+    """CLR ignores an empty HIP_VISIBLE_DEVICES; it must not 'hide every GPU'."""
+    accessor = make_healthy_accessor(env={"HIP_VISIBLE_DEVICES": ""})
+    result = checks["environ"].check_gpu_visibility(accessor)
+    assert result.status == checks["status"].STATUS_PASS
+    assert "restricting nothing" in result.detail
+
+
 def test_doctor_checks_gpu_visibility_remediation_unsets_every_variable(checks):
     """Following the fix must clear the finding, whichever variable is set."""
     accessor = make_healthy_accessor(env={"CUDA_VISIBLE_DEVICES": "1"})
@@ -685,11 +751,16 @@ def test_doctor_checks_python_version_too_old_fails(checks):
     assert result.status == checks["status"].STATUS_FAIL
 
 
-def test_doctor_checks_sqlite_importable_but_broken_fails(checks):
-    """Minimal images ship a Python whose sqlite3 imports but cannot connect."""
+def test_doctor_checks_sqlite_importable_but_broken_warns(checks):
+    """Minimal images ship a Python whose sqlite3 imports but cannot connect.
+
+    Only the `rocpd` Python CLI needs sqlite3 -- rocprofv3 writes rocpd output
+    from C++ -- so this is a warning, not a failure.
+    """
     accessor = make_healthy_accessor(sqlite_ok=False)
     result = checks["python"].check_sqlite3(accessor)
-    assert result.status == checks["status"].STATUS_FAIL
+    assert result.status == checks["status"].STATUS_WARN
+    assert "rocpd" in result.remediation
     assert "unable to open database" in result.data["error"]
 
 

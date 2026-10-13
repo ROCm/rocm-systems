@@ -281,6 +281,22 @@ def test_doctor_diagnose_no_device_names_the_mask(diag):
     assert "unset HIP_VISIBLE_DEVICES" in match["remediation"]
 
 
+def test_doctor_diagnose_no_device_empty_hip_mask_is_not_blamed(diag):
+    """CLR treats an empty HIP_VISIBLE_DEVICES as no restriction."""
+    accessor = make_healthy_accessor(env={"HIP_VISIBLE_DEVICES": ""})
+    (match,) = diag.diagnose(accessor, "hipErrorNoDevice")
+    assert match["confidence"] == "possible"
+    assert "HIP_VISIBLE_DEVICES" not in match["cause"]
+
+
+def test_doctor_diagnose_no_device_empty_rocr_mask_hides_every_gpu(diag):
+    """ROCr filters whenever ROCR_VISIBLE_DEVICES is set, even to ""."""
+    accessor = make_healthy_accessor(env={"ROCR_VISIBLE_DEVICES": ""})
+    (match,) = diag.diagnose(accessor, "hipErrorNoDevice")
+    assert match["confidence"] == "high"
+    assert "unset ROCR_VISIBLE_DEVICES" in match["remediation"]
+
+
 def test_doctor_diagnose_no_device_partial_mask_is_only_possible(diag):
     """A mask that selects a device is not evidence it caused the failure."""
     accessor = make_healthy_accessor(env={"HIP_VISIBLE_DEVICES": "0"})

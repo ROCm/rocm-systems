@@ -80,6 +80,49 @@ _SQLITE_SCRIPT = (
 )
 
 
+# GPU visibility variables, and what a value of each does to the GPUs a HIP
+# program sees. SYNC: projects/clr/rocclr/device/rocm/rocdevice.cpp (the
+# HIP_VISIBLE_DEVICES / CUDA_VISIBLE_DEVICES ordinals) and
+# projects/rocr-runtime/runtime/hsa-runtime/core/util/flag.h
+# (ROCR_VISIBLE_DEVICES).
+GPU_VISIBILITY_VARS = (
+    "ROCR_VISIBLE_DEVICES",
+    "HIP_VISIBLE_DEVICES",
+    "CUDA_VISIBLE_DEVICES",
+)
+MASK_HIDES_ALL = "hides-all"
+MASK_RESTRICTS = "restricts"
+MASK_NO_EFFECT = "no-effect"
+
+
+def gpu_visibility_masks(getenv):
+    """Classify each GPU visibility variable that is set.
+
+    Returns ``[(name, value, effect)]`` with ``effect`` one of the MASK_*
+    values. ROCr filters whenever ROCR_VISIBLE_DEVICES is set, so an empty
+    value hides every GPU. CLR reads HIP_VISIBLE_DEVICES when it is non-empty
+    and CUDA_VISIBLE_DEVICES otherwise, and an empty value there means no
+    restriction. In all three, ``-1`` is an invalid ordinal, and CLR and ROCr
+    drop it and everything after it, so it hides every GPU.
+    """
+    hip = getenv("HIP_VISIBLE_DEVICES")
+    masks = []
+    for name in GPU_VISIBILITY_VARS:
+        value = getenv(name)
+        if value is None:
+            continue
+        if name == "CUDA_VISIBLE_DEVICES" and hip:
+            effect = MASK_NO_EFFECT  # HIP_VISIBLE_DEVICES takes precedence
+        elif value == "":
+            effect = MASK_HIDES_ALL if name == "ROCR_VISIBLE_DEVICES" else MASK_NO_EFFECT
+        elif value.strip() == "-1":
+            effect = MASK_HIDES_ALL
+        else:
+            effect = MASK_RESTRICTS
+        masks.append((name, value, effect))
+    return masks
+
+
 def signal_name(returncode):
     """``SIGSEGV`` for a returncode of -11, or None for any other outcome."""
     if (

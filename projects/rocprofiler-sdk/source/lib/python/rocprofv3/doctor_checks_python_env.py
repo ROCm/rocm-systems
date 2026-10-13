@@ -82,29 +82,39 @@ def check_python_version(accessor):
 @register(
     id="python.sqlite3",
     group="python",
-    title="sqlite3 module usable",
-    severity=SEV_ERROR,
+    title="sqlite3 module usable (rocpd convert/merge/query)",
+    severity=SEV_WARNING,
     order=71,
     probe=PROBE_PROCESS,
 )
 def check_sqlite3(accessor):
+    # rocprofv3 writes rocpd databases from C++ (source/lib/output/sql) and
+    # never imports sqlite3; only the `rocpd` Python CLI (importer, merge,
+    # time_window) needs it. So a missing sqlite3 is a warning, not an error.
     ok, detail = accessor.can_import("sqlite3")
-    data = {"module": "sqlite3", "purpose": "rocpd output database"}
+    data = {"module": "sqlite3", "purpose": "`rocpd` convert/merge/query"}
+    only_rocpd = (
+        "\nOnly the `rocpd` command needs it; `rocprofv3 --output-format rocpd` "
+        "works without it."
+    )
     if not ok:
         data["error"] = detail
-        return make_fail(
-            "sqlite3 is not importable ({})".format(detail),
+        return make_warn(
+            "sqlite3 is not importable ({}); the `rocpd` command cannot read "
+            "databases".format(detail),
             "This Python was built without SQLite support. Install a complete "
-            "Python:\n  sudo apt install python3 libsqlite3-0",
+            "Python:\n  sudo apt install python3 libsqlite3-0" + only_rocpd,
             data,
         )
     usable, why = accessor.sqlite_usable()
     if not usable:
         data["error"] = why
-        return make_fail(
-            "sqlite3 imports but cannot open an in-memory database ({})".format(why),
+        return make_warn(
+            "sqlite3 imports but cannot open an in-memory database ({}); the "
+            "`rocpd` command cannot read databases".format(why),
             "This Python was built against a broken or missing SQLite library. "
-            "Install a complete Python:\n  sudo apt install python3 libsqlite3-0",
+            "Install a complete Python:\n  sudo apt install python3 libsqlite3-0"
+            + only_rocpd,
             data,
         )
     return make_pass("sqlite3 imports and can open a database", "", data)

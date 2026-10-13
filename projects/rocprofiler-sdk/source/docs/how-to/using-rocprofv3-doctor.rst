@@ -375,8 +375,8 @@ reading alongside it. The recognised messages are:
        exhausted GPU memory, or under WSL2 a runtime that does not take the DXG path.
    * - ``no ROCm-capable device is detected``
      - No GPU is visible to HIP. ``likely`` caused by a ``*_VISIBLE_DEVICES`` mask that
-       hides every GPU (an empty value or ``-1``); any other mask is only a ``possible``
-       cause, since it may select a GPU that exists.
+       hides every GPU (see ``environ.gpu-visibility``); any other mask is only a
+       ``possible`` cause, since it may select a GPU that exists.
    * - ``could not be locked for profiling due to lack of permissions``,
        ``Required permission (CAP_PERFMON) is not set``
      - The GPU could not be locked for exclusive profiling without ``CAP_PERFMON``.
@@ -418,6 +418,10 @@ and how it appears to have been installed (``install_kind`` in JSON output:
 ``system-package``, ``therock-package``, ``python-wheel``, ``distro-package``, or
 ``standalone``). Remediation commands follow that layout -- for example, a missing
 library in a Python-package installation suggests ``pip``, not ``apt``.
+
+When no location contains a ROCm installation, ``install.rocm-root`` fails and the checks
+that depend on it report ``SKIP``, so the report shows that one cause rather than a
+missing file for every library.
 
 Override the root explicitly when several installations exist side by side:
 
@@ -475,9 +479,15 @@ Common findings
        ``HSA_ENABLE_DXG_DETECTION=0``. ``driver.dri-devices``, ``driver.amdgpu-module``,
        and the group checks report ``SKIP``: they do not apply there.
    * - ``environ.gpu-visibility``
-     - A ``*_VISIBLE_DEVICES`` variable restricts the GPUs ``rocprofv3`` sees; an empty
-       value or ``-1`` hides all of them. The remediation unsets every such variable
-       that is set.
+     - A ``*_VISIBLE_DEVICES`` variable restricts the GPUs ``rocprofv3`` sees. ``-1``
+       hides all of them, as does an empty ``ROCR_VISIBLE_DEVICES``; an empty
+       ``HIP_VISIBLE_DEVICES`` or ``CUDA_VISIBLE_DEVICES`` restricts nothing, and a
+       non-empty ``HIP_VISIBLE_DEVICES`` overrides ``CUDA_VISIBLE_DEVICES``. The
+       remediation unsets every such variable that is set.
+   * - ``python.sqlite3``
+     - Warning only: the ``rocpd`` command needs Python ``sqlite3`` to convert, merge,
+       or query databases, but ``rocprofv3 --output-format rocpd`` writes them without
+       it.
    * - ``environ.run-as-user``
      - The tool runs as root on behalf of another account (through ``sudo``, ``su``, or
        similar), so its results describe root rather than the user who profiles.

@@ -255,7 +255,8 @@ def _group_check(accessor, group_name):
     group="driver",
     title="GPU device node exists (/dev/kfd, or /dev/dxg on WSL2)",
     severity=SEV_ERROR,
-    depends=["install.rocm-root"],
+    # no depends on install.rocm-root: the device node and driver are worth
+    # reporting even when no ROCm installation is found
     order=20,
 )
 def check_kfd_device(accessor):

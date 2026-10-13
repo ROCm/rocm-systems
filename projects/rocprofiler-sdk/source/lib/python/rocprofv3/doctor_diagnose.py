@@ -47,7 +47,13 @@ from __future__ import absolute_import
 
 import re
 
-from rocprofv3.doctor_env import describe_returncode, signal_name
+from rocprofv3.doctor_env import (
+    describe_returncode,
+    gpu_visibility_masks,
+    MASK_HIDES_ALL,
+    MASK_NO_EFFECT,
+    signal_name,
+)
 from rocprofv3.doctor_layout import physical_root, reinstall_hint, same_installation
 
 HIGH = "high"
@@ -69,7 +75,6 @@ _ROCM_LIBRARY_RE = re.compile(
 # PyPI distribution names that differ from the import name.
 _PIP_NAMES = {"yaml": "pyyaml"}
 
-_VISIBILITY_VARS = ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
 _TOOL_INJECTION_VARS = ("LD_PRELOAD", "HSA_TOOLS_LIB", "ROCP_TOOL_LIBRARIES")
 
 _CRASH_SIGNALS = ("SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE")
@@ -251,20 +256,24 @@ def _out_of_resources(accessor, match, text):
 
 def _no_device(accessor, match, text):
     observation = "HIP sees no GPU"
-    masks = [
-        "{}={}".format(var, accessor.getenv(var))
-        for var in _VISIBILITY_VARS
-        if accessor.getenv(var) is not None
+    # A mask with no effect (an empty HIP_VISIBLE_DEVICES, say) is not a
+    # candidate. Of the rest, only one that hides every GPU is a finding; any
+    # other selects some devices, and whether those exist cannot be told
+    # without enumerating them, so it is a candidate cause.
+    effective = [
+        (name, value, effect)
+        for name, value, effect in gpu_visibility_masks(accessor.getenv)
+        if effect != MASK_NO_EFFECT
     ]
+    masks = ["{}={}".format(name, value) for name, value, _ in effective]
     if masks:
-        # Only an empty value or -1 is known to hide every GPU. Any other mask
-        # selects some devices, and whether those exist cannot be told without
-        # enumerating them, so it is a candidate cause rather than a finding.
         hides_all = [
-            mask for mask in masks if mask.split("=", 1)[1].strip() in ("", "-1")
+            "{}={}".format(name, value)
+            for name, value, effect in effective
+            if effect == MASK_HIDES_ALL
         ]
         unset = "Unset or correct the mask:\n  unset " + " ".join(
-            mask.split("=", 1)[0] for mask in masks
+            name for name, _, _ in effective
         )
         if hides_all:
             return _finding(

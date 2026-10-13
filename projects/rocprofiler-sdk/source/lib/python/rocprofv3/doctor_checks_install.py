@@ -31,9 +31,11 @@ from rocprofv3.doctor_layout import (
     install_kind,
     INSTALL_KIND_TITLES,
     known_installations,
+    looks_like_rocm_root,
     physical_root,
     reinstall_hint,
     same_installation,
+    SOURCE_NOT_FOUND,
 )
 from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
@@ -212,6 +214,23 @@ def check_rocm_root(accessor):
     if not accessor.path_is_dir(root):
         return make_fail(
             "ROCm root {!r} is not a directory".format(root),
+            LOCATE_ROOT_HINT,
+            data,
+        )
+    # Root detection falls back to the rocprofv3 prefix or /opt/rocm when it
+    # finds nothing. Failing here makes every library check below SKIP, so
+    # the report names one root cause instead of a missing file per library.
+    if accessor.rocm_root_source == SOURCE_NOT_FOUND:
+        return make_fail(
+            "no ROCm installation found: none of the searched locations has the "
+            "ROCm libraries under lib or lib64 (fell back to {})".format(root),
+            LOCATE_ROOT_HINT,
+            data,
+        )
+    if not looks_like_rocm_root(accessor, root):
+        return make_fail(
+            "{} is not a ROCm installation: it has none of the ROCm libraries "
+            "under lib or lib64".format(root),
             LOCATE_ROOT_HINT,
             data,
         )

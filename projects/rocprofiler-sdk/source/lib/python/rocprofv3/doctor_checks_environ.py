@@ -25,6 +25,11 @@ masks, and a dump of every ROCPROF*/ROCPROFILER* variable in scope."""
 
 from __future__ import absolute_import
 
+from rocprofv3.doctor_env import (
+    gpu_visibility_masks,
+    MASK_HIDES_ALL,
+    MASK_NO_EFFECT,
+)
 from rocprofv3.doctor_registry import register
 from rocprofv3.doctor_result import (
     DOCTOR_COMMAND,
@@ -248,19 +253,29 @@ def check_gpu_visibility(accessor):
     data = {}
     set_vars = []
     hiding = []
+    effective = []
 
-    for name in ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
-        value = accessor.getenv(name)
-        if value is None:
-            continue
+    for name, value, effect in gpu_visibility_masks(accessor.getenv):
         data[name] = value
-        set_vars.append("{}={!r}".format(name, value))
-        # an empty value and -1 hide every GPU (same rule as doctor_diagnose)
-        if value.strip() in ("", "-1"):
-            hiding.append("{}={!r}".format(name, value))
+        mask = "{}={!r}".format(name, value)
+        set_vars.append(mask)
+        if effect == MASK_HIDES_ALL:
+            hiding.append(mask)
+        if effect != MASK_NO_EFFECT:
+            effective.append(mask)
 
     if not set_vars:
         return make_pass("no GPU visibility variables are set", "", data)
+    if not effective:
+        # an empty HIP/CUDA_VISIBLE_DEVICES, or a CUDA_VISIBLE_DEVICES that
+        # HIP_VISIBLE_DEVICES overrides, restricts nothing
+        return make_pass(
+            "GPU visibility variables set but restricting nothing: {}".format(
+                ", ".join(set_vars)
+            ),
+            "",
+            data,
+        )
 
     # unset every variable that is set: any one of them alone can restrict
     # (or hide) the devices, so leaving one in place would keep the finding
@@ -275,7 +290,7 @@ def check_gpu_visibility(accessor):
 
     return make_warn(
         "GPU visibility is restricted: {}. This is often intentional, but it "
-        "limits which agents rocprofv3 can profile.".format(", ".join(set_vars)),
+        "limits which agents rocprofv3 can profile.".format(", ".join(effective)),
         remediation,
         data,
     )
