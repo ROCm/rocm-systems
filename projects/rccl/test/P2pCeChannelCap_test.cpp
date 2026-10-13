@@ -10,7 +10,7 @@
 
 TEST(P2pCeChannelCapTests, Gfx1250CeDefaultsToSafePerPeerCount)
 {
-    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/2), 2);
+    EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/16), 16);
 }
 
 TEST(P2pCeChannelCapTests, OtherArchitecturesAndKernelP2pAreUnchanged)
@@ -28,4 +28,25 @@ TEST(P2pCeChannelCapTests, OverrideIsPowerOfTwoAndBoundedByPool)
 {
     EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/128, true, true, /*configuredCap=*/7), 4);
     EXPECT_EQ(rcclP2pCeChannelsPerPeerCap(/*current=*/64, /*pool=*/2, true, true, /*configuredCap=*/8), 2);
+}
+
+TEST(P2pCeChannelCapTests, Gfx1250CeUsesConfiguredStepSize)
+{
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, true, 4 * 1024 * 1024, 512 * 1024), 4 * 1024 * 1024);
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, true, 0, 512 * 1024), 512 * 1024);
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1200, true, 4 * 1024 * 1024, 512 * 1024), 512 * 1024);
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, false, 4 * 1024 * 1024, 512 * 1024), 512 * 1024);
+}
+
+TEST(P2pCeChannelCapTests, Gfx1250CeSharesThePerThreadStream)
+{
+    EXPECT_TRUE(rcclP2pCeUsesPerThreadStream(/*cudaArch=*/1250, true));
+    EXPECT_FALSE(rcclP2pCeUsesPerThreadStream(/*cudaArch=*/1200, true));
+    EXPECT_FALSE(rcclP2pCeUsesPerThreadStream(/*cudaArch=*/1250, false));
+}
+
+TEST(P2pCeChannelCapTests, KernelCollectivesRejectP2pCeTransport)
+{
+    EXPECT_FALSE(rcclP2pCeSupportsKernelCollectives(true));
+    EXPECT_TRUE(rcclP2pCeSupportsKernelCollectives(false));
 }
