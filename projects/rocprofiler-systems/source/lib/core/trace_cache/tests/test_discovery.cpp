@@ -100,7 +100,8 @@ TEST(discovery_test, list_dir_files_empty_path_returns_empty)
 
 TEST(discovery_test, list_dir_files_nonexistent_path_throws)
 {
-    EXPECT_THROW(list_dir_files("/nonexistent_path_for_rocprofsys_test"),
+    EXPECT_THROW(const auto files =
+                     list_dir_files("/nonexistent_path_for_rocprofsys_test"),
                  std::runtime_error);
 }
 
