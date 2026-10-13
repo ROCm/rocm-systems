@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -128,16 +129,20 @@ TEST_F(ParamRegistryMicrotest, Add_DuplicateKeyWarnsAndLeavesTheFirstRegistratio
   FakeParam second(2);
   ASSERT_EQ(ncclSuccess, Register(key, &first));
 
+  // The duplicate carries different flags so that overwriting info on a
+  // rejected add() would show up below, not just overwriting the pointer.
   std::string log = CaptureLog([&]() {
-    EXPECT_EQ(ncclInternalError, ncclParamRegistry::add(key, MakeInfo(key.c_str()), &second));
+    EXPECT_EQ(ncclInternalError,
+              ncclParamRegistry::add(key, MakeInfo(key.c_str(), NCCL_PARAM_FLAG_PUBLISHED), &second));
   });
   EXPECT_TRUE(LogHas(log, "Duplicate registration"));
   EXPECT_TRUE(LogHas(log, key.c_str()));
 
-  // The duplicate add() left the original registration (and pointer) in place.
+  // The duplicate add() left the original registration (info and pointer) in place.
   auto* entry = ncclParamRegistry::find(key);
   ASSERT_NE(nullptr, entry);
   EXPECT_EQ(&first, entry->param);
+  EXPECT_EQ(static_cast<uint64_t>(NCCL_PARAM_FLAG_NONE), entry->info.flags);
 }
 
 TEST_F(ParamRegistryMicrotest, Remove_UnregistersSoFindReturnsNullptrAfterward) {
@@ -205,21 +210,17 @@ TEST_F(ParamRegistryMicrotest, State_IsASingletonSharedAcrossAllAccessors) {
   EXPECT_EQ(&ncclParamRegistry::state().mtx, &ncclParamRegistry::mutex());
 }
 
-TEST_F(ParamRegistryMicrotest, AddLocksTheSharedMutexForTheDurationOfTheCall) {
-  // State_IsASingletonSharedAcrossAllAccessors only proves mutex() resolves to
-  // the right address; it doesn't prove add/find/remove actually lock it.
-  // Deleting the three std::lock_guard lines in param_registry.cc leaves every
-  // other test here green, since none of them run concurrently. Holding the
-  // mutex on this thread and asserting a concurrent add() hasn't returned yet
-  // exercises the lock_guard itself, not just its target.
-  std::string key = Key();
-  FakeParam fake(7);
+// State_IsASingletonSharedAcrossAllAccessors only proves mutex() resolves to
+// the right address; it doesn't prove add/find/remove actually lock it.
+// Deleting any of the three std::lock_guard lines in param_registry.cc leaves
+// every other test here green, since none of them run concurrently. Holding
+// the mutex on this thread and asserting that a concurrent call hasn't
+// returned yet exercises each lock_guard itself, not just its target.
+void ExpectBlocksOnRegistryMutex(const std::function<void()>& call) {
   std::atomic<bool> done{false};
-  ncclResult_t result = ncclInternalError;
-
   std::unique_lock<std::mutex> lock(ncclParamRegistry::mutex());
   std::thread worker([&] {
-    result = Register(key, &fake);
+    call();
     done.store(true, std::memory_order_release);
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -228,7 +229,34 @@ TEST_F(ParamRegistryMicrotest, AddLocksTheSharedMutexForTheDurationOfTheCall) {
   lock.unlock();
   worker.join();
   EXPECT_TRUE(done.load(std::memory_order_acquire));
+}
+
+TEST_F(ParamRegistryMicrotest, AddLocksTheSharedMutexForTheDurationOfTheCall) {
+  std::string key = Key();
+  FakeParam fake(7);
+  ncclResult_t result = ncclInternalError;
+  ExpectBlocksOnRegistryMutex([&] { result = Register(key, &fake); });
   EXPECT_EQ(ncclSuccess, result);
+}
+
+TEST_F(ParamRegistryMicrotest, FindLocksTheSharedMutexForTheDurationOfTheCall) {
+  std::string key = Key();
+  FakeParam fake(7);
+  ASSERT_EQ(ncclSuccess, Register(key, &fake));
+  ncclParamRegistry::mapEntry* entry = nullptr;
+  ExpectBlocksOnRegistryMutex([&] { entry = ncclParamRegistry::find(key); });
+  ASSERT_NE(nullptr, entry);
+  EXPECT_EQ(&fake, entry->param);
+}
+
+TEST_F(ParamRegistryMicrotest, RemoveLocksTheSharedMutexForTheDurationOfTheCall) {
+  std::string key = Key();
+  FakeParam fake(7);
+  ASSERT_EQ(ncclSuccess, Register(key, &fake));
+  ncclResult_t result = ncclInternalError;
+  ExpectBlocksOnRegistryMutex([&] { result = ncclParamRegistry::remove(key); });
+  EXPECT_EQ(ncclSuccess, result);
+  EXPECT_EQ(nullptr, ncclParamRegistry::find(key));
 }
 
 }  // namespace
