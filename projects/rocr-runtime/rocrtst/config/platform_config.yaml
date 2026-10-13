@@ -74,6 +74,7 @@ groups:
     - rocrtstFunc.GroupMemoryAllocationTest
     - rocrtstFunc.MemoryAllocateAndFreeTest
     - rocrtstFunc.MemoryAllocateContiguousTest
+    - rocrtstFunc.Loader_ReservedAddress_Test
     - rocrtstFunc.Concurrent_Init_Test
     - rocrtstFunc.Concurrent_Init_Shutdown_Test
     - rocrtstFunc.Concurrent_Shutdown
