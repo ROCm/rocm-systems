@@ -248,7 +248,9 @@
   X(TilePutWG4DStrided,             204)  \
   X(TileGetWG4DStrided,             205)  \
   X(TilePutWave4DStrided,           206)  \
-  X(TileGetWave4DStrided,           207)
+  X(TileGetWave4DStrided,           207)  \
+  X(HostPutmemSignal,               208)  \
+  X(HostPutmemSignalAdd,            209)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
