@@ -36,6 +36,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdlib>
 #include <filesystem>
 #include <shared_mutex>
+#include <span>
 #include <thread>
 #include <vector>
 
@@ -61,6 +62,11 @@ struct TestVM {
     return soc ? soc->memory() : nullptr;
   }
 
+  rocjitsu::SoC *soc(uint32_t index = 0) {
+    auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
+    return vm ? vm->soc(index) : nullptr;
+  }
+
   uint32_t num_socs() {
     auto *vm = dynamic_cast<rocjitsu::VirtualMachine *>(engine->topology().root());
     return vm ? vm->num_socs() : 0;
@@ -72,6 +78,10 @@ TestVM create_test_vm() {
   t.loaded = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
   auto *soc = t.loaded.soc();
 
+  // These tests drive the engine directly and inspect single-partition state, so
+  // pin one worker instead of taking the config's default of one partition per
+  // XCD.
+  t.loaded.engine_config.num_threads = 1;
   t.loaded.engine_config.max_ticks = 0;
   t.loaded.engine_config.await_primaries = true;
   t.engine = std::make_unique<simdojo::SimulationEngine>(t.loaded.engine_config);
@@ -137,7 +147,7 @@ TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecy
   first_queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
   first_queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
   first_queue.gpu_id = driver->gpu_id();
-  first_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  first_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &first_queue), 0);
 
   kfd_ioctl_destroy_queue_args destroy_first{};
@@ -167,7 +177,7 @@ TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecy
   second_queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
   second_queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
   second_queue.gpu_id = driver->gpu_id();
-  second_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  second_queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &second_queue), 0);
   EXPECT_EQ(second_queue.doorbell_offset, first_queue.doorbell_offset);
 
@@ -446,6 +456,172 @@ TEST_F(SimulatedKfdTest, FailedMonitorMmapPreservesFixedTarget) {
   EXPECT_EQ(::munmap(target, doorbell_page_size), 0);
 }
 
+TEST_F(SimulatedKfdTest, ClientDoorbellUnmapPreservesMonitorAndRemapContents) {
+  auto fixture = create_test_vm();
+  auto *driver = fixture.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t bytes = 8192;
+  const off_t offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                          rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+  void *client = driver->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+  ASSERT_NE(client, MAP_FAILED);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  auto *monitor = static_cast<uint64_t *>(process->gpu(0).doorbell_monitor_page);
+  ASSERT_NE(monitor, nullptr);
+  static_cast<uint64_t *>(client)[0] = 123;
+  ASSERT_EQ(driver->munmap(client, bytes), 0);
+  EXPECT_EQ(process->gpu(0).doorbell_monitor_page, monitor);
+  EXPECT_EQ(monitor[0], 123u);
+  EXPECT_TRUE(process->gpu(0).doorbell_views.empty());
+  client = driver->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+  ASSERT_NE(client, MAP_FAILED);
+  EXPECT_EQ(static_cast<uint64_t *>(client)[0], 123u);
+  static_cast<uint64_t *>(client)[0] = 456;
+  EXPECT_EQ(monitor[0], 456u);
+  EXPECT_EQ(driver->munmap(client, bytes), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, ContainingUnmapRetiresEveryClientDoorbellView) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  const off_t offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                          rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+  void *region = ::mmap(nullptr, 4 * page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(region, MAP_FAILED);
+  for (unsigned i : {1u, 2u}) {
+    void *address = static_cast<char *>(region) + i * page_size;
+    ASSERT_EQ(
+        driver->mmap(address, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, offset),
+        address);
+  }
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  ASSERT_EQ(process->gpu(0).doorbell_views.size(), 2u);
+  void *monitor = process->gpu(0).doorbell_monitor_page;
+  *reinterpret_cast<uint64_t *>(static_cast<char *>(region) + page_size) = 37;
+  ASSERT_EQ(driver->munmap(region, 4 * page_size), 0);
+  EXPECT_TRUE(process->gpu(0).doorbell_views.empty());
+  EXPECT_EQ(*static_cast<uint64_t *>(monitor), 37u);
+  void *replacement = driver->mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+  ASSERT_NE(replacement, MAP_FAILED);
+  EXPECT_EQ(*static_cast<uint64_t *>(replacement), 37u);
+  EXPECT_EQ(driver->munmap(replacement, page_size), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentEventPage) {
+  for (bool doorbell_first : {false, true}) {
+    SCOPED_TRACE(doorbell_first);
+    auto t = create_test_vm();
+    auto *driver = t.driver();
+    ASSERT_GE(driver->open(), 0);
+    const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+    void *region = ::mmap(nullptr, 2 * page_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(region, MAP_FAILED);
+    void *doorbell = static_cast<char *>(region) + (doorbell_first ? 0 : page_size);
+    void *events = static_cast<char *>(region) + (doorbell_first ? page_size : 0);
+    const off_t doorbell_offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                                     rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+    ASSERT_EQ(driver->mmap(doorbell, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           doorbell_offset),
+              doorbell);
+    ASSERT_EQ(driver->mmap(events, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                           static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_EVENTS)),
+              events);
+    auto process = driver->find_process(driver->local_process_id());
+    ASSERT_NE(process, nullptr);
+    *static_cast<uint64_t *>(doorbell) = 37;
+
+    errno = 0;
+    const int result = driver->munmap(region, 2 * page_size);
+    EXPECT_EQ(result, -1);
+    EXPECT_EQ(errno, EINVAL);
+    if (result == 0) {
+      // Keep the failing implementation's stale event pointer out of teardown.
+      EXPECT_TRUE(process->event_state_.release_page(events));
+      EXPECT_EQ(driver->close(), 0);
+      continue;
+    }
+    ASSERT_EQ(process->gpu(0).doorbell_views.size(), 1u);
+    EXPECT_EQ(*static_cast<uint64_t *>(doorbell), 37u);
+    EXPECT_TRUE(process->event_state_.has_page());
+    kfd_ioctl_create_event_args event{};
+    event.event_type = KFD_IOC_EVENT_SIGNAL;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_EVENT, &event), 0);
+    kfd_ioctl_set_event_args signal{};
+    signal.event_id = event.event_id;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_SET_EVENT, &signal), 0);
+    EXPECT_EQ(static_cast<uint64_t *>(events)[event.event_id], 2u);
+    EXPECT_EQ(driver->close(), 0);
+    EXPECT_EQ(static_cast<uint64_t *>(events)[event.event_id], KFD_SIGNAL_EVENT_LIMIT);
+    EXPECT_EQ(::munmap(region, 2 * page_size), 0);
+  }
+}
+
+TEST_F(SimulatedKfdTest, ContainingDoorbellUnmapRejectsAdjacentAllocation) {
+  for (bool userptr : {false, true}) {
+    SCOPED_TRACE(userptr);
+    auto t = create_test_vm();
+    auto *driver = t.driver();
+    ASSERT_GE(driver->open(), 0);
+    const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+    void *region =
+        ::mmap(nullptr, 3 * page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(region, MAP_FAILED);
+    const off_t offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                            rocjitsu::kfd_mmap_gpu_id(driver->gpu_id()));
+    ASSERT_EQ(
+        driver->mmap(region, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, offset),
+        region);
+    void *allocation = static_cast<char *>(region) + page_size + (userptr ? 64 : 0);
+    kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+    alloc.va_addr = userptr ? reinterpret_cast<uint64_t>(allocation) : 0;
+    alloc.size = page_size;
+    alloc.gpu_id = driver->gpu_id();
+    alloc.flags = (userptr ? KFD_IOC_ALLOC_MEM_FLAGS_USERPTR : KFD_IOC_ALLOC_MEM_FLAGS_GTT) |
+                  KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+    if (!userptr) {
+      ASSERT_EQ(driver->mmap(allocation, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                             static_cast<off_t>(alloc.mmap_offset)),
+                allocation);
+    }
+    auto process = driver->find_process(driver->local_process_id());
+    ASSERT_NE(process, nullptr);
+    *static_cast<uint64_t *>(region) = 37;
+    *static_cast<uint64_t *>(allocation) = 41;
+
+    errno = 0;
+    // The host rounds the short range up to a page, including the userptr
+    // allocation even though its first byte is beyond the supplied length.
+    const int result = driver->munmap(region, userptr ? page_size + 1 : 2 * page_size);
+    EXPECT_EQ(result, -1);
+    EXPECT_EQ(errno, EINVAL);
+    if (result == 0) {
+      EXPECT_EQ(driver->close(), 0);
+      EXPECT_EQ(::munmap(region, 3 * page_size), 0);
+      continue;
+    }
+    EXPECT_EQ(process->gpu(0).doorbell_views.size(), 1u);
+    EXPECT_EQ(process->allocations_.at(alloc.handle).host_ptr, allocation);
+    EXPECT_EQ(*static_cast<uint64_t *>(region), 37u);
+    EXPECT_EQ(*static_cast<uint64_t *>(allocation), 41u);
+    const auto access = t.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+    ASSERT_TRUE(access);
+    uint64_t value = 0;
+    EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(value, 41u);
+    EXPECT_EQ(driver->close(), 0);
+    EXPECT_EQ(::munmap(region, 3 * page_size), 0);
+  }
+}
+
 TEST_F(SimulatedKfdTest, DoorbellMonitorRejectsOverlappingMunmapWhileQueueIsLive) {
   auto t = create_test_vm();
   auto *driver = t.driver();
@@ -470,7 +646,7 @@ TEST_F(SimulatedKfdTest, DoorbellMonitorRejectsOverlappingMunmapWhileQueueIsLive
   queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
   queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
   queue.gpu_id = driver->gpu_id();
-  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
   ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
 
   auto process = driver->find_process(driver->local_process_id());
@@ -659,6 +835,57 @@ TEST_F(SimulatedKfdTest, ProcessAddressedDoorbellMmapPublishesCanonicalMemfd) {
   EXPECT_GE(driver->get_mmap_memfd(process_id, doorbell_mmap_offset), 0)
       << "daemon fd passing must use the canonical backing created by mmap";
   EXPECT_EQ(driver->close(process_id), 0);
+}
+
+TEST_F(SimulatedKfdTest, FailedDaemonSdmaPointerInitializationRecyclesDoorbell) {
+  auto test_vm = create_test_vm();
+  rocjitsu::SimulatedKfd daemon(*test_vm.soc(), /*daemon_mode=*/true);
+  const uint32_t process_id = daemon.open_process();
+  ASSERT_NE(process_id, 0u);
+
+  const long host_page_size = ::sysconf(_SC_PAGESIZE);
+  ASSERT_GT(host_page_size, 0);
+  const size_t doorbell_page_size = static_cast<size_t>(host_page_size);
+  const off_t doorbell_mmap_offset = static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL |
+                                                        rocjitsu::kfd_mmap_gpu_id(daemon.gpu_id()));
+  ASSERT_NE(daemon.mmap(process_id, nullptr, doorbell_page_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                        doorbell_mmap_offset),
+            MAP_FAILED);
+
+  for (uint32_t attempt = 0; attempt < 3; ++attempt) {
+    kfd_ioctl_create_queue_args failing{};
+    failing.gpu_id = daemon.gpu_id();
+    failing.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+    failing.ring_base_address = 0x200000000ULL;
+    failing.ring_size = 4096;
+    failing.read_pointer_address = 0x300000000ULL;
+    failing.write_pointer_address = 0x300000008ULL;
+    failing.queue_percentage = 100;
+    EXPECT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &failing), -EFAULT);
+  }
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.gpu_id = daemon.gpu_id();
+  allocation.size = 4096;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = daemon.gpu_id();
+  create.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  create.ring_base_address = allocation.va_addr;
+  create.ring_size = 1024;
+  create.read_pointer_address = allocation.va_addr + 2048;
+  create.write_pointer_address = allocation.va_addr + 2056;
+  create.queue_percentage = 100;
+  ASSERT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  EXPECT_EQ(create.doorbell_offset % doorbell_page_size, 0u)
+      << "failed creates must return their uncommitted doorbell reservation";
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = create.queue_id;
+  EXPECT_EQ(daemon.ioctl(process_id, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(daemon.close(process_id), 0);
 }
 
 TEST_F(SimulatedKfdTest, UnknownDoorbellGpuDoesNotUseCanonicalBacking) {
@@ -1084,8 +1311,8 @@ TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
-  auto *memory = t.memory();
-  ASSERT_NE(memory, nullptr);
+  auto *soc = t.soc();
+  ASSERT_NE(soc, nullptr);
 
   ASSERT_GE(drv->open(), 0);
   const uint32_t process_id = drv->local_process_id();
@@ -1107,7 +1334,11 @@ TEST_F(SimulatedKfdTest, UnresolvedGpuAddressRaisesMemoryExceptionEvent) {
   ASSERT_NE(raw, MAP_FAILED);
   const uint64_t faulting_va = reinterpret_cast<uint64_t>(raw) + 0x40;
 
-  memory->read32(faulting_va, process_id);
+  const auto access = soc->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  uint32_t ignored = 0;
+  EXPECT_EQ(access->read(faulting_va, std::as_writable_bytes(std::span(&ignored, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
 
   kfd_event_data ev{};
   ev.event_id = create.event_id;
@@ -1142,8 +1373,8 @@ TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
 
   auto *drv = dynamic_cast<rocjitsu::SimulatedKfd *>(vm->vm->driver());
   ASSERT_NE(drv, nullptr);
-  auto *second_memory = vm->vm->soc(1)->memory();
-  ASSERT_NE(second_memory, nullptr);
+  auto *second_soc = vm->vm->soc(1);
+  ASSERT_NE(second_soc, nullptr);
 
   const uint32_t process_id = drv->local_process_id();
   auto proc = drv->find_process(process_id);
@@ -1162,7 +1393,12 @@ TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
   ASSERT_NE(raw, MAP_FAILED);
 
   // Fault the SECOND device only.
-  second_memory->read32(reinterpret_cast<uint64_t>(raw), process_id);
+  const auto access = second_soc->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  uint32_t ignored = 0;
+  EXPECT_EQ(
+      access->read(reinterpret_cast<uint64_t>(raw), std::as_writable_bytes(std::span(&ignored, 1))),
+      rocjitsu::amdgpu::VmAccessOutcome::Faulted);
 
   kfd_event_data ev{};
   ev.event_id = create.event_id;
@@ -1189,8 +1425,8 @@ TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
-  auto *memory = t.memory();
-  ASSERT_NE(memory, nullptr);
+  auto *soc = t.soc();
+  ASSERT_NE(soc, nullptr);
 
   ASSERT_GE(drv->open(), 0);
   const uint32_t process_id = drv->local_process_id();
@@ -1211,8 +1447,14 @@ TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
   const uint64_t addr = reinterpret_cast<uint64_t>(raw);
 
   // Reading is fine; only the write violates the protection.
-  memory->read32(addr, process_id);
-  memory->write32(addr, 0x1234u, process_id);
+  const auto access = soc->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  uint32_t value = 0;
+  EXPECT_EQ(access->read(addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  constexpr uint32_t kWriteValue = 0x1234u;
+  EXPECT_EQ(access->write(addr, std::as_bytes(std::span(&kWriteValue, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
 
   kfd_event_data ev{};
   ev.event_id = create.event_id;
@@ -1239,8 +1481,8 @@ TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
-  auto *memory = t.memory();
-  ASSERT_NE(memory, nullptr);
+  auto *soc = t.soc();
+  ASSERT_NE(soc, nullptr);
 
   ASSERT_GE(drv->open(), 0);
   const uint32_t process_id = drv->local_process_id();
@@ -1265,11 +1507,15 @@ TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
   // classification regress unnoticed.
   constexpr uint64_t kGpuVa = 0x8000'0000'0000ULL;
   proc->map_pages(kGpuVa, raw, rocjitsu::KfdProcess::kPageSize);
-  ASSERT_TRUE(memory->is_mapped(kGpuVa, process_id))
+  const auto access = soc->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  ASSERT_EQ(
+      access->translate(kGpuVa, sizeof(uint64_t), rocjitsu::amdgpu::VmAccessKind::Atomic).outcome,
+      rocjitsu::amdgpu::VmAccessOutcome::Complete)
       << "the atomic must resolve through the page table, not by identity";
 
-  EXPECT_EQ(memory->atomic_store(kGpuVa, sizeof(uint64_t), 1, process_id),
-            rocjitsu::amdgpu::AccessOutcome::Faulted);
+  EXPECT_EQ(access->atomic_store(kGpuVa, sizeof(uint64_t), 1),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
 
   kfd_event_data ev{};
   ev.event_id = create.event_id;
@@ -1294,8 +1540,8 @@ TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
   auto t = create_test_vm();
   ASSERT_NE(t.driver(), nullptr);
   auto *drv = t.driver();
-  auto *memory = t.memory();
-  ASSERT_NE(memory, nullptr);
+  auto *soc = t.soc();
+  ASSERT_NE(soc, nullptr);
 
   ASSERT_GE(drv->open(), 0);
   const uint32_t process_id = drv->local_process_id();
@@ -1316,8 +1562,14 @@ TEST_F(SimulatedKfdTest, ResolvableAddressRaisesNoMemoryException) {
   const uint64_t addr = reinterpret_cast<uint64_t>(raw) + 0x40;
 
   constexpr uint32_t kValue = 0x5eeded;
-  memory->write32(addr, kValue, process_id);
-  EXPECT_EQ(memory->read32(addr, process_id), kValue);
+  const auto access = soc->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  ASSERT_EQ(access->write(addr, std::as_bytes(std::span(&kValue, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  uint32_t observed = 0;
+  ASSERT_EQ(access->read(addr, std::as_writable_bytes(std::span(&observed, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kValue);
 
   kfd_event_data ev{};
   ev.event_id = create.event_id;
@@ -1408,6 +1660,8 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   create.event_type = 0;
   create.auto_reset = 1;
   ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &create), 0);
+  kfd_ioctl_create_event_args unsignaled{};
+  ASSERT_EQ(drv->ioctl(AMDKFD_IOC_CREATE_EVENT, &unsignaled), 0);
 
   // Register a waiter deterministically: poll the event's waiter count rather than
   // sleeping, so the SET_EVENT below is guaranteed to take the "waiters present"
@@ -1416,11 +1670,14 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
   std::atomic<int> wait_rc{-1};
   std::atomic<uint32_t> wait_result{0};
   std::thread waiter([&] {
-    kfd_event_data ev{};
-    ev.event_id = create.event_id;
+    // Keep wait-all parked after the first event signals. A legacy single-event
+    // wait now correctly completes, which would race the cancellation below.
+    std::array<kfd_event_data, 2> ev{};
+    ev[0].event_id = create.event_id;
+    ev[1].event_id = unsignaled.event_id;
     kfd_ioctl_wait_events_args wait{};
-    wait.events_ptr = reinterpret_cast<uint64_t>(&ev);
-    wait.num_events = 1;
+    wait.events_ptr = reinterpret_cast<uint64_t>(ev.data());
+    wait.num_events = ev.size();
     wait.wait_for_all = 1;
     wait.timeout = 0xFFFFFFFFu;
     wait_rc.store(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), std::memory_order_release);

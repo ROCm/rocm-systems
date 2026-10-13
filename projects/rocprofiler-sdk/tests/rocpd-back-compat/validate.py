@@ -217,6 +217,44 @@ def test_csv_for_schema_3_0_3_changes_present(output_root, latest_schema):
 
 
 # ---------------------------------------------------------------------------
+# CSV tests — schema 3.0.4 (hip_event output)
+# ---------------------------------------------------------------------------
+
+
+def test_csv_for_schema_3_0_4_changes_absent(output_root, old_schema):
+    """Schema 3.0.4 additions must be absent for pre-3.0.4 schemas.
+
+    Verifies that out_hip_event_trace.csv is not produced for schemas < 3.0.4.
+    """
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 4):
+        print(
+            f"Schema {old_schema} is newer than 3.0.4, calling test_csv_for_schema_3_0_4_changes_present instead"
+        )
+        return test_csv_for_schema_3_0_4_changes_present(output_root, old_schema)
+
+    hip_event_csv = output_root / old_schema / "csv" / "out_hip_event_trace.csv"
+    assert (
+        not hip_event_csv.exists()
+    ), f"out_hip_event_trace.csv should not be created for schema {old_schema}"
+
+
+def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
+    """Schema 3.0.4 additions must be present for the latest schema.
+
+    Verifies that out_hip_event_trace.csv is produced with expected columns.
+    """
+    hip_event_csv = output_root / latest_schema / "csv" / "out_hip_event_trace.csv"
+    assert (
+        hip_event_csv.exists()
+    ), f"out_hip_event_trace.csv not found for schema {latest_schema}: {hip_event_csv}"
+    cols = _csv_columns(hip_event_csv)
+    for expected in ("kind", "operation", "event_handle", "source_queue_id"):
+        assert (
+            expected in cols
+        ), f"Column '{expected}' missing from hip_event CSV for schema {latest_schema}"
+
+
+# ---------------------------------------------------------------------------
 # Perfetto tests — old schemas
 # ---------------------------------------------------------------------------
 

@@ -9,9 +9,9 @@ from __future__ import annotations
 import json
 import re
 import pytest
-import os
 import shutil
 from conftest import RocprofsysTest
+from rocprofsys.commands import get_ls_command
 
 pytestmark = [pytest.mark.rocprof_binary]
 
@@ -74,6 +74,8 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
     "ROCPROFSYS_AMD_SMI_METRICS": "domains.gpu.metrics",
     "ROCPROFSYS_USE_AINIC": "domains.gpu.ainic",
     "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": "domains.gpu.unified_memory_profiling",
+    "ROCPROFSYS_USE_HIPFILE": "domains.gpu.hipfile",
+    "ROCPROFSYS_HIPFILE_METRICS": "domains.gpu.hipfile.metrics",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "domains.gpu.process_sampling",
     "ROCPROFSYS_PROCESS_SAMPLING_FREQ": "domains.gpu.process_sampling_freq",
     "ROCPROFSYS_PROCESS_SAMPLING_DURATION": "domains.gpu.process_sampling_duration",
@@ -163,17 +165,6 @@ def validate_format_consistency(txt_vars: set[str], json_paths: set[str]) -> lis
 # ============================================================================
 # Helper functions
 # ============================================================================
-
-
-def get_ls_command() -> tuple[str, list[str]]:
-    """Get ls binary name and args (handles RedHat coreutils wrapper).
-
-    Returns:
-        Tuple of (binary_name, args_list)
-    """
-    if os.path.exists("/usr/bin/coreutils"):
-        return "coreutils", ["--coreutils-prog=ls"]
-    return "ls", []
 
 
 # ============================================================================
@@ -1035,7 +1026,7 @@ class TestRocprofilerSystemsRun(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="run-args-output/",
-            trace_file="perfetto-run-args-trace.proto",
+            trace_file="perfetto-run-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
             run_only=True,
@@ -1076,7 +1067,7 @@ class TestRocprofilerSystemsSample(RocprofsysTest):
             empty_cfg=empty_cfg,
             output_dir=test_output_dir,
             output_subdir="sample-args-output/",
-            trace_file="perfetto-sample-args-trace.proto",
+            trace_file="perfetto-sample-args-trace.pftrace",
             tmpdir=tmpdir,
             sleep_cmd=sleep_cmd,
         )

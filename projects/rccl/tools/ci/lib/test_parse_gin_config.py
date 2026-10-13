@@ -40,6 +40,34 @@ class ParseGinConfigTest(unittest.TestCase):
         self.assertEqual(parts[4], "")
         self.assertEqual(parts[5], "--gtest_filter=GinRocshmemGdaTemplateTest.*")
 
+    def test_pytest_kind_preserves_args(self) -> None:
+        config = parse_config(
+            _write_json(
+                {
+                    "mca": "",
+                    "debug_env": [],
+                    "tests": [
+                        {
+                            "name": "bcast-pytest",
+                            "kind": "pytest",
+                            "bin": "test_Broadcast.py",
+                            "env": ["NCCL_CUMEM_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1"],
+                            "args": "-k GinSdma -v",
+                        }
+                    ],
+                }
+            )
+        )
+        rows = format_rows(config)
+        test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
+        parts = test_row.split(_FIELD_SEP)
+        self.assertEqual(parts[2], "pytest")
+        self.assertEqual(parts[3], "test_Broadcast.py")
+        self.assertEqual(
+            parts[4], "-x NCCL_CUMEM_ENABLE=1 -x HSA_NO_SCRATCH_RECLAIM=1"
+        )
+        self.assertEqual(parts[5], "-k GinSdma -v")
+
 
 def _write_json(data: dict) -> Path:
     handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)

@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.2.0"
+SCHEMA_VERSION = "2.3.0"
 
 
 Base = declarative_base()
@@ -155,6 +155,9 @@ class Kernel(Base):
         Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
     )
     kernel_name = Column(String)
+    # The demangled identifier rocprofiler-sdk truncates the signature down to.
+    # Deliberately not unique: overloads and template instantiations share one.
+    short_name = Column(String, nullable=True)
 
     # Kernel can have one workload
     workload = relationship("Workload", back_populates="kernels")
@@ -239,10 +242,9 @@ class InstructionLine(Base):
         ForeignKey(f"{PREFIX}kernel_symbol.kernel_symbol_uuid"),
         nullable=False,
     )
-    # TODO: populate from the disassembled mnemonic. This is the static
-    # compiler class of the instruction at this offset (Matrix / Vector /
-    # Scalar / Branch), one value per line. Distinct from InstructionSample,
-    # which counts the issue state seen at each sample.
+    # The execution pipeline that runs the instruction at this offset (VALU /
+    # MATRIX / SCALAR / ...), one value per line. Distinct from
+    # InstructionSample, which counts the issue state seen at each sample.
     instruction_type_uuid = Column(
         Integer,
         ForeignKey(f"{PREFIX}instruction_type_lookup.instruction_type_lookup_uuid"),
@@ -361,10 +363,7 @@ class PCSampleState(Base):
     total_count = Column(Integer)
     issue_count = Column(Integer, nullable=True)
     stall_count = Column(Integer, nullable=True)
-    # TODO: populate from the popcount of record.exec_mask over the wave size
-    # (64 on CDNA, 32 or 64 on RDNA), averaged across the samples in this group.
     active_thread_percent = Column(Float, nullable=True)
-    # TODO: populate from record.wave_cnt.
     wave_occupancy_percent = Column(Float, nullable=True)
     # TODO: populate from record.dispatch_id, resolved to its dispatch row.
     # Blocked: this table aggregates samples grouped by
@@ -539,6 +538,26 @@ class Metadata(Base):
     compute_version = Column(String)
     git_version = Column(String)
     schema_version = Column(String)
+
+
+def per_kernel_isa_file_key_columns() -> list[Any]:
+    """Return the columns naming the file a per-kernel ISA row is written to.
+
+    The exporter splits each row at the end of this list, so the select and the
+    split have to agree. Building the select from this one list is what keeps
+    them in step.
+    """
+    return [
+        Workload.name.label("workload_name"),
+        Workload.sub_name.label("workload_sub_name"),
+        Kernel.kernel_uuid.label("kernel_uuid"),
+        Kernel.short_name.label("kernel_short_name"),
+        CodeObjectStore.code_object_id.label("code_object_id"),
+        CodeObjectStore.pid.label("pid"),
+    ]
+
+
+PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT = len(per_kernel_isa_file_key_columns())
 
 
 class Database:
@@ -829,16 +848,13 @@ class Database:
 
         return (
             select(
-                Workload.name.label("workload_name"),
-                Workload.sub_name.label("workload_sub_name"),
-                Kernel.kernel_uuid.label("kernel_uuid"),
-                CodeObjectStore.code_object_id.label("code_object_id"),
-                CodeObjectStore.pid.label("pid"),
+                *per_kernel_isa_file_key_columns(),
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
+                InstructionTypeLookup.text.label("instruction_type"),
                 PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
                 PCSampleState.wave_occupancy_percent,
                 PCSampleState.active_thread_percent,
                 *stall_reason_columns,
@@ -857,7 +873,13 @@ class Database:
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
             .join(Workload, CodeObjectStore.workload_id == Workload.workload_id)
-            # A line the disassembly holds but no sample landed on has no state.
+            # An instruction with no pipeline leaves the type empty.
+            .outerjoin(
+                InstructionTypeLookup,
+                InstructionLine.instruction_type_uuid
+                == InstructionTypeLookup.instruction_type_lookup_uuid,
+            )
+            # A line no sample landed on leaves the counts empty.
             .outerjoin(
                 PCSampleState,
                 InstructionLine.instruction_uuid == PCSampleState.instruction_uuid,
@@ -948,6 +970,7 @@ class Database:
                 Kernel.workload_id.label("workload_id"),
                 Workload.name.label("workload_name"),
                 Kernel.kernel_name,
+                Kernel.short_name,
                 func.count(Dispatch.dispatch_id).label("dispatch_count"),
                 func.sum(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                     "duration_ns_sum"
@@ -975,6 +998,7 @@ class Database:
                 Kernel.workload_id,
                 Workload.name,
                 Kernel.kernel_name,
+                Kernel.short_name,
             ),
             "kernel_metric": select(
                 Workload.workload_id.label("workload_id"),
@@ -1030,10 +1054,13 @@ class Database:
                 Kernel.kernel_name,
                 InstructionLine.code_object_offset.label("offset"),
                 InstructionLine.instruction,
+                InstructionTypeLookup.text.label("instruction_type"),
                 source_chain_subquery.c.source.label("source"),
                 PCSampleState.total_count.label("count"),
-                PCSampleState.issue_count.label("count_issue"),
-                PCSampleState.stall_count.label("count_stall"),
+                PCSampleState.issue_count,
+                PCSampleState.stall_count,
+                PCSampleState.wave_occupancy_percent,
+                PCSampleState.active_thread_percent,
                 stall_reason_json_subquery.c.stall_reason,
             )
             .select_from(PCSampleState)
@@ -1050,6 +1077,12 @@ class Database:
                 KernelSymbol.code_object_uuid == CodeObjectStore.code_object_uuid,
             )
             .join(Kernel, KernelSymbol.kernel_uuid == Kernel.kernel_uuid)
+            # An instruction with no pipeline leaves the type empty.
+            .outerjoin(
+                InstructionTypeLookup,
+                InstructionLine.instruction_type_uuid
+                == InstructionTypeLookup.instruction_type_lookup_uuid,
+            )
             # host_trap samples have no stall reasons, so the subquery is empty.
             .outerjoin(
                 stall_reason_json_subquery,

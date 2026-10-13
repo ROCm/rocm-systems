@@ -178,7 +178,9 @@ hipError_t ihipFree(void* ptr) {
         amd::MemObjMap::RemoveMemObj(ptr);
         memory_object->release();
       } else {
-        amd::SvmBuffer::free(memory_object->getContext(), ptr);
+        if (!amd::SvmBuffer::free(memory_object->getContext(), ptr)) {
+          return hipErrorInvalidValue;
+        }
       }
     }
     return hipSuccess;
@@ -3020,7 +3022,13 @@ static inline unsigned int getBatchCopyFlags(hipMemcpyAttributes* attrs, size_t*
 // ================================================================================================
 hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count,
                            hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
-                           hip::Stream& stream, bool isAsync) {
+                           hip::Stream& stream, bool isAsync, size_t* failIdx) {
+  // Reports the entry a per-entry error refers to.
+  const auto fail = [failIdx](size_t i, hipError_t error) {
+    if (failIdx != nullptr) *failIdx = i;
+    return error;
+  };
+
   // Pre-compute memory objects once per copy to avoid repeated expensive
   // getMemoryObject calls later in validation, classification, and submission.
   std::vector<amd::Memory*> srcMemories(count, nullptr);
@@ -3030,7 +3038,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
 
   for (size_t i = 0; i < count; ++i) {
     if (dsts[i] == nullptr || srcs[i] == nullptr) {
-      return hipErrorInvalidValue;
+      return fail(i, hipErrorInvalidValue);
     }
   }
 
@@ -3076,7 +3084,7 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
                                           /*read_write*/ true);
     }
     if (status != hipSuccess) {
-      return status;
+      return fail(i, status);
     }
   }
 
@@ -3104,11 +3112,8 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
   std::vector<std::vector<amd::BatchReadMemoryOp>> read_ops_by_device(g_devices.size());
   std::vector<size_t> hostToHostIndices;
 
-  // The ExtOp flags (hipMemcpyFlagExtOpSwap / hipMemcpyFlagExtOpIndirect*) are
-  // only honored by the SDMA batch path (BatchCopyMemoryCommand ->
-  // DmaBlitManager::hsaCopyBatch), which restricts them to transfers between
-  // device memory and pinned host memory, plus peer device-to-device copies.
-  // All other combinations are rejected up front.
+  // Swap and indirect operations require the SDMA batch path. Allow device-to-device
+  // and pinned host/device transfers; reject host-only and pageable-host copies.
   const unsigned int kExtOpFlagMask =
       hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
   size_t attrIdx = 0;
@@ -3130,11 +3135,12 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
       switch (type) {
         case hipCopyBuffer:
         case hipCopyBufferSDMA: {
-          // Narrow to H<->D for both swap and indirect.
           amd::Memory* sMem = srcMemories[i];
           amd::Memory* dMem = dstMemories[i];
-          if (sMem == nullptr || dMem == nullptr || getMemoryType(sMem) == getMemoryType(dMem)) {
-            return hipErrorNotSupported;
+          if (sMem == nullptr || dMem == nullptr ||
+              (getMemoryType(sMem) == hipMemoryTypeHost &&
+               getMemoryType(dMem) == hipMemoryTypeHost)) {
+            return fail(i, hipErrorNotSupported);
           }
           break;
         }
@@ -3143,7 +3149,22 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
         case hipHostToHost:
         case hipWriteBuffer:
         case hipReadBuffer:
-          return hipErrorNotSupported;
+          return fail(i, hipErrorNotSupported);
+      }
+
+      // ROCr would reject it asynchronously, too late to report.
+      if (copyFlags & hipMemcpyFlagExtOpSwap) {
+        const uintptr_t alignMask = stream.device().settings().sdma_swap_alignment_ - 1;
+        if (((reinterpret_cast<uintptr_t>(srcs[i]) | reinterpret_cast<uintptr_t>(dsts[i])) &
+             alignMask) != 0) {
+          return fail(i, hipErrorInvalidValue);
+        }
+      }
+
+      // An indirect packet can't be split, so ROCr rejects larger entries.
+      if ((copyFlags & (hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst)) &&
+          sizes[i] > stream.device().settings().sdma_indirect_max_size_) {
+        return fail(i, hipErrorInvalidValue);
       }
     }
 
@@ -3304,11 +3325,8 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
   // Call internal batch implementation
-  hipError_t status = ihipMemcpyBatch(
-      dsts, srcs, sizes, count,
-      attrs, attrsIdxs, numAttrs,
-      *hip::getStream(stream),
-      true);
+  hipError_t status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs,
+                                      *hip::getStream(stream), true, failIdx);
 
   HIP_RETURN(status);
 }
@@ -4927,18 +4945,31 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
                                    (size_t)mipmapDesc->offset, buf));
 }
 
+// ================================================================================================
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
 
-  // We do not support any flags at this time.
-  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd || flags != 0) {
+  if (dptr == nullptr || size == 0 || handleType != hipMemRangeHandleTypeDmaBufFd ||
+      (flags != 0 && flags != hipMemRangeFlagDmaBufMappingTypePcie)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
-  if (!device->GetHandleForAddressRange(dptr, size, handle)) {
+
+  // ensure exported handle is reachable by third party devices via pcie, hence the owning device
+  // must be xgmi or pcie with large BAR enabled.
+  if (flags == hipMemRangeFlagDmaBufMappingTypePcie && !device->isXgmi() &&
+      !device->info().largeBar_) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  const amd::HandleExportResult result =
+      device->GetHandleForAddressRange(dptr, size, handle, flags);
+  if (result == amd::HandleExportResult::kNotSupported) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+  if (result != amd::HandleExportResult::kSuccess) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 

@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace rocjitsu {
@@ -29,8 +30,9 @@ struct IsaExecutionBackend;
 /// By default, decoded instructions are heap-allocated.  Call
 /// ``enable_pool()`` to route Instruction::operator new/delete through
 /// the decoder's O(1) free-list pool.  Only enable the pool when all
-/// decoded instructions will be deleted before the decoder is destroyed
-/// (e.g., the ComputeUnit simulation loop).
+/// decoded instructions will be deleted on the bound thread with this pool
+/// active, before the decoder is destroyed. CU execution uses heap storage
+/// because decoded instructions can survive issue quanta and move between workers.
 class Decoder {
 public:
   using Pool = util::ArenaAlloc<512, 128>;
@@ -67,6 +69,17 @@ public:
   DecodeResult decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                       const DecodeErrorEmitter &emit_error = {});
 
+  /// @brief Decode from a bounded instruction stream and record its source offset.
+  ///
+  /// @details Uses the original stream when it contains the decoder's maximum
+  /// lookahead. At the tail, pads a temporary window with zeros and rejects any
+  /// instruction whose encoded size exceeds the remaining input or the declared
+  /// bound. Input-backed raw encodings retain the original stream's lifetime;
+  /// callers must keep that stream alive while using the decoded instruction.
+  /// @returns A decoded instruction, or failure with an optional diagnostic.
+  DecodeResult decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc = 0,
+                             const DecodeErrorEmitter &emit_error = {});
+
   /// @brief Create a decoder for the given architecture.
   static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
 
@@ -83,16 +96,22 @@ public:
 
   /// @brief Enable pool allocation for decoded instructions.
   ///
-  /// When active, Instruction::operator new/delete route through the
-  /// decoder's pool for O(1) alloc/free.  Only enable when the caller
-  /// guarantees all instructions will be deleted before the decoder
-  /// is destroyed (e.g., the ComputeUnit hot path).
+  /// @details Allocate the pool on first use and retain it across disable/enable
+  /// cycles. Production decoders use heap storage and never enable pooling.
+  /// Instruction::operator new/delete route through the active pool for O(1)
+  /// alloc/free. Pooled instructions must be deleted on the bound thread while
+  /// this pool is active, before the decoder is destroyed.
+  /// @throws std::bad_alloc if the initial pool allocation fails.
   void enable_pool() {
+    if (!pool_)
+      pool_ = std::make_unique<Pool>();
     activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
-                  [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, &pool_);
+                  [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, pool_.get());
   }
 
-  /// @brief Disable pool allocation; future allocations use the heap.
+  /// @brief Disable this pool's allocator hooks without releasing its storage.
+  /// @details Re-enable this pool before deleting any outstanding pooled
+  /// instructions. Later enable_pool() calls reuse the retained pool.
   void disable_pool();
 
 protected:
@@ -103,7 +122,10 @@ protected:
   static Result validate_instruction_operands(const Instruction &inst,
                                               const DecodeErrorEmitter &emit_error);
 
-  Pool pool_;
+private:
+  friend class DecoderPoolTestAccess;
+
+  std::unique_ptr<Pool> pool_;
 };
 
 /// @brief ISA-parameterized decoder.

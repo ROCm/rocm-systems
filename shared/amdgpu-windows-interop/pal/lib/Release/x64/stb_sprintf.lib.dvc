@@ -1,5 +1,5 @@
 outs:
-- md5: 3eebd3c172419d1c3bc0c6af73e6f4e9
+- md5: ce96c2abad1a8c7ba2adf75a448675b5
   size: 25922
   hash: md5
   path: stb_sprintf.lib

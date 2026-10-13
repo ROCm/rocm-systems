@@ -22,6 +22,23 @@ rj_add_object_library(
     throughput/plugin.cpp
 )
 
+rj_add_object_library(
+    rocjitsu_plugin_instruction_mix
+    instruction_mix/plugin.cpp
+)
+
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    rj_add_object_library(
+        rocjitsu_plugin_perfsim
+        perfsim/plugin.cpp
+    )
+    target_link_libraries(
+        rocjitsu_plugin_perfsim
+        PRIVATE flatbuffers
+        PUBLIC ${CMAKE_DL_LIBS}
+    )
+endif()
+
 # Host-side loader: discovers and dlopen()s plugin shared objects named in the
 # config file. Linked into the interposer and main shared library.
 rj_add_object_library(
@@ -114,4 +131,22 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_plugin_so(throughput rocjitsu_plugin_throughput
         ${CMAKE_CURRENT_SOURCE_DIR}/throughput/plugin_export.cpp
     )
+    # The registered plugin name is `instruction-mix`, and the loader derives
+    # the soname from that name, so the output name must carry the hyphen too.
+    rj_add_plugin_so(instruction-mix rocjitsu_plugin_instruction_mix
+        ${CMAKE_CURRENT_SOURCE_DIR}/instruction_mix/plugin_export.cpp
+    )
+    if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+        rj_add_plugin_so(perfsim rocjitsu_plugin_perfsim
+            ${CMAKE_CURRENT_SOURCE_DIR}/perfsim/plugin_export.cpp
+        )
+        # Perfsim builds may run LLVM-global cleanup from an ELF destructor.
+        # Keep this adapter and its backend-handle registry mapped across a
+        # loader dlclose() after a failed factory call. The registry's retained
+        # handles keep the Perfsim backends themselves mapped for the process lifetime.
+        target_link_options(
+            rocjitsu_plugin_perfsim_so
+            PRIVATE "-Wl,-z,nodelete"
+        )
+    endif()
 endif()

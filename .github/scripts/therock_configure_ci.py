@@ -150,6 +150,8 @@ SKIPPABLE_PATH_PATTERNS = [
     "*/.wordlist.txt",
     "projects/*/docs/*",
     "shared/*/docs/*",
+    # Vendored API headers are not yet integrated into TheRock builds.
+    "runtimes/api-headers/*",
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
     # WSL support files (should these still be excluded?)

@@ -42,7 +42,7 @@ struct stub_settings
     static void reset()
     {
         filter              = device_filter{};
-        filter.mode         = device_selection_mode::ALL;
+        filter.mode         = device_selection_mode::all;
         visible_bdfs        = std::set<std::string>{};
         visible_query_count = 0;
     }
@@ -80,10 +80,11 @@ protected:
     // is how AMD SMI signals that the BDF could not be determined.
     static std::shared_ptr<gpu_device_t> make_device(size_t index, const std::string& bdf)
     {
-        auto backend = std::make_shared<MockBackend>();
+        auto const backend = std::make_shared<MockBackend>();
 
         ON_CALL(*backend, get_gpu_asic_info())
-            .WillByDefault(Return(asic_info{ "Test GPU", "AMD" }));
+            .WillByDefault(
+                Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
         ON_CALL(*backend, probe_sdma_gpu_support()).WillByDefault(Return(true));
 
         if(bdf.empty())
@@ -121,10 +122,10 @@ protected:
 
 TEST_F(GpuTraitsEnumerateTest, keeps_only_devices_the_runtime_exposes)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::set<std::string>{ "0000:26:00.0" };
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
@@ -134,10 +135,10 @@ TEST_F(GpuTraitsEnumerateTest, keeps_only_devices_the_runtime_exposes)
 
 TEST_F(GpuTraitsEnumerateTest, all_devices_kept_when_all_are_visible)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::set<std::string>{ "0000:05:00.0", "0000:26:00.0" };
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
@@ -149,10 +150,10 @@ TEST_F(GpuTraitsEnumerateTest, all_devices_kept_when_all_are_visible)
 // filter applies and nothing is sampled.
 TEST_F(GpuTraitsEnumerateTest, empty_visible_set_excludes_every_device)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::set<std::string>{};
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     EXPECT_TRUE(traits_t::enumerate_devices<stub_settings>(provider).empty());
@@ -163,10 +164,10 @@ TEST_F(GpuTraitsEnumerateTest, empty_visible_set_excludes_every_device)
 // skipped rather than silently dropping every device.
 TEST_F(GpuTraitsEnumerateTest, unknown_visibility_skips_the_filter_entirely)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::nullopt;
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
@@ -178,10 +179,10 @@ TEST_F(GpuTraitsEnumerateTest, unknown_visibility_skips_the_filter_entirely)
 // nothing to correlate it against, so there is no basis for excluding it.
 TEST_F(GpuTraitsEnumerateTest, unknown_visibility_keeps_device_without_bdf)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::nullopt;
 
-    auto provider = make_provider({ make_device(0, "") });
+    auto const provider = make_provider({ make_device(0, "") });
 
     EXPECT_EQ(traits_t::enumerate_devices<stub_settings>(provider).size(), 1U);
 }
@@ -190,7 +191,7 @@ TEST_F(GpuTraitsEnumerateTest, unknown_visibility_keeps_device_without_bdf)
 // simply yields nothing.
 TEST_F(GpuTraitsEnumerateTest, no_devices_and_unknown_visibility_is_not_an_error)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::nullopt;
 
     EXPECT_TRUE(traits_t::enumerate_devices<stub_settings>(make_provider({})).empty());
@@ -199,11 +200,11 @@ TEST_F(GpuTraitsEnumerateTest, no_devices_and_unknown_visibility_is_not_an_error
 // Explicit index selection is still honored when visibility is unknown.
 TEST_F(GpuTraitsEnumerateTest, unknown_visibility_still_applies_index_filter)
 {
-    stub_settings::filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::filter.mode    = device_selection_mode::specific;
     stub_settings::filter.indices = { 1 };
     stub_settings::visible_bdfs   = std::nullopt;
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
@@ -215,10 +216,11 @@ TEST_F(GpuTraitsEnumerateTest, unknown_visibility_still_applies_index_filter)
 // device::get_bdf(); such a device cannot be correlated and must not be sampled.
 TEST_F(GpuTraitsEnumerateTest, device_with_unknown_bdf_is_excluded)
 {
-    stub_settings::filter.mode  = device_selection_mode::ALL;
+    stub_settings::filter.mode  = device_selection_mode::all;
     stub_settings::visible_bdfs = std::set<std::string>{ "0000:05:00.0" };
 
-    auto provider = make_provider({ make_device(0, ""), make_device(1, "0000:05:00.0") });
+    auto const provider =
+        make_provider({ make_device(0, ""), make_device(1, "0000:05:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
 
@@ -227,11 +229,11 @@ TEST_F(GpuTraitsEnumerateTest, device_with_unknown_bdf_is_excluded)
 
 TEST_F(GpuTraitsEnumerateTest, explicit_index_selection_still_honors_visibility)
 {
-    stub_settings::filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::filter.mode    = device_selection_mode::specific;
     stub_settings::filter.indices = { 0, 1 };
     stub_settings::visible_bdfs   = std::set<std::string>{ "0000:26:00.0" };
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
@@ -243,11 +245,11 @@ TEST_F(GpuTraitsEnumerateTest, explicit_index_selection_still_honors_visibility)
 // cannot be honored, and the device is not sampled.
 TEST_F(GpuTraitsEnumerateTest, explicitly_requested_masked_device_yields_nothing)
 {
-    stub_settings::filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::filter.mode    = device_selection_mode::specific;
     stub_settings::filter.indices = { 0 };
     stub_settings::visible_bdfs   = std::set<std::string>{ "0000:26:00.0" };
 
-    auto provider =
+    auto const provider =
         make_provider({ make_device(0, "0000:05:00.0"), make_device(1, "0000:26:00.0") });
 
     EXPECT_TRUE(traits_t::enumerate_devices<stub_settings>(provider).empty());
@@ -255,9 +257,9 @@ TEST_F(GpuTraitsEnumerateTest, explicitly_requested_masked_device_yields_nothing
 
 TEST_F(GpuTraitsEnumerateTest, sampling_disabled_skips_the_visibility_query)
 {
-    stub_settings::filter.mode = device_selection_mode::NONE;
+    stub_settings::filter.mode = device_selection_mode::none;
 
-    auto provider = make_provider({ make_device(0, "0000:05:00.0") });
+    auto const provider = make_provider({ make_device(0, "0000:05:00.0") });
 
     EXPECT_TRUE(traits_t::enumerate_devices<stub_settings>(provider).empty());
     EXPECT_EQ(stub_settings::visible_query_count, 0);
@@ -267,18 +269,20 @@ TEST_F(GpuTraitsEnumerateTest, sampling_disabled_skips_the_visibility_query)
 // visibility check is deliberately short-circuited behind the index filter.
 TEST_F(GpuTraitsEnumerateTest, device_rejected_by_index_filter_is_not_probed_for_bdf)
 {
-    stub_settings::filter.mode    = device_selection_mode::SPECIFIC;
+    stub_settings::filter.mode    = device_selection_mode::specific;
     stub_settings::filter.indices = { 1 };
     stub_settings::visible_bdfs = std::set<std::string>{ "0000:05:00.0", "0000:26:00.0" };
 
-    auto excluded_backend = std::make_shared<MockBackend>();
+    auto const excluded_backend = std::make_shared<MockBackend>();
     ON_CALL(*excluded_backend, get_gpu_asic_info())
-        .WillByDefault(Return(asic_info{ "Test GPU", "AMD" }));
+        .WillByDefault(
+            Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
     ON_CALL(*excluded_backend, probe_sdma_gpu_support()).WillByDefault(Return(true));
     EXPECT_CALL(*excluded_backend, get_bdf()).Times(0);
 
-    auto provider = make_provider({ std::make_shared<gpu_device_t>(excluded_backend, 0),
-                                    make_device(1, "0000:26:00.0") });
+    auto const provider =
+        make_provider({ std::make_shared<gpu_device_t>(excluded_backend, 0),
+                        make_device(1, "0000:26:00.0") });
 
     const auto entries = traits_t::enumerate_devices<stub_settings>(provider);
 

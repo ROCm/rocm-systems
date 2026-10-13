@@ -1371,6 +1371,11 @@ hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(
   return amdExtTable->hsa_amd_vmem_get_alloc_properties_from_handle_fn(alloc_handle, pool, type);
 }
 
+hsa_status_t HSA_API hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t alloc_handle, hsa_amd_vmem_handle_info_t* info) {
+  return amdExtTable->hsa_amd_vmem_get_vmem_info_fn(alloc_handle, info);
+}
+
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
   return amdExtTable->hsa_amd_agent_set_async_scratch_limit_fn(agent, threshold);
 }
@@ -1458,6 +1463,13 @@ hsa_status_t HSA_API hsa_amd_svm_discard_and_prefetch_batch_async(
   return amdExtTable->hsa_amd_svm_discard_and_prefetch_batch_async_fn(
       ptrs, sizes, count, dst_agents, num_dst_agents,
       num_dep_signals, dep_signals, completion_signal);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  return amdExtTable->hsa_amd_agent_set_attribute_fn(agent, attribute, value);
 }
 
 // Tools only table interfaces.
