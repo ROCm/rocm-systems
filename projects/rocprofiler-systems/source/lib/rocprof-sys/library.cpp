@@ -739,7 +739,7 @@ rocprofsys_init_tooling_hidden(void)
 
         rocprofsys_preinit_cache();
 
-#if (defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||           \
+#if(defined(ROCPROFSYS_USE_MPI_HEADERS) && ROCPROFSYS_USE_MPI_HEADERS > 0) ||            \
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
         component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
@@ -1415,7 +1415,7 @@ rocprofsys_finalize_hidden(void)
 
         rocprofsys::progress::tracker _tracker{ [_bar_opts](std::string   _label,
                                                             std::uint64_t _total) {
-            auto const _bar = std::make_shared<rocprofsys::progress::bar>(
+            auto const                _bar = std::make_shared<rocprofsys::progress::bar>(
                 std::move(_label), _total, _bar_opts);
             return rocprofsys::progress::progress_callback{ [_bar](std::uint64_t _delta) {
                 _bar->on_advance(_delta);
