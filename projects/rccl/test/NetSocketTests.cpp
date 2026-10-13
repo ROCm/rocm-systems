@@ -11,10 +11,14 @@
 #include "common/ScopedEnv.hpp"
 #include "gtest/gtest.h"
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 
 extern ncclNet_t ncclNetSocket;
 
@@ -1678,6 +1682,91 @@ TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
                     "ordering was not exercised on this host";
   TEST_INFO("virbr present (%d bridge iface(s)) but auto-pick chose '%s'",
             nVirbr, pick);
+}
+
+// ---------------------------------------------------------------------------
+// Test: BcmLinksEnvFallback
+//
+// GPU-free unit test for the RCCL_BCM_LINKS_PATH env-var fallback in
+// ncclOsGetBcmLinks().  Creates a tmpdir whose layout mirrors the sysfs
+// structure that the BCM switch_discovery kernel module would populate,
+// using two real PCI bus IDs read from /sys/bus/pci/devices/ (required
+// because ncclOsGetPciPath validates each peer via realpath).
+// ---------------------------------------------------------------------------
+TEST(BcmLinksTest, EnvFallback) {
+  // Skip when the kernel module's default sysfs directory exists —
+  // the env-var fallback is never reached in that case.
+  struct stat st;
+  if (stat("/sys/kernel/pci_switch_link/virtual_switch_links", &st) == 0 &&
+      S_ISDIR(st.st_mode)) {
+    GTEST_SKIP() << "BCM switch_discovery sysfs path exists; "
+                    "env-var fallback not exercised";
+  }
+
+  // Pick two real PCI bus IDs so ncclOsGetPciPath's realpath() succeeds.
+  DIR* pciDir = opendir("/sys/bus/pci/devices");
+  ASSERT_NE(pciDir, nullptr) << "cannot open /sys/bus/pci/devices";
+
+  std::string bdfA, bdfB;
+  struct dirent* entry;
+  while ((entry = readdir(pciDir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;
+    if (strlen(entry->d_name) != 12) continue;  // "0000:00:00.0"
+    if (bdfA.empty())      bdfA = entry->d_name;
+    else if (bdfB.empty()) { bdfB = entry->d_name; break; }
+  }
+  closedir(pciDir);
+
+  ASSERT_FALSE(bdfA.empty()) << "no PCI devices in /sys/bus/pci/devices";
+  ASSERT_FALSE(bdfB.empty()) << "fewer than 2 PCI devices found";
+
+  // Build mock directory: <tmpdir>/<bdfA>/<bdfB>
+  char tmpdir[] = "/tmp/rccl_bcm_test_XXXXXX";
+  ASSERT_NE(mkdtemp(tmpdir), nullptr) << "mkdtemp failed";
+
+  std::string linkDir   = std::string(tmpdir) + "/" + bdfA;
+  std::string linkEntry = linkDir + "/" + bdfB;
+  ASSERT_EQ(mkdir(linkDir.c_str(), 0755), 0)
+      << "mkdir failed: " << linkDir;
+  { FILE* f = fopen(linkEntry.c_str(), "w");
+    ASSERT_NE(f, nullptr) << "cannot create " << linkEntry;
+    fclose(f); }
+
+  // Redirect the fallback path to our tmpdir.
+  ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir);
+
+  // Query bdfA — should discover bdfB as its sole peer.
+  int   nlinks = -1;
+  char* peers  = nullptr;
+  ASSERT_EQ(ncclOsGetBcmLinks(bdfA.c_str(), &nlinks, &peers), ncclSuccess);
+  EXPECT_EQ(nlinks, 1) << "expected 1 peer for " << bdfA;
+  if (nlinks == 1 && peers != nullptr) {
+    // Peers are stored as 13-byte (12-char + NUL) entries.
+    std::string got(peers, 12);
+    // Case-insensitive compare (readdir preserves on-disk case).
+    auto toLower = [](std::string s) {
+      for (auto& c : s) c = static_cast<char>(tolower(c));
+      return s;
+    };
+    EXPECT_EQ(toLower(got), toLower(bdfB))
+        << "peer mismatch: expected " << bdfB << ", got " << got;
+  }
+  free(peers);
+
+  // Query bdfB — no subdirectory exists for it, expect 0 peers.
+  int   nlinks2 = -1;
+  char* peers2  = nullptr;
+  ASSERT_EQ(ncclOsGetBcmLinks(bdfB.c_str(), &nlinks2, &peers2), ncclSuccess);
+  EXPECT_EQ(nlinks2, 0) << "expected 0 peers for " << bdfB;
+  free(peers2);
+
+  // Cleanup
+  unlink(linkEntry.c_str());
+  rmdir(linkDir.c_str());
+  rmdir(tmpdir);
+
+  TEST_INFO("BcmLinksEnvFallback: bdfA=%s bdfB=%s nlinks=%d",
+            bdfA.c_str(), bdfB.c_str(), nlinks);
 }
 
 } // namespace RcclUnitTesting

@@ -47,6 +47,7 @@ test_categories:
       - "GinAllReduceEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
+      - "BcmLinksTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
