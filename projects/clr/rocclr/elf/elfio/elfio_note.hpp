@@ -105,8 +105,11 @@ template <class S> class note_section_accessor_template {
       }
     }
 
-    note_start_positions.push_back(note_section->get_size());
-    note_section->append_data(buffer);
+    // Records start on a 4-byte boundary, even after data that does not.
+    const Elf_Xword current_size = note_section->get_size();
+    const size_t padding = (align - current_size % align) % align;
+    note_start_positions.push_back(current_size + padding);
+    note_section->append_data(std::string(padding, '\0') + buffer);
   }
 
  private:
@@ -145,12 +148,11 @@ template <class S> class note_section_accessor_template {
     }
 
     const char* name = data + position + header_size;
-    if (namesz != 0 && name[namesz - 1] != '\0') {
-      return false;
-    }
+    // Some producers omit the owner's terminator; keep the full name then.
+    const bool terminated = namesz != 0 && name[namesz - 1] == '\0';
     record.type = convertor(header[2]);
     record.name = name;
-    record.name_size = namesz == 0 ? 0 : namesz - 1;
+    record.name_size = terminated ? namesz - 1 : namesz;
     record.descriptor = descsz == 0 ? nullptr : name + padded_name;
     record.descriptor_size = descsz;
     record.total_size = header_size + padded_name + padded_desc;
