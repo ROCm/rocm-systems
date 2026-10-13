@@ -248,6 +248,9 @@ Not every accelerator mode can be combined with every memory mode. MI300X suppor
 - NPS8 is defined in the API but not supported on MI300X.
 - Supported combinations vary by model and firmware. The `MEMORY_PARTITION_CAPS` column of
   `sudo amd-smi partition --accelerator` lists the NPS modes each accelerator profile supports.
+- For the accelerator
+  and memory mode pairs AMD validates per model and environment, see {ref}`GPU partitioning
+  support <rocm:release-gpu-partitioning-support>` in the ROCm release notes.
 ```
 
 ### Performance trade-offs
