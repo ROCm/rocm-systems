@@ -160,6 +160,9 @@ public:
 
   hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override;
 
+  hsa_status_t GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const override;
+
+  hsa_status_t GetMaxPersistingCacheSize(uint32_t node_id, uint64_t* max_cache_size) const override;
  private:
   /// @brief Flags for @ref ExportMemoryHandleImpl.
   enum ExportMemoryFlags : uint32_t {

@@ -397,6 +397,10 @@ class ThunkLoader {
                                       HSAint32* fd);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetPersistingCacheSize))(HSAuint32 NodeId, \
                                       HSAuint64 CacheSize);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetPersistingCacheSize))(HSAuint32 NodeId, \
+                                      HSAuint64 *CacheSize);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetPersistingCacheSizeMax))(HSAuint32 NodeId, \
+                                      HSAuint64 *MaxCacheSize);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -416,6 +420,11 @@ class ThunkLoader {
     typedef int (DRM_DEF(amdgpu_bo_export))(amdgpu_bo_handle bo, \
                                       enum amdgpu_bo_handle_type type, \
                                       uint32_t *shared_handle);
+    
+    typedef int (DRM_DEF(amdgpu_query_info))(amdgpu_device_handle dev, \
+                                      unsigned info_id, \
+                                      unsigned size, \
+                                      void *value);
 
     typedef int (DRM_DEF(amdgpu_bo_import))(amdgpu_device_handle dev, \
                                       enum amdgpu_bo_handle_type type, \
@@ -573,12 +582,15 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
     HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
     HSAKMT_DEF(hsaKmtSetPersistingCacheSize)* HSAKMT_PFN(hsaKmtSetPersistingCacheSize);
+    HSAKMT_DEF(hsaKmtGetPersistingCacheSize)* HSAKMT_PFN(hsaKmtGetPersistingCacheSize);
+    HSAKMT_DEF(hsaKmtGetPersistingCacheSizeMax)* HSAKMT_PFN(hsaKmtGetPersistingCacheSizeMax);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
     HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);
     DRM_DEF(amdgpu_query_gpu_info)* DRM_PFN(amdgpu_query_gpu_info);
+    DRM_DEF(amdgpu_query_info)* DRM_PFN(amdgpu_query_info);
     DRM_DEF(amdgpu_bo_cpu_map)* DRM_PFN(amdgpu_bo_cpu_map);
     DRM_DEF(amdgpu_bo_free)* DRM_PFN(amdgpu_bo_free);
     DRM_DEF(amdgpu_bo_export)* DRM_PFN(amdgpu_bo_export);
