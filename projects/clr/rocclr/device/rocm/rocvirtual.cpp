@@ -799,7 +799,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       signal_list_[current_id_]->release();
       signal_list_[current_id_] = signal.release();
     } else {
-      assert(!"ProfilingSignal reallocation failed! Marker has a conflict with signal reuse!");
+      guarantee(false, "ProfilingSignal reallocation failed! Refusing to reset a retained signal.");
     }
   }
 
