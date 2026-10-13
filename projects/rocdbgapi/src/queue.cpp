@@ -1112,7 +1112,10 @@ aql_queue_t::scratch_memory_region (
   auto [offset, size] = architecture ().scratch_memory_region (
     agent (), m_compute_tmpring_size, cwsr_record);
 
-  return { m_scratch_backing_memory_address + offset, size };
+  if (!architecture ().has_architected_flat_scratch ())
+    offset += m_scratch_backing_memory_address;
+
+  return { offset, size };
 }
 
 void
