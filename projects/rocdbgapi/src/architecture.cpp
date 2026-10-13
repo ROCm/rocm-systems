@@ -2607,6 +2607,7 @@ public:
   std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 
   amd_dbgapi_size_t
@@ -3436,6 +3437,7 @@ gfx9_architecture_t::dispatch_packet_id (
 std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
 gfx9_architecture_t::scratch_memory_region (
   const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t scratch_backing_memory_address,
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   /* Total size of allocated scratch memory in number of waves.  */
@@ -3471,7 +3473,8 @@ gfx9_architecture_t::scratch_memory_region (
   amd_dbgapi_size_t xcc_scratch_base
     = waves * wavesize * cwsr_record.xcc_id ();
 
-  return { xcc_scratch_base + offset, wavesize };
+  return { scratch_backing_memory_address + xcc_scratch_base + offset,
+           wavesize };
 }
 
 amd_dbgapi_size_t
@@ -3973,6 +3976,7 @@ protected:
   std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 };
 
@@ -4317,6 +4321,7 @@ gfx9_4_architecture_t::dispatch_packet_id (
 std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
 gfx9_4_architecture_t::scratch_memory_region (
   const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t /* scratch_backing_memory_address */,
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   dbgapi_assert (has_architected_flat_scratch ());
@@ -5600,6 +5605,7 @@ public:
   std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
 
   amd_dbgapi_size_t
@@ -6153,6 +6159,7 @@ gfx11_architecture_t::can_simulate (wave_t &wave,
 std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
 gfx11_architecture_t::scratch_memory_region (
   const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t /* scratch_backing_memory_address */,
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   dbgapi_assert (has_architected_flat_scratch ());
