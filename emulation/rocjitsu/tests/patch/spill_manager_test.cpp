@@ -3,8 +3,9 @@
 
 #include "rocjitsu/code/patch/spill_manager.h"
 
-#include "rocjitsu/analysis/exec_state.h"
-#include "rocjitsu/analysis/liveness.h"
+#include "decode_test_util.h"
+#include "rocjitsu/code/analysis/exec_state.h"
+#include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/decoder.h"
@@ -109,7 +110,9 @@ enum class IntegOpcode : uint32_t {
 
 class IntegDecoder : public Decoder {
 public:
-  Instruction *decode(const rj_code_binary_inst_t *inst) override {
+  std::size_t max_instruction_words() const override { return 1; }
+
+  DecodeResult decode(const rj_code_binary_inst_t *inst, const DecodeErrorEmitter &) override {
     auto op = static_cast<IntegOpcode>(*inst);
     switch (op) {
     case IntegOpcode::Def_Vgpr0_Sgpr4:
@@ -359,6 +362,36 @@ TEST(SpillManager, ReserveSet_HandlesEmpty) {
   EXPECT_EQ(m.total_private_bytes(), before);
 }
 
+// A set containing a special singleton (EXEC/VCC/...) has no scratch slot, so
+// reserve must fail cleanly and reserve NOTHING — not even its ordinary members,
+// and without tripping the post-capacity-check assert on the special reg.
+TEST(SpillManager, ReserveSet_FailsCleanlyOnSpecialRegisters) {
+  RegisterSet set;
+  set.expand(sgpr(0));
+  set.expand(RegisterRef{RegClass::EXEC, 0, 1});
+
+  SpillManager m(0, kBigLimit);
+  EXPECT_FALSE(m.reserve(set));
+  EXPECT_EQ(m.total_private_bytes(), 0u);
+  EXPECT_EQ(m.offset_for(sgpr(0)), std::nullopt);
+}
+
+// The ordinary_only() projection of a set with specials is reservable — the
+// ordinary members allocate normally once the special is projected out.
+TEST(SpillManager, ReserveSet_OrdinaryProjectionIsReservable) {
+  RegisterSet set;
+  set.expand(sgpr(0));
+  set.expand(vgpr(3));
+  set.expand(RegisterRef{RegClass::VCC, 0, 1});
+
+  SpillManager m(0, kBigLimit);
+  ASSERT_FALSE(m.reserve(set)); // specials present -> clean fail
+  EXPECT_TRUE(m.reserve(set.ordinary_only()));
+  EXPECT_EQ(m.total_private_bytes(), 8u);
+  EXPECT_TRUE(m.offset_for(sgpr(0)).has_value());
+  EXPECT_TRUE(m.offset_for(vgpr(3)).has_value());
+}
+
 TEST(SpillManager, AllocateSlotReturnsNulloptOnOverflow) {
   SpillManager m(0, /*limit=*/8);
   EXPECT_TRUE(m.allocate_slot(sgpr(0)).has_value());
@@ -533,7 +566,7 @@ TEST(SpillManager, IntegrationFromLiveBefore) {
   };
   TestCodeObject co(std::move(words));
   IntegDecoder decoder;
-  auto blocks = BasicBlock::build(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  auto blocks = build_valid_blocks(co, decoder, ROCJITSU_CODE_ARCH_CDNA3);
   ASSERT_FALSE(blocks.empty());
 
   // Pick the probe-site instruction by mnemonic match.

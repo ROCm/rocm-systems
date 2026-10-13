@@ -68,6 +68,13 @@ testResult_t  AllReduceGetSymkInfo(ncclComm_t comm, size_t count, ncclDataType_t
   return testSuccess;
 }
 
+testResult_t  AllReduceGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType_t type, ncclRedOp_t op,
+    const void* sendbuff, void* recvbuff, int graphCapturing, int* algo, int* proto, int* nchannels) {
+  if(rcclTestsGetCollImplInfo == NULL) return testInternalError;
+  NCCLCHECK(rcclTestsGetCollImplInfo(comm, ncclFuncAllReduce, count, type, op, sendbuff, recvbuff, graphCapturing, algo, proto, nchannels));
+  return testSuccess;
+}
+
 void AllReduceGetBw(size_t count, size_t typesize, double sec, double* algBw, double* busBw, int nranks) {
   double baseBw = (double)(count * typesize) / 1.0E9 / sec;
 
@@ -548,7 +555,8 @@ struct testColl allReduceTest = {
   AllReduceGetBw,
   AllReduceRunColl,
   AllReduceGetAlgoProtoChannels,
-  AllReduceGetSymkInfo
+  AllReduceGetSymkInfo,
+  AllReduceGetCollImplInfo
 };
 
 void AllReduceGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
@@ -585,7 +593,7 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
 #if defined(RCCL_FLOAT8)
-  if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || run_ops[j] == ncclAvg || strcmp(run_opnames[j],"mulsum") == 0))
+  if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || strcmp(run_opnames[j],"mulsum") == 0))
     continue;
 #endif
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));

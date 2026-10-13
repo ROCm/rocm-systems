@@ -93,15 +93,16 @@ struct static_object
     static Tp*& construct_via_function(Tp* (*func)(void*, FuncArgs...), Args&&... args);
 
 private:
-    static Tp*                                             m_object;
-    static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
+    static Tp* m_object;
+    alignas(Tp) static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
 };
 
 template <typename Tp, typename ContextT>
 Tp* static_object<Tp, ContextT>::m_object = nullptr;
 
 template <typename Tp, typename ContextT>
-std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
+alignas(
+    Tp) std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
 constexpr bool

@@ -1,0 +1,70 @@
+name: rocprofiler-systems Clang-Tidy
+run-name: clang-tidy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-clang-tidy.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-rocm-7.2-ubuntu-24.04
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            projects/rocprofiler-systems
+            .gitmodules
+
+      - name: Init rocprofiler-systems submodules
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule update --init --recursive --depth 1 --jobs 4 -- projects/rocprofiler-systems
+
+      - name: Configure ROCm environment
+        run: |
+          echo "/opt/rocm/bin" >> $GITHUB_PATH
+          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+      - name: Install clang-tidy
+        run: |
+          python3 -m pip install --break-system-packages clang-tidy==22.1.8
+          clang-tidy --version
+
+      - name: CMake configure
+        working-directory: projects/rocprofiler-systems
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$PWD"
+          cmake --preset debug-mpi
+
+      - name: Run clang-tidy-check
+        working-directory: projects/rocprofiler-systems
+        run: |
+          python3 scripts/clang-tidy-check.py \
+            --base "origin/${{ github.base_ref }}" \
+            --build-path build/debug-mpi \
+            -j $(nproc) \
+            --timeout 600

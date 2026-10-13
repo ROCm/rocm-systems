@@ -22,6 +22,8 @@
 
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -33,15 +35,79 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <fmt/format.h>
+
+#include <fstream>
+
 namespace rocprofiler
 {
 namespace counters
 {
+namespace
+{
+void
+check_power_performance_level()
+{
+    // Check if power_dpm_force_performance_level is set to profile_standard
+    // for GPU agents that support counter collection. gfx1100 up to (but not
+    // including) gfx1250 requires profile_standard for stable counter
+    // collection; other GFX IPs do not.
+    constexpr auto min_gfx_target_version = 110000;
+    constexpr auto max_gfx_target_version = 120500;
+
+    for(const auto* agent : agent::get_agents())
+    {
+        if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        if(agent->gfx_target_version < min_gfx_target_version ||
+           agent->gfx_target_version >= max_gfx_target_version)
+            continue;
+
+        auto perf_path = common::filesystem::path{"/sys/class/drm"} /
+                         fmt::format("renderD{}", agent->drm_render_minor) / "device" /
+                         "power_dpm_force_performance_level";
+
+        if(!common::filesystem::exists(perf_path)) continue;
+
+        std::ifstream perf_file(perf_path.string());
+        if(!perf_file.is_open())
+        {
+            ROCP_WARNING << fmt::format(
+                "Could not open path {} to get power_dpm_force_performance_level.",
+                perf_path.string());
+            continue;
+        }
+
+        std::string perf_level{};
+        std::getline(perf_file, perf_level);
+        ROCP_WARNING_IF(perf_level.empty())
+            << fmt::format("Could not get power_dpm_force_performance_level for Agent {} "
+                           "(renderD{}). Set it to 'profile_standard' (e.g. via rocm-smi) for "
+                           "stable GPU counter collection. Please refer to the rocprofv3 "
+                           "documentation, 'Setting GPU performance level for PMC profiling' "
+                           "section, for more information.",
+                           agent->node_id,
+                           agent->drm_render_minor);
+
+        ROCP_WARNING_IF(!perf_level.empty() && perf_level != "profile_standard")
+            << fmt::format("Agent {} (renderD{}) has power_dpm_force_performance_level='{}'. Set "
+                           "it to 'profile_standard' (e.g. via rocm-smi) for stable GPU counter "
+                           "collection. Please refer to the rocprofv3 documentation, 'Setting "
+                           "GPU performance level for PMC profiling' section, for more "
+                           "information.",
+                           agent->node_id,
+                           agent->drm_render_minor,
+                           perf_level);
+    }
+}
+}  // namespace
+
 CounterController::CounterController()
 {
     // Pre-read metrics map file to catch failures during initial setup.
     rocprofiler::counters::loadMetrics();
     rocprofiler::counters::check_installed_firmware_restrictions();
+    check_power_performance_level();
 }
 
 // Adds a counter collection profile to our global cache.
@@ -86,6 +152,8 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
     if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
+    if(ctx.device_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(!rocprofiler::buffer::get_buffer(buffer_id) &&
        buffer_id != rocprofiler_buffer_id_t{.handle = 0})
@@ -149,6 +217,8 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
     if(ctx.dispatch_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
+    if(ctx.device_spm) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
     if(!ctx.dispatch_counter_collection)
     {
         // Disable PTL for all GPUs for dispatch counter collection
@@ -166,6 +236,22 @@ CounterController::configure_dispatch(rocprofiler_context_id_t                  
 
         ctx.dispatch_counter_collection =
             std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
+
+        // On WSL2/DXG the KFD device node is absent (/dev/dxg is exposed but not
+        // /dev/kfd), so hardware counters are not armed through the KFD profiler
+        // ioctl; instead aqlprofile's vendor-specific PM4 IB is submitted through
+        // the dxg path in libhsakmt, gated by WSLKMT_VENDOR_PACKET (enabled by
+        // default by the WSL platform layer). Both single- and multi-counter
+        // collection are supported this way (the per-queue PM4 command-buffer
+        // frame size is computed from the device geometry). The /dev/kfd
+        // capability probe is shared at the topology level (rocprofiler::agent)
+        // so this stays consistent with KFD event tracing rather than being an
+        // ad-hoc check here.
+        LOG_IF_FIRST_N(WARNING, !::rocprofiler::agent::kfd_device_available(), 1)
+            << "/dev/kfd is not available (expected under WSL/DXG). Hardware performance "
+               "counters are collected via the dxg vendor-packet path in libhsakmt (requires "
+               "WSLKMT_VENDOR_PACKET=1, enabled automatically by the WSL platform layer). "
+               "Single- and multi-counter collection are supported.";
     }
 
     auto& cb = *ctx.dispatch_counter_collection->callbacks.emplace_back(

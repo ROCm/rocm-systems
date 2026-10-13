@@ -31,19 +31,22 @@ enum class DiagnosticKind {
   NothingToTranslate,
   ResourceLimit,
   KernelSkipped,
+  ResidualRewrite,
 };
 
 /// @brief One user/developer-facing DBT diagnostic.
 ///
-/// @details Instruction diagnostics use @c guest_offset and @c mnemonic to point
-/// at the original guest instruction. Whole-image failures such as descriptor
-/// translation can leave those fields empty. @c required_work is intentionally a
-/// short checklist for EXPAND failures so missing lowerings document the next
-/// implementation steps instead of only reporting that translation failed.
+/// @details Translation diagnostics use @c guest_offset and @c mnemonic to point
+/// at the original guest instruction. Final-output verification instead uses
+/// @c output_offset. Whole-image failures such as descriptor translation can
+/// leave both offsets empty. @c required_work is intentionally a short checklist
+/// for EXPAND failures so missing lowerings document the next implementation
+/// steps instead of only reporting that translation failed.
 struct TranslationDiagnostic {
   DiagnosticSeverity severity = DiagnosticSeverity::Warning;
   DiagnosticKind kind = DiagnosticKind::Legalization;
   std::optional<uint64_t> guest_offset;
+  std::optional<uint64_t> output_offset;
   std::string mnemonic;
   std::string message;
   std::vector<std::string> required_work;

@@ -161,7 +161,7 @@ def generate_broadcast_api():
  *                         heap.
  * @param[in] nelement     Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return void
  */
@@ -472,7 +472,7 @@ def generate_broadcast_wave_api():
  *                         heap.
  * @param[in] nelement     Number of elements to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return int; zero when sucessful, non-zero otherwise
  */\n"""
@@ -496,7 +496,7 @@ def generate_broadcast_wave_api():
  *                         heap.
  * @param[in] nelement     Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
- * 
+ *
  *
  * @return int; zero when successful, non-zero otherwise
  */

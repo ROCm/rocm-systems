@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <numeric>
 #include "hevc_parser.h"
 
 HevcVideoParser::HevcVideoParser() {
@@ -207,7 +208,7 @@ int HevcVideoParser::FillSeqCallbackFn(HevcSeqParamSet* sps_data) {
     }
     int disp_width = (video_format_params_.display_area.right - video_format_params_.display_area.left) * sar.numerator;
     int disp_height = (video_format_params_.display_area.bottom - video_format_params_.display_area.top) * sar.denominator;
-    int gcd = std::__gcd(disp_width, disp_height); // greatest common divisor
+    int gcd = std::gcd(disp_width, disp_height); // greatest common divisor
     if (gcd) {
         video_format_params_.display_aspect_ratio.x = disp_width / gcd;
         video_format_params_.display_aspect_ratio.y = disp_height / gcd;
@@ -374,10 +375,16 @@ int HevcVideoParser::SendPicForDecode() {
     if (pps_ptr->tiles_enabled_flag) {
         pic_param_ptr->num_tile_columns_minus1 = pps_ptr->num_tile_columns_minus1;
         pic_param_ptr->num_tile_rows_minus1 = pps_ptr->num_tile_rows_minus1;
-        for (i = 0; i <= pps_ptr->num_tile_columns_minus1; i++) {
+        // RocdecHevcPicParams mirrors VAPictureParameterBufferHEVC, whose column_width_minus1[] and
+        // row_height_minus1[] hold only 19 and 21 entries. That is one fewer than the Table A.4 level
+        // limits allow, so the largest conforming tile counts cannot be passed on in full.
+        if (pps_ptr->num_tile_columns_minus1 > 18 || pps_ptr->num_tile_rows_minus1 > 20) {
+            ErrorLog(g_rocdec_logger, ROCDEC_STR("Tile count exceeds the picture parameter buffer capacity: num_tile_columns_minus1 = ") + ROCDEC_TOSTR(pps_ptr->num_tile_columns_minus1) + ", num_tile_rows_minus1 = " + ROCDEC_TOSTR(pps_ptr->num_tile_rows_minus1) + ". Only the first 19 columns and 21 rows are sent to the decoder.");
+        }
+        for (i = 0; i <= pps_ptr->num_tile_columns_minus1 && i < 19; i++) {
             pic_param_ptr->column_width_minus1[i] = pps_ptr->column_width_minus1[i];
         }
-        for (i = 0; i <= pps_ptr->num_tile_rows_minus1; i++) {
+        for (i = 0; i <= pps_ptr->num_tile_rows_minus1 && i < 21; i++) {
             pic_param_ptr->row_height_minus1[i] = pps_ptr->row_height_minus1[i];
         }
     }
@@ -413,7 +420,7 @@ int HevcVideoParser::SendPicForDecode() {
     if (num_slices_ > slice_param_list_.size()) {
         slice_param_list_.resize(num_slices_, {0});
     }
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecHevcSliceParams *slice_params_ptr = &slice_param_list_[slice_index];
         HevcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         HevcSliceSegHeader *p_slice_header = &p_slice_info->slice_header;
@@ -578,31 +585,57 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
             ErrorLog(g_rocdec_logger, ROCDEC_STR("Error: no start code found in the frame data."));
             FunctionExitLog(g_rocdec_logger);
             return ret;
+        } else if (ret == PARSER_INVALID_FORMAT) {
+            // The frame data cannot be walked; GetNalUnit() has logged why. This has to return
+            // rather than fall through, because the loop below is while (1) and GetNalUnit()
+            // would report the same thing on every pass.
+            //
+            // Returning here also skips the end of packet finalization below, so slices already
+            // accumulated for the current picture would be dropped rather than decoded. Neither
+            // condition that reports this can leave any accumulated: the short packet one tests
+            // pic_data_size_, which is set once per packet, so it only fires on the first pass
+            // when num_slices_ is still 0, and the offset ordering one is not reachable with the
+            // current callers. A third condition that can fire mid packet would have to decide
+            // whether to finalize what was accumulated before returning.
+            FunctionExitLog(g_rocdec_logger);
+            return ret;
         }
         // Parse the NAL unit
         if (nal_unit_size_ >= 5) {
-            // start code + NAL unit header = 5 bytes
-            int ebsp_size = nal_unit_size_ - 5 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 5; // only copy enough bytes for header parsing
+            // start code + NAL unit header = 5 bytes. Subtract once, here, where the floor above
+            // is in view: the subtraction is unsigned, so doing it further down would wrap for a
+            // NAL unit shorter than the header without that floor being obvious.
+            uint32_t nal_payload_size = nal_unit_size_ - 5;
+            uint32_t ebsp_size = nal_payload_size > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_payload_size; // only copy enough bytes for header parsing
 
             nal_unit_header_ = ParseNalUnitHeader(&pic_data_buffer_ptr_[curr_start_code_offset_ + 3]);
             switch (nal_unit_header_.nal_unit_type) {
                 case NAL_UNIT_VPS: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     ParseVps(rbsp_buf_, rbsp_size_);
                     break;
                 }
 
                 case NAL_UNIT_SPS: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     ParseSps(rbsp_buf_, rbsp_size_);
                     break;
                 }
 
                 case NAL_UNIT_PPS: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     ParsePps(rbsp_buf_, rbsp_size_);
                     break;
                 }
@@ -632,7 +665,10 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                     }
 
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), ebsp_size);
-                    rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
+                    if (EbspToRbsp(rbsp_buf_, 0, ebsp_size, &rbsp_size_) != PARSER_OK) {
+                        ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                        break;
+                    }
                     HevcSliceSegHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
                     if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, p_slice_header)) != PARSER_OK) {
                         // we got an error while parsing this NAL unit. ignore and continue with next NAL unit
@@ -710,7 +746,7 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                 case NAL_UNIT_PREFIX_SEI:
                 case NAL_UNIT_SUFFIX_SEI: {
                     if (pfn_get_sei_message_cb_) {
-                        int sei_ebsp_size = nal_unit_size_ - 5; // copy the entire NAL unit
+                        uint32_t sei_ebsp_size = nal_payload_size; // copy the entire NAL unit
                         if (sei_rbsp_buf_) {
                             if (sei_ebsp_size > sei_rbsp_buf_size_) {
                                 delete [] sei_rbsp_buf_;
@@ -722,8 +758,13 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                             sei_rbsp_buf_ = new uint8_t [sei_rbsp_buf_size_];
                         }
                         memcpy(sei_rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), sei_ebsp_size);
-                        rbsp_size_ = EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size);
-                        ParseSeiMessage(sei_rbsp_buf_, rbsp_size_);
+                        if (EbspToRbsp(sei_rbsp_buf_, 0, sei_ebsp_size, &rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "This NAL unit is skipped.");
+                            break;
+                        }
+                        if (ParseSeiMessage(sei_rbsp_buf_, rbsp_size_) != PARSER_OK) {
+                            ErrorLog(g_rocdec_logger, "Error in SEI message parsing. Remaining SEI messages in this NAL unit are skipped.");
+                        }
                     }
                     break;
                 }
@@ -1313,6 +1354,7 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     p_vps->vps_base_layer_available_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_max_layers_minus1 = Parser::ReadBits(nalu, offset, 6);
     p_vps->vps_max_sub_layers_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("vps_max_sub_layers_minus1", p_vps->vps_max_sub_layers_minus1, 0, 6);
     p_vps->vps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     p_vps->vps_reserved_0xffff_16bits = Parser::ReadBits(nalu, offset, 16);
     if (p_vps->vps_reserved_0xffff_16bits != 0xFFFF) {
@@ -1336,6 +1378,9 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
         }
     }
     p_vps->vps_max_layer_id = Parser::ReadBits(nalu, offset, 6);
+    // 7.4.3.1: vps_max_layer_id shall be less than 63 in bitstreams conforming to this version of the
+    // specification. 63 is reserved for future use and is not supported by this single layer decoder.
+    CHECK_ALLOWED_RANGE("vps_max_layer_id", p_vps->vps_max_layer_id, 0, 62);
     p_vps->vps_num_layer_sets_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
     CHECK_ALLOWED_RANGE("vps_num_layer_sets_minus1", p_vps->vps_num_layer_sets_minus1, 0, 1023);
     for (int i = 1; i <= p_vps->vps_num_layer_sets_minus1; i++) {
@@ -1385,6 +1430,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
 
     uint32_t vps_id = Parser::ReadBits(nalu, offset, 4);
     uint32_t max_sub_layer_minus1 = Parser::ReadBits(nalu, offset, 3);
+    CHECK_ALLOWED_RANGE("sps_max_sub_layers_minus1", max_sub_layer_minus1, 0, 6);
     uint32_t sps_temporal_id_nesting_flag = Parser::GetBit(nalu, offset);
     HevcProfileTierLevel ptl;
     memset (&ptl, 0, sizeof(ptl));
@@ -1607,9 +1653,9 @@ ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     pps_ptr->entropy_coding_sync_enabled_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->tiles_enabled_flag) {
         pps_ptr->num_tile_columns_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, pic_width_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, std::min(pic_width_in_ctbs_y_ - 1, HEVC_MAX_TILE_COLS - 1));
         pps_ptr->num_tile_rows_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
-        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, pic_height_in_ctbs_y_ - 1);
+        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, std::min(pic_height_in_ctbs_y_ - 1, HEVC_MAX_TILE_ROWS - 1));
         pps_ptr->uniform_spacing_flag = Parser::GetBit(nalu, offset);
         if (!pps_ptr->uniform_spacing_flag) {
             int temp_size = pic_width_in_ctbs_y_; // PicWidthInCtbsY
@@ -1852,6 +1898,12 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
                 }
                 p_slice_header->num_long_term_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
                 CHECK_ALLOWED_MAX("num_long_term_pics", p_slice_header->num_long_term_pics, HEVC_MAX_DPB_FRAMES - 1);
+                // 7.4.7.1: when nuh_layer_id is equal to 0, the sum of NumNegativePics[CurrRpsIdx], NumPositivePics[CurrRpsIdx],
+                // num_long_term_sps and num_long_term_pics shall be less than or equal to
+                // sps_max_dec_pic_buffering_minus1[sps_max_sub_layers_minus1] (== dpb_size - 1).
+                // This must be checked before the loop below, which uses num_long_term_sps + num_long_term_pics to index
+                // the fixed-size long-term RPS arrays of the slice header.
+                CHECK_ALLOWED_MAX("num_of_delta_pocs + num_long_term_sps + num_long_term_pics", p_slice_header->st_rps.num_of_delta_pocs + p_slice_header->num_long_term_sps + p_slice_header->num_long_term_pics, dpb_buffer_.dpb_size - 1);
 
                 int bits_for_ltrp_in_sps = 0;
                 while (sps_ptr->num_long_term_ref_pics_sps > (1 << bits_for_ltrp_in_sps)) {
@@ -3019,7 +3071,7 @@ void HevcVideoParser::PrintVappiBufInfo() {
     }
 
     MSG("Slice ref lists:")
-    for (int slice_index = 0; slice_index < num_slices_; slice_index++) {
+    for (uint32_t slice_index = 0; slice_index < num_slices_; slice_index++) {
         RocdecHevcSliceParams *p_slice_param = &slice_param_list_[slice_index];
         HevcSliceInfo *p_slice_info = &slice_info_list_[slice_index];
         MSG("Slice " << slice_index << " ref list 0:");

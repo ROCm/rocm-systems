@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 ### Handle safe initialization for amdsmi
 
@@ -28,6 +11,8 @@ import signal
 import sys
 import threading
 from pathlib import Path
+
+from amdsmi_cli_exceptions import AmdSmiExitCode
 
 # CLI module resolution order (distinct from `import amdsmi` in a user script):
 #   1. this installation's share/amd_smi copy -- the modules the CLI shipped
@@ -58,7 +43,7 @@ except ImportError as e:
     print(
         "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
     )
-    sys.exit(1)
+    sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
 # Using basic python logging for user errors and development
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.ERROR)  # User level logging
@@ -71,8 +56,33 @@ AMDSMI_INIT_FLAG = amdsmi_interface.AmdSmiInitFlags.INIT_ALL_PROCESSORS
 AMD_VENDOR_ID = 4098
 
 
+def check_wsl_dxg():
+    """Returns true if running under WSL2 (not Hyper-V) with /dev/dxg present.
+
+    /dev/dxg is created by dxgkrnl for any WDDM GPU, so we additionally require
+    the WSL2 kernel signature in /proc/version to avoid false-positives on
+    Hyper-V Linux guests or native hosts where dxgkrnl may be loaded.
+    Vendor confirmation (AMD 0x1002) is deferred to amdsmi_init(), which calls
+    into librocdxg and rejects non-AMD adapters.
+    """
+    if not Path("/dev/dxg").exists():
+        return False
+    try:
+        osrelease = Path("/proc/sys/kernel/osrelease").read_text(encoding="ascii").lower()
+        return "microsoft" in osrelease and "wsl" in osrelease
+    except OSError:
+        return False
+
+
 def check_amdgpu_driver():
     """Returns true if amdgpu is found in the list of initialized modules"""
+    # WSL2: no native amdgpu module; use /dev/dxg via dxgkrnl instead.
+    # check_wsl_dxg() requires the WSL2 kernel string, so this is safe for
+    # Hyper-V guests (which lack "wsl" in osrelease) and bare-metal hosts.
+    # Vendor confirmation (AMD 0x1002) is done inside librocdxg during amdsmi_init().
+    if check_wsl_dxg():
+        return True
+
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
         try:
@@ -173,18 +183,25 @@ def amdsmi_cli_init():
     init_thread.join(timeout=_INIT_TIMEOUT_SEC)
 
     if init_thread.is_alive():
+        # The library hung with no status, so exit with a CLI code (not a borrowed
+        # library status) -- the exit code unambiguously means the CLI watchdog gave up.
         logging.error(
             "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
             _INIT_TIMEOUT_SEC,
         )
-        sys.exit(2)
+        sys.exit(int(AmdSmiExitCode.INIT_TIMEOUT))
 
     if isinstance(
         init_result["exception"],
         (amdsmi_interface.AmdSmiLibraryException, amdsmi_interface.AmdSmiParameterException),
     ):
         e = init_result["exception"]
-        # parameter exception thrown if init_flag is 0, but err_code will be set to 0 in that case, so must check if init_flag is 0 too
+        # Normalize "drivers not loaded" to one CLI code, reached two ways:
+        # 1) Library returns NOT_INIT/DRIVER_NOT_LOADED
+        # 2) No drivers detected up front -> init_flag == 0. (amdsmi_init raises
+        #    AmdSmiParameterException with err_code=None, which won't match (1)'s
+        #    tuple, so the init_flag == 0 check catches it.)
+        # We don't want to clash with library error codes, so we use a CLI code (AmdSmiExitCode.DRIVERS_NOT_LOADED) for this case.
         if (
             e.err_code
             in (
@@ -196,7 +213,7 @@ def amdsmi_cli_init():
             logging.error(
                 "Drivers not loaded (amdgpu, amd_hsmp, ionic, bnxt_en drivers not found in modules)"
             )
-            sys.exit(-1)
+            sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
         else:
             raise e
     elif init_result["exception"] is not None:

@@ -3,9 +3,7 @@
 
 #include "library/tracing/annotation.hpp"
 
-namespace rocprofsys
-{
-namespace tracing
+namespace rocprofsys::tracing
 {
 void
 add_perfetto_annotation(perfetto_event_context_t&      ctx,
@@ -14,5 +12,4 @@ add_perfetto_annotation(perfetto_event_context_t&      ctx,
     add_perfetto_annotation(
         ctx, _annotation, utility::make_index_sequence_range<1, ROCPROFSYS_VALUE_LAST>{});
 }
-}  // namespace tracing
-}  // namespace rocprofsys
+}  // namespace rocprofsys::tracing

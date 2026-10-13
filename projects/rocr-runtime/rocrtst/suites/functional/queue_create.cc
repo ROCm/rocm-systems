@@ -285,6 +285,9 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   ASSERT_SUCCESS(rocrtst::SetDefaultAgents(this));
   ASSERT_SUCCESS(rocrtst::SetPoolsTypical(this));
 
+  // HSA_AMD_QUEUE_INFO_READ_POINTER / _WRITE_POINTER are HSA enum constants added
+  // in hsa_ext_amd.h interface 1.31.
+#if HSA_AMD_INTERFACE_VERSION_MINOR >= 31
   auto create_and_destroy = [&](uint16_t flags, const char* label) {
     hsa_amd_queue_create_desc_t desc = {};
     desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
@@ -310,6 +313,32 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
     EXPECT_NE(desc.queue->base_address, nullptr) << label;
     EXPECT_NE(desc.queue->doorbell_signal.handle, 0) << label;
 
+    uint64_t read_pointer = 0;
+    uint64_t write_pointer = 0;
+    uint64_t doorbell_pointer = 0;
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_READ_POINTER, &read_pointer));
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_WRITE_POINTER, &write_pointer));
+    ASSERT_SUCCESS(
+        hsa_amd_queue_get_info(desc.queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell_pointer));
+    ASSERT_NE(read_pointer, 0u);
+    ASSERT_NE(write_pointer, 0u);
+    ASSERT_NE(doorbell_pointer, 0u);
+
+    auto* raw_read_pointer = reinterpret_cast<volatile uint64_t*>(read_pointer);
+    auto* raw_write_pointer = reinterpret_cast<volatile uint64_t*>(write_pointer);
+    EXPECT_EQ(hsa_queue_load_read_index_relaxed(desc.queue), *raw_read_pointer);
+
+    hsa_queue_store_write_index_relaxed(desc.queue, 64);
+    EXPECT_EQ(hsa_queue_load_write_index_relaxed(desc.queue), 64u);
+    EXPECT_EQ(*raw_write_pointer, 64u);
+    EXPECT_EQ(hsa_queue_add_write_index_relaxed(desc.queue, 32), 64u);
+    EXPECT_EQ(*raw_write_pointer, 96u);
+    EXPECT_EQ(hsa_queue_cas_write_index_relaxed(desc.queue, 96, 128), 96u);
+    EXPECT_EQ(*raw_write_pointer, 128u);
+    hsa_queue_store_write_index_relaxed(desc.queue, 0);
+
     ASSERT_SUCCESS(hsa_queue_destroy(desc.queue)) << label;
   };
 
@@ -319,6 +348,12 @@ void QueueCreateTest::SdmaQueueCreateDestroyTest() {
   create_and_destroy(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF |
                          HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR,
                      "device ring buffer and descriptor");
+#else
+  // The gtest vendored under rocrtst/ predates GTEST_SKIP(); use the standard
+  // [ SKIPPED ] marker instead.
+  fprintf(stdout, "[ SKIPPED ] SdmaQueueCreateDestroyTest: HSA headers predate "
+                  "queue read/write pointer queries\n");
+#endif
 }
 
 void QueueCreateTest::InvalidArgsTest() {

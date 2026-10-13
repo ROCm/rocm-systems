@@ -1,23 +1,6 @@
 #!/usr/bin/env python3
-#
-# Copyright (C) Advanced Micro Devices. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy of
-# this software and associated documentation files (the "Software"), to deal in
-# the Software without restriction, including without limitation the rights to
-# use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-# the Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-# CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
 
 import csv
 import json
@@ -57,6 +40,10 @@ class AMDSMILogger:
         self.store_memory_partition_json_output = []
         self.store_partition_profiles_json_output = []
         self.store_partition_resources_json_output = []
+
+        # The event command prints one record at a time. The CSV header is
+        # captured from the first event so subsequent events emit only a row.
+        self._event_csv_header = None
 
     class LoggerFormat(Enum):
         """Enum for logger formats"""
@@ -348,7 +335,10 @@ class AMDSMILogger:
         for key, value in tabbed_dictionary.items():
             del capitalized_json[key]
 
-        capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
+        # Only set when non-empty: an empty dict now renders "KEY: N/A", which the
+        # literal strip below would miss, leaking the marker into the output.
+        if tabbed_dictionary:
+            capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
 
         # Convert the capitalized JSON to a YAML-like string
         yaml_output = self.custom_dump(capitalized_json)
@@ -381,7 +371,10 @@ class AMDSMILogger:
         yaml_string = ""
         for key, value in data.items():
             if isinstance(value, dict):
-                yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
+                if not value:
+                    yaml_string += "  " * indent + f"{key}: N/A\n"
+                else:
+                    yaml_string += "  " * indent + f"{key}:\n" + self.custom_dump(value, indent + 1)
             elif isinstance(value, list):
                 if not value:
                     yaml_string += "  " * indent + f"{key}: N/A\n"
@@ -472,6 +465,25 @@ class AMDSMILogger:
         """
         gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
         self._store_output_amdsmi(gpu_id=gpu_id, argument=argument, data=data)
+
+    def store_event_output(self, device_handle, values_dict):
+        """Store one streamed event as a fresh, self-contained record.
+
+        Keep each event payload isolated from previous records. CSV output uses a
+        single stable ``message`` column containing the event's serialized payload,
+        so later events with a different schema do not inherit stale flattened
+        keys or silently lose data.
+        """
+        gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+        message = values_dict.get("message", {})
+        if self.is_csv_format():
+            message = json.dumps(message, separators=(",", ":")) if message else "{}"
+        self.output = {
+            "gpu": int(gpu_id),
+            "timestamp": values_dict.get("timestamp"),
+            "event": values_dict.get("event"),
+            "message": message,
+        }
 
     def store_nic_output(self, device_handle, argument, data):
         """Convert device handle to nic id and store output
@@ -746,6 +758,69 @@ class AMDSMILogger:
                 self._print_human_readable_output(
                     multiple_device_enabled=multiple_device_enabled, watching_output=watching_output
                 )
+
+    def _format_event_human_readable(self, event):
+        """Render one event as the classic indented multi-line block.
+
+        Reuses the generic human-readable renderer so the block matches the rest
+        of the CLI (uppercased keys, GPU as the device header, nested MESSAGE),
+        while now including the ``TIMESTAMP`` line carried on the record. The
+        returned string keeps its single trailing newline so consecutive event
+        blocks are separated by a blank line.
+        """
+        return self._convert_json_to_human_readable(dict(event))
+
+    def print_event_output(self):
+        """Print a single event record in the configured format.
+
+        The event command streams one record per call. Each format emits a single
+        well-formed record: human-readable is one indented block (including its
+        TIMESTAMP), CSV writes the header once followed by a row per event, and
+        JSON emits one object per line (newline-delimited JSON so every line is
+        independently parseable).
+        """
+        if self.is_human_readable_format():
+            self._write_event_line(self._format_event_human_readable(self.output))
+        elif self.is_csv_format():
+            self._print_event_csv_output()
+        elif self.is_json_format():
+            self._write_event_line(json.dumps(self.output))
+        else:
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+
+    def _write_event_line(self, line):
+        """Emit a single event line to stdout or append it to the output file."""
+        if self.destination == "stdout":
+            print(line)
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(line + "\n")
+
+    def _print_event_csv_output(self):
+        """Emit one CSV row per event, writing the header only on the first event.
+
+        The header is fixed from the first event's keys so the stream stays a
+        single valid CSV document. Later events fill missing columns with ``N/A``
+        and ignore any extra keys, keeping every row aligned to that header.
+        """
+        write_header = self._event_csv_header is None
+        if write_header:
+            self._event_csv_header = list(self.output.keys())
+        header = self._event_csv_header
+        row = {key: self.output.get(key, "N/A") for key in header}
+
+        builder = self.CsvStdoutBuilder()
+        writer = csv.DictWriter(builder, header, lineterminator="\n", extrasaction="ignore")
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+        text = str(builder)
+
+        if self.destination == "stdout":
+            print(text, end="")
+        else:
+            with self.destination.open("a", encoding="utf-8") as output_file:
+                output_file.write(text)
 
     def _print_json_output(
         self, multiple_device_enabled=False, watching_output=False, emit_empty=False
@@ -1260,21 +1335,11 @@ class AMDSMILogger:
         rocm_version = "N/A"
         if output["version_info"]["rocm version"][0]:
             rocm_version = str(output["version_info"]["rocm version"][1]).ljust(8)
-        driver_version = output["version_info"]["amdgpu version"]
-        if driver_version == "N/A":
-            amdgpu_version = "N/A".ljust(8)
+        driver_info = output["version_info"]["amdgpu version"]
+        if driver_info == "N/A":
+            amdgpu_version = "N/A"
         else:
-            # Example driver version string for amdgpu: 6.8.0-60 : 'Linuxversion6.8.0-60-generic(buildd@lcy02-amd64-098)(x86_64-linux-gnu-gcc-12(Ubuntu12.3.0-1ubuntu1~22.04)12.3.0,GNUld(GNUBinutilsforUbuntu)2.38)#63~22.04.1-UbuntuSMPPREEMPT_DYNAMICTueApr2219:00:15UTC2'
-            # Extract version before "-generic" if it exists
-            if "-generic" in driver_version["driver_version"]:
-                # Extract version using regex to find pattern like "6.8.0-60"
-                match = re.search(r"(\d+\.\d+\.\d+-\d+)", driver_version["driver_version"])
-                if match:
-                    amdgpu_version = match.group(1)[:80]
-                else:
-                    amdgpu_version = "N/A"
-            else:
-                amdgpu_version = str(driver_version["driver_version"])[:80]
+            amdgpu_version = str(driver_info["driver_full_version"])
         fw_pldm_version = str(output["version_info"]["fw pldm version"])
         vbios_version = str(output["version_info"]["vbios version"])
         kernel_version = str(output["version_info"]["kernel version"])
@@ -1301,10 +1366,9 @@ class AMDSMILogger:
         print(default_line_1)
         print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
 
-        # Print amdgpu or kernel version based on availability, if neither then don't print
-        if amdgpu_version.strip() != "N/A":
+        if amdgpu_version != "N/A":
             print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
-        elif kernel_version.strip() != "N/A":
+        elif kernel_version != "N/A":
             print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":

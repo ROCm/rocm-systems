@@ -13,11 +13,17 @@ from pathlib import Path
 # Suppress pandas FutureWarning about chained assignment
 warnings.filterwarnings("ignore", category=FutureWarning)
 
+_ANALYZE_DEPS_DOC = (
+    "Install the analyze dependencies into their own virtual environment: "
+    "https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/"
+    "install/core-install.html#analyze-deps"
+)
+
 try:
     from importlib import metadata
 
     from rocprof_compute_base import RocProfCompute
-    from utils.logger import console_error
+    from utils.logger import console_error, console_log
 except ImportError as e:
     print(f"{e}")
     # In wheel package, softlink is not supported.
@@ -33,7 +39,7 @@ except ImportError as e:
         from importlib import metadata
 
         from rocprof_compute_base import RocProfCompute
-        from utils.logger import console_error
+        from utils.logger import console_error, console_log
     except ImportError:
         print(
             "\n[ERROR] Could not import rocprofiler-compute modules. "
@@ -109,6 +115,13 @@ def verify_deps() -> None:
                 dependency = dependency.strip()
                 if not dependency or dependency.startswith("#"):
                     continue
+
+                # Skip requirements whose marker excludes this interpreter.
+                requirement, _, marker = dependency.partition(";")
+                if marker and not _python_marker_applies(marker):
+                    continue
+                dependency = requirement.strip()
+
                 match = version_pattern.match(dependency)
                 if match:
                     package, operator, desired_version = match.groups()
@@ -140,13 +153,21 @@ def verify_deps() -> None:
 
             if error:
                 console_error(
-                    "\nPlease verify all of the python dependencies called out "
-                    "in the requirements file"
-                    "\nare installed locally prior to running "
-                    "rocprofiler-compute."
-                    f"\n\nSee: {check_file}"
+                    "\nAnalyze mode needs every dependency listed above before "
+                    "it can run."
+                    f"\n\n{_ANALYZE_DEPS_DOC}"
                 )
             return
+
+    searched = [
+        str(Path(bindir).joinpath(location).resolve()) for location in deps_locations
+    ]
+    console_error(
+        "Cannot find requirements.txt at "
+        f"{', '.join(searched)}"
+        ", so the analyze dependencies could not be checked."
+        f"\n\n{_ANALYZE_DEPS_DOC}"
+    )
 
 
 def main() -> None:
@@ -165,11 +186,40 @@ def main() -> None:
         # Analyze mode needs a higher Python floor and external dependencies
         check_analyze_python_version()
         verify_deps()
+        if rocprof_compute.get_args().verify_deps:
+            console_log("All analyze dependencies are installed.")
+            sys.exit(0)
         rocprof_compute.run_analysis()
     else:
         console_error("Unsupported execution mode")
 
     sys.exit(0)
+
+
+def _python_marker_applies(marker: str) -> bool:
+    """Evaluate a python_version environment marker from requirements.txt.
+
+    Only the python_version form used by the companion requirements file is
+    understood. An unrecognized marker is treated as applicable so that a
+    dependency is never silently skipped.
+    """
+    match = re.match(
+        r"^python_version\s*(==|!=|>=|<=|>|<)\s*[\"']([0-9.]+)[\"']$", marker.strip()
+    )
+    if not match:
+        return True
+
+    operator, target_version = match.groups()
+    ops = {
+        "==": lambda current, target: current == target,
+        "!=": lambda current, target: current != target,
+        ">=": lambda current, target: current >= target,
+        "<=": lambda current, target: current <= target,
+        ">": lambda current, target: current > target,
+        "<": lambda current, target: current < target,
+    }
+    target = tuple(int(part) for part in target_version.split("."))
+    return ops[operator](sys.version_info[: len(target)], target)
 
 
 if __name__ == "__main__":

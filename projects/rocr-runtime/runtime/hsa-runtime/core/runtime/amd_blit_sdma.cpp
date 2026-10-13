@@ -218,8 +218,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   }
 
   // Allocate queue buffer.
-  queue_start_addr_ =
-      (char*)agent_->system_allocator()(kQueueSize, 0x1000, core::MemoryRegion::AllocateExecutable);
+  // NonPaged: queue buffer, resolved via amdgpu_vm_bo_lookup_mapping().
+  queue_start_addr_ = (char*)agent_->system_allocator()(
+      kQueueSize, 0x1000,
+      core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateNonPaged);
 
   if (queue_start_addr_ == NULL) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1988,7 +1990,7 @@ char* BlitSdma<useGCR, scopeFields>::AcquireWriteAddress(uint32_t cmd_size, uint
 
     // CAS failed -- reuse the observed value directly, skip redundant atomic Load.
     curr_index = observed;
-    _mm_pause();
+    cpu_relax();
   }
 
   return nullptr;
@@ -2063,7 +2065,7 @@ void BlitSdma<useGCR, scopeFields>::PadRingToEnd(uint64_t curr_index) {
   // Check whether the engine has finished using this region.
   if (CanWriteUpto(new_index) == false) {
     // Engine hasn't freed this region yet.  Pause briefly.
-    _mm_pause();
+    cpu_relax();
     return;
   }
 
@@ -2315,6 +2317,7 @@ void BlitSdma<useGCR, scopeFields>::BuildMulticastWaitSignalCopyCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
       void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2746,6 +2749,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalCopyCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
       void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2817,6 +2821,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalIndirectCopyCommand(
 
   if (do_wait) {
     pkt.WAIT_FUNCTION_UNION.wait_function = 0x3;  // Equal
+    pkt.WAIT_FUNCTION_UNION.wait_scope = SDMA_MEMORY_SCOPE_SYS;
     void* wait_addr = const_cast<core::Signal*>(wait_signal)->ValueLocation();
     pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3 = ptrlow32(wait_addr) >> 3;
     pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wait_addr);
@@ -2894,6 +2899,7 @@ void BlitSdma<useGCR, scopeFields>::BuildWaitSignalSwapCommand(
 
     if (do_wait) {
       pkt.WAIT_FUNCTION_UNION.wait_function  = 0x3;  // Equal
+      pkt.WAIT_FUNCTION_UNION.wait_scope     = SDMA_MEMORY_SCOPE_SYS;
       void* wa = const_cast<core::Signal*>(wait_signal)->ValueLocation();
       pkt.WAIT_ADDR_LO_UNION.wait_addr_31_3  = ptrlow32(wa) >> 3;
       pkt.WAIT_ADDR_HI_UNION.wait_addr_63_32 = ptrhigh32(wa);

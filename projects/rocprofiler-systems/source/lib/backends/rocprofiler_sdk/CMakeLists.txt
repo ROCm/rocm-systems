@@ -12,6 +12,7 @@ target_link_libraries(
     INTERFACE
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-rocm
+        rocprofiler-systems-logger
 )
 
 if(ROCPROFSYS_BUILD_TESTING)

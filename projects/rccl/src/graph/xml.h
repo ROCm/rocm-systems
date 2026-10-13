@@ -17,6 +17,12 @@
 #include "archinfo.h"
 #include <cinttypes>
 
+#define PCI_NVSWITCH_CLASS "0x068000"
+#define PCI_GPU_CLASS "0x03"
+#define PCI_IBMNPU_CLASS "0x068001"
+// PCI device class for AMD accelerators ("Processing accelerators"), mapped to GPU in kvDictPciClass
+#define PCI_ACCELERATOR_CLASS "0x120000"
+
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
@@ -65,12 +71,12 @@ ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src);
 /* Relocate pointers in XML to (de-)serialize the structure */
 ncclResult_t ncclTopoConvertXml(struct ncclXml* xml, uintptr_t base, int exp);
 
-ncclResult_t ncclTopoGetStrFromSys(const char* path, const char* fileName, char* strValue);
-
 /**************/
 /* XML Struct */
 /* Functions  */
 /**************/
+
+ncclResult_t xmlUnsetAttr(struct ncclXmlNode* node, const char* attrName);
 
 static size_t xmlMemSize(int maxNodes) {
   return offsetof(struct ncclXml, nodes) + sizeof(struct ncclXmlNode) * maxNodes;
@@ -95,6 +101,15 @@ static ncclResult_t xmlGetAttrIndex(struct ncclXmlNode* node, const char* attrNa
   return ncclSuccess;
 }
 
+static ncclResult_t xmlGetNextAttrIndex(struct ncclXmlNode* node, int* index) {
+  if (node->nAttrs >= MAX_ATTR_COUNT) {
+    WARN("Error : too many XML attributes (max %d)", MAX_ATTR_COUNT);
+    return ncclInternalError;
+  }
+  *index = node->nAttrs++;
+  return ncclSuccess;
+}
+
 static ncclResult_t xmlGetAttr(struct ncclXmlNode* node, const char* attrName, const char** value) {
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
@@ -102,10 +117,19 @@ static ncclResult_t xmlGetAttr(struct ncclXmlNode* node, const char* attrName, c
   return ncclSuccess;
 }
 
+inline void printMissingTopoAttrHint(const char* attrName, const char* nodeName) {
+  if (strcmp(attrName, "busid") == 0 && strcmp(nodeName, "nic") == 0) {
+    INFO(NCCL_GRAPH, "HINT: In many cases this error indicates that NCCL could not obtain complete PCI topology "
+                     "information, which inside a container is often caused by running with '--net host'.");
+    INFO(NCCL_GRAPH, "HINT: To confirm, run the container without '--net host' (or provide a valid topology file).");
+  }
+}
+
 static ncclResult_t xmlGetAttrStr(struct ncclXmlNode* node, const char* attrName, const char** value) {
   NCCLCHECK(xmlGetAttr(node, attrName, value));
   if (*value == NULL) {
     WARN("Attribute %s of node %s not found", attrName, node->name);
+    printMissingTopoAttrHint(attrName, node->name);
     return ncclInternalError;
   }
   return ncclSuccess;
@@ -230,7 +254,7 @@ static ncclResult_t xmlSetAttr(struct ncclXmlNode* node, const char* attrName, c
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -260,7 +284,7 @@ static ncclResult_t xmlSetAttrIfUnset(struct ncclXmlNode* node, const char* attr
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index != -1) return ncclSuccess;
-  index = node->nAttrs++;
+  NCCLCHECK(xmlGetNextAttrIndex(node, &index));
   strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
   node->attrs[index].key[MAX_STR_LEN] = '\0';
   strncpy(node->attrs[index].value, value, MAX_STR_LEN);
@@ -272,7 +296,7 @@ static ncclResult_t xmlSetAttrInt(struct ncclXmlNode* node, const char* attrName
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -284,7 +308,7 @@ static ncclResult_t xmlSetAttrFloat(struct ncclXmlNode* node, const char* attrNa
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -296,7 +320,7 @@ static ncclResult_t xmlSetAttrLong(struct ncclXmlNode* node, const char* attrNam
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
@@ -308,23 +332,11 @@ static ncclResult_t xmlSetAttrUint64(struct ncclXmlNode* node, const char* attrN
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
   }
   snprintf(node->attrs[index].value, MAX_STR_LEN, "0x%" PRIx64, value);
-  return ncclSuccess;
-}
-
-static ncclResult_t xmlUnsetAttr(struct ncclXmlNode* node, const char* attrName) {
-  int index;
-  NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
-  if (index == -1) return ncclSuccess;
-  for (int i = index + 1; i < node->nAttrs; i++) {
-    strcpy(node->attrs[i - 1].key, node->attrs[i].key);
-    strcpy(node->attrs[i - 1].value, node->attrs[i].value);
-  }
-  node->nAttrs--;
   return ncclSuccess;
 }
 
@@ -422,6 +434,14 @@ static ncclResult_t xmlAddTree(struct ncclXml* dst, struct ncclXmlNode* parent, 
 
 // Dictionary for STR -> INT conversions. No dictionary size information,
 // there needs to be a last element with str == NULL.
+
+inline void printMissingTopoDictValueHint() {
+  INFO(NCCL_GRAPH,
+       "HINT: In many cases this error indicates missing or faulty information in the provided topology file.");
+  INFO(NCCL_GRAPH, "HINT: To confirm, set NCCL_TOPO_DUMP_FILE=topo.xml to produce the topology NCCL has detected and "
+                   "compare to the one provided.");
+}
+
 struct kvDict {
   const char* str;
   int value;
@@ -437,6 +457,7 @@ static ncclResult_t kvConvertToInt(const char* str, int* value, struct kvDict* d
     d++;
   }
   INFO(NCCL_GRAPH, "KV Convert to int : could not find value of '%s' in dictionary, falling back to %d", str, d->value);
+  printMissingTopoDictValueHint();
   *value = d->value;
   return ncclSuccess;
 }
@@ -458,6 +479,7 @@ static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* d
     d++;
   }
   WARN("KV Convert to str : could not find value %d in dictionary", value);
+  printMissingTopoDictValueHint();
   return ncclInternalError;
 }
 

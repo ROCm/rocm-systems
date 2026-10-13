@@ -13,6 +13,10 @@ from typing import Any, Optional
 
 import config
 from argparser import omniarg_parser
+from pc_sampling.pc_sampling_profile import (
+    PC_SAMPLING_DEFAULT_INTERVALS,
+    pc_sampling_interval_limits,
+)
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils.logger import (
@@ -43,7 +47,6 @@ from utils.utils_common import (
     reconfigure_stdio_utf8,
     replace_env,
     replace_rank,
-    resolve_rocm_library_path,
     validate_roofline_csv,
 )
 from utils.utils_exceptions import WorkloadCommandError
@@ -112,6 +115,10 @@ class RocProfCompute:
     def get_mode(self) -> Optional[str]:
         return self.__mode
 
+    def get_args(self) -> argparse.Namespace:
+        assert self.__args is not None
+        return self.__args
+
     def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
@@ -133,8 +140,16 @@ class RocProfCompute:
 
     def detect_analyze(self) -> None:
         if self.__args.gui:
+            console_warning(
+                "--gui is deprecated and will be removed in a future release. "
+                "Use the default CLI analysis instead."
+            )
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
+            console_warning(
+                "--tui is deprecated and will be removed in a future release. "
+                "Use the default CLI analysis instead."
+            )
             self.__analyze_mode = "tui"
         elif self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"
@@ -154,62 +169,9 @@ class RocProfCompute:
 
         self._validate_list_option_exclusions()
 
-        # Validate block 30 / block 21 require their respective experimental flags
-        filter_list: list[str] = []
-        if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
-            filter_list = self.__args.filter_blocks
-        elif hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics:
-            filter_list = self.__args.filter_metrics
-
-        for block_input in filter_list:
-            # Check if this is block 30 (starts with "30" or "30.")
-            if block_input.startswith("30") and (
-                len(block_input) == 2 or block_input[2] == "."
-            ):
-                if not self.__args.membw_analysis or not self.__args.experimental:
-                    console_error(
-                        "Block 30 (Memory Bandwidth Analysis) is an experimental "
-                        "feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --membw-analysis"
-                    )
-            # Block 21 (PC sampling) is profile-only; analyze auto-detects it
-            # from the profiling config yaml.
-            if self.__mode == "profile" and block_input in ("21", "pc_sampling"):
-                if not self.__args.pc_sampling or not self.__args.experimental:
-                    console_error(
-                        "Block 21 (PC Sampling) is an experimental feature.\n"
-                        f'To use "-b {block_input}", you must also specify: '
-                        "--experimental --pc-sampling"
-                    )
-
-        # When --pc-sampling is set, inject "21" into filter_blocks so the
-        # profiling config yaml records it and downstream code is unchanged.
-        if self.__mode == "profile" and self.__args.pc_sampling:
-            current = list(self.__args.filter_blocks or [])
-            if "21" not in current:
-                current.append("21")
-            self.__args.filter_blocks = current
-
         if self.__mode == "profile":
             self._validate_profile_mode_arguments()
             self._resolve_pc_sampling_interval()
-
-        # fallback to csv output format, if rocpd public api not available
-        if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
-            rocpd_path = resolve_rocm_library_path(
-                str(
-                    Path(self.__args.rocprofiler_sdk_tool_path).parents[1]
-                    / "librocprofiler-sdk-rocpd.so"
-                )
-            )
-            if not Path(rocpd_path).exists():
-                console_warning(
-                    "rocpd output format is not supported with the "
-                    "current rocprofiler-sdk version. "
-                    "Falling back to csv output format."
-                )
-                self.__args.format_rocprof_output = "csv"
 
         # Validate name and output directory arguments in profiling mode
         # Skip validation if only listing metrics or sets
@@ -631,36 +593,42 @@ class RocProfCompute:
 
     def _resolve_pc_sampling_interval(self) -> None:
         """Apply the method-aware default for --pc-sampling-interval and
-        validate a user-supplied value."""
+        validate a user-supplied value against the limits the GPU reports."""
         args = self.__args
         if not getattr(args, "pc_sampling", False):
             return
 
-        stochastic_default_interval_in_cycles = 1048576
-        stochastic_min_interval_in_cycles = 65536
-        host_trap_default_interval_in_microseconds = 512
-
         method = args.pc_sampling_method
-        if args.pc_sampling_interval is None:
-            if method == "stochastic":
-                args.pc_sampling_interval = stochastic_default_interval_in_cycles
-            else:
-                args.pc_sampling_interval = host_trap_default_interval_in_microseconds
+        limits = pc_sampling_interval_limits(
+            method, getattr(args, "rocprofiler_sdk_tool_path", None)
+        )
+        if limits is None:
+            console_error(
+                f"PC sampling method '{method}' is not supported on any of the "
+                "agents on this system. See supported configurations with "
+                "'rocprofv3-avail info --pc-sampling'."
+            )
             return
 
+        if args.pc_sampling_interval is None:
+            args.pc_sampling_interval = PC_SAMPLING_DEFAULT_INTERVALS[method]
+
         interval = args.pc_sampling_interval
-        if method == "stochastic":
-            is_power_of_two = interval > 0 and interval & (interval - 1) == 0
-            if not is_power_of_two or interval < stochastic_min_interval_in_cycles:
-                console_error(
-                    "--pc-sampling-interval for stochastic sampling must be a "
-                    f"power of 2 and at least {stochastic_min_interval_in_cycles} "
-                    f"(got {interval})."
-                )
-        elif interval <= 0:
+        min_interval = limits.min_interval
+        max_interval = limits.max_interval
+
+        if not (min_interval <= interval <= max_interval):
             console_error(
-                "--pc-sampling-interval for host_trap sampling must be a "
-                f"positive integer (got {interval})."
+                f"PC sampling interval {interval} is outside the range "
+                f"{min_interval} to {max_interval} reported for {method} sampling. "
+                "See supported configurations with "
+                "'rocprofv3-avail info --pc-sampling'."
+            )
+
+        if limits.interval_pow2 and interval & (interval - 1) != 0:
+            console_error(
+                f"PC sampling interval {interval} must be a power of 2 for "
+                f"{method} sampling."
             )
 
     def _validate_list_option_exclusions(self) -> None:

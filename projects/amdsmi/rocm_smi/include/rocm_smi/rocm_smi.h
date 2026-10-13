@@ -1,40 +1,24 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_ROCM_SMI_H_
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -637,11 +621,27 @@ typedef enum { RSMI_NPM_STATUS_DISABLED, RSMI_NPM_STATUS_ENABLED } rsmi_npm_stat
  *
  */
 typedef struct {
-  rsmi_npm_status_t status;      //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  rsmi_npm_status_t status;       //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit).
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in Watts
+                                  //!< (board/node_power).
+  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
+                                  //!< current_node_power.
 } rsmi_npm_info_t;
+
+/**
+ * @brief NPM balancing mode
+ *
+ */
+typedef enum {
+  RSMI_NPM_BALANCING_MODE_INVALID = 0,
+  RSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,
+  RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,
+  RSMI_NPM_BALANCING_MODE_MAX = 3
+} rsmi_npm_balancing_mode_t;
 
 /**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
@@ -2651,6 +2651,9 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p bw_bitmask selects no settable bandwidth
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  *
  */
 rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
@@ -3184,6 +3187,17 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);
 
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode);
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode);
+
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask);
+
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
 
 /**
@@ -3534,7 +3548,7 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t* od);
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *  If multiple current frequencies are found, a warning is shown. If no
- *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  current frequency is found, it is reflected as UINT32_MAX. If frequencies are not
  *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
@@ -4027,34 +4041,43 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  * @brief Control the set of allowed frequencies that can be used for the
  * specified clock.
  *
- * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- * 64 bit bitmask @p freq_bitmask, this function will limit the set of
- * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- * the frequency (as ordered in an ::rsmi_frequencies_t returned by
- * rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
- * allowed.
+ * @details Given a device index @p dv_ind, this function will restrict clock
+ * @p clk_type to the frequencies selected in @p freq_bitmask. Bit N maps to
+ * DPM level N in the order returned by rsmi_dev_gpu_clk_freq_get(). Set a bit
+ * to 1 to enable and 0 to disable that level.
  *
- * This function will change the performance level to
- * ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- * frequencies. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
- * to get back to default state.
+ * Only settable DPM levels can be enabled. Bits outside the settable range are
+ * dropped before the request is sent, so an out-of-range level is never
+ * requested; the remaining in-range bits are still applied. The deep-sleep
+ * frequency (see ::rsmi_frequencies_t::has_deep_sleep)
+ * is not settable, so when it is present the settable level count is
+ * ::rsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ * frequency, all ::rsmi_frequencies_t::num_supported levels (0 to
+ * num_supported - 1) are settable. The call returns ::RSMI_STATUS_INVALID_ARGS
+ * if @p freq_bitmask selects no settable level, or ::RSMI_STATUS_UNEXPECTED_DATA
+ * if the device reports zero settable levels for @p clk_type.
  *
- * All bits with indices greater than or equal to
- * ::rsmi_frequencies_t::num_supported will be ignored.
+ * This call sets the performance level to ::RSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ * back to ::RSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p clk_type is not a valid ::rsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::RSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than RSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  *
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_type,

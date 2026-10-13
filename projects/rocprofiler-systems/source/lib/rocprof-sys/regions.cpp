@@ -6,6 +6,8 @@
 #include "core/config.hpp"
 #include "library/components/category_region.hpp"
 #include "library/tracing.hpp"
+#include "rocprofiler-systems/categories.h"
+
 #include <cstdint>
 
 #if defined(__GNUC__) && (__GNUC__ == 7)
@@ -13,9 +15,7 @@
 #    pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 
-namespace rocprofsys
-{
-namespace impl
+namespace rocprofsys::impl
 {
 namespace
 {
@@ -30,9 +30,13 @@ annotation_arg_type_name()
 {
     using value_type = std::decay_t<Tp>;
     if constexpr(concepts::is_string_type<value_type>::value)
+    {
         return "string";
+    }
     else
+    {
         return utility::demangle<value_type>();
+    }
 }
 
 template <typename Tp>
@@ -41,13 +45,21 @@ annotation_arg_value_string(Tp&& _val)
 {
     using value_type = std::decay_t<Tp>;
     if constexpr(concepts::is_string_type<value_type>::value)
+    {
         return std::string{ std::string_view{ std::forward<Tp>(_val) } };
+    }
     else if constexpr(std::is_pointer<value_type>::value)
+    {
         return fmt::format("{:#x}", reinterpret_cast<std::uintptr_t>(_val));
+    }
     else if constexpr(std::is_integral<value_type>::value)
+    {
         return fmt::format_int{ _val }.str();
+    }
     else
+    {
         return fmt::format("{}", std::forward<Tp>(_val));
+    }
 }
 
 template <size_t Idx, size_t... Tail>
@@ -90,7 +102,10 @@ append_annotation_arg(function_args_t& _args, const rocprofsys_annotation_t& _an
 annotations_to_function_args(const rocprofsys_annotation_t* _annotations, size_t _count)
 {
     function_args_t _args;
-    if(_annotations == nullptr || _count == 0) return _args;
+    if(_annotations == nullptr || _count == 0)
+    {
+        return _args;
+    }
 
     _args.reserve(_count);
     for(size_t i = 0; i < _count; ++i)
@@ -98,7 +113,9 @@ annotations_to_function_args(const rocprofsys_annotation_t* _annotations, size_t
         const auto& _annotation = _annotations[i];
         if(_annotation.name == nullptr || _annotation.type <= ROCPROFSYS_VALUE_NONE ||
            _annotation.type >= ROCPROFSYS_VALUE_LAST || _annotation.value == nullptr)
+        {
             continue;
+        }
 
         append_annotation_arg(
             _args, _annotation, static_cast<std::uint32_t>(_args.size()),
@@ -122,14 +139,19 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
         using category_type = category_type_id_t<Idx>;
 
         // skip if category is disabled
-        if(!trait::runtime_enabled<category_type>::get()) return;
+        if(!trait::runtime_enabled<category_type>::get())
+        {
+            return;
+        }
 
         component::category_region<category_type>::start(
             name, [&](::perfetto::EventContext ctx) {
                 if(_annotations && config::get_perfetto_annotations())
                 {
                     for(size_t i = 0; i < _annotation_count; ++i)
+                    {
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                    }
                 }
             });
 
@@ -148,8 +170,10 @@ invoke_category_region_start(rocprofsys_category_t _category, const char* name,
     {
         constexpr size_t remaining = sizeof...(Tail);
         if constexpr(remaining > 0)
+        {
             invoke_category_region_start(_category, name, _annotations, _annotation_count,
                                          std::index_sequence<Tail...>{});
+        }
     }
 }
 
@@ -168,14 +192,19 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
         using category_type = category_type_id_t<Idx>;
 
         // skip if category is disabled
-        if(!trait::runtime_enabled<category_type>::get()) return;
+        if(!trait::runtime_enabled<category_type>::get())
+        {
+            return;
+        }
 
         component::category_region<category_type>::stop(
             name, [&](::perfetto::EventContext ctx) {
                 if(_annotations && config::get_perfetto_annotations())
                 {
                     for(size_t i = 0; i < _annotation_count; ++i)
+                    {
                         tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                    }
                 }
             });
     }
@@ -183,13 +212,14 @@ invoke_category_region_stop(rocprofsys_category_t _category, const char* name,
     {
         constexpr size_t remaining = sizeof...(Tail);
         if constexpr(remaining > 0)
+        {
             invoke_category_region_stop(_category, name, _annotations, _annotation_count,
                                         std::index_sequence<Tail...>{});
+        }
     }
 }
 }  // namespace
-}  // namespace impl
-}  // namespace rocprofsys
+}  // namespace rocprofsys::impl
 
 //======================================================================================//
 
@@ -259,6 +289,26 @@ rocprofsys_pop_category_region_hidden(rocprofsys_category_t _category, const cha
 {
     rocprofsys::impl::invoke_category_region_stop(
         _category, name, _annotations, _annotation_count,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
+extern "C" void
+rocprofsys_push_category_region_python_hidden(const char*              name,
+                                              rocprofsys_annotation_t* _annotations,
+                                              size_t                   _annotation_count)
+{
+    rocprofsys::impl::invoke_category_region_start(
+        ROCPROFSYS_CATEGORY_PYTHON, name, _annotations, _annotation_count,
+        rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
+}
+
+extern "C" void
+rocprofsys_pop_category_region_python_hidden(const char*              name,
+                                             rocprofsys_annotation_t* _annotations,
+                                             size_t                   _annotation_count)
+{
+    rocprofsys::impl::invoke_category_region_stop(
+        ROCPROFSYS_CATEGORY_PYTHON, name, _annotations, _annotation_count,
         rocprofsys::utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
 

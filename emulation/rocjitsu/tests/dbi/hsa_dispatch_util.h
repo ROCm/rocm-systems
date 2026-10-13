@@ -9,31 +9,117 @@
 ///        boilerplate.
 ///
 /// Functions are `inline` so the header can be included in multiple TUs without
-/// ODR violations. They require a live HSA runtime; callers gate on a real
-/// gfx90a agent before invoking dispatch_vector_add.
+/// ODR violations. They require a live HSA runtime; callers gate on an agent
+/// matching their target ISA before invoking dispatch_vector_add.
 
 #pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
+#include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 RJ_DIAGNOSTIC_POP
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string_view>
 #include <vector>
+
+#if defined(__SANITIZE_THREAD__)
+#define ROCJITSU_DBI_TEST_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define ROCJITSU_DBI_TEST_TSAN 1
+#endif
+#endif
+
+#ifdef ROCJITSU_DBI_TEST_TSAN
+#include <sanitizer/tsan_interface.h>
+#endif
 
 namespace rocjitsu::dbi_test {
 
-// Find a GPU agent whose ISA name contains "gfx90a". Returns {handle=0} if
-// no such agent is present.
-inline hsa_agent_t find_gfx90a_agent() {
-  hsa_agent_t result{};
+inline void annotate_hsa_copy_release(const void *ptr, size_t size) {
+#ifdef ROCJITSU_DBI_TEST_TSAN
+  if (ptr == nullptr || size == 0)
+    return;
+  constexpr uintptr_t kHostPageMask = 4095;
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr) & ~kHostPageMask;
+  const uintptr_t end = (reinterpret_cast<uintptr_t>(ptr) + size - 1) & ~kHostPageMask;
+  for (uintptr_t page = begin;; page += kHostPageMask + 1) {
+    __tsan_release(reinterpret_cast<void *>(page));
+    if (page == end)
+      break;
+  }
+#else
+  (void)ptr;
+  (void)size;
+#endif
+}
+
+inline void annotate_hsa_copy_acquire(void *ptr, size_t size) {
+#ifdef ROCJITSU_DBI_TEST_TSAN
+  if (ptr == nullptr || size == 0)
+    return;
+  constexpr uintptr_t kHostPageMask = 4095;
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(ptr) & ~kHostPageMask;
+  const uintptr_t end = (reinterpret_cast<uintptr_t>(ptr) + size - 1) & ~kHostPageMask;
+  for (uintptr_t page = begin;; page += kHostPageMask + 1) {
+    __tsan_acquire(reinterpret_cast<void *>(page));
+    if (page == end)
+      break;
+  }
+#else
+  (void)ptr;
+  (void)size;
+#endif
+}
+
+inline hsa_status_t synchronized_hsa_memory_copy(void *dst, const void *src, size_t size) {
+  // ROCR performs this ownership transfer in an uninstrumented shared library.
+  // Mirror its synchronous hand-off for TSan at the simulator's identity-page
+  // annotations without weakening checking on either side of the API.
+  annotate_hsa_copy_release(src, size);
+  annotate_hsa_copy_release(dst, size);
+  const hsa_status_t status = hsa_memory_copy(dst, src, size);
+  if (status == HSA_STATUS_SUCCESS) {
+    annotate_hsa_copy_acquire(const_cast<void *>(src), size);
+    annotate_hsa_copy_acquire(dst, size);
+    annotate_hsa_copy_release(dst, size);
+  }
+  return status;
+}
+
+inline hsa_signal_value_t wait_for_dispatch(hsa_signal_t signal, uint64_t timeout_ns) {
+  const hsa_signal_value_t observed = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
+                                                                timeout_ns, HSA_WAIT_STATE_BLOCKED);
+#ifdef ROCJITSU_DBI_TEST_TSAN
+  if (observed < 1) {
+    auto *amd_signal = reinterpret_cast<amd_signal_t *>(signal.handle);
+    __tsan_acquire(const_cast<int64_t *>(&amd_signal->value));
+  }
+#endif
+  return observed;
+}
+
+// Find a GPU agent whose HSA ISA name contains @p isa_substring (e.g. "gfx90a",
+// "gfx950"). Returns {handle=0} if no such agent is present.
+//
+// Matching on the ISA name rather than a device ID is what lets one test binary
+// bind either to a real GPU or to whichever agent the rocjitsu CLI supplies, so
+// the Sim and Hardware registrations can share a fixture.
+inline hsa_agent_t find_gpu_agent(std::string_view isa_substring) {
+  struct Ctx {
+    std::string_view needle;
+    hsa_agent_t agent;
+  } ctx{isa_substring, {}};
   hsa_iterate_agents(
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
+        auto *c = static_cast<Ctx *>(data);
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
         if (type != HSA_DEVICE_TYPE_GPU)
@@ -42,14 +128,14 @@ inline hsa_agent_t find_gfx90a_agent() {
         hsa_agent_get_info(agent, HSA_AGENT_INFO_ISA, &isa);
         char isa_name[128]{};
         hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, isa_name);
-        if (std::strstr(isa_name, "gfx90a")) {
-          *static_cast<hsa_agent_t *>(data) = agent;
+        if (std::string_view(isa_name).find(c->needle) != std::string_view::npos) {
+          c->agent = agent;
           return HSA_STATUS_INFO_BREAK;
         }
         return HSA_STATUS_SUCCESS;
       },
-      &result);
-  return result;
+      &ctx);
+  return ctx.agent;
 }
 
 inline hsa_agent_t find_cpu_agent() {
@@ -169,29 +255,34 @@ inline std::vector<float> dispatch_vector_add(std::span<const uint8_t> elf_bytes
     hsa_amd_agents_allow_access(2, both, nullptr, C_dev);
     hsa_amd_agents_allow_access(2, both, nullptr, kernarg);
 
-    hsa_memory_copy(A_dev, a_in.data(), buf_size);
-    hsa_memory_copy(B_dev, b_in.data(), buf_size);
+    ok = synchronized_hsa_memory_copy(A_dev, a_in.data(), buf_size) == HSA_STATUS_SUCCESS;
+    if (ok)
+      ok = synchronized_hsa_memory_copy(B_dev, b_in.data(), buf_size) == HSA_STATUS_SUCCESS;
     const std::vector<uint8_t> zero_bytes(buf_size, 0);
-    hsa_memory_copy(C_dev, zero_bytes.data(), buf_size);
+    if (ok)
+      ok = synchronized_hsa_memory_copy(C_dev, zero_bytes.data(), buf_size) == HSA_STATUS_SUCCESS;
 
-    std::memset(kernarg, 0, kKernArgsBytes);
-    struct __attribute__((packed)) KernArgs {
-      const float *A;
-      const float *B;
-      float *C;
-      uint32_t N;
-    };
-    auto *args = static_cast<KernArgs *>(kernarg);
-    args->A = A_dev;
-    args->B = B_dev;
-    args->C = C_dev;
-    args->N = n;
+    if (ok) {
+      std::memset(kernarg, 0, kKernArgsBytes);
+      struct __attribute__((packed)) KernArgs {
+        const float *A;
+        const float *B;
+        float *C;
+        uint32_t N;
+      };
+      auto *args = static_cast<KernArgs *>(kernarg);
+      args->A = A_dev;
+      args->B = B_dev;
+      args->C = C_dev;
+      args->N = n;
+      annotate_hsa_copy_release(kernarg, sizeof(*args));
 
-    uint32_t queue_size = 0;
-    hsa_agent_get_info(gpu, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
-    ok = hsa_queue_create(gpu, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX,
-                          UINT32_MAX, &queue) == HSA_STATUS_SUCCESS &&
-         queue != nullptr;
+      uint32_t queue_size = 0;
+      hsa_agent_get_info(gpu, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+      ok = hsa_queue_create(gpu, queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX,
+                            UINT32_MAX, &queue) == HSA_STATUS_SUCCESS &&
+           queue != nullptr;
+    }
   }
 
   if (ok)
@@ -219,22 +310,25 @@ inline std::vector<float> dispatch_vector_add(std::span<const uint8_t> elf_bytes
     header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE;
     __atomic_store_n(reinterpret_cast<uint16_t *>(aql), header, __ATOMIC_RELEASE);
 
-    hsa_signal_store_relaxed(queue->doorbell_signal, write_idx);
+    // The doorbell is the publication boundary for the packet body and its
+    // release-stored header. Keep the doorbell release-ordered as well so the
+    // device cannot observe a new write index before the complete packet.
+    hsa_signal_store_screlease(queue->doorbell_signal, write_idx);
 
-    hsa_signal_value_t val = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                                       5'000'000'000ULL, HSA_WAIT_STATE_BLOCKED);
+    hsa_signal_value_t val = wait_for_dispatch(signal, 5'000'000'000ULL);
     if (val == 0) {
       out.resize(n);
-      hsa_memory_copy(out.data(), C_dev, buf_size);
+      if (synchronized_hsa_memory_copy(out.data(), C_dev, buf_size) != HSA_STATUS_SUCCESS)
+        out.clear();
     }
   }
 
   // Cleanup epilogue: each call is guarded so partial-initialization paths
   // don't dereference null handles.
-  if (signal.handle != 0)
-    hsa_signal_destroy(signal);
   if (queue != nullptr)
     hsa_queue_destroy(queue);
+  if (signal.handle != 0)
+    hsa_signal_destroy(signal);
   if (kernarg != nullptr)
     hsa_amd_memory_pool_free(kernarg);
   if (A_dev != nullptr)

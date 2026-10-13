@@ -407,7 +407,8 @@ public:
 
   [[nodiscard]] std::vector<KdTranslation>
   translate_image(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
-                  const KernelDescriptorTranslationOptions &options) const;
+                  const KernelDescriptorTranslationOptions &options,
+                  std::optional<size_t> text_section_index = std::nullopt) const;
 
   /// @brief Recompute one already-discovered kernel descriptor.
   ///

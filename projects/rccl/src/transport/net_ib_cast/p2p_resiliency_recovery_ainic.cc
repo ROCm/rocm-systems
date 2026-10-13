@@ -36,13 +36,23 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
     NCCLCHECK(wrap_ibv_destroy_qp(localQp->qp));
     localQp->qp = NULL;
 
+    // IbCastQpCreate() clears telQpStats; the slot it named never moves (blocks
+    // are only appended), so restoring the pointer keeps the recreated QP tracked.
+    RcclQpStats* telQpStats = localQp->telQpStats;
+
     struct ncclIbQpCreateAttr createAttr;
     IbCastBuildDataQpCreateAttr(recoveryContext->resCtx->baseComm, recoveryContext->devIndex, &createAttr);
     createAttr.channelId = localQp->channelId;
     createAttr.isDataQp = localQp->isDataQp;
     // isCtsEnabled and ctsQpSlot are left at 0 (from memset in IbCastBuildDataQpCreateAttr).
     // CTS offload is disabled when resiliency features are enabled (init.cc).
+    // TODO - QP sharing:
+    //        as of now QP sharing disabled during recovery restore.
+    //        to analyze and set sharing accordingly for this QP during recovery restore.
+    //        identify if it is primary or secondary comm and set sharing attributes accordingly.
+    IbCastQpCreateAttrInitSharing(&createAttr);
     NCCLCHECK(IbCastQpCreate(localQp, &createAttr));
+    localQp->telQpStats = telQpStats;
 
     INFO(NCCL_NET, "NET/IB: %s: Recreated QP %d on device %d (comm=%p, old_qp_num=%u, new_qp_num=%u)", __func__,
          qpIndex, recoveryContext->devIndex, recoveryContext->resCtx->baseComm, oldQpn, localQp->qp->qp_num);
@@ -73,6 +83,11 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
         flushCreateAttr.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
         flushCreateAttr.channelId = flushQp->channelId;
         flushCreateAttr.isDataQp = flushQp->isDataQp;
+        // Loopback flush QP carries no classification, as at connect time.
+        flushCreateAttr.isP2p = 0;
+        // TODO - QP sharing:
+        //        disabled for flush QP
+        IbCastQpCreateAttrInitSharing(&flushCreateAttr);
         NCCLCHECK(IbCastQpCreate(flushQp, &flushCreateAttr));
         INFO(NCCL_NET, "NET/IB: %s: Recreated Flush QP on device %d (comm=%p, new_qp_num=%u)", __func__, i,
              recoveryContext->resCtx->baseComm, flushQp->qp->qp_num);
@@ -91,6 +106,9 @@ ncclResult_t IbCastPortRecoveryQpsRestoreAinic(struct ncclIbPortRecoveryContext*
 ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* recoveryContext) {
   if (!IbCastAinicRoce) return ncclSuccess;
   uint nqps = recoveryContext->resCtx->baseComm->nqps;
+  struct ncclIbNetCommDevBase* devBase =
+    IbCastGetNetCommDevBase(recoveryContext->resCtx->baseComm, recoveryContext->devIndex);
+  if (devBase == NULL) return ncclInternalError;
 
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     ncclIbQp* localQp = &recoveryContext->resCtx->baseComm->qps[qpIndex];
@@ -114,6 +132,8 @@ ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* r
     }
 
     localQp->rtrAttr.remoteQpNum = remoteQpn;
+    localQp->rtrAttr.localGid = devBase->gidInfo.localGid;
+    localQp->rtrAttr.localGidIndex = devBase->gidInfo.localGidIndex;
     INFO(NCCL_NET, "NET/IB: %s: QP %d RTR with remoteQpn=%u (comm=%p, qp_num=%u)", __func__, qpIndex, remoteQpn,
          recoveryContext->resCtx->baseComm, localQp->qp->qp_num);
 
@@ -141,6 +161,9 @@ ncclResult_t IbCastPortRecoveryQpsToRtsAinic(struct ncclIbPortRecoveryContext* r
         struct ncclIbRecvCommDev* rCommDev = &recvComm->devs[i];
         ncclIbQp* flushQp = &rCommDev->gpuFlush.qp;
         flushQp->rtrAttr.remoteQpNum = flushQp->qp->qp_num;
+        flushQp->rtrAttr.localGid = rCommDev->base.gidInfo.localGid;
+        flushQp->rtrAttr.localGidIndex = rCommDev->base.gidInfo.localGidIndex;
+        flushQp->rtrAttr.remoteGid = rCommDev->base.gidInfo.localGid;
         NCCLCHECK(IbCastQpRtr(flushQp));
         NCCLCHECK(IbCastQpRts(flushQp));
         INFO(NCCL_NET, "NET/IB: %s: Restored Flush QP on device %d (comm=%p, qp_num=%u)", __func__, i,

@@ -3,8 +3,8 @@
 
 #include "core/trace_cache/discovery.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
-#include <spdlog/fmt/fmt.h>
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -27,7 +27,9 @@ std::string
 temp_root()
 {
     if(const char* env = std::getenv("TMPDIR"); env != nullptr && env[0] != '\0')
+    {
         return env;
+    }
     return "/tmp";
 }
 
@@ -41,12 +43,18 @@ void
 remove_dir_recursive(const std::string& dir)
 {
     DIR* d = ::opendir(dir.c_str());
-    if(d == nullptr) return;
+    if(d == nullptr)
+    {
+        return;
+    }
 
     while(dirent* entry = ::readdir(d))
     {
         const std::string name = entry->d_name;
-        if(name == "." || name == "..") continue;
+        if(name == "." || name == "..")
+        {
+            continue;
+        }
         ::unlink(fmt::format("{}/{}", dir, name).c_str());  // best effort, files only
     }
     ::closedir(d);
@@ -105,11 +113,11 @@ TEST_F(temp_dir_fixture, list_dir_files_returns_files_excluding_dot_entries)
     auto files = list_dir_files(m_dir);
 
     EXPECT_EQ(files.size(), 3U);
-    EXPECT_NE(std::find(files.begin(), files.end(), "a.txt"), files.end());
-    EXPECT_NE(std::find(files.begin(), files.end(), "b.bin"), files.end());
-    EXPECT_NE(std::find(files.begin(), files.end(), "c.json"), files.end());
-    EXPECT_EQ(std::find(files.begin(), files.end(), "."), files.end());
-    EXPECT_EQ(std::find(files.begin(), files.end(), ".."), files.end());
+    EXPECT_NE(std::ranges::find(files, "a.txt"), files.end());
+    EXPECT_NE(std::ranges::find(files, "b.bin"), files.end());
+    EXPECT_NE(std::ranges::find(files, "c.json"), files.end());
+    EXPECT_EQ(std::ranges::find(files, "."), files.end());
+    EXPECT_EQ(std::ranges::find(files, ".."), files.end());
 }
 
 TEST(discovery_test, find_cache_files_empty_input_returns_empty)
@@ -143,7 +151,7 @@ TEST(discovery_test, find_cache_files_pairs_buffered_and_metadata_for_same_pid)
 
 TEST(discovery_test, find_cache_files_skips_mismatched_parent_pid)
 {
-    auto m = find_cache_files(100, { "buffered_storage_999_42.bin" });
+    auto const m = find_cache_files(100, { "buffered_storage_999_42.bin" });
     EXPECT_TRUE(m.empty());
 }
 

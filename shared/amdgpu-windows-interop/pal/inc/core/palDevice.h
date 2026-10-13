@@ -39,9 +39,11 @@
 #include "palImage.h"
 #include "palInlineFuncs.h"
 #include "palLib.h"
+#include "palMsaaState.h"
 #include "palPerfExperiment.h"
 #include "palPipeline.h"
 #include "palQueue.h"
+#include "palSpan.h"
 #include <chrono>
 
 #if PAL_KMT_BUILD
@@ -79,7 +81,11 @@ class IQueryPool;
 class IQueue;
 class IQueueSemaphore;
 class IShaderLibrary;
+class IStateBlock;
 class ISwapChain;
+#if PAL_WORK_LISTS_SUPPORT
+class IWorkList;
+#endif
 struct BorderColorPaletteCreateInfo;
 struct CmdAllocatorCreateInfo;
 struct CmdBufferCreateInfo;
@@ -101,7 +107,6 @@ struct GraphicsPipelineCreateInfo;
 struct ImageCreateInfo;
 struct IndirectCmdGeneratorCreateInfo;
 struct MsaaStateCreateInfo;
-struct MsaaQuadSamplePattern;
 struct PeerGpuMemoryOpenInfo;
 struct PeerImageOpenInfo;
 struct PerfExperimentCreateInfo;
@@ -114,10 +119,15 @@ struct QueueCreateInfo;
 struct QueueSemaphoreCreateInfo;
 struct QueueSemaphoreOpenInfo;
 struct ShaderLibraryCreateInfo;
+struct StateBlockCreateInfo;
 struct SwapChainCreateInfo;
 struct SwapChainProperties;
 struct SvmGpuMemoryCreateInfo;
 struct GraphicPipelineViewInstancingInfo;
+#if PAL_WORK_LISTS_SUPPORT
+struct WorkListCreateInfo;
+enum class WorkListsFeatureLevel : uint32;
+#endif
 enum class WsiPlatform : uint32;
 enum class PipelineBindPoint : uint32;
 enum class VaRange : uint32;
@@ -137,7 +147,7 @@ constexpr uint32 MaxIndirectUserDataTables = 1;
 constexpr uint32 MaxSamplePatternPaletteEntries = 16;
 
 /// Maximum number of supported units in the gpu. These can be much larger than the actual values, but useful for arrays.
-constexpr uint32 MaxShaderEngines       = 32;
+constexpr uint32 MaxShaderEngines       = 12;
 /// Maximum number of supported subunits each Shader Engine splits into (SH or SA, depending on generation)
 constexpr uint32 MaxShaderArraysPerSe   = 2;
 
@@ -150,9 +160,9 @@ constexpr uint32 MaxPixelPackerPerSe = 4;
 /// Defines host flags for Semaphore/Fence Array wait
 enum HostWaitFlags : uint32
 {
-    HostWaitAny                = 0x1,  ///< if set this bit, return after any signle semaphore/fence in the array has
-                                       ///  completed. if not set, wait for completion of all semaphores/fences in the
-                                       ///  array before returning.
+    HostWaitAny = 0x1,  ///< If set this bit, return after any single semaphore/fence in the array has
+                        ///  completed. if not set, wait for completion of all semaphores/fences in the
+                        ///  array before returning.
 };
 
 /// Specifies what type of GPU a particular IDevice is (i.e., discrete vs. integrated).
@@ -203,6 +213,7 @@ enum class VideoDecodeType : uint32
     Vp910Bit            = 0xa,      ///< VP9 10bit
     Av1                 = 0xb,      ///< AV1 8/10bit
     Av112Bit            = 0xc,      ///< AV1 12bit
+    Dnx                 = 0xd,      ///< DNX
     Count,
 };
 
@@ -339,6 +350,7 @@ enum RsFeatureType : uint32
     RsFeatureTypeDelag     = (1u << 2),
     RsFeatureTypeBoost     = (1u << 4),
     RsFeatureTypeProVsr    = (1u << 5),
+    RsFeatureTypeUpscale   = (1u << 7),
 };
 
 /// Output structure containing information about the requested RsFeatureType (singular).
@@ -386,6 +398,14 @@ union RsFeatureInfo
         uint32 hotkey;   ///< If nonzero, specifies the virtual key code assigned to ProVsr.
     } proVsr;
 
+    /// Universal upscale (MLSR) resolution settings.
+    struct
+    {
+        uint32 renderWidth;  ///< Source (render) width, or 0 when inactive.
+        uint32 renderHeight; ///< Source (render) height, or 0 when inactive.
+        uint32 targetWidth;  ///< Target (upscaled/display) width, or 0 when inactive.
+        uint32 targetHeight; ///< Target (upscaled/display) height, or 0 when inactive.
+    } upscale;
 };
 
 /// High-dynamic range (HDR) surface display modes.  Used to indicate the HDR display standard for a particular swap
@@ -677,11 +697,16 @@ struct PalPublicSettings
     /// Controls PWS enable mode: disabled, fully enabled or partially enabled. Only take effect if HW supports PWS.
     PwsMode pwsMode;
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1001
     /// Controls the MaxScratchRingSizeBaseline, which is really just the maximum size of the scratch ring
     gpusize maxScratchRingSizeBaseline;
 
     /// Controls the maximum size of the scratch ring allocation
     uint32 maxScratchRingSizeScalePct;
+#endif
+
+    /// Client-selected vertex attribute ring-buffer size per shader engine, in bytes. Zero selects PAL's ASIC default.
+    uint32 vertexAttributesRingBufferSizePerSe;
 
 #if defined(__unix__)
     /// Whether enable vm-always-valid feature on Linux while allocating Bo
@@ -1128,8 +1153,13 @@ struct DeviceProperties
                 /// Indicates KMD has enabled HBCC(High Bandwidth Cache Controller) page migration support.  This means
                 /// shaders must be compiled such that all memory clauses can be replayed in response to an XNACK.
                 uint32 pageMigrationEnabled             :  1;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
                 /// Indicates TMZ (or HSFB) protected memory allocations are supported.
                 uint32 supportsTmz                      :  1;
+#else
+                uint32 placeholder                      :  1;
+#endif
 
                 /// Memory allocations on this device support MALL (memory access last level); essentially
                 /// the lowest level cache possible.
@@ -1192,6 +1222,9 @@ struct DeviceProperties
             uint32 memOpsPerClock;   ///< Memory operations per clock.
         } performance;               ///< Performance-related memory properties.
 
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+        uint32 supportedTmzModes;    ///< Bitmask of @ref TmzModeSupport flags indicated supported @ref TmzMode values.
+#endif
     } gpuMemoryProperties;           ///< Memory properties for this device.
 
     struct
@@ -1293,6 +1326,10 @@ struct DeviceProperties
         uint32                  cpUcodeVersion;   ///< Command processor feature version.
         uint32                  pfpUcodeVersion;  ///< Command processor, graphics prefetch firmware version.
 
+#if PAL_WORK_LISTS_SUPPORT
+        WorkListsFeatureLevel  workListsLevel; ///< Supported Work Lists feature level.
+#endif
+
         union
         {
             struct
@@ -1356,7 +1393,11 @@ struct DeviceProperties
                 uint64 support64BitInstructions           :  1; ///< Hardware supports 64b instructions
                 uint64 supportShaderSubgroupClock         :  1; ///< HW supports clock functions across subgroup.
                 uint64 supportShaderDeviceClock           :  1; ///< HW supports clock functions across device.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1008
                 uint64 supportAlphaToOne                  :  1; ///< HW supports forcing PS output alpha channel to 1
+#else
+                uint64 reserved0                          :  1; ///< Reclaimed bit from deprecated feature.
+#endif
                 uint64 supportCaptureReplay               :  1; ///< HW supports captureReplay
                 uint64 supportSortAgnosticBarycentrics    :  1; ///< HW supports sort-agnostic Barycentrics for PS
                 uint64 supportVrsWithDsExports            :  1; ///< If true, asic support coarse VRS rates
@@ -1520,7 +1561,6 @@ struct DeviceProperties
                 uint32 supportNativeHdrWindowing  :  1; ///< Support HDR presentation that does not require FSE.
                 uint32 flipQueueSupportsDecodeDst :  1; ///< If set, Decode destination images are supported
                                                         ///  in the OS flip-queue.
-                uint32 supportFreeMux             :  1; ///< Whether FreeMux is supported by KMD
                 uint32 isDataCenterBoard          :  1; ///< Whether the current board in use is a Data Center board.
                                                         ///  This is meant to support a unified VDI/CG driver package.
 #if defined(__unix__)
@@ -1532,7 +1572,7 @@ struct DeviceProperties
                 uint32 forceAlignmentSupported    :  1; ///< If PalPublicSettings::hardwareBufferAlignmentMode
                                                         ///  has any effect.
                 uint32 haltOnAccessSupported      :  1; ///< KMD supports per-page halt-on-access memory tracking.
-                uint32 reserved                   : 17; ///< Reserved for future use.
+                uint32 reserved                   : 18; ///< Reserved for future use.
             };
             uint32 u32All;                              ///< Flags packed as 32-bit uint.
         } flags;                                        ///< OS-specific property flags.
@@ -1694,13 +1734,12 @@ union FullScreenFrameMetadataControlFlags
         uint32 enableDwmFrameMetadata    :  1; ///< When cleared, no frame metadata should be sent for DWM(Output only).
         uint32 flipIntervalOverride      :  3; ///< KMD-UMD interface FLIP_INTERVAL_OVERRIDE, for KMD to request flip
                                                ///  interval override from UMD.
-        uint32 disableFreeMux            :  1; ///< KMD notifies UMD to disable FreeMux.
         uint32 maxFrameLatency           :  2; ///< KMD can notify UMD to override the frame latency of an app.
         uint32 sendMotionVectors         :  1; ///< Send the motion vector in CmdBufInfo once per frame
         uint32 sendDepth                 :  1; ///< Send the depth buffer in CmdBufInfo once per frame
         uint32 sendCameraMatrix          :  1; ///< Send the camera matrix in CmdBufInfo once per frame
         uint32 sendHudLessImage          :  1; ///< Send the HUD less image in CmdBufInfo once per frame
-        uint32 reserved                  : 11; ///< Reserved for future use.
+        uint32 reserved                  : 12; ///< Reserved for future use.
 
     };
     uint32 u32All;    ///< Flags packed as 32-bit uint.
@@ -1832,7 +1871,14 @@ struct GpuMemoryHeapProperties
 
     gpusize logicalSize;                   ///< Size of the heap in bytes. If HBCC is enabled, certain heaps may be
                                            ///  virtualized and the logical size will exceed the physical size.
+                                           ///  If zero, this heap is not supported by this device.
     gpusize physicalSize;                  ///< Physical size of the heap in bytes
+};
+
+/// Wraps an array of @ref GpuMemoryHeapProperties with one entry for each @ref GpuHeap, see @ref GetGpuHeapProperties.
+struct GpuHeapProperties
+{
+    GpuMemoryHeapProperties heaps[GpuHeapCount];
 };
 
 /// Reports properties of a specific GPU block required for interpretting performance experiment data from that block.
@@ -2918,7 +2964,6 @@ enum class ReclaimResult : uint8
 enum class EventTrackingType : uint32
 {
     ShaderInterrupt = 0,
-    EarlyPresent    = 1,
     Count
 };
 
@@ -2945,11 +2990,6 @@ union RegisterEventOutputInfo
         uint32  eventId;
         gpusize eventMailboxGpuVa;
     } shaderInterrupt;
-
-    struct
-    {
-        uint32  eventId;
-    } earlyPresent;
 };
 #endif
 
@@ -3008,6 +3048,10 @@ public:
     /// Fills out a structure with details on the properties of this device.  This includes capability flags,
     /// supported engines/queues, performance characteristics, etc.  This should only be called after a client has
     /// called @ref CommitSettingsAndInit().
+    ///
+    /// @note Some fields in the returned DeviceProperties contain Span members that reference memory owned by this
+    ///       Device (e.g., NveIpProperties).  The referenced data is only valid for the lifetime of this Device
+    ///       object; callers must not access these Span members after the Device is destroyed.
     ///
     /// @see DeviceProperties
     ///
@@ -3182,50 +3226,107 @@ public:
     /// Reports properties of all GPU memory heaps available to this device (e.g., size, whether it is CPU visible or
     /// not, performance characteristics, etc.).
     ///
-    /// @param [out] info Properties of each GPU heap available to this device, indexed by the GPU ID defined in
-    ///                   @ref GpuHeap.  If a particular heap is unavailable, its entry will report a size of 0.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the heap properties were successfully queried and returned in info[].  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorUnknown if an unexpected internal error occured.
-    virtual Result GetGpuMemoryHeapProperties(
-        GpuMemoryHeapProperties info[GpuHeapCount]) const = 0;
+    /// @returns A reference to this device's internal @ref GpuHeapProperties struct.
+    virtual const GpuHeapProperties& GetGpuHeapProperties() const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetGpuMemoryHeapProperties(
+        GpuMemoryHeapProperties info[GpuHeapCount]) const
+    {
+        if (info == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        const GpuHeapProperties& props = GetGpuHeapProperties();
+
+        for (uint32 idx = 0; idx < GpuHeapCount; ++idx)
+        {
+            info[idx] = props.heaps[idx];
+        }
+
+        return Result::Success;
+    }
+#endif
 
     /// Reports all format and tiling mode related properties for this device.
     ///
-    /// @param [out] pInfo  Output properties.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the properties were successfully queried and returned in pProperties.  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorInvalidPointer if pInfo is null.
-    virtual Result GetFormatProperties(
-        MergedFormatPropertiesTable* pInfo) const = 0;
+    /// @returns A reference to this device's internal @ref MergedFormatPropertiesTable struct.
+    virtual const MergedFormatPropertiesTable& GetFormatProperties() const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetFormatProperties(
+        MergedFormatPropertiesTable* pInfo) const
+    {
+        if (pInfo == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        *pInfo = GetFormatProperties();
+        return Result::Success;
+    }
+#endif
 
     /// Reports performance experiment related properties for this device.
     ///
     /// Enumerates the GPU family, blocks, capabilities, etc..
     ///
-    /// @param [out] pProperties Output properties.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if the properties were successfully queried and returned in pProperties.  Otherwise, one of the
-    ///          following errors may be returned:
-    ///          + ErrorInvalidPointer if pProperties is null.
-    virtual Result GetPerfExperimentProperties(
-        PerfExperimentProperties* pProperties) const = 0;
+    /// @returns A reference to this device's internal @ref PerfExperimentProperties struct.
+    virtual const PerfExperimentProperties& GetPerfExperimentProperties() const = 0;
 
-    /// Fills out the default MSAA quad sample pattern for the given sample count.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetPerfExperimentProperties(
+        PerfExperimentProperties* pProperties) const
+    {
+        if (pProperties == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        *pProperties = GetPerfExperimentProperties();
+        return Result::Success;
+    }
+#endif
+
+    /// Reports the default MSAA quad sample pattern for the given sample count.
     ///
-    /// @param [in]  samples             The number of valid samples in the sample pattern. Must be a power of two.
-    /// @param [out] pQuadSamplePattern  Fill this with the default pattern.
+    /// The client may cache the returned reference; PAL guarantees it will remain valid for the lifetime of the device.
     ///
-    /// @returns Success if @ref pQuadSamplePattern was filled with the default sample pattern.
-    ///          Otherwise, one of the following errors may be returned:
-    ///          + ErrorInvalidPointer if @ref pQuadSamplePattern is null.
-    ///          + ErrorInvalidValue if @ref samples is not a supported power of two.
-    ///          + ErrorUnavailable if this device lacks GfxIp support.
-    virtual Result GetDefaultSamplePattern(
+    /// @param [in] samples  The number of valid samples in the sample pattern. Must be a power of two.
+    ///
+    /// @returns Nullptr if "samples" is not a power of two or not supported by this device. Otherwise, any non-null
+    ///          pointer points to the default sample pattern for "samples".
+    virtual const MsaaQuadSamplePattern* GetDefaultSamplePattern(
+        uint32 samples) const = 0;
+
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    Result GetDefaultSamplePattern(
         uint32                 samples,
-        MsaaQuadSamplePattern* pQuadSamplePattern) const = 0;
+        MsaaQuadSamplePattern* pQuadSamplePattern) const
+    {
+        if (pQuadSamplePattern == nullptr)
+        {
+            return Result::ErrorInvalidPointer;
+        }
+
+        const MsaaQuadSamplePattern* pPattern = GetDefaultSamplePattern(samples);
+
+        if (pPattern == nullptr)
+        {
+            return Result::ErrorInvalidValue;
+        }
+
+        *pQuadSamplePattern = *pPattern;
+        return Result::Success;
+    }
+#endif
 
     /// Adds a list of per-device memory object references that persist across command buffer submissions. It is the
     /// responsibility of the client to make sure that all required memory references have been added before submitting
@@ -3277,17 +3378,13 @@ public:
         IQueue*           pQueue
         ) = 0;
 
-    /// Queries the Device for the total amount of referenced GPU memory for each heap type.  These totals include all
-    /// memory added to the Device or any Queue using @ref AddGpuMemoryReferences and not yet removed using @ref
-    /// RemoveGpuMemoryReferences.  Internal PAL allocations are included in these totals, but memory referenced using
-    /// the per-submit list in @ref IQueue::Submit is not included in these amounts.
-    ///
-    /// The intended use for this interface is for clients to be able to manage budgeting of resident GPU memory.
-    ///
-    /// @param [out] referencedGpuMemTotal Array containing the total amount of referenced GPU memory for each GPU
-    ///              memory heap.
-    virtual void GetReferencedMemoryTotals(
-        gpusize  referencedGpuMemTotal[GpuHeapCount]) const = 0;
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1002
+    void GetReferencedMemoryTotals(
+        gpusize referencedGpuMemTotal[GpuHeapCount]) const
+    {
+        // No client has called this function for many years so there's no need for functional backcompat.
+    }
+#endif
 
     /// Get primary surface MGPU support information based upon primary surface create info and input flags provided
     /// by client.
@@ -4672,6 +4769,56 @@ public:
         const GraphicsPipelineCreateInfo& createInfo,
         void*                             pPlacementAddr,
         IPipeline**                       ppPipeline) = 0;
+
+    /// Determines the amount of system memory required for an @ref IStateBlock object.  An allocation of this amount of
+    /// memory must be provided in the pPlacementAddr parameter of CreateStateBlock().
+    ///
+    /// @returns  Size, in bytes, of system memory required for an IStateBlock object with the specified properties.
+    ///           A return value of 0 indicates the createInfo was invalid.
+    virtual size_t GetStateBlockSize() const = 0;
+
+    /// Creates an @ref IStateBlock object with the requested properties.
+    ///
+    /// @param [in]  createInfo      State block properties.
+    /// @param [in]  pPlacementAddr  Pointer to the location where PAL should construct this object.  There must be
+    ///                              as much size available here as reported by calling @ref GetStateBlockSize().
+    /// @param [out] ppStateBlock    Constructed state block object.  When successful, the returned address will be the
+    ///                              same as specified in pPlacementAddr.
+    ///
+    /// @returns  Success if the object was successfully created.  Otherwise, one of the following errors may be
+    ///           returned:
+    ///          + ErrorInvalidPointer if:
+    ///              - pPlacementAddr or ppStateBlock is null.
+    virtual Result CreateStateBlock(
+        const StateBlockCreateInfo& createInfo,
+        void*                       pPlacementAddr,
+        IStateBlock**               ppStateBlock) = 0;
+
+#if PAL_WORK_LISTS_SUPPORT
+    /// Determines the amount of system memory required for an @ref IWorkList object.  An allocation of this amount of
+    /// memory must be provided in the pPlacementAddr parameter of CreateWorkList().
+    ///
+    /// @returns  Size, in bytes, of system memory required for an IWorkList object with the specified properties.
+    ///           A return value of 0 indicates the createInfo was invalid.
+    virtual size_t GetWorkListSize() const = 0;
+
+    /// Creates an @ref IWorkList object with the requested properties.
+    ///
+    /// @param [in]  createInfo      Work list properties.
+    /// @param [in]  pPlacementAddr  Pointer to the location where PAL should construct this object.  There must be
+    ///                              as much size available here as reported by calling @ref GetWorkListSize().
+    /// @param [out] ppWorkList      Constructed work list object.  When successful, the returned address will be the
+    ///                              same as specified in pPlacementAddr.
+    ///
+    /// @returns  Success if the object was successfully created.  Otherwise, one of the following errors may be
+    ///           returned:
+    ///          + ErrorInvalidPointer if:
+    ///              - pPlacementAddr or ppWorkList is null.
+    virtual Result CreateWorkList(
+        const WorkListCreateInfo& createInfo,
+        void*                     pPlacementAddr,
+        IWorkList**               ppWorkList) = 0;
+#endif
 
     /// Determines the amount of system memory required for a MSAA state object.  An allocation of this amount of memory
     /// must be provided in the pPlacementAddr parameter of CreateMsaaState().

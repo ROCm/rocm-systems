@@ -11,6 +11,10 @@ roctx_scoped_range_in::~roctx_scoped_range_in() noexcept {}
 #include "utils.h"
 void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) { return nullptr; }
 
+#include <unistd.h>
+#include "ipcsocket.h"
+int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+
 // ncclCommMemStats public API -> _impl dispatch (bypasses api_trace.cc)
 extern "C" ncclResult_t ncclCommMemStats(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value) {
   return ncclCommMemStats_impl(comm, stat, value);

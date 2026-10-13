@@ -318,9 +318,29 @@ manifest = load_and_parse_kpm(manifest_path);
 hashmap_put(loaded_manifests, manifest_path, manifest);
 ```
 
+### Environment Variable Overrides
+
+The kpack runtime supports two environment variables for controlling archive search paths:
+
+- **`ROCM_KPACK_PATH`** — **Overrides** the search paths entirely. When set, the
+  embedded paths from HIPK metadata are ignored and only the paths listed in this
+  variable are searched. Paths are colon-separated on Linux. Use this when you
+  need to replace the default kpack archives completely (e.g. testing a specific
+  build). Note: this was originally documented as "additional search directories"
+  but the implementation is a full override — set `ROCM_KPACK_PATH_PREFIX` instead
+  if you want to add paths without discarding the embedded defaults.
+
+- **`ROCM_KPACK_PATH_PREFIX`** — **Prepends** additional paths to the search list.
+  The embedded paths from HIPK metadata are still searched after the prefix paths.
+  Use this when you need a specific kpack to take priority over the embedded default
+  (e.g. testing a CI-built RCCL kpack alongside pip-installed PyTorch kpacks).
+
+- **`ROCM_KPACK_DISABLE`** — If set, all load calls return `NOT_IMPLEMENTED`.
+
+- **`ROCM_KPACK_DEBUG`** — Enable verbose logging to stderr.
+
 ### Future Extensions
 
-- Environment variable `ROCM_KPACK_PATH` for additional search directories (not implemented initially)
 - Handling of symlinks and canonical paths (within controlled prefix, shouldn't be an issue)
 
 ## Runtime Lookup Mechanism

@@ -30,32 +30,21 @@ class GpuAgent;
 /// protocol, including ring-space checks, wrap/no-op handling, packet writes,
 /// and ordered doorbell publication.
 ///
-/// Write-pointer model (important): an SDMA queue tracks the write position in
-/// two distinct places, unlike an AQL queue.
-///   1. @c amd_queue_.write_dispatch_id is the *software* write index. It is a
-///      monotonically increasing byte count (SDMA pointers are byte offsets)
-///      and backs the public hsa_queue_load/store/add/cas_write_index helpers.
-///      The SDMA engine never reads it.
-///   2. @c queue_wptr_ (the KFD-provided @c HsaQueueResource::Queue_write_ptr)
-///      is the *hardware* write pointer the SDMA engine actually consumes.
-/// For an AQL queue these two are the same memory, because KFD is told to use
-/// @c write_dispatch_id directly as the hardware write pointer. For an SDMA
-/// queue KFD allocates its own write-pointer location, so the software index
-/// must be explicitly copied into @c queue_wptr_ at publish time.
+/// Write-pointer model: the KFD-provided @c queue_wptr_ is the canonical
+/// monotonically increasing byte index. Public load/store/add/CAS write-index
+/// operations access it directly. A caller writes complete packets, advances
+/// this pointer, then rings the doorbell to notify the engine.
 ///
 /// Submission protocol (single producer, performed by the caller per
 /// submission, matching BlitSdma's AcquireWriteAddress/ReleaseWriteAddress):
-///   a. Read the current write index (LoadWriteIndex* -> write_dispatch_id).
+///   a. Read the current write index (LoadWriteIndex* -> queue_wptr_).
 ///   b. Ensure ring space against the read index (queue_rptr_) and pad to the
 ///      ring end with SDMA no-ops if the request would wrap.
 ///   c. Write complete packets into base_address + (index % size).
-///   d. Advance the software write index (StoreWriteIndex*/AddWriteIndex*).
-///   e. Publish via the doorbell signal store, which routes to RingDoorbell():
-///      that is the *only* step that updates the hardware write pointer
-///      (queue_wptr_) and the doorbell, in that order, after a release fence.
-/// Steps (a)-(d) only touch the software index; the engine observes nothing
-/// until (e). Callers must serialize a-e (e.g. a lock) because the index
-/// accessors here do not implement a reservation/commit handshake.
+///   d. Advance queue_wptr_ (StoreWriteIndex*/AddWriteIndex*).
+///   e. Publish via the doorbell signal store after a release fence.
+/// Callers must serialize a-e (e.g. a lock) because the index accessors here
+/// do not implement a reservation/commit handshake.
 class SdmaQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
  public:
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
@@ -91,9 +80,8 @@ class SdmaQueue : public core::Queue, private core::LocalSignal, public core::Do
   uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override;
   uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override;
 
-  // Implemented to satisfy the core::Queue interface and public hsa_queue_t
-  // helpers. These update only the descriptor's software write index; they do
-  // not reserve SDMA ring space or make SDMA submission multi-producer safe.
+  // These operate on queue_wptr_ directly. They do not reserve SDMA ring space
+  // or make SDMA submission multi-producer safe.
   uint64_t AddWriteIndexAcqRel(uint64_t value) override;
   uint64_t AddWriteIndexAcquire(uint64_t value) override;
   uint64_t AddWriteIndexRelaxed(uint64_t value) override;

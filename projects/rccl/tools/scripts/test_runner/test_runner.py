@@ -11,7 +11,7 @@ import logging
 
 from lib.test_parser import ArgumentParserInterface
 from lib.test_config import TestConfigProcessor
-from lib.test_executor import TestExecutor, glob_filter_matches
+from lib.test_executor import TestExecutor, suite_disposition
 
 # Configure logging
 logging.basicConfig(
@@ -90,40 +90,57 @@ def main():
 
             # Print skip messages for disabled or filtered-out test suites upfront.
             # --suite-name uses gtest-style glob filtering (see glob_filter_matches).
+            # --scope smoke restricts the run to suites marked "smoke": true in
+            # the config; 'all' (the default) or 'nightly' run all enabled suites.
+            smoke_only = args.scope == 'smoke'
+
             print()
             for suite in test_suites:
                 suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                if not enabled:
-                    print(f"SKIP: Test suite '{suite_name}' is disabled")
-                elif args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition == "disabled":
+                    print(f"DISABLED: Test suite '{suite_name}' is disabled")
+                elif disposition == "skip_scope":
+                    print(f"SKIP: Test suite '{suite_name}' (not in --scope smoke)")
+                elif disposition == "skip_name":
                     print(f"SKIP: Test suite '{suite_name}' (does not match --suite-name '{args.suite_name}')")
 
-            # Run only enabled (and name-matched) test suites
+            # Run enabled (scope- and name-matched) suites; record disabled ones
+            # in the summary so Config entries / Total / Unique include them.
             # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             for suite in test_suites:
-                suite_name = suite["suite_details"]["name"]
-                enabled = suite["suite_details"].get("enabled", True)
-                if not enabled:
+                disposition = suite_disposition(
+                    suite, smoke_only, args.suite_name
+                )
+                if disposition in ("skip_scope", "skip_name"):
                     continue
-                if args.suite_name and not glob_filter_matches(suite_name, args.suite_name):
+                if disposition == "disabled":
+                    executor.record_disabled_suite(suite)
                     continue
                 executor.run_test_suite(suite)
 
             # Print summary once at the end
             executor.print_summary()
 
-        # Generate coverage report
+        # Generate coverage report. A failure here must NOT short-circuit
+        # emit_results() below: a run whose tests all passed but whose coverage
+        # report failed should still publish its dashboard JSON/tarball. We
+        # record the failure and fold it into the final exit code instead.
         if not args.coverage_report:
             print("\nSKIP: Coverage report not requested (use --coverage-report to enable)")
-        executor.generate_coverage_report()
+        coverage_failed = not executor.generate_coverage_report()
+        if coverage_failed:
+            print("ERROR: Coverage report generation failed")
 
         # Emit structured results for the dashboard (no-op unless
         # --emit-results / --db-push was passed). Coverage is emitted too when a
         # report was generated above.
         executor.emit_results()
 
-        # Return based on results
+        # Determine whether the test run itself failed.
+        tests_failed = False
         if executor.test_results:
             from lib.test_executor import TestResult
 
@@ -137,19 +154,28 @@ def main():
                 rerun_timeout = executor.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
 
                 if rerun_failed > 0 or rerun_timeout > 0:
+                    tests_failed = True
                     if args.verbose:
-                        print(f"Exiting: Tests failed after rerun (original: failed={failed}, timeout={timeout}; rerun: failed={rerun_failed}, timeout={rerun_timeout})")
-                    sys.exit(1)
+                        print(f"Tests failed after rerun (original: failed={failed}, timeout={timeout}; rerun: failed={rerun_failed}, timeout={rerun_timeout})")
                 else:
                     # All reruns passed, but original tests failed - this is a success with caveat
                     if args.verbose:
-                        print(f"Exiting: All rerun tests passed (original had {failed} failures and {timeout} timeouts, but reruns succeeded)")
-                    sys.exit(0)
+                        print(f"All rerun tests passed (original had {failed} failures and {timeout} timeouts, but reruns succeeded)")
             elif failed > 0 or timeout > 0:
                 # No reruns, but original tests failed
+                tests_failed = True
                 if args.verbose:
-                    print(f"Exiting: Tests failed (failed={failed}, timeout={timeout})")
-                sys.exit(1)
+                    print(f"Tests failed (failed={failed}, timeout={timeout})")
+
+        if tests_failed or coverage_failed:
+            if args.verbose:
+                reasons = []
+                if tests_failed:
+                    reasons.append("test failures")
+                if coverage_failed:
+                    reasons.append("coverage report generation failure")
+                print(f"Exiting non-zero due to: {', '.join(reasons)}")
+            sys.exit(1)
 
         if args.verbose:
             print("Exiting: Test run completed successfully")

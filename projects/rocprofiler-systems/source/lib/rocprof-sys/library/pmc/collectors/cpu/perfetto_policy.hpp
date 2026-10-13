@@ -8,8 +8,6 @@
 #include "library/thread_info.hpp"
 #include "logger/debug.hpp"
 
-#include <spdlog/fmt/fmt.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -79,16 +77,17 @@ struct perfetto_policy
         {
             if(enabled.bits.frequency)
             {
-                auto name =
+                auto const name =
                     fmt::format("CPU [{}] Core [{}] Frequency (S)", socket_id, cpu_id);
-                auto track_id = counter_track::emplace(socket_id, name, "MHz");
+                auto const track_id = counter_track::emplace(socket_id, name, "MHz");
                 tracks.freq_tracks[cpu_id] = track_id;
             }
 
             if(enabled.bits.load)
             {
-                auto name = fmt::format("CPU [{}] Core [{}] Load (S)", socket_id, cpu_id);
-                auto track_id              = counter_track::emplace(socket_id, name, "%");
+                auto const name =
+                    fmt::format("CPU [{}] Core [{}] Load (S)", socket_id, cpu_id);
+                auto const track_id        = counter_track::emplace(socket_id, name, "%");
                 tracks.load_tracks[cpu_id] = track_id;
             }
         }
@@ -99,15 +98,18 @@ struct perfetto_policy
     {
         if(detail::get_cpu_samples())
         {
-            detail::get_cpu_samples()->emplace_back(
-                detail::cpu_perfetto_sample{ timestamp, metric_values });
+            detail::get_cpu_samples()->emplace_back(detail::cpu_perfetto_sample{
+                .timestamp = timestamp, .metric_values = metric_values });
         }
     }
 
     static void post_process(size_t socket_id, const std::set<size_t>& /*monitored_cpus*/,
                              const enabled_metrics& enabled)
     {
-        if(!detail::get_cpu_samples()) return;
+        if(!detail::get_cpu_samples())
+        {
+            return;
+        }
 
         auto& samples = *detail::get_cpu_samples();
 
@@ -116,14 +118,20 @@ struct perfetto_policy
             samples.size(), socket_id);
 
         const auto& thread_info = thread_info::get(0, InternalTID);
-        if(!thread_info) return;
+        if(!thread_info)
+        {
+            return;
+        }
 
         auto& tracks = detail::get_cpu_tracks();
 
         for(const auto& sample : samples)
         {
             const auto ts = sample.timestamp;
-            if(!thread_info->is_valid_time(ts)) continue;
+            if(!thread_info->is_valid_time(ts))
+            {
+                continue;
+            }
 
             for(const auto& cpu : sample.metric_values.cpu_data)
             {

@@ -1,24 +1,6 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "power_read_write.h"
 
 #include <gtest/gtest.h>
@@ -41,7 +23,9 @@ TestPowerReadWrite::~TestPowerReadWrite(void) {}
 
 void TestPowerReadWrite::SetUp(void) {
   TestBase::SetUp();
-
+  // Capture the per-device performance level so Close() can restore it and
+  // avoid leaking a forced 'manual' perf state to later tests.
+  SavePerfLevels();
   return;
 }
 
@@ -53,6 +37,10 @@ void TestPowerReadWrite::DisplayResults(void) const {
 }
 
 void TestPowerReadWrite::Close() {
+  // Restore the performance level captured in SetUp() before amdsmi is shut
+  // down. Runs even if Run() aborted on a failed assertion, so this test cannot
+  // leak a forced 'manual' state to subsequent tests.
+  RestorePerfLevels();
   // This will close handles opened within amdsmitst utility calls and call
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();

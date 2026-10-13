@@ -66,7 +66,7 @@ HIP_TEST_CASE(Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters) {
 
   SECTION("numDevices > device count") {
     HIP_CHECK_ERROR(hipExtLaunchMultiKernelMultiDevice(params_list.data(), device_count + 1, 0u),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidDevice);
   }
 
   SECTION("invalid flags") {

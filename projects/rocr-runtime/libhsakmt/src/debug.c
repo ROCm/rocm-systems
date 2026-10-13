@@ -24,8 +24,8 @@
  */
 
 #include "libhsakmt.h"
+#include "kfd_ioctl.h"
 #include "fmm.h"
-#include "hsakmt/linux/kfd_ioctl.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

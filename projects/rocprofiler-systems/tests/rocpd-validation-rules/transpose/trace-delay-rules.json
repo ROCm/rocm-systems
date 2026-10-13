@@ -1,0 +1,46 @@
+{
+    "required_tables": [
+        {
+            "min_rows": 0,
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "TRACE_DELAY exceeding the whole process runtime must gate GPU context startup - zero kernels should ever be captured",
+                    "error_message": "Kernels were captured despite ROCPROFSYS_TRACE_DELAY exceeding the process runtime; the delay window never closed, so the GPU contexts must never have started",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM kernels"
+                }
+            ]
+        },
+        {
+            "min_rows": 0,
+            "name": "top_kernels",
+            "required_columns": [
+                "name",
+                "total_calls",
+                "total_duration",
+                "average",
+                "percentage"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Kernel summary view must also be empty when TRACE_DELAY gates GPU context startup",
+                    "error_message": "top_kernels has entries despite ROCPROFSYS_TRACE_DELAY gating GPU context startup",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM top_kernels"
+                }
+            ]
+        }
+    ]
+}

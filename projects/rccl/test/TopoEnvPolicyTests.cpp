@@ -21,7 +21,7 @@
 // settings like MAX:1 did not actually limit which network devices a GPU used.
 //
 // The policy is applied through ncclTopoGetLocalNet(), and the per-peer
-// network channel count for remote ranks is derived from getLocalNetCountByBw()
+// network channel count for remote ranks is derived from ncclTopoGetLocalNetCountByBw()
 // (called by ncclTopoGetNchannels() in src/graph/paths.cc). These are exactly
 // the functions send/recv/all-to-all use to pick NICs and channels over the
 // network. This test ties the policy to that P2P NET channel-selection path so
@@ -53,8 +53,9 @@
 #include <string>
 
 #include "comm.h"        // struct ncclComm, struct ncclPeerInfo
-#include "graph.h"       // ncclTopoGetLocalNet(), getLocalNetCountByBw(), ncclTopoComputePaths(), ncclTopoFree()
+#include "graph.h"       // ncclTopoGetLocalNet(), ncclTopoGetLocalNetCountByBw(), ncclTopoComputePaths(), ncclTopoFree()
 #include "graph/topo.h"  // struct ncclTopoSystem, ncclTopoGetSystemFromXml(), GPU/NET, ncclTopoRankToIndex()
+#include "common/TopoRailPlane.hpp"
 #include "graph/xml.h"   // struct ncclXml, ncclTopoGetXmlFromFile()
 
 #include "common/ProcessIsolatedTestRunner.hpp"
@@ -118,7 +119,8 @@ ncclResult_t loadTopoSystem(const char* path, struct ncclTopoSystem** system)
         free(xml);
         return res;
     }
-    res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
+    res = RcclUnitTesting::fillMissingRailPlane(xml);
+    if(res == ncclSuccess) res = ncclTopoGetSystemFromXml(xml, system, /*localHostHash=*/0);
     free(xml);
     return res;
 }
@@ -243,7 +245,9 @@ void expectAutoSelection(struct ncclTopoSystem* system)
 
 constexpr int kXgmiPeerRank = 1;
 
-void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
+// cpuVendor >= 0 replaces the fixture's CPU vendor, for the host-dependent
+// defaults ncclTopoCheckP2p applies. The CPU arch is forced to x86 as well.
+void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut, int cpuVendor = -1)
 {
     *p2pOut     = -1;
     *cudaP2pOut = -1;
@@ -252,6 +256,14 @@ void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
     ASSERT_EQ(loadTopoSystem(kTopoXmlPath, &system), ncclSuccess)
         << "failed to load topo fixture: " << kTopoXmlPath;
     ASSERT_NE(system, nullptr);
+    if(cpuVendor >= 0)
+    {
+        for(int c = 0; c < system->nodes[CPU].count; c++)
+        {
+            system->nodes[CPU].nodes[c].cpu.arch   = NCCL_TOPO_CPU_ARCH_X86;
+            system->nodes[CPU].nodes[c].cpu.vendor = cpuVendor;
+        }
+    }
 
     MockComm mock(system);
     ASSERT_EQ(ncclTopoComputePaths(system, mock.comm), ncclSuccess);
@@ -270,7 +282,7 @@ void checkXgmiPairP2p(int* p2pOut, int* cudaP2pOut)
 }  // namespace
 
 // NCCL_NETDEVS_POLICY=MAX:1 -- the policy must cap network device usage to a
-// single NIC: getLocalNetCountByBw() returns 1, and ncclTopoGetLocalNet()
+// single NIC: ncclTopoGetLocalNetCountByBw() returns 1, and ncclTopoGetLocalNet()
 // returns the same NIC for channel 0 and channel 1.
 TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 {
@@ -287,7 +299,7 @@ TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 
                     int   count = -1;
                     float bw    = 0.0f;
-                    ASSERT_EQ(getLocalNetCountByBw(system, gpu, &count, &bw), ncclSuccess);
+                    ASSERT_EQ(ncclTopoGetLocalNetCountByBw(system, gpu, &count, &bw), ncclSuccess);
                     EXPECT_EQ(count, 1);
 
                     int     dev0 = -1, dev1 = -1;
@@ -308,7 +320,7 @@ TEST(NetDevsPolicyTests, Max1_LimitsGetLocalNetCountByBw)
 // channels 0 and 1 map to different NICs.
 //
 // Note: this is asserted through ncclTopoGetLocalNet() rather than
-// getLocalNetCountByBw(). getLocalNetCountByBw() is bandwidth-driven -- it stops
+// ncclTopoGetLocalNetCountByBw(). ncclTopoGetLocalNetCountByBw() is bandwidth-driven -- it stops
 // once the accumulated NIC bandwidth meets the GPU's bandwidth -- so when a
 // single NIC already saturates the GPU it returns 1 regardless of the policy.
 // The policy itself only governs how ncclTopoGetLocalNet() distributes NICs.
@@ -604,6 +616,58 @@ TEST(SymmetricMemP2pLevelTests, P2pDisable_KeepsCudaP2p)
                 << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
         },
         {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// On Intel (and ARM, Zhaoxin) hosts ncclTopoCheckP2p lowers its default level to
+// PXB. The user's NCCL_P2P_DISABLE must still win over that host default rather
+// than be overwritten by it.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnIntelHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_HonoredOnIntelHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_INTEL);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate on an Intel host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// Same host default and the same contract on Zhaoxin, the other x86 vendor with
+// a lowered default level.
+TEST(SymmetricMemP2pLevelTests, P2pDisable_HonoredOnZhaoxinHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "P2pDisable_HonoredOnZhaoxinHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_ZHAOXIN);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_DISABLE=1 must engage the distance gate on a Zhaoxin host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_DISABLE", "1"}});
+}
+
+// The NCCL_P2P_LEVEL half of the same contract: the host default must not raise
+// a user level back up to PXB.
+TEST(SymmetricMemP2pLevelTests, RestrictiveLevelLOC_HonoredOnIntelHost)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RestrictiveLevelLOC_HonoredOnIntelHost",
+        []()
+        {
+            int p2p = -1, cudaP2p = -1;
+            checkXgmiPairP2p(&p2p, &cudaP2p, NCCL_TOPO_CPU_VENDOR_INTEL);
+            EXPECT_EQ(p2p, 0) << "NCCL_P2P_LEVEL=LOC must engage the distance gate on an Intel host";
+            EXPECT_EQ(cudaP2p, 1)
+                << "raw CUDA P2P (symmetric-memory prereq) must be distance-independent";
+        },
+        {{"NCCL_P2P_LEVEL", "LOC"}});
 }
 
 }  // namespace RcclUnitTesting

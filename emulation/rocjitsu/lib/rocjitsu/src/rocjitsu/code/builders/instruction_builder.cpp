@@ -50,7 +50,7 @@ enum class ScalarSop2Op {
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_GFX1250:
+  case ROCJITSU_CODE_ARCH_CDNA5:
     // gfx1250 retains the legacy 32-bit arithmetic opcodes and adds the
     // SCC-neutral 64-bit scalar add used by its canonical PC builders.
     switch (op) {
@@ -143,18 +143,19 @@ bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> word
 }
 
 bool append_pc_delta_builder(std::vector<uint32_t> &words, rj_code_arch_t arch, uint16_t pc_sreg,
-                             int64_t delta) {
+                             int64_t delta, bool prefer_literal64) {
   constexpr uint16_t kLiteralOperand = 255;
   constexpr uint16_t kLiteral64Operand = 254;
   constexpr uint16_t kInlineInt0 = 128;
 
-  if (arch == ROCJITSU_CODE_ARCH_GFX1250) {
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
     // gfx1250's SCC-neutral s_add_nc_u64 is both the compiler's canonical PC
     // materialization and the smallest safe relocation replacement. Positive
     // 32-bit deltas need one literal word; negative or wider deltas use the
     // literal64 form so modulo-2^64 addition preserves their full bit pattern.
     const uint64_t raw_delta = static_cast<uint64_t>(delta);
-    const bool use_literal32 = delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
+    const bool use_literal32 =
+        !prefer_literal64 && delta >= 0 && raw_delta <= std::numeric_limits<uint32_t>::max();
     auto opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddNcU64);
     if (!opcode)
       return false;

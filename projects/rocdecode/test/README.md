@@ -90,6 +90,60 @@ export ROCDECODE_CONFORMANCE_DIR="$HOME/Movies/rocDecodeConformance"
 Codecs whose directory is missing are reported as `WARNING` and skipped, so the sweep
 still runs (and CTest still passes) without the full data set.
 
+## `perf_regression.py` — performance regression check
+
+Measures decode FPS (running the `videoDecodePerf` sample on each stream) and compares it
+against the GPU-specific baseline, flagging streams whose Avg FPS has dropped beyond the
+tolerance. Prints a summary box, writes a per-stream comparison CSV to
+`$HOME/rocDecode_perf_results/<timestamp>/` (outside the repo; override the base with
+`ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there are no regressions, `1` otherwise.
+
+```shell
+test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--quick] [--check-rocm]
+```
+
+| Option | Description |
+| --- | --- |
+| `--perf-dir DIR` | Streams + baseline dir (default: `$ROCDECODE_PERF_DIR`). |
+| `--baseline FILE` | Baseline HTML (default: `<perf-dir>/rocDecode_perf_baseline.html`). |
+| `--tolerance PCT` | Regression threshold, % Avg FPS drop (default: `$ROCDECODE_PERF_TOLERANCE` or 5). |
+| `--runs N` | Runs to average when confirming a flagged stream (default: 3). |
+| `--device ID` | GPU device id (default: 0). |
+| `--quick` | Fast check: one baseline stream per leaf subfolder, capped at ≤4K (8K skipped). |
+| `--check-rocm` | Only verify the ROCm toolchain (`ROCM_PATH`) and exit. |
+
+### GPU detection
+
+The local GPU is detected (via `amd-smi` market name, then `rocm-smi`, then KFD
+`gfx_target_version`) and mapped to the matching baseline column: `MI250X`, `MI300X`,
+`MI300A`, `MI350`, `MI355`, `Navi31`, or `Navi48`. Because MI300X/MI300A share `gfx942` and
+MI350/MI355 share `gfx950`, detection prefers the market name. Override with
+`ROCDECODE_PERF_GPU=<column>` if needed.
+
+### Perf stream + baseline location
+
+Streams and the baseline file are located via the `ROCDECODE_PERF_DIR` environment variable
+(default: `$HOME/rocDecodePerformance`), containing one subdirectory per codec plus the
+baseline HTML:
+
+```
+$ROCDECODE_PERF_DIR/
+├── AvcPerformance/
+├── Av1Performance/
+├── HevcPerformance/
+├── Vp9Performance/
+└── rocDecode_perf_baseline.html   # download from SharePoint
+```
+
+Point the variable at your local collection, e.g. add to your shell profile:
+
+```shell
+export ROCDECODE_PERF_DIR="$HOME/Movies/rocDecodePerformance"
+```
+
+The baseline is not distributed with the repo (it lives on an internal SharePoint site);
+download `rocDecode_perf_baseline.html` into `$ROCDECODE_PERF_DIR` before running.
+
 ## Claude Code Skills
 
 For developers using [Claude Code](https://claude.com/claude-code), the skills under
@@ -124,6 +178,23 @@ Defined in `.claude/skills/validate/SKILL.md`. Runs the entire pipeline end to e
 4. `test/validate.sh` — run CTest + conformance and report the summary.
 
 Invoke it by typing `/validate` in a Claude Code session started from the project root.
+
+### `/perf-check` — performance regression check
+
+Defined in `.claude/skills/perf-check/SKILL.md`. Measures decode FPS and compares it to the
+GPU-specific baseline:
+
+1. `test/perf_regression.py --check-rocm` — verify the ROCm toolchain (`ROCM_PATH`).
+2. `cmake -S samples/videoDecodePerf -B samples/videoDecodePerf/build` then
+   `cmake --build samples/videoDecodePerf/build` — build the performance sample.
+3. `test/perf_regression.py` — detect the GPU, run the perf test, compare to baseline, and
+   report the summary.
+
+Invoke it by typing `/perf-check` in a Claude Code session started from the project root,
+or `/perf-check quick` for the fast one-stream-per-subfolder variant (`--quick`, ≤4K only).
+Requires
+`ROCDECODE_PERF_DIR` (streams + baseline) as described under
+[`perf_regression.py`](#perf_regressionpy--performance-regression-check) above.
 
 <!-- Add future skills here as new "### /<skill-name> — <summary>" subsections. -->
 

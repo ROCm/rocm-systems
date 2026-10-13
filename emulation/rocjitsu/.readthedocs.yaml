@@ -1,0 +1,23 @@
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+version: 2
+
+sphinx:
+  configuration: emulation/rocjitsu/docs/sphinx/conf.py
+
+formats: []
+
+python:
+  install:
+    - requirements: emulation/rocjitsu/docs/sphinx/sphinx/requirements.txt
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+  apt_packages:
+    - doxygen
+  jobs:
+    pre_build:
+      - cd emulation/rocjitsu/docs/sphinx/doxygen && doxygen Doxyfile

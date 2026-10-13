@@ -125,7 +125,8 @@ protected:
     {
         EXPECT_CALL(*g_mock, initialize());
         EXPECT_CALL(*g_mock, get_lib_version())
-            .WillOnce(Return(mock_version{ major, minor, release, build }));
+            .WillOnce(Return(mock_version{
+                .major = major, .minor = minor, .release = release, .build = build }));
     }
 
     void expect_shutdown() { EXPECT_CALL(*g_mock, shutdown()); }
@@ -140,8 +141,8 @@ TEST_F(ProviderTest, constructor_stores_version_fields)
     expect_init(26, 3, 1, "26.3.1");
     expect_shutdown();
 
-    provider_t  p;
-    const auto& v = p.get_version();
+    const provider_t p;
+    const auto&      v = p.get_version();
     EXPECT_EQ(v.numeric_representation.major, 26U);
     EXPECT_EQ(v.numeric_representation.minor, 3U);
     EXPECT_EQ(v.numeric_representation.release, 1U);
@@ -153,7 +154,7 @@ TEST_F(ProviderTest, constructor_null_build_string_stored_as_empty)
     expect_init(1, 0, 0, nullptr);
     expect_shutdown();
 
-    provider_t p;
+    const provider_t p;
     EXPECT_TRUE(p.get_version().string_representation.empty());
 }
 
@@ -174,7 +175,7 @@ TEST_F(ProviderTest, destructor_calls_shutdown)
     expect_shutdown();
 
     {
-        provider_t p;
+        const provider_t p;
     }
 }
 
@@ -206,8 +207,8 @@ TEST_F(ProviderTest, move_constructor_produces_exactly_one_shutdown)
     expect_init();
     expect_shutdown();  // only from p2's destructor; p1 is moved-from
 
-    provider_t p1;
-    provider_t p2{ std::move(p1) };
+    provider_t       p1;
+    const provider_t p2{ std::move(p1) };
 }
 
 TEST_F(ProviderTest, move_assignment_shuts_down_overwritten_backend)
@@ -218,7 +219,8 @@ TEST_F(ProviderTest, move_assignment_shuts_down_overwritten_backend)
     EXPECT_CALL(*g_mock, initialize()).Times(2);
     EXPECT_CALL(*g_mock, get_lib_version())
         .Times(2)
-        .WillRepeatedly(Return(mock_version{ 1, 0, 0, nullptr }));
+        .WillRepeatedly(Return(
+            mock_version{ .major = 1, .minor = 0, .release = 0, .build = nullptr }));
     EXPECT_CALL(*g_mock, shutdown()).Times(2);
 
     provider_t p1;

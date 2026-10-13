@@ -21,7 +21,7 @@ Panel Config:
 
   - metric_table:
       id: 801
-      title: "TXA Utilization"
+      title: TXA Utilization
       header:
         metric: Metric
         avg: Avg
@@ -31,19 +31,19 @@ Panel Config:
       metric:
         # Utilization: TX_VCA_VCA_BUSY_sum is summed across all TXA units (one per WGP).
         Utilization:
-          avg: AVG((100 * TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VCA_BUSY_sum / (GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
         TXA Stall Rate:
-          avg: AVG((100 * TX_VCA_ADDRESSER_STALLED_CYCLES_sum / TX_VMW_GATE_EN1_sum) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VCA_ADDRESSER_STALLED_CYCLES_sum / TX_VMW_GATE_EN1_sum) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VCA_ADDRESSER_STALLED_CYCLES_sum / TX_VMW_GATE_EN1_sum) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TX_VMW_GATE_EN1_sum)
+          min: 100 * MIN(TX_VCA_ADDRESSER_STALLED_CYCLES_sum / TX_VMW_GATE_EN1_sum)
+          max: 100 * MAX(TX_VCA_ADDRESSER_STALLED_CYCLES_sum / TX_VMW_GATE_EN1_sum)
           unit: Percent
 
   - metric_table:
       id: 802
-      title: "Shader-TXA Requests - LDS"
+      title: Shader-TXA Requests - LDS
       header:
         metric: Metric
         avg: Avg
@@ -52,28 +52,28 @@ Panel Config:
         unit: Unit
       metric:
         LDS Instructions:
-          avg: AVG(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_TOTAL_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         LDS Load Instructions:
-          avg: AVG(TX_VCA_LDS_LOAD_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_LOAD_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         LDS Store Instructions:
-          avg: AVG(TX_VCA_LDS_STORE_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_STORE_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         LDS Atomics Instructions:
-          avg: AVG(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 803
-      title: "Shader-TXA Requests - VMEM"
+      title: Shader-TXA Requests - VMEM
       header:
         metric: Metric
         avg: Avg
@@ -82,48 +82,48 @@ Panel Config:
         unit: Unit
       metric:
         Buffer Instructions:
-          avg: AVG(TX_VCA_BUFFER_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Buffer Load Instructions:
-          avg: AVG(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_LOAD_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Buffer Store Instructions:
-          avg: AVG(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_STORE_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Buffer Atomics Instructions:
-          avg: AVG(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Flat Instructions:
-          avg: AVG(TX_VCA_FLAT_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_FLAT_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Flat Load Instructions:
-          avg: AVG(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_LOAD_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Flat Store Instructions:
-          avg: AVG(TX_VCA_FLAT_STORE_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_FLAT_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_STORE_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Flat Atomics Instructions:
-          avg: AVG(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 804
-      title: "Shader-TXA Requests - Async Load and Store"
+      title: Shader-TXA Requests - Async Load and Store
       header:
         metric: Metric
         avg: Avg
@@ -132,43 +132,43 @@ Panel Config:
         unit: Unit
       metric:
         Async Load Instruction:
-          avg: AVG(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Async Store Instruction:
-          avg: AVG(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Async Direct Load Instruction:
-          avg: AVG(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Async Direct Store Instruction:
-          avg: AVG(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Cluster Load Instruction:
-          avg: AVG(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Async Cluster Load Instruction:
-          avg: AVG(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         Async Barrier Instruction:
-          avg: AVG(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 805
-      title: "Shader-TXA Requests - TDM"
+      title: Shader-TXA Requests - TDM
       header:
         metric: Metric
         avg: Avg
@@ -177,33 +177,33 @@ Panel Config:
         unit: Unit
       metric:
         TDM Instructions:
-          avg: AVG(TX_VCA_TENSOR_DMA_WAVEFRONT_sum / $denom)
+          avg: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_DMA_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_TENSOR_DMA_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
         TDM Async Load Instructions:
-          avg: AVG(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
+          avg: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum / $denom)
           unit: (Count + $normUnit)
         TDM Async Store Instructions:
-          avg: AVG(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum / $denom)
+          avg: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum / $denom)
           unit: (Count + $normUnit)
         TDM Async Cluster Load Instructions:
-          avg: AVG(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum / $denom)
+          avg: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum / $denom)
           unit: (Count + $normUnit)
         TDM Async Barrier Instruction:
-          avg: AVG(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum / $denom)
+          avg: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
           min: MIN(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum / $denom)
           max: MAX(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 806
-      title: "Shader-TXA Requests - Block Load and Store"
+      title: Shader-TXA Requests - Block Load and Store
       header:
         metric: Metric
         avg: Avg
@@ -212,18 +212,18 @@ Panel Config:
         unit: Unit
       metric:
         Block Load Instruction:
-          avg: AVG(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
         Block Store Instruction:
-          avg: AVG(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum / $denom)
+          avg: SUM(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum) / SUM($denom)
           min: MIN(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum / $denom)
           max: MAX(TX_VCA_BLOCK_STORE_WAVEFRONTS_sum / $denom)
           unit: (Count + $normUnit)
   - metric_table:
       id: 807
-      title: "Shader-TXA Interface"
+      title: Shader-TXA Interface
       header:
         metric: Metric
         avg: Avg
@@ -234,19 +234,19 @@ Panel Config:
         # Shader-TXA bus util: cycle counters are summed across WGPs; normalize against
         # 2 * GRBM_GUI_ACTIVE * cu_per_gpu (bidirectional bus slots per GPU-active cycle).
         Request Bus Utilization:
-          avg: AVG((100 * (TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * (TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * (TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          min: 100 * MIN((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: 100 * MAX((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
         Request Bus Utilization - Atomic Data:
-          avg: AVG((100 * TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
 
   - metric_table:
       id: 808
-      title: "TXA-VMW Interface"
+      title: TXA-VMW Interface
       header:
         metric: Metric
         avg: Avg
@@ -255,44 +255,44 @@ Panel Config:
         unit: Unit
       metric:
         Command Bus Util:
-          avg: AVG((100 * TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VMEMCMD_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
         Command Bus Stall Rate:
-          avg: AVG((100 * TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+          min: 100 * MIN(TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum))
+          max: 100 * MAX(TX_VMW_VMW_VCA_REQ_STALL_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
         Request Bus Util:
-          avg: AVG((100 * TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          min: MIN((100 * TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
-          max: MAX((100 * TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+          min: 100 * MIN(TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
+          max: 100 * MAX(TX_VCA_VMEMREQ_CYCLES_sum / (2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu))
           unit: Percent
         Request Bus Stall Rate:
-          avg: AVG((100 * TX_VMW_DATA_FIFO_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VMW_DATA_FIFO_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VMW_DATA_FIFO_STALL_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+          min: 100 * MIN(TX_VMW_DATA_FIFO_STALL_sum / (2 * TX_VMW_GATE_EN1_sum))
+          max: 100 * MAX(TX_VMW_DATA_FIFO_STALL_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
         Bus Util - LDS Requests:
-          avg: AVG((100 * TX_VCA_LDS_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VCA_LDS_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VCA_LDS_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_LDS_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+          min: 100 * MIN(TX_VCA_LDS_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
+          max: 100 * MAX(TX_VCA_LDS_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
         Bus Util - Buffer Requests:
-          avg: AVG((100 * TX_VCA_BUFFER_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VCA_BUFFER_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VCA_BUFFER_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_BUFFER_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+          min: 100 * MIN(TX_VCA_BUFFER_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
+          max: 100 * MAX(TX_VCA_BUFFER_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
         Bus Util - Flat Requests:
-          avg: AVG((100 * TX_VCA_FLAT_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          min: MIN((100 * TX_VCA_FLAT_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
-          max: MAX((100 * TX_VCA_FLAT_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum)) if (TX_VMW_GATE_EN1_sum != 0) else None)
+          avg: 100 * SUM(TX_VCA_FLAT_TOTAL_CYCLES_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
+          min: 100 * MIN(TX_VCA_FLAT_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
+          max: 100 * MAX(TX_VCA_FLAT_TOTAL_CYCLES_sum / (2 * TX_VMW_GATE_EN1_sum))
           unit: Percent
 
   - metric_table:
       id: 809
-      title: "LDS and GL0 Data Bandwidth"
+      title: LDS and GL0 Data Bandwidth
       header:
         metric: Metric
         avg: Avg
@@ -301,54 +301,54 @@ Panel Config:
         unit: Unit
       metric:
         LDS Bandwidth - Load:
-          avg: AVG(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Bandwidth - Store:
-          avg: AVG(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         LDS Bandwidth - Atomics:
-          avg: AVG(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Load Bandwidth:
-          avg: AVG(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_ASYNC_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         Async Store Bandwidth:
-          avg: AVG(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Load Bandwidth:
-          avg: AVG(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_TDM_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         TDM Store Bandwidth:
-          avg: AVG(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Load Bandwidth:
-          avg: AVG(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Store Bandwidth:
-          avg: AVG(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
         GL0 Atomics Bandwidth:
-          avg: AVG(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          min: MIN(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
-          max: MAX(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          avg: SUM(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
+          max: MAX(TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum / (End_Timestamp - Start_Timestamp))
           unit: GB/s
 
   metrics_description:

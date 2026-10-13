@@ -87,17 +87,8 @@ def make_test_files_portable(filenames):
                     exe_pattern, replace_exe_pattern, modified_content
                 )
                 # 6 include _ctest.cmake file with path.
-                # Use if(EXISTS) guard: CatchAddTests.cmake returns early
-                # without writing _tests.cmake when no tests match the filter
-                # (e.g. a binary with no [disabled]-tagged tests).  Without
-                # the guard ctest errors at startup with "include could not
-                # find requested file".
                 ctest_test_pattern = r'include\("(.*?_tests\.cmake)"\)'
-                replace_ctest_pattern = (
-                    r'if(EXISTS "${CTEST_CURRENT_DIR}/\1")\n'
-                    r'  include("${CTEST_CURRENT_DIR}/\1")\n'
-                    r'endif()'
-                )
+                replace_ctest_pattern = r'include("${CTEST_CURRENT_DIR}/\1")'
                 modified_content = re.sub(
                     ctest_test_pattern, replace_ctest_pattern, modified_content
                 )

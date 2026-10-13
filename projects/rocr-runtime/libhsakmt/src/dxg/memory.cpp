@@ -574,6 +574,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   GraphicsResourceInfo->MemoryAddress = RegisterFlags.ui32.requiresVAddr ?
                                           reinterpret_cast<void *>(gpu_mem->GpuAddress()):
                                           reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
+  // Populate swizzle metadata for the ROCr interop layer to use as a fallback when
+  // the DXX extension (CLQueryResource11/CLQueryResource) or GL extension(wglResourceAttachAMD)
+  // is unavailable.
+  const HsaWddmSurfaceMetadata* meta = gpu_mem->GetSurfaceMetadata();
+  GraphicsResourceInfo->Metadata = meta;
+  GraphicsResourceInfo->MetadataSizeInBytes = meta ? sizeof(HsaWddmSurfaceMetadata) : 0;
 
   return ret;
 }
@@ -1294,6 +1300,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHandle, HSAint32* fd)
+{
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+// Persisting GL2 cache sizing is an amdgpu DRM ioctl; no DXG/WDDM equivalent.
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node, HSAuint64 CacheSize)
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

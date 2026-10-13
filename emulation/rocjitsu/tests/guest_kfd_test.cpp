@@ -133,6 +133,7 @@ bool install_inline_dbt_config(std::string simulator_json, const char *host_isa,
       "simd_per_cu": 4,
       "wave_front_size": 64,
       "max_slots_scratch_cu": 32,
+      "num_sdma_queues_per_engine": 2,
       "lds_size_kb": )"
               << lds_size_kb << R"(
     }
@@ -247,38 +248,35 @@ bool read_process_aperture_count(int fd, uint32_t *count) {
   return true;
 }
 
+// Local mode supports fork-then-exec only, so a child must NOT be able to open the
+// emulated KFD before exec -- and must not silently fall through to the host's real
+// one either. Both outcomes are checked here: refusal, with ENODEV.
 int child_process() {
   int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
-  if (fd < 0)
-    return 2;
-
-  const bool visible = guest_gpu_is_visible();
-  close(fd);
-  return visible ? 0 : 3;
+  if (fd >= 0) {
+    close(fd);
+    return 2; // opened a GPU endpoint before exec.
+  }
+  if (errno != ENODEV)
+    return 3; // refused, but not with the documented error.
+  return 0;
 }
 
+// Under fork-then-exec the child neither reuses the inherited descriptor for
+// rocJITsu work nor re-opens its own. What matters is that it cannot, and that
+// trying leaves the parent untouched.
 int child_reset_process(int inherited_fd, uint32_t expected_reopened_count) {
-  uint32_t inherited_count = 0;
-  if (read_process_aperture_count(inherited_fd, &inherited_count))
-    return 7;
-
+  static_cast<void>(inherited_fd);
+  static_cast<void>(expected_reopened_count);
   int fd = open(kKfdPath, O_RDWR | O_CLOEXEC);
-  if (fd < 0)
+  if (fd >= 0) {
+    close(fd);
     return 2;
-
-  uint32_t reopened_count = 0;
-  const bool count_ok = read_process_aperture_count(fd, &reopened_count);
-  const bool visible_after_reopen = guest_gpu_is_visible();
-  close(fd);
-
-  if (!count_ok)
-    return 5;
-  if (reopened_count < expected_reopened_count)
-    return 6;
-  return visible_after_reopen ? 0 : 3;
+  }
+  return errno == ENODEV ? 0 : 3;
 }
 
-TEST(GuestKfdMultiprocessTest, ForkedChildrenDoNotRemoveParentOverlay) {
+TEST(GuestKfdMultiprocessTest, ForkedChildrenRefuseGpuAndLeaveParentOverlayIntact) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
 
@@ -305,14 +303,15 @@ TEST(GuestKfdMultiprocessTest, ForkedChildrenDoNotRemoveParentOverlay) {
     int status = 0;
     ASSERT_EQ(waitpid(pid, &status, 0), pid);
     ASSERT_TRUE(WIFEXITED(status)) << "child " << pid << " did not exit normally";
-    EXPECT_EQ(WEXITSTATUS(status), 0) << "child " << pid << " failed";
+    EXPECT_EQ(WEXITSTATUS(status), 0)
+        << "child " << pid << ": 2=opened a GPU endpoint before exec, 3=wrong errno";
   }
 
   EXPECT_TRUE(guest_gpu_is_visible()) << "parent guest topology disappeared after forked children";
   close(parent_fd);
 }
 
-TEST(GuestKfdMultiprocessTest, ForkedChildDropsInheritedGuestDriverBeforeReopen) {
+TEST(GuestKfdMultiprocessTest, ForkedChildCannotUseInheritedGuestDriver) {
   if (access(kKfdPath, R_OK | W_OK) != 0)
     GTEST_SKIP() << kKfdPath << " is not available: " << std::strerror(errno);
 
@@ -334,7 +333,8 @@ TEST(GuestKfdMultiprocessTest, ForkedChildDropsInheritedGuestDriverBeforeReopen)
   int status = 0;
   ASSERT_EQ(waitpid(pid, &status, 0), pid);
   ASSERT_TRUE(WIFEXITED(status)) << "child " << pid << " did not exit normally";
-  EXPECT_EQ(WEXITSTATUS(status), 0) << "child " << pid << " did not reset and reopen cleanly";
+  EXPECT_EQ(WEXITSTATUS(status), 0)
+      << "child " << pid << ": 2=opened a GPU endpoint before exec, 3=wrong errno";
 
   uint32_t parent_count_after = 0;
   EXPECT_TRUE(read_process_aperture_count(parent_fd, &parent_count_after));

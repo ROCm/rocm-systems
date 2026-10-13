@@ -16,12 +16,9 @@ DECLARE_RCCL_PFN(ncclAllReduceWithBias);
 static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 
 static void initOnceFunc() {
-  void *librccl = dlopen("librccl.so", RTLD_LAZY | RTLD_LOCAL);
-  if (!librccl) {
-    fprintf(stderr, "dlopen failed: %s\n", dlerror());
-    return;
-  }
-  pfn_ncclAllReduceWithBias = (PFN_ncclAllReduceWithBias) dlsym(librccl, "ncclAllReduceWithBias");
+  // Resolve optional RCCL symbol from the already-loaded librccl.so.1 (via DT_NEEDED).
+  // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
+  pfn_ncclAllReduceWithBias = (PFN_ncclAllReduceWithBias) dlsym(RTLD_DEFAULT, "ncclAllReduceWithBias");
 }
 
 void AllReduceGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -118,7 +115,7 @@ testResult_t AllReduceRunTest(struct threadArgs* args, int root, ncclDataType_t 
   for (int i=0; i<type_count; i++) {
     for (int j=0; j<op_count; j++) {
 #if defined(RCCL_FLOAT8)
-      if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || run_ops[j] == ncclAvg || strcmp(run_opnames[j],"mulsum") == 0))
+      if((run_types[i] == ncclFloat8e4m3 || run_types[i] == ncclFloat8e5m2) && (run_ops[j] == ncclProd || strcmp(run_opnames[j],"mulsum") == 0))
       continue;
 #endif
       TESTCHECK(TimeTest(args, run_types[i], run_typenames[i], run_ops[j], run_opnames[j], -1));

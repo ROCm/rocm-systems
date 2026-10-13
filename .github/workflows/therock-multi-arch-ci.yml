@@ -13,7 +13,7 @@
 # - Better parallelization across GPU architectures
 
 # TheRock ref: TEMPORARILY pointed at the branch users/geomin12/remove-external-configure-ci
-# to test ROCm/TheRock#<PR>. Restore `main` before merging (TheRock#3343).
+# to test ROCm/TheRock#<PR>. Restore a pinned SHA before merging.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -29,11 +29,17 @@
 name: TheRock Multi-Arch CI
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
+      - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -60,6 +66,26 @@ on:
         type: string
         default: ""
         description: "Workflow run ID to copy prebuilt stage artifacts from; required when prebuilt_stages is set"
+      build_python_packages:
+        type: boolean
+        default: false
+        description: "Build ROCm Python packages"
+      build_pytorch:
+        type: boolean
+        default: false
+        description: "Build PyTorch wheels"
+      build_jax:
+        type: boolean
+        default: false
+        description: "Build JAX wheels"
+      build_native_linux:
+        type: boolean
+        default: false
+        description: "Build native Linux packages and run install tests"
+      baseline_repository:
+        type: string
+        default: ""
+        description: "Repository to query for baseline_run_id. Defaults to github.repository for workflow_dispatch."
 
 permissions:
   contents: read
@@ -84,11 +110,20 @@ jobs:
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
-      # rocm-systems affects compiler-runtime (HIP, CLR, runtime, profiler-core)
-      # which cascades to ALL downstream stages. No stages can be reused.
-      # Hard-coding to empty for now.
+      # TEST-BRANCH REGRESSION: build_stages and the Linux-only Windows skip
+      # both came from compute_build_stages.py, which needs changed_projects
+      # *before* setup runs. changed_projects is now computed inside setup, so
+      # that input is unavailable here. Omitting build_stages falls back to the
+      # documented fail-safe (empty = build every stage) and Windows uses the
+      # default families. This only costs build time, not correctness, but the
+      # real PR must restore selective builds -- see the PR description.
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      build_python_packages: ${{ inputs.build_python_packages || false }}
+      build_pytorch: ${{ inputs.build_pytorch || false }}
+      build_jax: ${{ inputs.build_jax || false }}
+      build_native_linux: ${{ inputs.build_native_linux || false }}
+      baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
@@ -110,8 +145,8 @@ jobs:
           "ref": "${{ github.sha }}",
           "event_name": "${{ github.event_name }}",
           "pr_number": "${{ github.event.pull_request.number }}",
-          "base_sha": "${{ github.event.pull_request.base.sha }}",
-          "head_sha": "${{ github.event.pull_request.head.sha }}",
+          "base_sha": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
           "projects_config": ".github/repos-config.json",
           "skip_ci_config": ".github/skip-ci-config.toml",
           "family_overrides": {
@@ -138,6 +173,8 @@ jobs:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
+      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string triggers a full test run in the downstream workflow.
@@ -192,5 +229,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          python build_tools/github_actions/workflow_summary.py \
+          python3 build_tools/github_actions/workflow_summary.py \
             --needs-json '${{ toJSON(needs) }}'

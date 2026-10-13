@@ -28,6 +28,8 @@ class RocprofsysConfig:
         - rocprofsys_sample: Path to rocprof-sys-sample executable
         - rocprofsys_causal: Path to rocprof-sys-causal executable
         - rocprofsys_avail: Path to rocprof-sys-avail executable
+        - rocprofsys_attach: Path to rocprof-sys-attach executable (optional;
+            None if the binary was not built)
         - rocm_path: Path to ROCm installation directory
         - rocprofsys_lib_dir: Path to rocprofsys library directory
         - rocprofsys_bin_dir: Path to rocprofsys binary directory
@@ -52,6 +54,7 @@ class RocprofsysConfig:
     rocprofsys_sample: Path
     rocprofsys_causal: Path
     rocprofsys_avail: Path
+    rocprofsys_attach: Optional[Path]
     rocm_path: Optional[Path]
     rocprofsys_lib_dir: Path
     rocprofsys_bin_dir: Path
@@ -125,8 +128,11 @@ class RocprofsysConfig:
                     found_paths.append(candidate)
         return found_paths
 
-    def get_library_path(self) -> str:
+    def get_library_path(self, python_version: Optional[str] = None) -> str:
         """Get LD_LIBRARY_PATH including rocprofiler-systems libraries.
+
+        Args:
+            python_version: Interpreter the run targets, when it targets one.
 
         Returns:
             LD_LIBRARY_PATH string with rocprofiler-systems libraries
@@ -143,9 +149,25 @@ class RocprofsysConfig:
         if existing:
             paths.append(existing)
 
+        # Add ROCm main lib directory so that HIP and other ROCm runtime
+        # libraries (e.g. libamdhip64.so) are found without requiring the
+        # caller to set LD_LIBRARY_PATH manually.
+        if self.rocm_path:
+            rocm_lib = self.rocm_path / "lib"
+            if rocm_lib.is_dir():
+                paths.append(str(rocm_lib))
+
         # Add ROCm LLVM lib as fallback
         for llvm_path in self.llvm_lib_paths:
             paths.append(str(llvm_path))
+
+        # The python base environment puts ROCm's roctx bindings on PYTHONPATH;
+        # on some builds their compiled extension resolves libpython through the
+        # loader search path, so the interpreter's own lib dir has to be here.
+        if python_version and self.capabilities.roctx_site_packages(python_version):
+            python_lib_dir = self.capabilities.python_lib_dir(python_version)
+            if python_lib_dir:
+                paths.append(str(python_lib_dir))
 
         return ":".join(paths)
 
@@ -458,6 +480,8 @@ def discover_install_config(
 
     search_paths = [bin_dir]
     sys_execs = _find_rocprofsys_core_executables(search_paths)
+    # rocprof-sys-attach is optional: tests that need it should skip when None.
+    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
     rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
         search_paths, install_dir
     )
@@ -469,6 +493,7 @@ def discover_install_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
+        rocprofsys_attach=rocprof_attach,
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,
@@ -543,6 +568,8 @@ def discover_build_config(
 
     search_paths = [bin_dir]
     sys_execs = _find_rocprofsys_core_executables(search_paths)
+    # rocprof-sys-attach is optional: tests that need it should skip when None.
+    rocprof_attach = _find_executable("rocprof-sys-attach", search_paths)
     rocprofsys_python, rocprofsys_site_packages = _find_rocprofsys_python(
         search_paths, build_dir
     )
@@ -560,6 +587,7 @@ def discover_build_config(
         rocprofsys_sample=sys_execs["rocprof-sys-sample"],
         rocprofsys_causal=sys_execs["rocprof-sys-causal"],
         rocprofsys_avail=sys_execs["rocprof-sys-avail"],
+        rocprofsys_attach=rocprof_attach,
         rocm_path=rocm_path,
         rocprofsys_lib_dir=lib_dir,
         rocprofsys_bin_dir=bin_dir,

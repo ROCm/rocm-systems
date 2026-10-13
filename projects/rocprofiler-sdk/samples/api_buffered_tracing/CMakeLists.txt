@@ -1,7 +1,7 @@
 #
 #
 #
-cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 if(NOT CMAKE_HIP_COMPILER)
     find_program(
@@ -49,9 +49,16 @@ rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 
 set(buffered-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
 
+# WSL2/DXG has no /dev/kfd and schedules GPU work through the dxg path. Under WSL2/DXG
+# these workloads run slower in practice and need more timeout headroom (root cause TBD),
+# so scale the timeout only there. Non-WSL keeps the develop baseline (45); WSL scales it
+# up.
+rocprofiler_sdk_wsl_timeout_scale(_BUFFERED_API_TRACING_TIMEOUT BASE 45)
+
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 
 set_tests_properties(
     buffered-api-tracing
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${buffered-api-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT ${_BUFFERED_API_TRACING_TIMEOUT} LABELS "samples" ENVIRONMENT
+               "${buffered-api-tracing-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

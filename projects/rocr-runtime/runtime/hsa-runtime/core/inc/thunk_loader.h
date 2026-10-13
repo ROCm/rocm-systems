@@ -359,6 +359,8 @@ class ThunkLoader {
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaHandleImportDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtQueryDmaBufInfo))(int DMABufFd, \
+                                      HsaDmaBufInfo* Info);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtImportExternalSemaphore))(HSAuint32 NodeId, \
                                       void* NtHandle, \
                                       HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE Type, \
@@ -395,6 +397,8 @@ class ThunkLoader {
                                       uint64_t* Frequency);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd))(HsaAMDGPUDeviceHandle DeviceHandle, \
                                       HSAint32* fd);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtSetPersistingCacheSize))(HSAuint32 NodeId, \
+                                      HSAuint64 CacheSize);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -445,9 +449,14 @@ class ThunkLoader {
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
-    bool IsDXG() const { return is_win_dxg_ || is_wsl_dxg_; }
-    bool IsWinDxg() const { return is_win_dxg_; }
-    bool IsWslDxg() const { return is_wsl_dxg_; }
+    bool IsDXG() const { return is_dxg_; }
+    // On Linux, DXG is only present under WSL2.
+    // On Windows, DXG is the native driver (not WSL).
+#if defined(__linux__)
+    bool IsWslDxg() const { return is_dxg_; }
+#else
+    bool IsWslDxg() const { return false; }
+#endif
     bool IsDTIF() const { return is_dtif_; }
     bool IsSharedLibraryLoaded() const { return is_loaded_; }
     void* ThunkHandle() const { return thunk_handle; }
@@ -554,6 +563,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
 #endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
+    HSAKMT_DEF(hsaKmtQueryDmaBufInfo)* HSAKMT_PFN(hsaKmtQueryDmaBufInfo);
     HSAKMT_DEF(hsaKmtImportExternalSemaphore)* HSAKMT_PFN(hsaKmtImportExternalSemaphore);
     HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)* HSAKMT_PFN(hsaKmtDestroyExternalSemaphore);
     HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)* HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore);
@@ -565,6 +575,7 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtMemHandleFreePreserveMetadata)* HSAKMT_PFN(hsaKmtMemHandleFreePreserveMetadata);
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
     HSAKMT_DEF(hsaKmtGetAmdGPUDeviceFd)* HSAKMT_PFN(hsaKmtGetAmdGPUDeviceFd);
+    HSAKMT_DEF(hsaKmtSetPersistingCacheSize)* HSAKMT_PFN(hsaKmtSetPersistingCacheSize);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
     HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
 
@@ -584,8 +595,7 @@ class ThunkLoader {
     std::string whoami();
     void *thunk_handle;
     std::string library_name;
-    bool is_win_dxg_;
-    bool is_wsl_dxg_;
+    bool is_dxg_;
     bool is_dtif_;
     bool is_loaded_;
 };

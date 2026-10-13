@@ -44,7 +44,8 @@ protected:
 
         EXPECT_CALL(*mock_backend, get_gpu_asic_info())
             .Times(AnyNumber())
-            .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+            .WillRepeatedly(
+                Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
 
         EXPECT_CALL(*mock_backend, get_hotspot_temperature())
             .Times(AnyNumber())
@@ -75,7 +76,7 @@ protected:
      */
     void SetupAllMetricsSupported()
     {
-        metrics met = CreateValidMetrics();
+        const metrics met = CreateValidMetrics();
 
         EXPECT_CALL(*mock_backend, get_metrics())
             .Times(AtLeast(1))
@@ -100,7 +101,7 @@ protected:
      */
     void SetupNoMetricsSupported()
     {
-        metrics met = CreateSentinelMetrics();
+        const metrics met = CreateSentinelMetrics();
 
         EXPECT_CALL(*mock_backend, get_metrics())
             .Times(AtLeast(1))
@@ -281,11 +282,11 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
 {
     SetupAllMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_NE(supported.value, 0U);
 
     EXPECT_EQ(dev.get_index(), test_index);
@@ -304,7 +305,7 @@ TEST_F(DeviceTest, device_construction_no_support)
 
     EXPECT_FALSE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_EQ(supported.value, 0U);
 
     auto met = dev.get_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -322,11 +323,11 @@ TEST_F(DeviceTest, device_construction_partial_support)
 {
     SetupPartialMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
 
     EXPECT_TRUE(supported.bits.current_socket_power);
     EXPECT_TRUE(supported.bits.hotspot_temperature);
@@ -355,17 +356,17 @@ TEST_F(DeviceTest, device_construction_different_indices)
     SetupAllMetricsSupported();
 
     {
-        device<MockBackend> dev(mock_backend, 0);
+        const device<MockBackend> dev(mock_backend, 0);
         EXPECT_EQ(dev.get_index(), 0U);
     }
 
     {
-        device<MockBackend> dev(mock_backend, 1);
+        const device<MockBackend> dev(mock_backend, 1);
         EXPECT_EQ(dev.get_index(), 1U);
     }
 
     {
-        device<MockBackend> dev(mock_backend, 2);
+        const device<MockBackend> dev(mock_backend, 2);
         EXPECT_EQ(dev.get_index(), 2U);
     }
 }
@@ -445,7 +446,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.current_socket_power);
     EXPECT_FALSE(supported.bits.average_socket_power);
 
@@ -467,7 +468,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
  */
 TEST_F(DeviceTest, hotspot_temperature_collection)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -500,7 +501,7 @@ TEST_F(DeviceTest, hotspot_temperature_collection)
  */
 TEST_F(DeviceTest, edge_temperature_collection)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -537,7 +538,7 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.hotspot_temperature);
     EXPECT_FALSE(supported.bits.edge_temperature);
 
@@ -646,7 +647,7 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.gfx_activity);
     EXPECT_TRUE(supported.bits.umc_activity);
     EXPECT_TRUE(supported.bits.mm_activity);
@@ -665,7 +666,7 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
 
 TEST_F(DeviceTest, vram_memory_usage_collection_success)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -689,7 +690,7 @@ TEST_F(DeviceTest, vram_memory_usage_collection_success)
 
 TEST_F(DeviceTest, memory_usage_collection_failure)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -816,7 +817,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.vcn_busy);
     EXPECT_FALSE(supported.bits.jpeg_busy);
     EXPECT_FALSE(supported.bits.vcn_activity);
@@ -862,7 +863,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.vcn_busy);
     EXPECT_FALSE(supported.bits.jpeg_busy);
     EXPECT_FALSE(supported.bits.vcn_activity);
@@ -1189,9 +1190,9 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
 {
     SetupAllMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.current_socket_power);
     EXPECT_TRUE(supported.bits.average_socket_power);
     EXPECT_TRUE(supported.bits.memory_usage);
@@ -1227,7 +1228,7 @@ TEST_F(DeviceTest, vcn_activity_support_detection_any_xcp)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.vcn_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
@@ -1237,7 +1238,7 @@ TEST_F(DeviceTest, vcn_activity_unsupported_all_sentinels)
 {
     SetupNoMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 }
@@ -1258,7 +1259,7 @@ TEST_F(DeviceTest, jpeg_activity_support_detection_any_xcp)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.jpeg_busy);
     EXPECT_FALSE(dev.get_supported_metrics().bits.jpeg_activity);
@@ -1279,7 +1280,7 @@ TEST_F(DeviceTest, xgmi_support_detection_link_width_only)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 }
@@ -1299,7 +1300,7 @@ TEST_F(DeviceTest, xgmi_support_detection_any_read_data_valid)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.xgmi);
 }
@@ -1319,14 +1320,14 @@ TEST_F(DeviceTest, pcie_support_detection_bandwidth_only)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.pcie);
 }
 
 TEST_F(DeviceTest, memory_usage_support_detection)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -1338,14 +1339,14 @@ TEST_F(DeviceTest, memory_usage_support_detection)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.get_supported_metrics().bits.memory_usage);
 }
 
 TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -1357,7 +1358,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 }
@@ -1368,7 +1369,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_api_failure)
 
 TEST_F(DeviceTest, vcn_activity_top_level_field_only)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -1380,7 +1381,7 @@ TEST_F(DeviceTest, vcn_activity_top_level_field_only)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
         << "BUG: Implementation does not check top-level vcn_activity[] field";
@@ -1415,7 +1416,7 @@ TEST_F(DeviceTest, vcn_activity_in_both_fields)
 
 TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -1427,7 +1428,7 @@ TEST_F(DeviceTest, vcn_activity_detection_should_check_both_sources)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity)
         << "Implementation gap: initialize_supported_metrics() should check both "
@@ -1462,7 +1463,7 @@ TEST_F(DeviceTest, vcn_activity_collection_priority)
 
 TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -1474,7 +1475,7 @@ TEST_F(DeviceTest, vcn_activity_xcp_disabled_top_level_valid)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.vcn_activity);
 }
@@ -1522,11 +1523,11 @@ TEST_F(DeviceTest, get_metrics_info_failure_during_init)
         .Times(AnyNumber())
         .WillRepeatedly(Return(0));
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.memory_usage);
     EXPECT_FALSE(supported.bits.current_socket_power);
 }
@@ -1671,7 +1672,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
 
     EXPECT_CALL(*mock_backend1, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "GPU1", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "GPU1", .vendor_name = "AMD" }));
 
     SetupTemperatureExpectationsUnsupported(mock_backend1);
 
@@ -1690,7 +1692,8 @@ TEST_F(DeviceTest, concurrent_device_objects)
 
     EXPECT_CALL(*mock_backend2, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "GPU2", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "GPU2", .vendor_name = "AMD" }));
 
     SetupTemperatureExpectationsUnsupported(mock_backend2);
 
@@ -1715,7 +1718,7 @@ TEST_F(DeviceTest, device_with_index_zero)
 {
     SetupAllMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, 0);
+    const device<MockBackend> dev(mock_backend, 0);
 
     EXPECT_EQ(dev.get_index(), 0U);
 }
@@ -1724,7 +1727,7 @@ TEST_F(DeviceTest, device_with_high_index)
 {
     SetupAllMetricsSupported();
 
-    device<MockBackend> dev(mock_backend, 15);
+    const device<MockBackend> dev(mock_backend, 15);
 
     EXPECT_EQ(dev.get_index(), 15U);
 }
@@ -1771,7 +1774,8 @@ TEST_F(DeviceTest, full_lifecycle_with_realistic_data)
 
     EXPECT_CALL(*mock, get_gpu_asic_info())
         .Times(AnyNumber())
-        .WillRepeatedly(Return(asic_info{ "Test GPU", "AMD" }));
+        .WillRepeatedly(
+            Return(asic_info{ .product_name = "Test GPU", .vendor_name = "AMD" }));
 
     EXPECT_CALL(*mock, get_hotspot_temperature())
         .WillOnce(Return(std::int64_t{ 70 }))
@@ -1888,7 +1892,7 @@ TEST_F(DeviceTest, clock_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.gfx_clock);
     EXPECT_FALSE(supported.bits.mem_clock);
 
@@ -1999,7 +2003,7 @@ TEST_F(DeviceTest, vcn_activity_device_level_preserves_sentinels)
 
 TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
 {
-    metrics met = CreateSentinelMetrics();
+    const metrics met = CreateSentinelMetrics();
 
     EXPECT_CALL(*mock_backend, get_metrics())
         .Times(AtLeast(1))
@@ -2012,7 +2016,7 @@ TEST_F(DeviceTest, memory_usage_unsupported_sentinel_value)
 
     SetupSDMAExpectations(mock_backend);
 
-    device<MockBackend> dev(mock_backend, test_index);
+    const device<MockBackend> dev(mock_backend, test_index);
 
     EXPECT_FALSE(dev.get_supported_metrics().bits.memory_usage);
 }

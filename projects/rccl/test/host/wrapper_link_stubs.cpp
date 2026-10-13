@@ -29,12 +29,13 @@ typedef enum { NCCL_LOG_NONE=0, NCCL_LOG_ERROR=1, NCCL_LOG_VERSION=2,
                NCCL_LOG_TRACE=6 } ncclDebugLogLevel;
 
 // --- debug.cc ---
-int ncclDebugLevel = 3;  // NCCL_LOG_WARN
+// Levels ERROR..WARN, matching the pre-2.32 scalar level NCCL_LOG_WARN.
+uint32_t ncclDebugLevelMask = (1u << 1) | (1u << 2) | (1u << 3);
 uint64_t ncclDebugMask = 0x7fffffffffffffffULL;
 
 void ncclDebugLog(ncclDebugLogLevel level, unsigned long flags,
                   const char* filefunc, int line, const char* fmt, ...) {
-    if (level > ncclDebugLevel) return;
+    if (!(ncclDebugLevelMask & (1u << level))) return;
     va_list args;
     va_start(args, fmt);
     vfprintf(stderr, fmt, args);
@@ -117,16 +118,20 @@ int hipMemGetAddressRange(void**, size_t*, void*) { return 0; }
 int hipDeviceSynchronize() { return 0; }
 int hipMemcpy(void*, const void*, size_t, int) { return 0; }
 int hipGetDevice(int* d) { if (d) *d = 0; return 0; }
+// hipGetDevicePropertiesR0600 lives in hip_prop_r0600_stub.cpp so this TU can
+// keep int-returning HIP stubs without including hip_runtime.h.
 int hipSetDevice(int) { return 0; }
 int hipMalloc(void**, size_t) { return 0; }
 int hipFree(void*) { return 0; }
 int hipHostMalloc(void**, size_t, unsigned int) { return 0; }
 int hipMemsetAsync(void*, int, size_t, void*) { return 0; }
 int hipStreamCreateWithFlags(void**, unsigned int) { return 0; }
+int hipStreamCreateWithPriority(void**, unsigned int, int) { return 0; }
 int hipStreamDestroy(void*) { return 0; }
 int hipStreamSynchronize(void*) { return 0; }
 int hipThreadExchangeStreamCaptureMode(int*) { return 0; }
 int hipDeviceGetAttribute(int* v, int, int) { if (v) *v = 0; return 0; }
+int hipDeviceGetStreamPriorityRange(int* least, int* greatest) { if (least) *least = 0; if (greatest) *greatest = 0; return 0; }
 int hipExtMallocWithFlags(void**, size_t, unsigned int) { return 0; }
 int hipDeviceGet(int* d, int) { if (d) *d = 0; return 0; }
 }
@@ -150,3 +155,7 @@ ncclResult_t ncclProxyClientGetFdBlocking(ncclComm*, int, void*, int*) { return 
 int ncclCuMemEnable() { return 0; }
 int ncclCuMemHandleType = 0;
 ncclResult_t getBusId(int, int64_t* busId) { if (busId) *busId = 0; return ncclSuccess; }
+
+// Return type is int64_t (no ncclResult_t), so this can live here. ncclMgmtTaskEnqueue
+// uses the real ncclResult_t enum and is defined in init_stubs.cpp.
+int64_t ncclParamEnqueueRearchEnable() { return 0; }

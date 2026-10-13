@@ -61,6 +61,7 @@ set(AMD_TEST_SRC
     hipVectorTypesDevice.cc
     hipTestHalf.cc
     hipTestHalfConstexpr.cc
+    hipTestHalfIntegralAssign_test.cc
     hipComplex.cc
     hipTestFMA.cc
     hipTestNativeHalf.cc
@@ -83,6 +84,11 @@ set(AMD_TEST_SRC
 # until the header is made portable.
 if(NOT WIN32)
   list(APPEND AMD_TEST_SRC ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc)
+  # The OCP host reference returns wide vector types (__amd_floatx32_storage_t)
+  # by value. Without AVX-512 enabled this triggers -Wpsabi ABI-change notes,
+  # which are inherent to the type and not a real defect, so suppress them here.
+  set_source_files_properties(ext_ocp_fp6.cc ext_ocp_fp8.cc ext_ocp_fp4.cc
+                              PROPERTIES COMPILE_OPTIONS "-Wno-psabi")
 endif()
 
 set(AMD_ARCH_SPEC_TEST_SRC
@@ -209,8 +215,8 @@ function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
 endfunction()  # CheckAcceptedArchs
 
 if(HIP_PLATFORM MATCHES "amd")
-  # Do not enable arch specific tests for ASAN.
-  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN"))
+  # Do not enable arch specific tests for device ASAN, which rewrites the arch to xnack+.
+  if (DEFINED OFFLOAD_ARCH_STR AND NOT (ENABLE_SANITIZER STREQUAL "ASAN"))
     CheckAcceptedArchs(${OFFLOAD_ARCH_STR})
   elseif(DEFINED $ENV{HCC_AMDGPU_TARGET})
     CheckAcceptedArchs($ENV{HCC_AMDGPU_TARGET})

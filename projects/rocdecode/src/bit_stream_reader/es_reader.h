@@ -31,7 +31,7 @@ THE SOFTWARE.
 #define BS_RING_SIZE (16 * 1024 * 1024)
 #define INIT_PIC_DATA_SIZE (2 * 1024 * 1024)
 
-enum {
+enum StreamFileType {
     kStreamTypeUnsupported = -1,
     kStreamTypeAvcElementary = 0,
     kStreamTypeHevcElementary,
@@ -39,7 +39,7 @@ enum {
     kStreamTypeAv1Ivf,
     kStreamTypeVp9Ivf,
     kStreamTypeNumSupported
-} StreamFileType;
+};
 
 #define STREAM_PROBE_SIZE 2 * 1024
 #define STREAM_TYPE_SCORE_THRESHOLD 50

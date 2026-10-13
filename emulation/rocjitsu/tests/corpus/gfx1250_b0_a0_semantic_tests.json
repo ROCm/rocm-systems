@@ -1,5 +1,6 @@
 {
   "semantics": [
+    "barrier_signal_isfirst_test",
     "cluster_load_test",
     "ds_2addr_test",
     "ds_addtid_test",
@@ -11,6 +12,8 @@
     "wmma_scale_regular_test",
     "wmma_scale16_m16_test",
     "wmma_scale16_m32_test",
-    "wmma_split_f32_test"
+    "wmma_split_f16_test",
+    "wmma_split_f32_test",
+    "wmma_split_fp4_test"
   ]
 }
