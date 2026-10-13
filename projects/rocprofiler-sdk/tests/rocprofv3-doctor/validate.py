@@ -34,8 +34,6 @@ import os
 import subprocess
 import sys
 
-import pytest
-
 TIMEOUT = 120
 
 

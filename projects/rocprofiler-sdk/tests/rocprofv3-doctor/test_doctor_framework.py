@@ -731,7 +731,7 @@ def test_doctor_framework_rocprofv3_doctor_execs_the_libexec_script(
     with pytest.raises(SystemExit):
         launcher.main(["--doctor", "--only", "install"])
 
-    (path, argv) = calls[0]
+    path, argv = calls[0]
     script = argv[1]
     assert path == argv[0]
     assert "libexec" in script.split("/")
