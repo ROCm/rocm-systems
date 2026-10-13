@@ -219,6 +219,7 @@ const char* ncclSymkKernelIdToString(int kernelId);
 ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
                                ncclSymRegType_t* winRegType);
 bool rcclSymkKernelIdIsLL(int kernelId);
+bool rcclSymkKernelIdIsTma(int kernelId);
 
 int ncclSymkLLKernelMask();
 int ncclSymkDynamicSmemKernelMask();

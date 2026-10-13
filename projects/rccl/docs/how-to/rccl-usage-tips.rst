@@ -128,6 +128,18 @@ line. TDM kernels have ``Tma`` in their name:
    NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=TUNING ./your_app
    # ... ReduceScatter [Symmetric]: 67108864 Bytes -> Kernel ReduceScatter_TmaLD nchannels 64 nthreads 512 nWorks 1
 
+In rccl-tests, ``-A 1`` prints the selected algorithm for each size. With
+symmetric registration (``-R 2``), the ``algo`` column shows ``SymTDM`` for sizes
+that use a TDM kernel and ``SYM`` for sizes that use a vector-load symmetric
+kernel:
+
+.. code-block:: shell
+
+   ./reduce_scatter_perf -g 4 -b 64M -e 256M -f 4 -R 2 -A 1
+   #       size  ...   algo     proto   nchannels
+   #   67108864  ...    SYM    SIMPLE          62
+   #  268435456  ...  SymTDM    SIMPLE          64
+
 ``NCCL_SYM_TMA_ENABLE`` controls these kernels:
 
 - ``0`` disables them.
