@@ -30,7 +30,7 @@ extern std::function<int(struct ncclComm*)> g_computeLsaSize;
 extern std::function<bool(int, ncclDevrRegisterCapability)> g_devrWinRegEnabled;
 
 // findCommAndHostWindowFromDeviceWindow: fail-loud default; a test must set
-// g_foundComm/g_foundWinHost and install ResolveFoundCommAndWindow (or its own
+// g_foundComm/g_foundWinHost and call UseFoundCommAndWindow() (or install its own
 // hook) before calling a function that depends on it.
 extern std::function<ncclResult_t(ncclWindow_t, ncclComm_t*, struct ncclDevrWindow**)>
     g_findCommAndHostWindowFromDeviceWindow;

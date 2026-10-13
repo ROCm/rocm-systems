@@ -24,7 +24,7 @@
 
 #include <gtest/gtest.h>
 
-#include <cstring>
+#include <cstdlib>
 #include <memory>
 
 #include "fakes/cft_dev_runtime_fakes.h"
@@ -35,6 +35,25 @@
 
 namespace {
 
+// Heap-allocates a ncclDevrTeam sized and populated for its flexible-array
+// worldRankList, same idiom dev_runtime.cc's own symTeamObtain uses. An
+// automatic (stack) ncclDevrTeam's worldRankList has zero elements; a fake
+// that hands one to code indexing it at team.nRanks-1 is out of bounds.
+struct DevrTeamDeleter {
+  void operator()(ncclDevrTeam* t) const { std::free(t); }
+};
+using DevrTeamPtr = std::unique_ptr<ncclDevrTeam, DevrTeamDeleter>;
+
+DevrTeamPtr MakeDevrTeam(ncclTeam_t team, ncclCftLeId mcLeId0, ncclCftLeId mcLeId1) {
+  auto* t = static_cast<ncclDevrTeam*>(std::malloc(sizeof(ncclDevrTeam) + team.nRanks * sizeof(int)));
+  t->team = team;
+  t->ucLeId[0] = t->ucLeId[1] = NCCL_LE_ID_INVALID;
+  t->mcLeId[0] = mcLeId0;
+  t->mcLeId[1] = mcLeId1;
+  for (int i = 0; i < team.nRanks; i++) t->worldRankList[i] = i;
+  return DevrTeamPtr(t);
+}
+
 class NcclCftDevRuntimeMicrotest : public ::testing::Test {
 protected:
   std::unique_ptr<ncclComm> commStorage;
@@ -43,8 +62,11 @@ protected:
   void SetUp() override {
     commStorage = std::make_unique<ncclComm>(); // value-initialised: POD members zeroed
     comm = commStorage.get();
-    // bigSize != 0 makes the real ncclDevrInitOnce (called by ncclTeamCft/
-    // ncclTeamCftMultimem via core.cc) a no-op that leaves devrState as set below.
+    // Load-bearing only for computeCftSize/computeCftMcSize, which check
+    // devrState.bigSize themselves: ncclDevrInitOnce in this binary is the
+    // always-succeeds fake seam at fakes/dev_runtime_fakes.cc, which never
+    // reads devrState, so bigSize is inert on the ncclTeamCft/
+    // ncclTeamCftMultimem path.
     comm->devrState.bigSize = 1;
   }
 
@@ -170,12 +192,15 @@ TEST_F(NcclCftDevRuntimeMicrotest, SymUnbindTeamLe_AlwaysSucceedsAndConsultsWinR
   auto mem = std::make_unique<ncclDevrMemory>();
   mem->winFlags = 0x3c;
   int sawWinFlags = -1;
-  g_devrWinRegEnabled = [&](int winFlags, ncclDevrRegisterCapability) {
+  ncclDevrRegisterCapability sawCapability = ncclDevrRegisterAll;
+  g_devrWinRegEnabled = [&](int winFlags, ncclDevrRegisterCapability capability) {
     sawWinFlags = winFlags;
+    sawCapability = capability;
     return true;
   };
   EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/3), ncclSuccess);
   EXPECT_EQ(sawWinFlags, 0x3c);
+  EXPECT_EQ(sawCapability, ncclDevrRegisterCft);
 }
 
 TEST_F(NcclCftDevRuntimeMicrotest, SymUnbindTeamLe_WinRegDisabled_StillSucceeds) {
@@ -214,32 +239,44 @@ TEST_F(NcclCftDevRuntimeMicrotest, SymTeamObtainMcLe_UnsupportedOnThisPlatform_R
             ncclInvalidUsage);
 }
 
-// ---------------------------------------------------------------------------
-// ncclGetMultimemDeviceLeInfo
-// ---------------------------------------------------------------------------
-
-class NcclGetMultimemDeviceLeInfoTest : public NcclCftDevRuntimeMicrotest {
+// Shared window/comm-resolution setup for all three ncclGet*DeviceLeInfo
+// query functions; BigOffset() keeps each derived suite's winHost.bigOffset
+// distinct, same reasoning as the handle.* field checks elsewhere in this
+// file: a test mixing up which window it is reading would get a visibly
+// wrong offset back instead of an accidental match.
+class NcclGetDeviceLeInfoTestBase : public NcclCftDevRuntimeMicrotest {
 protected:
   ncclDevrWindow winHost{};
   int dummyWindowTarget = 0;
   ncclWindow_t window = reinterpret_cast<ncclWindow_t>(&dummyWindowTarget);
 
+  virtual size_t BigOffset() const = 0;
+
   void SetUp() override {
     NcclCftDevRuntimeMicrotest::SetUp();
     comm->gpuCftSupport = 13030;
-    winHost.bigOffset = 0x1000;
+    winHost.bigOffset = BigOffset();
     g_foundComm = comm;
     g_foundWinHost = &winHost;
     UseFoundCommAndWindow();
   }
 };
 
+// ---------------------------------------------------------------------------
+// ncclGetMultimemDeviceLeInfo
+// ---------------------------------------------------------------------------
+
+class NcclGetMultimemDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
+protected:
+  size_t BigOffset() const override { return 0x1000; }
+};
+
 TEST_F(NcclGetMultimemDeviceLeInfoTest, NullArgs_RejectedByPtrCheckBeforeAnyLookup) {
   ncclCftLeId leId;
   size_t leOffset;
-  EXPECT_NE(ncclGetMultimemDeviceLeInfo(nullptr, 0, &leId, &leOffset), ncclSuccess);
-  EXPECT_NE(ncclGetMultimemDeviceLeInfo(window, 0, nullptr, &leOffset), ncclSuccess);
-  EXPECT_NE(ncclGetMultimemDeviceLeInfo(window, 0, &leId, nullptr), ncclSuccess);
+  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(nullptr, 0, &leId, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, nullptr, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, nullptr), ncclInvalidArgument);
 }
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
@@ -283,25 +320,25 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SymTeamObtainFails_PropagatesErrorViaNcc
 TEST_F(NcclGetMultimemDeviceLeInfoTest, SuccessPath_ReadsMcLeIdByCountedBitAndOffsetsByBigOffsetPlusOffset) {
   comm->devrState.cftMcSize = 4;
   comm->devrState.cftMcSelf = 1;
-  winHost.winFlags = NCCL_WIN_CFT_COUNTED;
+  // NCCL_WIN_COLL_SYMMETRIC is ORed in alongside NCCL_WIN_CFT_COUNTED so this
+  // exercises `winFlags & NCCL_WIN_CFT_COUNTED` as a real bit test: every
+  // other winFlags value elsewhere in this file is exactly
+  // NCCL_WIN_CFT_COUNTED or exactly 0, which `winFlags == NCCL_WIN_CFT_COUNTED`
+  // would also satisfy.
+  winHost.winFlags = NCCL_WIN_CFT_COUNTED | NCCL_WIN_COLL_SYMMETRIC;
 
-  // ncclDevrTeam has a flexible array member (worldRankList[]), which clang
-  // refuses to let a lambda capture directly (even by reference) -- capture a
-  // pointer to it instead.
-  ncclDevrTeam capturedTeamStorage{};
-  capturedTeamStorage.mcLeId[0] = 111;
-  capturedTeamStorage.mcLeId[1] = 222; // counted == true selects this one
-  ncclDevrTeam* capturedTeamPtr = &capturedTeamStorage;
+  DevrTeamPtr team = MakeDevrTeam(ncclTeam_t{4, 1, 1}, /*mcLeId0=*/111, /*mcLeId1=*/222); // counted==true selects mcLeId1
+  ncclDevrTeam* teamPtr = team.get();
   bool sawNeedBarrierRequested = false;
-  g_symTeamObtain = [&, capturedTeamPtr](ncclComm*, ncclTeam team, bool multimem, bool counted, bool wantsLeUc,
-                                        bool wantsLeMc, ncclDevrTeam** outTeam, bool* needBarrier) {
+  g_symTeamObtain = [&, teamPtr](ncclComm*, ncclTeam team, bool multimem, bool counted, bool wantsLeUc,
+                                bool wantsLeMc, ncclDevrTeam** outTeam, bool* needBarrier) {
     EXPECT_FALSE(multimem);
     EXPECT_TRUE(counted); // from winHost.winFlags & NCCL_WIN_CFT_COUNTED
     EXPECT_FALSE(wantsLeUc);
     EXPECT_TRUE(wantsLeMc);
     EXPECT_EQ(team.nRanks, 4);
     EXPECT_EQ(team.rank, 1);
-    *outTeam = capturedTeamPtr;
+    *outTeam = teamPtr;
     *needBarrier = true;
     sawNeedBarrierRequested = true;
     return ncclSuccess;
@@ -320,14 +357,12 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, UncountedWindow_ReadsMcLeIdZeroSlot) {
   comm->devrState.cftMcSelf = 0;
   winHost.winFlags = 0; // not counted
 
-  ncclDevrTeam capturedTeamStorage{};
-  capturedTeamStorage.mcLeId[0] = 55;
-  capturedTeamStorage.mcLeId[1] = 66;
-  ncclDevrTeam* capturedTeamPtr = &capturedTeamStorage;
-  g_symTeamObtain = [capturedTeamPtr](ncclComm*, ncclTeam, bool, bool counted, bool, bool, ncclDevrTeam** outTeam,
-                                     bool* needBarrier) {
+  DevrTeamPtr team = MakeDevrTeam(ncclTeam_t{4, 0, 1}, /*mcLeId0=*/55, /*mcLeId1=*/66);
+  ncclDevrTeam* teamPtr = team.get();
+  g_symTeamObtain = [teamPtr](ncclComm*, ncclTeam, bool, bool counted, bool, bool, ncclDevrTeam** outTeam,
+                             bool* needBarrier) {
     EXPECT_FALSE(counted);
-    *outTeam = capturedTeamPtr;
+    *outTeam = teamPtr;
     *needBarrier = false; // no barrier requested this time
     return ncclSuccess;
   };
@@ -342,27 +377,18 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, UncountedWindow_ReadsMcLeIdZeroSlot) {
 // ncclGetCftDeviceLeInfo
 // ---------------------------------------------------------------------------
 
-class NcclGetCftDeviceLeInfoTest : public NcclCftDevRuntimeMicrotest {
+class NcclGetCftDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
-  ncclDevrWindow winHost{};
-  int dummyWindowTarget = 0;
-  ncclWindow_t window = reinterpret_cast<ncclWindow_t>(&dummyWindowTarget);
-
-  void SetUp() override {
-    NcclCftDevRuntimeMicrotest::SetUp();
-    comm->gpuCftSupport = 13030;
-    winHost.bigOffset = 0x2000;
-    g_foundComm = comm;
-    g_foundWinHost = &winHost;
-    UseFoundCommAndWindow();
-  }
+  size_t BigOffset() const override { return 0x2000; }
 };
 
 TEST_F(NcclGetCftDeviceLeInfoTest, NullArgs_RejectedByPtrCheck) {
   ncclTeam_t cftTeam{4, 0, 1};
   ncclCftLeId leId;
   size_t leOffset;
-  EXPECT_NE(ncclGetCftDeviceLeInfo(nullptr, 0, 0, cftTeam, &leId, &leOffset), ncclSuccess);
+  EXPECT_EQ(ncclGetCftDeviceLeInfo(nullptr, 0, 0, cftTeam, &leId, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, nullptr, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetCftDeviceLeInfo(window, 0, 0, cftTeam, &leId, nullptr), ncclInvalidArgument);
 }
 
 TEST_F(NcclGetCftDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
@@ -400,8 +426,9 @@ TEST_F(NcclGetCftDeviceLeInfoTest, BaseLeIdNotYetCreated_ReturnsInvalidUsage) {
 }
 
 TEST_F(NcclGetCftDeviceLeInfoTest, SuccessPath_AddsFlatTeamRankAndPeerOffsetToBaseLeId) {
-  // ncclTeamCft(comm, FLAT) reads straight from devrState.cftSize/cftSelf (bigSize != 0
-  // from the fixture keeps ncclDevrInitOnce a no-op).
+  // ncclTeamCft(comm, FLAT) reads straight from devrState.cftSize/cftSelf; it never
+  // consults devrState.bigSize itself (that's load-bearing only for computeCftSize/
+  // computeCftMcSize -- see NcclCftDevRuntimeMicrotest::SetUp's comment).
   comm->devrState.cftSize = 8;
   comm->devrState.cftSelf = 3;
   comm->devrState.le[0].baseId = 1000;
@@ -435,21 +462,18 @@ TEST_F(NcclGetCftDeviceLeInfoTest, CountedWindow_UsesCountedBaseLeIdSlot) {
 // ncclGetPeerDeviceLeInfo
 // ---------------------------------------------------------------------------
 
-class NcclGetPeerDeviceLeInfoTest : public NcclCftDevRuntimeMicrotest {
+class NcclGetPeerDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
-  ncclDevrWindow winHost{};
-  int dummyWindowTarget = 0;
-  ncclWindow_t window = reinterpret_cast<ncclWindow_t>(&dummyWindowTarget);
-
-  void SetUp() override {
-    NcclCftDevRuntimeMicrotest::SetUp();
-    comm->gpuCftSupport = 13030;
-    winHost.bigOffset = 0x3000;
-    g_foundComm = comm;
-    g_foundWinHost = &winHost;
-    UseFoundCommAndWindow();
-  }
+  size_t BigOffset() const override { return 0x3000; }
 };
+
+TEST_F(NcclGetPeerDeviceLeInfoTest, NullArgs_RejectedByPtrCheck) {
+  ncclCftLeId leId;
+  size_t leOffset;
+  EXPECT_EQ(ncclGetPeerDeviceLeInfo(nullptr, 0, 0, &leId, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, nullptr, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, 0, &leId, nullptr), ncclInvalidArgument);
+}
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, WindowNotCftRegistered_ReturnsInvalidUsage) {
   g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
@@ -476,14 +500,42 @@ TEST_F(NcclGetPeerDeviceLeInfoTest, FindCommAndHostWindowFails_PropagatesErrorVi
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, PeerOutsideFlatTeamBoundaries_ReturnsInvalidArgument) {
   // flatStart = comm->rank - flatTeam.rank; valid range is [flatStart, flatStart + nRanks).
+  // The boundary check runs before baseLeId is ever read, so no valid baseId is needed for
+  // the two out-of-range probes below. 20 and 7 alone don't pin either exact edge though: a
+  // relaxed `>=` -> `>` survives because 12 (the first rejected value above the range) is
+  // never probed, and a relaxed `<` -> `<=` survives because 8 (the first accepted value) is
+  // never probed either. 12 closes the first; 8 (further down, where it can succeed) closes
+  // the second.
   comm->rank = 10;
   comm->devrState.cftSize = 4;
   comm->devrState.cftSelf = 2; // flatTeam.rank == 2 -> flatStart == 8, valid peers in [8, 12)
-  comm->devrState.le[0].baseId = 1; // must be valid so we reach the boundary check
   ncclCftLeId leId;
   size_t leOffset;
   EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/20, &leId, &leOffset), ncclInvalidArgument);
   EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/7, &leId, &leOffset), ncclInvalidArgument);
+  EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/12, &leId, &leOffset), ncclInvalidArgument);
+
+  // peerWorld=8 is the lower inclusive edge: it must succeed, not reject. This path proceeds
+  // past the boundary check into the baseLeId read, so (unlike the three probes above) it
+  // needs a valid baseId.
+  comm->devrState.le[0].baseId = 1;
+  ASSERT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/8, &leId, &leOffset), ncclSuccess);
+  EXPECT_EQ(leId, 1u); // baseLeId(1) + flatTeam.rank(2) + (peerWorld(8) - comm->rank(10)) == 1
+}
+
+TEST_F(NcclGetPeerDeviceLeInfoTest, CountedWindow_UsesCountedBaseLeIdSlot) {
+  comm->rank = 10;
+  comm->devrState.cftSize = 4;
+  comm->devrState.cftSelf = 2; // flatStart = 8, valid peers in [8, 12)
+  comm->devrState.le[0].baseId = NCCL_LE_ID_INVALID; // uncounted slot deliberately unset
+  comm->devrState.le[1].baseId = 2000;               // counted slot is what must be read
+  winHost.winFlags = NCCL_WIN_CFT_COUNTED;
+
+  ncclCftLeId leId = 0;
+  size_t leOffset = 0;
+  // *leId = baseLeId + flatTeam.rank + (peerWorld - comm->rank) = 2000 + 2 + (11 - 10) = 2003
+  ASSERT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/11, &leId, &leOffset), ncclSuccess);
+  EXPECT_EQ(leId, 2003u);
 }
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, BaseLeIdNotYetCreated_ReturnsInvalidUsage) {

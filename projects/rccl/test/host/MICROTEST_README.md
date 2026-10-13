@@ -253,9 +253,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `nccl-cft-dev-runtime-test.cc`); suites `NcclCftDevRuntimeMicrotest.*`,
   `NcclGetMultimemDeviceLeInfoTest.*`, `NcclGetCftDeviceLeInfoTest.*`,
   `NcclGetPeerDeviceLeInfoTest.*` (all caught by the `Nccl*` pattern). Its own
-  binary for the same reason as `rccl-UnitTestsMicroNcclDeviceCore`: 6 of
-  core.cc's 7 functions are faked elsewhere in `rccl-UnitTestsMicro`. core.cc
-  is compiled for real here too (not faked) because
+  binary because `rccl-UnitTestsMicro`'s `fakes/dev_runtime_micro_fakes.cc`,
+  `fakes/devcomm_fakes.cc`, and `gin-host-test.cc` between them fake 6 of
+  core.cc's 7 functions. core.cc is compiled for real here too (not faked)
+  because
   `ncclGetMultimemDeviceLeInfo`/`ncclGetCftDeviceLeInfo`/`ncclGetPeerDeviceLeInfo`
   call `ncclTeamCft`/`ncclTeamCftMultimem`. Links `fakes/dev_runtime_fakes.cc`
   for core.cc's `ncclDevrInitOnce`, and the new `fakes/cft_dev_runtime_fakes.cc`
