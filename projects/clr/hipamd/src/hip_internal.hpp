@@ -508,9 +508,8 @@ namespace hip {
   private:
     ~Stream();
 
-    //! Null-stream signal this stream waits on; retained so it can't be recycled.
-    void* blocked_on_signal_ = nullptr;
-    mutable std::mutex blocked_on_lock_;
+    //! Null-stream signal this stream waits on; retained so HwQueueTracker won't re-arm it.
+    std::atomic<void*> blocked_on_signal_{nullptr};
 
     /// Generate ID for stream capture unique over the lifetime of the process
     static uint64_t GenerateCaptureID() {
