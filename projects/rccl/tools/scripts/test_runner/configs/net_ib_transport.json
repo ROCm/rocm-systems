@@ -15,7 +15,8 @@
     "thor2": "--oversubscribe --mca plm_rsh_agent srun --mca oob_tcp_if_include eno8303 --mca btl_tcp_if_include eno8303 --mca btl ^openib --bind-to none"
   },
   "env_variables": {
-    "NCCL_DEBUG": "INFO"
+    "NCCL_DEBUG": "INFO",
+    "NCCL_SOCKET_IFNAME": "^lo,docker,veth,virbr,usb"
   },
   "system_env_variables": {
     "mellanox": {
