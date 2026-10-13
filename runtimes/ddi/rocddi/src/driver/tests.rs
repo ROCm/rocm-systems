@@ -249,14 +249,17 @@ fn non_gpu_allocation_owner_preserves_cleanup_retry() -> Result<(), Error> {
     let driver = Shared::new(fake)?;
     let device_state = driver.activate(&driver.endpoint())?;
 
-    let mut allocation = DriverAllocation::<FakeDriver>::new(driver.allocate_owned(
-        &device_state,
-        &[],
-        MemoryKind::System,
-        4096,
-        4096,
-        DeviceAccess::READ,
-    )?);
+    let mut allocation = DriverAllocation::<FakeDriver>::new(
+        driver.clone(),
+        driver.allocate_owned(
+            &device_state,
+            &[],
+            MemoryKind::System,
+            4096,
+            4096,
+            DeviceAccess::READ,
+        )?,
+    );
     assert_eq!(allocation.info().device_address, 0x10000);
     allocation.check()?;
     assert_eq!(allocation.device_address(&device_state)?, 0x10000);
@@ -266,6 +269,25 @@ fn non_gpu_allocation_owner_preserves_cleanup_retry() -> Result<(), Error> {
     allocation.free()?;
     drop(allocation);
     assert_eq!(allocation_drops.load(Ordering::Relaxed), 1);
+    Ok(())
+}
+
+#[test]
+fn failed_allocation_drop_retains_the_driver_for_native_quarantine() -> Result<(), Error> {
+    let driver = Shared::new(FakeDriver::new())?;
+    let allocation = DriverAllocation::<FakeDriver>::new(
+        driver.clone(),
+        Owned::new(FakeAllocation {
+            device_id: ID,
+            drops: driver.allocation_drops.clone(),
+            fail_free: true,
+            released: false,
+        })?,
+    );
+
+    drop(allocation);
+    assert_eq!(Shared::strong_count(&driver), 2);
+    assert_eq!(driver.allocation_drops.load(Ordering::Relaxed), 1);
     Ok(())
 }
 

@@ -16,6 +16,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
+* Fixed a stray RASL picture being output from the first CRA picture after an application signals end of sequence with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
 * Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content. The decoder silently downgrades a 16-bit `output_format` to its 8-bit counterpart when `bit_depth_minus_8` is 0, so a caller that trusted the mask would misread an 8-bit surface as 16-bit.
 

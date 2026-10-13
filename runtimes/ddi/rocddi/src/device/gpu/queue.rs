@@ -326,7 +326,7 @@ impl GpuDevice<'_> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
         Ok(Queue {
-            inner: unsafe { self.device.driver_state.create_queue(desc)? },
+            inner: unsafe { self.driver.create_queue(desc)? },
         })
     }
 
