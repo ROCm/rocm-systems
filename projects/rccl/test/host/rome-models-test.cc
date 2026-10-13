@@ -127,13 +127,20 @@ TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsReject
 
   // Overruns while copying a parenthesis.
   const std::string parens(rowLen, '(');
-  // Overruns on the second digit of "14": the parentheses fill the row up to its last
-  // usable byte. The trailing ')' keeps the number's end-of-token scan inside the string.
-  const std::string endsInNumber = std::string(rowLen - 2, '(') + "14)";
+  // Overruns while copying a digit of a GPU number: the parentheses fill the row, so the
+  // digits of "14" land beyond it. The trailing ')' keeps the number's end-of-token scan
+  // inside the string.
+  const std::string endsInNumber = std::string(rowLen - 1, '(') + "14)";
 
   for (const std::string& tooLong : {parens, endsInNumber}) {
     SCOPED_TRACE("segment length " + std::to_string(tooLong.size()));
+    const char sentinel = 'Z';
+    graph()->treeBase[1][0] = sentinel;
+
     EXPECT_EQ(parseGraphLight(tooLong.c_str(), system(), graph(), nullptr), ncclInvalidUsage);
+    // Returning an error is not enough: the row after this one must be untouched, or the
+    // overrun happened and was merely reported afterwards.
+    EXPECT_EQ(graph()->treeBase[1][0], sentinel);
   }
 }
 
