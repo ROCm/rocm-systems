@@ -257,10 +257,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   and `ras-diagnostics-gpu-test.cc` defines its own NVML seams; the TU supplies
   its own `ncclDebugLog` and `g_loadParam`, so no shared fakes are linked.
   `roctx.cc` gates its `roctxRangePushA`/`roctxRangePop` calls on
-  `ROCTX_ENABLE` at the preprocessor: the base binary covers the WARN fallback,
-  and the standalone-only `-roctx` variant defines `ROCTX_ENABLE` against the
-  stand-in `fakes/roctx_include/roctracer/roctx.h`, with the test TU recording
-  each push and pop.
+  `ROCTX_ENABLE` at the preprocessor. Standalone, the base binary covers the
+  WARN fallback and the standalone-only `-roctx` variant defines `ROCTX_ENABLE`
+  against the stand-in `fakes/roctx_include/roctracer/roctx.h`, with the test TU
+  recording each push and pop. In-tree, the base binary inherits `ROCTX_ENABLE`
+  from the `rccl` target whenever roctracer is found, so it compiles the
+  roctracer arm instead and no in-tree binary builds the WARN fallback.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
