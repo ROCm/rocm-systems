@@ -181,6 +181,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed AMD AI NIC values that can't be read showing as numbers**.  
   - A port that is down showed carrier and link speed 0, and a NIC with no NUMA node showed node 255. Unknown AI NIC values are now the field's maximum value in the C API and `N/A` in `amd-smi` and the Python interface.
 
+- **Fixed `amd-smi static --json` printing nothing when AI NICs are selected with `-N`**.  
+  - It now prints the same `nic_data` JSON that `amd-smi static --json` prints without `-N`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
