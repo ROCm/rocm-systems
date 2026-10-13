@@ -67,8 +67,6 @@ RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
 RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 // -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
 RCCL_PARAM(ForceCeAllReduce, "FORCE_CE_ALLREDUCE", -1);
-// -1 = auto (enabled on gfx1250, disabled elsewhere); 0 = disabled; 1 = bypass CTAPolicy check.
-RCCL_PARAM(ForceCeColl, "FORCE_CE_COLL", -1);
 RCCL_PARAM(CeArMaxMsgBytes,    "CE_AR_2SHOT_MAX_BYTES",   -1);  // -1 = use ceArMax from arch table (2-shot)
 RCCL_PARAM(CeArStagingBytes,   "CE_AR_STAGING_BYTES",   -1);  // -1 = use NCCL_CE_AR_STAGING_BYTES default
 RCCL_PARAM(CeArRegMaxMsgBytes, "CE_AR_REG_MAX_MSG_BYTES", -1); // -1 = use ceArRegMax (registered)
@@ -1974,7 +1972,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const bool ceAvailable =
         !ceCapturing && ncclCeAvailable(comm, ncclFuncAllGather, (int)ncclSum, datatype, winRegType, sendWin, recvWin);
       if (ceAvailable && !hasSysmemSegment &&
-          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || rcclForceCeCollEnabled(comm) ||
+          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) ||
            (!symEligible && rcclAllGatherCeRegisteredWindowTab(archTable, totalBytes, winRegType, ceCapturing)))) {
         decision->algo = RCCL_CE_REGISTERED;
         return ncclSuccess;
