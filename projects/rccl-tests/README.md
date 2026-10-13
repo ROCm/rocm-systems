@@ -125,6 +125,14 @@ For MPI (using MPICH), you need to use a command similar to the following:
 mpirun.mpich -np 8 -env NCCL_DEBUG=VERSION -env HSA_NO_SCRATCH_RECLAIM=1 ./build/all_reduce_perf -b 8M -e 128M -i 8388608 -g 1 -d bfloat16
 ```
 
+#### Socket encryption (TLS)
+
+`NCCL_TESTS_TLS_PSK=<key>` makes every process call `ncclSetEncryption()` with this pre-shared key
+before the communicator is created, so RCCL's bootstrap, proxy and socket-transport TCP traffic is
+TLS-encrypted. The key must be at least 32 characters and identical on all ranks, and RCCL must be
+built with `-DTLS_BACKEND=OPENSSL3` (otherwise communicator creation fails instead of falling back
+to plaintext). Requires RCCL 2.32 or newer; the variable is ignored on older versions.
+
 #### Grouped-broadcast (AllGatherV) mode
 
 `RCCL_TESTS_ALLGATHERV_ENABLE=1` makes `broadcast_perf` issue `nranks` broadcasts with distinct
