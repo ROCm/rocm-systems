@@ -199,6 +199,7 @@ def _build_args():
         mem_carveout=False,
         partition=False,
         ampp=True,
+        numa=False,
     )
 
 
