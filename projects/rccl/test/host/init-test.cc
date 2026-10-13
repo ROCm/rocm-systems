@@ -1297,18 +1297,12 @@ TEST_F(InitMicrotest, CommShrink_ZeroExcludeCount_ReturnsInvalidArgumentViaExitP
   EXPECT_EQ(nullptr, out) << "a failed shrink must not hand back a comm";
 }
 
-// LATENT BUG (init.cc:4113): PtrCheck rejects a null newcomm by jumping to exit:, which derefs *newcomm and SEGFAULTs.
-TEST_F(InitMicrotest, CommShrink_NullNewcomm_DiesOnNullDeref) {
+TEST_F(InitMicrotest, CommShrink_NullNewcomm_ReturnsInvalidArgument) {
   ReadyComm rc;
   int exclude[1] = {0};
-  // Match the message too: the signal alone would also accept a crash arriving BEFORE the newcomm validation.
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        (void)ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
-                                  /*config=*/nullptr, /*shrinkFlags=*/0);
-      },
-      DEATH_BY_SEGV, "newcomm argument is NULL");
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclCommShrink_impl(rc.get(), exclude, /*excludeRanksCount=*/1, nullptr,
+                                /*config=*/nullptr, /*shrinkFlags=*/0));
 }
 
 // Full strings, not substrings: a prefix check cannot see a changed NCCL_DEBUG level or a dropped "(run with)" hint.
@@ -1707,8 +1701,16 @@ TEST_F(InitMicrotest, FillInfo_PropertiesFault_DoesNotAllocate) {
 TEST_F(InitMicrotest, FillInfo_FreeFault_ReturnsUnhandledCudaError) {
   auto comm = std::make_unique<ncclComm>();
   ncclPeerInfo info{};
+  void* allocation = nullptr;
+  auto realAlloc = g_hipExtMallocWithFlags;
+  g_hipExtMallocWithFlags = [&](void** ptr, std::size_t size, unsigned flags) {
+    const hipError_t result = realAlloc(ptr, size, flags);
+    if (result == hipSuccess) allocation = *ptr;
+    return result;
+  };
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
   EXPECT_EQ(ncclUnhandledCudaError, fillInfo(comm.get(), &info, 0));
+  std::free(allocation);  // the injected hipFree failure intentionally leaves ownership with the test
 }
 
 namespace {
@@ -2009,7 +2011,38 @@ TEST_F(InitMicrotest, CheckHostUncacheMemSetting_Cached_Gfx942_ReturnsSuccess) {
 #endif
 
 namespace {
-std::unique_ptr<ncclComm> FreshComm() { return std::unique_ptr<ncclComm>(new ncclComm{}); }
+// commAlloc/devCommSetup deliberately leave communicator-owned allocations live for commFree.
+// These direct microtests do not run through the public init job that normally owns that cleanup,
+// so give their comms the same lifetime as production comms instead of shallow-deleting ncclComm.
+struct AllocedCommDeleter {
+  void operator()(ncclComm* comm) const {
+    if (!comm) return;
+    if (comm->nRanks == 0) {
+      std::free(comm->archName);  // ncclCommInitRankFunc may fail before commAlloc after strdup
+      std::free(comm);  // commAlloc rejected the arguments before constructing any state.
+      return;
+    }
+
+    uint32_t abortFlag = 0;
+    int abortRef = 2;  // keep these stack-backed test flags out of commFree's free branch
+    comm->abortFlag = &abortFlag;
+    comm->abortFlagRefCount = &abortRef;
+    const ncclResult_t result = commFree(comm);
+    if (result != ncclSuccess) {
+      ADD_FAILURE() << "test communicator cleanup failed with ncclResult_t " << static_cast<int>(result);
+    }
+  }
+};
+using AllocedCommPtr = std::unique_ptr<ncclComm, AllocedCommDeleter>;
+
+AllocedCommPtr FreshComm() {
+  auto* comm = static_cast<ncclComm*>(std::calloc(1, sizeof(ncclComm)));
+  if (comm) {
+    // A failure before commAlloc's channel initialization must still be safe to reclaim.
+    for (int c = 0; c < MAXCHANNELS; ++c) comm->channels[c].id = -1;
+  }
+  return AllocedCommPtr(comm);
+}
 }  // namespace
 
 TEST_F(InitMicrotest, CommAlloc_NdevZero_ReturnsInvalidArgument) {
@@ -2088,15 +2121,16 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
 
 namespace {
 // void + out-param, not a return value: gtest's ASSERT_* only unwinds a void-returning function.
-void AllocedComm(std::unique_ptr<ncclComm>& comm, int ndev = 8, int rank = 0) {
-  comm = std::unique_ptr<ncclComm>(new ncclComm{});
+void AllocedComm(AllocedCommPtr& comm, int ndev = 8, int rank = 0) {
+  comm = FreshComm();
+  ASSERT_NE(nullptr, comm);
   ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), /*parent=*/nullptr, ndev, rank));
 }
 }  // namespace
 
 TEST_F(InitMicrotest, DevCommSetup_HappyPath_ReturnsSuccessAndSetsDevComm) {
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
   EXPECT_NE(nullptr, comm->devComm);
@@ -2105,7 +2139,7 @@ TEST_F(InitMicrotest, DevCommSetup_HappyPath_ReturnsSuccessAndSetsDevComm) {
 
 TEST_F(InitMicrotest, DevCommSetup_AsyncOpFails_ReturnsError) {
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   g_hipAsyncOpsResult = hipErrorInvalidValue;    // first calloc-async capture-mode fails
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
@@ -2113,7 +2147,7 @@ TEST_F(InitMicrotest, DevCommSetup_AsyncOpFails_ReturnsError) {
 
 TEST_F(InitMicrotest, DevCommSetup_HostAllocFails_ReturnsError) {
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   g_hipHostMalloc = [](void**, std::size_t, unsigned) { return hipErrorMemoryAllocation; };
   EXPECT_NE(ncclSuccess, devCommSetup(comm.get()));
@@ -2490,6 +2524,19 @@ class TransportsRankComm {
       g_ncclTopoGetSystem = [](ncclComm*, ncclTopoSystem**, const char*) { return ncclRemoteError; };
     }
     free(comm_->peerInfo);
+    if (comm_->nodeRanks) {
+      for (int n = 0; n < comm_->nNodes; ++n) free(comm_->nodeRanks[n].localRankToRank);
+      free(comm_->nodeRanks);
+    }
+    free(comm_->rankToNode);
+    free(comm_->rankToLocalRank);
+    free(comm_->collNetHeads);
+    free(comm_->clique.ranks);
+    free(comm_->topParentRanks);
+    free(comm_->topParentLocalRanks);
+    free(comm_->gproxyConn);
+    free(comm_->connectSend);
+    free(comm_->connectRecv);
   }
   TransportsRankComm(const TransportsRankComm&) = delete;
   TransportsRankComm& operator=(const TransportsRankComm&) = delete;
@@ -3349,16 +3396,15 @@ TEST_F(InitMicrotest, InitTransportsRank_CollNetPluginPresent_KeepsCollnetEnable
   EXPECT_EQ(1, g_ncclNvlsInitCalls);            // and execution really did carry on past :1614
 }
 
-TEST_F(InitMicrotest, InitTransportsRank_NvlsInitFails_ReturnsWithoutRunningCleanup) {
+TEST_F(InitMicrotest, InitTransportsRank_NvlsInitFails_PropagatesAndRunsCleanup) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   c.installTopo();
   g_ncclNvlsInitResult = ncclSystemError;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
   EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, g_ncclNvlsInitCalls);
-  // :1618 is a bare NCCLCHECK, not NCCLCHECKGOTO -- the second cleanup bypass in this function.
-  // :1608 already called ncclOsCpuCount once; reaching exit: would make it two.
-  EXPECT_EQ(1, g_ncclOsCpuCountCalls);
+  // :1608 already called ncclOsCpuCount once; exit: restores affinity and makes it two.
+  EXPECT_EQ(2, g_ncclOsCpuCountCalls);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_ComputesHostCountAndHostIndex) {
@@ -3909,22 +3955,14 @@ TEST_F(InitMicrotest, SetCommAbortFlags_LargePositiveValue_StoredVerbatim) {
   EXPECT_EQ(0x7F00FF01u, c.childDev());
 }
 
-// LATENT COUPLING (init.cc:3889): childAbortFlagDev is stored under childAbortFlag's null check, so a
-// non-null childAbortFlag paired with a null childAbortFlagDev writes through NULL. Differential with
-// SetCommAbortFlags_ChildAttached_WritesAllFourFlags: identical state but that pointer, which survives.
-TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDevUnderNonNullChildFlag_DiesOnNullDeref) {
-  EXPECT_EXIT(
-      {
-        DisableCoreDumpsForExpectedCrash();
-        AbortFlagsComm c;
-        c.get()->childAbortFlagDev = nullptr;
-        fprintf(stderr, "setCommAbortFlags-reached-with-null-childAbortFlagDev\n");
-        fflush(stderr);
-        (void)setCommAbortFlags(c.get(), 1);
-        fprintf(stderr, "setCommAbortFlags-returned-without-dereferencing-null\n");
-        _exit(0);  // a non-crashing build exits 0, matching neither DEATH_BY_SEGV alternative
-      },
-      DEATH_BY_SEGV, "setCommAbortFlags-reached-with-null-childAbortFlagDev");
+TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDev_SkipsDetachedChildPair) {
+  AbortFlagsComm c;
+  c.get()->childAbortFlagDev = nullptr;
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(1u, c.parent());
+  EXPECT_EQ(1u, c.parentDev());
+  EXPECT_EQ(AbortFlagsComm::kChildSentinel, c.child());
 }
 // ---------------------------------------------------------------------------
 // ncclGetUniqueId_impl (init.cc:358) -- the standalone public-API id minter.
@@ -5224,7 +5262,7 @@ TEST_F(InitMicrotest, CommFree_DestructorChain_RunsEveryNodeHeadToTail) {
   EXPECT_EQ(std::vector<int>({11, 22, 33}), ran);
 }
 
-TEST_F(InitMicrotest, CommFree_DestructorFails_PropagatesErrorAndStopsWalk) {
+TEST_F(InitMicrotest, CommFree_DestructorFails_PropagatesErrorAndFinishesCleanup) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
@@ -5239,8 +5277,7 @@ TEST_F(InitMicrotest, CommFree_DestructorFails_PropagatesErrorAndStopsWalk) {
   comm->destructorHead = &nodes[0].base;
 
   EXPECT_EQ(ncclSystemError, commFree(comm));
-  EXPECT_EQ(std::vector<int>({44}), ran);
-  free(comm);
+  EXPECT_EQ(std::vector<int>({44, 55}), ran);
 }
 
 TEST_F(InitMicrotest, CommFree_SharedAbortFlagReference_DecrementsRefCountByOne) {
@@ -5636,6 +5673,7 @@ struct Teardown_ChainMember {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRefCount = 2;
+  int localRankToRank = 0;
   ncclTuner_t tuner{};
   Teardown_TunerRecord rec;
 };
@@ -5647,8 +5685,8 @@ void BuildCommChain(Teardown_ChainMember* members, int n) {
     members[i].comm->rank = i;
     members[i].comm->localRank = 0;
     members[i].comm->localRanks = 1;
-    ASSERT_EQ(ncclSuccess, ncclCalloc(&members[i].comm->localRankToRank, 1));
-    members[i].comm->localRankToRank[0] = i;
+    members[i].localRankToRank = i;
+    members[i].comm->localRankToRank = &members[i].localRankToRank;
     ASSERT_EQ(ncclSuccess, ncclCalloc(&members[i].comm->peerInfo, n));
     members[i].comm->peerInfo[i].hostHash = 1;
     members[i].comm->intraRanks = n;
@@ -6404,7 +6442,7 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
   EXPECT_EQ(0, symk.calls);
 }
 
-TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {
+TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAfterTeardown) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
   int abortRef = 2;
@@ -6414,8 +6452,7 @@ TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown
 
   EXPECT_EQ(ncclInternalError, commFree(comm));
   EXPECT_EQ(1, symk.calls);
-  EXPECT_EQ(2, abortRef) << "commFree bailed before the abort-flag refcount drop";
-  ::free(comm);
+  EXPECT_EQ(1, abortRef) << "commFree must finish teardown after reporting the finalize error";
 }
 
 namespace {
@@ -7348,7 +7385,7 @@ ncclResult_t Rank_KernelInitOk(int, int, size_t* maxStackSize) {
 class Rank_JobScene {
  public:
   Rank_JobScene(int nranks, int myrank)
-      : comm_(new ncclComm{}),
+      : comm_(FreshComm()),
         job_(new ncclCommInitRankAsyncJob{}),
         attr_(g_hipDeviceGetAttribute, Rank_DeviceAttribute),
         props_(g_hipGetDeviceProperties, Rank_DeviceProperties) {
@@ -7361,10 +7398,6 @@ class Rank_JobScene {
     job_->newcomm = &published_;
     std::snprintf(job_->funcName, NCCL_COMMINIT_FUNCNAME_LEN, "%s", "Rank_JobScene");
   }
-  ~Rank_JobScene() {
-    free(comm_->archName);
-    free(comm_->peerInfo);
-  }
   Rank_JobScene(const Rank_JobScene&) = delete;
   Rank_JobScene& operator=(const Rank_JobScene&) = delete;
 
@@ -7374,7 +7407,7 @@ class Rank_JobScene {
   ncclResult_t Run() { return ncclCommInitRankFunc(reinterpret_cast<ncclAsyncJob*>(job_.get())); }
 
  private:
-  std::unique_ptr<ncclComm> comm_;
+  AllocedCommPtr comm_;
   std::unique_ptr<ncclCommInitRankAsyncJob> job_;
   ncclComm* published_ = nullptr;
   ScopedHook<hipError_t(int*, hipDeviceAttribute_t, int)> attr_;
@@ -8395,10 +8428,12 @@ TEST_F(InitMicrotest, CommGrow_BoundaryRankMagicMatches_ReplacesUniqueIdWithRece
   EXPECT_EQ(1, spy.rec().nId) << "the received handle stands in for the caller's absent uniqueId";
   ASSERT_TRUE(spy.rec().hasCommId);
   EXPECT_EQ(0, std::memcmp(&spy.rec().commId, &sent, sizeof(sent)));
+  const auto* commIdBytes = reinterpret_cast<const unsigned char*>(&spy.rec().commId);
+  EXPECT_TRUE(std::all_of(commIdBytes + sizeof(sent), commIdBytes + sizeof(ncclUniqueId),
+                          [](unsigned char byte) { return byte == 0; }));
   Rank_ReleaseComm(out, /*ownsAbortResources=*/true);
 }
 
-// LATENT BUG (init.cc:4390): uniqueId aliases the 48-byte stack recvHandle, so this memcpy over-reads to 128.
 TEST_F(InitMicrotest, CommGrow_LastRankIsBoundary_ReceivesHandle) {
   Grow_AllowHostAlloc();
   Grow_ParentComm parent;
@@ -10441,7 +10476,7 @@ TEST_F(InitMicrotest, CommAlloc_NoFaultInjectionRequested_StaysSilent) {
 TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesNotAPowerOfTwo_WarnsAndFallsBackToTheDefault) {
   const int64_t kNotAPowerOfTwo = 3 << 20;
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   SetParams({{"WORK_FIFO_BYTES", kNotAPowerOfTwo}});
   const std::string log = RcclUnitTesting::CaptureLog([&] {
@@ -10455,7 +10490,7 @@ TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesNotAPowerOfTwo_WarnsAndFallsBack
 TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAPowerOfTwo_IsKept) {
   const int64_t kPowerOfTwo = 1 << 20;
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   SetParams({{"WORK_FIFO_BYTES", kPowerOfTwo}});
   const std::string log = RcclUnitTesting::CaptureLog([&] {
@@ -10469,7 +10504,7 @@ TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAPowerOfTwo_IsKept) {
 TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAboveOneGigabyte_IsCappedThere) {
   const int64_t kTwoGigabytes = 1LL << 31;
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   SetParams({{"WORK_FIFO_BYTES", kTwoGigabytes}});
   EXPECT_EQ(ncclSuccess, devCommSetup(comm.get()));
@@ -10479,7 +10514,7 @@ TEST_F(InitMicrotest, DevCommSetup_WorkFifoBytesAboveOneGigabyte_IsCappedThere) 
 TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {
   const int kNRanks = 8;
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
   std::vector<int> denseToUser(kNRanks);
   for (int r = 0; r < kNRanks; r++) {
@@ -10494,7 +10529,7 @@ TEST_F(InitMicrotest, DevCommSetup_CollNetRankMapPresent_CopiesItToTheDevice) {
 
 TEST_F(InitMicrotest, DevCommSetup_NoCollNetRankMap_SkipsTheDeviceCopy) {
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm));
   EXPECT_EQ(nullptr, comm->denseToUserRank);
   g_hipMemcpyAsyncCalls = 0;
@@ -10603,7 +10638,7 @@ TEST_F(InitMicrotest, DevCommSetup_ChannelWithUserRanks_CopiesEachChannelsOwnRan
   const int kNRanks = 8;
   const int kChannelsWithRanks = 2;
   InstallDevCommSetupSuccess();
-  std::unique_ptr<ncclComm> comm;
+  AllocedCommPtr comm;
   ASSERT_NO_FATAL_FAILURE(AllocedComm(comm, kNRanks));
   std::vector<std::vector<int>> userRanks(kChannelsWithRanks, std::vector<int>(kNRanks));
   std::vector<int> devRanks(kChannelsWithRanks * kNRanks);
