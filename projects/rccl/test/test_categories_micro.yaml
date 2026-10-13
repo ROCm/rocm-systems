@@ -41,6 +41,8 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/diagnostics_gpu.cc
+      - "RasDiagnosticsGpuMicrotest.*"
       # ras/peers.cc
       - "RasPeersMicrotest.*"
       # ras/diagnostics_env.cc
@@ -78,6 +80,8 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # plugin/tuner/csv_tuner.cc
+      - "CsvTunerMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -100,6 +104,7 @@ test_categories:
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
