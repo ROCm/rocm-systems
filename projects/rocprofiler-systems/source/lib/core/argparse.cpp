@@ -976,7 +976,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             });
 
         _data.reg.processed_environs.emplace("ai-nics");
-        _data.reg.processed_environs.emplace("sampling_ai-nics");
+        _data.reg.processed_environs.emplace("sampling_ainics");
     }
 #endif
 
