@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include "cachePolicy.h"
 #include "syncPolicy.h"   // shared SyncPolicy encoding (same as tdmCopy.h)
+#include "uniform.h"      // shared warp-uniformity hints (same as tdmCopy.h)
 
 #ifndef __has_include
 #define __has_include(x) 0
@@ -200,21 +201,7 @@ __device__ inline void asyncCopyB128(const uint8_t* global, uint8_t* lds) {
   }
 }
 
-// Every argument of the warp-level entry points is warp-uniform by contract, but the compiler cannot prove it when
-// the caller derives it from threadIdx (e.g. a per-warp offset). Without that proof every loop bound, switch and
-// wait count downstream becomes a per-lane value with EXEC-masked control flow. readfirstlane restores it.
-__device__ inline uint32_t uniform(uint32_t v) {
-  return __builtin_amdgcn_readfirstlane(v);
-}
-__device__ inline uint64_t uniform(uint64_t v) {
-  const uint32_t lo = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v));
-  const uint32_t hi = __builtin_amdgcn_readfirstlane(static_cast<uint32_t>(v >> 32));
-  return (static_cast<uint64_t>(hi) << 32) | lo;
-}
-template <typename T>
-__device__ inline T* uniform(T* p) {
-  return reinterpret_cast<T*>(uniform(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(p))));
-}
+using wave::uniform;
 
 // Bytes moved by a single lane in the widest (b128) access.
 constexpr uint32_t BYTES_PER_LANE_B128 = 16;

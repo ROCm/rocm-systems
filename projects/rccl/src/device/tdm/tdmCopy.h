@@ -62,6 +62,7 @@ THE SOFTWARE.
 
 #include "cachePolicy.h"   // shared CachePolicy encoding (same as asyncCopy.h)
 #include "syncPolicy.h"    // shared SyncPolicy encoding  (same as asyncCopy.h)
+#include "uniform.h"       // shared warp-uniformity hints (same as asyncCopy.h)
 
 // ============================================================================
 //  AVAILABILITY
@@ -421,6 +422,7 @@ __device__ inline void store(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GRO
 __device__ inline void waitTensor0() {
   __builtin_amdgcn_s_wait_tensorcnt(0);
 }
+using wave::uniform;
 // ---- cooperative vector copy of a small byte range, by one warp ------------
 // All threads of the calling warp participate. Dword-wide where possible; the
 // (<4 byte) ragged end is finished by the warp's first thread.
@@ -564,6 +566,9 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
 // and compiles the head peel out.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
+  global = uniform(global);
+  lds = uniform(lds);
+  sizeInBytes = uniform(static_cast<uint64_t>(sizeInBytes));
   if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
 
   if ((((static_cast<uint32_t>(global) & (LINE - 1)) | (static_cast<uint32_t>(sizeInBytes) & (WIDTH - 1))) == 0) &&
@@ -603,16 +608,19 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
 template <CachePolicy cp>
 __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void* ldsBuffer, size_t ldsBufferBytes,
                              uint32_t startWarpId, uint32_t stopWarpId) {
-  const uint8_t* s = reinterpret_cast<const uint8_t*>(src);
-  uint8_t* d = reinterpret_cast<uint8_t*>(dst);
-  const uint32_t ldsBase = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer));
-  const uint32_t ldsBytes = static_cast<uint32_t>(ldsBufferBytes);  // LDS is small
+  const uint8_t* s = uniform(reinterpret_cast<const uint8_t*>(src));
+  uint8_t* d = uniform(reinterpret_cast<uint8_t*>(dst));
+  const uint32_t ldsBase = uniform(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ldsBuffer)));
+  const uint32_t ldsBytes = uniform(static_cast<uint32_t>(ldsBufferBytes)); // LDS is small
+  sizeBytes = uniform(static_cast<uint64_t>(sizeBytes));
+  startWarpId = uniform(startWarpId);
+  stopWarpId = uniform(stopWarpId);
 
   const uint32_t W = warpSize;
   const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
   const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
   const uint32_t warpThread = tid % W;               // thread index within its warp
-  const uint32_t warpId = tid / W;
+  const uint32_t warpId = uniform(tid / W);
   const uint32_t nWarps = (nThreads + W - 1) / W;
 
     // --- team membership: this warp participates iff in [start, stop) --------
