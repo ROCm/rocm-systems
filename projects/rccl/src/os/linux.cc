@@ -720,7 +720,8 @@ ncclResult_t ncclOsGetBcmLinks(const char* busId, int* nlinks, char** peers) {
   }
 
   char dirPath[PATH_MAX];
-  snprintf(dirPath, sizeof(dirPath), "%s/%s", base, "0000:00:00.0");
+  int n = snprintf(dirPath, sizeof(dirPath), "%s/%s", base, "0000:00:00.0");
+  if (n < 0 || n >= (int)sizeof(dirPath)) return ncclSuccess;  // path too long, no links
   memcpylower(dirPath + strlen(base) + 1, busId, BUSID_SIZE - 1);
 
   DIR* dir = opendir(dirPath);

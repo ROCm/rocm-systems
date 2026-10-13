@@ -119,7 +119,7 @@ if [ "${MODE}" = "clean" ]; then
     done < "${CHANGE_LOG}"
 
     # Pass 2: remove directories (in reverse order so children are removed before parents)
-    tac "${CHANGE_LOG}" | while IFS=' ' read -r TIMESTAMP ACTION ENTRY_PATH; do
+    while IFS=' ' read -r TIMESTAMP ACTION ENTRY_PATH; do
         if [ "${ACTION}" != "CREATE_DIR" ]; then
             continue
         fi
@@ -137,7 +137,7 @@ if [ "${MODE}" = "clean" ]; then
         else
             echo "  Already absent: ${ENTRY_PATH}"
         fi
-    done
+    done < <(tac "${CHANGE_LOG}")
 
     # Remove RCCL_BCM_LINKS_PATH from /etc/rccl.conf
     if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
@@ -152,12 +152,17 @@ if [ "${MODE}" = "clean" ]; then
         fi
     fi
 
-    # Remove the change log itself
-    rm -f "${CHANGE_LOG}"
     echo ""
     echo "  Entries removed: ${REMOVED}"
     echo "  Skipped:         ${FAILED}"
-    echo "  Change log removed: ${CHANGE_LOG}"
+    # Keep the change log when entries were skipped so a subsequent
+    # --clean can retry; only remove it when everything was cleaned.
+    if [ "${FAILED}" -eq 0 ]; then
+        rm -f "${CHANGE_LOG}"
+        echo "  Change log removed: ${CHANGE_LOG}"
+    else
+        echo "  Change log kept:    ${CHANGE_LOG} (${FAILED} entries remain)"
+    fi
     echo ""
     echo "Done."
     exit 0
@@ -176,15 +181,46 @@ SKIPPED_COUNT=0
 
 for BDF in $(lspci -D -d ${BCM_VENDOR}:${BCM_SWITCH_DEV} | awk '{print $1}'); do
     # Check if this is an Upstream Port (skip downstream ports, mgmt endpoints)
-    PORT_TYPE=$(lspci -vvs ${BDF} 2>/dev/null | grep -oP 'Express \(v2\) \K(Upstream Port|Downstream Port)' | head -1)
+    PORT_TYPE=$(lspci -vvs ${BDF} 2>/dev/null | grep -oP 'Express \(v2\) \K(Upstream Port|Downstream Port)' | head -1 || true)
     if [ "${PORT_TYPE}" != "Upstream Port" ]; then
         SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
         continue
     fi
 
-    # Read DSN from extended config space (offset 0x104 = lower 32b, 0x108 = upper 32b)
-    DSN_LO=$(setpci -s ${BDF} 0x104.L 2>/dev/null) || continue
-    DSN_HI=$(setpci -s ${BDF} 0x108.L 2>/dev/null) || continue
+    # Walk the PCIe extended capability linked list to find the DSN
+    # capability (ID 0x0003).  Extended caps start at offset 0x100;
+    # each header is a 32-bit word: bits[15:0] = cap ID, bits[31:20] =
+    # next-cap offset.  If AER (0x0001) or another cap sits first,
+    # reading 0x104/0x108 blindly would return its registers — identical
+    # across all ports — collapsing every port into one false DSN group.
+    DSN_CAP_OFFSET=""
+    CAP_OFFSET="100"
+    while [ -n "${CAP_OFFSET}" ] && [ "${CAP_OFFSET}" != "000" ]; do
+        CAP_HDR=$(setpci -s ${BDF} 0x${CAP_OFFSET}.L 2>/dev/null) || break
+        CAP_ID=$((16#${CAP_HDR} & 0xFFFF))
+        if [ "${CAP_ID}" -eq 3 ]; then
+            DSN_CAP_OFFSET="${CAP_OFFSET}"
+            break
+        fi
+        # Next-cap pointer is bits[31:20], which gives a 12-bit offset
+        NEXT=$((16#${CAP_HDR} >> 20 & 0xFFF))
+        if [ "${NEXT}" -eq 0 ]; then
+            break
+        fi
+        CAP_OFFSET=$(printf '%03x' ${NEXT})
+    done
+
+    if [ -z "${DSN_CAP_OFFSET}" ]; then
+        logger "rccl_bcm_isl_discover: WARNING: ${BDF} has no DSN capability in ext-cap list — skipping"
+        SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+        continue
+    fi
+
+    # Read DSN payload: lower 32b at cap+4, upper 32b at cap+8
+    DSN_DATA_LO=$(printf '%03x' $(( 16#${DSN_CAP_OFFSET} + 4 )))
+    DSN_DATA_HI=$(printf '%03x' $(( 16#${DSN_CAP_OFFSET} + 8 )))
+    DSN_LO=$(setpci -s ${BDF} 0x${DSN_DATA_LO}.L 2>/dev/null) || continue
+    DSN_HI=$(setpci -s ${BDF} 0x${DSN_DATA_HI}.L 2>/dev/null) || continue
 
     # Skip if DSN read failed (returns all-ones without root)
     if [ "${DSN_LO}" = "ffffffff" ] && [ "${DSN_HI}" = "ffffffff" ]; then
