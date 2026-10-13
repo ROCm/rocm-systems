@@ -666,6 +666,23 @@ if (NOT BUILD_TESTS_ONLY)
     unset(_config_out)
     unset(_config_content)
   endif()
+  # The in-build fixup above (strip /libc.so and the frozen CI -L/__w/ path,
+  # prepend the real libdrm search dir) only mutates hsakmt::hsakmt in our build
+  # tree.  Consumers re-run find_dependency(hsakmt) and reload the pristine,
+  # still-broken hsakmtTargets.cmake, so re-apply the same fixup in the generated
+  # config.  rocm_sysdeps is located relative to the consumer's hip_DIR so the
+  # path stays correct after relocation.
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    set(_config_out "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-config.cmake")
+    file(READ "${_config_out}" _config_content)
+    string(REPLACE
+      "find_dependency(hsakmt)"
+      "find_dependency(hsakmt)\nif(TARGET hsakmt::hsakmt)\n  get_target_property(_rocshmem_hsakmt_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)\n  if(_rocshmem_hsakmt_libs)\n    list(FILTER _rocshmem_hsakmt_libs EXCLUDE REGEX \"(/libc\\\\.so|/__w/)\")\n    string(REGEX REPLACE \"/lib/cmake/hip$\" \"\" _rocshmem_rocm_root \"\${hip_DIR}\")\n    if(EXISTS \"\${_rocshmem_rocm_root}/lib/rocm_sysdeps/lib\")\n      list(PREPEND _rocshmem_hsakmt_libs \"-L\${_rocshmem_rocm_root}/lib/rocm_sysdeps/lib\")\n    endif()\n    unset(_rocshmem_rocm_root)\n    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES \"\${_rocshmem_hsakmt_libs}\")\n  endif()\n  unset(_rocshmem_hsakmt_libs)\nendif()"
+      _config_content "${_config_content}")
+    file(WRITE "${_config_out}" "${_config_content}")
+    unset(_config_out)
+    unset(_config_content)
+  endif()
   include(ROCMPackageConfigHelpers)
   include(ROCMClients)
   rocm_package_setup_component(clients)
