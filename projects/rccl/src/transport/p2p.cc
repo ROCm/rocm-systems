@@ -1305,6 +1305,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                comm->rank, userbuff, buffSize, (void*)regRecord->begAddr, totalMappedSize, numSegments, peerRank,
                rmtRegAddr, (uintptr_t)userbuff - regRecord->begAddr);
         }
+        free(ipcInfo);
+        ipcInfo = nullptr;
       }
     }
 
@@ -1471,6 +1473,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   int numSegments = reqSize / sizeof(struct p2pIpcExpInfo);
   bool* mapped = nullptr;
   bool* imported = nullptr;
+  struct proxyMemHandle* memHandle = nullptr;
+  struct ncclIpcImpInfo* ipcInfo = nullptr;
 #if ROCM_VERSION >= 70000
   CUmemGenericAllocationHandle* segmentHandles = nullptr;
 #endif
@@ -1512,6 +1516,7 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
                                                      (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
                       ret, fail);
+          imported[segment] = true;
           SYSCHECKGOTO(ncclIpcFdClose(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
@@ -1543,10 +1548,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
 
 exit:
   if (regAddr) {
-    struct proxyMemHandle* memHandle = NULL;
-    struct ncclIpcImpInfo* ipcInfo = NULL;
-    NCCLCHECK(ncclCalloc(&memHandle, 1));
-    NCCLCHECK(ncclCalloc(&ipcInfo, 1));
+    NCCLCHECKGOTO(ncclCalloc(&memHandle, 1), ret, fail);
+    NCCLCHECKGOTO(ncclCalloc(&ipcInfo, 1), ret, fail);
     ipcInfo->rmtRegAddr = regAddr;
     ipcInfo->offset = ipcExpInfo[0].offset;
     ipcInfo->legacyIpcCap = ipcExpInfo->legacyIpcCap;
@@ -1563,7 +1566,12 @@ exit:
 #endif
   return ret;
 fail:
-  if (!ipcExpInfo->legacyIpcCap) {
+  if (ipcExpInfo->legacyIpcCap) {
+    if (regAddr) {
+      void* ipcBase = (void*)((uintptr_t)regAddr - ipcExpInfo->offset);
+      CUDACHECKIGNORE(cudaIpcCloseMemHandle(ipcBase));
+    }
+  } else {
 #if ROCM_VERSION >= 70000
     size_t offset = 0;
     for (int segment = 0; segment < numSegments; segment++) {
@@ -1579,6 +1587,10 @@ fail:
     if (regAddr) CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)regAddr, totalSize));
 #endif
   }
+  free(ipcInfo);
+  free(memHandle);
+  ipcInfo = nullptr;
+  memHandle = nullptr;
   regAddr = NULL;
   goto exit;
 }

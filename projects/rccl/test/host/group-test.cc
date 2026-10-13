@@ -1051,10 +1051,7 @@ TEST_F(ArgsGlobalCheckTest, HookFailsOnSecondEntry_StopsDequeuingAndPropagatesTh
   EXPECT_EQ(2, hook.calls);
   ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->argsInfoQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->argsInfoQueue));
-  // `failing` is deliberately left unfreed here: production's fail: path dequeues without
-  // freeing it (mirrored here), and no test-side check can tell that apart from "already freed
-  // by a future production change" -- guessing wrong there double-frees. Leaks one entry under
-  // ASan, same as ~18 other pre-existing allocations in this binary; not a new gate.
+  // The failing entry has been consumed and freed; later entries remain queued for cleanup.
 }
 
 // groupJobUnlinkComms: undoes the comm->groupJob links the non-blocking path published, so a
@@ -1358,7 +1355,7 @@ TEST_F(GroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequeuin
 
   EXPECT_EQ(1, hook.calls);
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->ceInitTaskQueue));
-  // `failing` leaks (LSan-visible), a production bug: the fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
+  // The failing task has been consumed and freed; later tasks remain queued for cleanup.
 }
 
 // groupCleanup: the fail-path unwind for a group that never launched. Walks groupCommHeadPtr per

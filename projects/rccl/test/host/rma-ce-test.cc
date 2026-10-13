@@ -604,6 +604,7 @@ TEST_F(RmaCeFinalizeTest, Finalize_StreamDestroyFails_IsIgnored) {
 // the state cleared rather than stopping at the failed free.
 TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   ASSERT_EQ(ncclRmaCeInit(comm_.get()), ncclSuccess);
+  std::vector<void*> failedFrees{Ctx(0)->signalsDev, Ctx(0)->signalOpSeqsDev, Ctx(0)->signalConstDev};
   g_hipFree = [](void*) { return hipErrorInvalidValue; };
 
   EXPECT_EQ(ncclRmaCeFinalize(comm_.get()), ncclUnhandledCudaError);
@@ -611,6 +612,10 @@ TEST_F(RmaCeFinalizeTest, Finalize_DeviceFreeFails_Propagates) {
   // loop carried on instead of abandoning the context at the first one.
   EXPECT_EQ(deregistered_.size(), 1u);
   ExpectTornDown();
+
+  // The injected free failure deliberately leaves the fake malloc-backed
+  // device allocations live; reclaim them directly in the test harness.
+  for (void* ptr : failedFrees) std::free(ptr);
 }
 
 // Finalizing a comm that was never initialised is not an error: every field it

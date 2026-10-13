@@ -6488,14 +6488,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_PosixFdCloseFails_ReleasesAndRec
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(resp, nullptr);
     EXPECT_EQ(done, 1);
-    // Latent bug: the handle is imported (p2p.cc:1501) before the close, but
-    // imported[segment] = true is only set after the close (p2p.cc:1511), so
-    // when the close fails into fail: the segment is not flagged and the
-    // fail-cleanup loop's `if (imported[segment])` release is skipped -- the
-    // imported handle leaks. releaseCalls is therefore 0. Pin the current
-    // contract; moving imported[segment] = true above the close (or releasing
-    // on the close-failure path) is a production follow-up.
-    EXPECT_EQ(releaseCalls, 0);
+    EXPECT_EQ(releaseCalls, 1);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // nothing recorded
 }
 
@@ -6529,13 +6522,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // no record enqueued
-    // Latent bug: on this bookkeeping-alloc-failure path the bare
-    // NCCLCHECK(ncclCalloc(...)) returns before *done is latched, unlike the
-    // fail: path which nulls regAddr and reaches *done = 1. done therefore
-    // stays 0, which would leave the requesting rank blocked in
-    // ncclProxyCallBlocking. Pin the current contract; latching done on this
-    // path is a production follow-up.
-    EXPECT_EQ(done, 0);
+    EXPECT_EQ(done, 1);
 }
 
 // The impInfo payload allocation (the second ncclCalloc in the bookkeeping
@@ -6566,9 +6553,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);
-    // See ProxyRegister_RecordAllocFails_Propagates: done is left unlatched on
-    // this alloc-failure path, so it stays 0 (a latent peer-blocking bug).
-    EXPECT_EQ(done, 0);
+    EXPECT_EQ(done, 1);
 }
 
 class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
