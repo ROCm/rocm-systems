@@ -187,13 +187,18 @@ LINEAR_FORWARD_WIRE = (
     "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
 )
 ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+TEST_GUID = "00000000-0000-0000-0000-000000000001"
+TEST_GUID_OTHER = "00000000-0000-0000-0000-000000000002"
 
 
-def linear_marker_row(correlation_id, start, end, thread_id=1, function=None):
+def linear_marker_row(
+    correlation_id, start, end, thread_id=1, function=None, guid=TEST_GUID
+):
     return {
         "Function": LINEAR_FORWARD_WIRE if function is None else function,
         "Thread_Id": thread_id,
         "Correlation_ID": correlation_id,
+        "GUID": guid,
         "Start_Timestamp": start,
         "End_Timestamp": end,
     }
@@ -206,19 +211,17 @@ def counter_row(
     end,
     dispatch_id=1,
     counter_name="SQ_WAVES",
-    guid=None,
+    guid=TEST_GUID,
 ):
-    row = {
+    return {
         "Correlation_ID": correlation_id,
+        "GUID": guid,
         "Kernel_Name": kernel_name,
         "Dispatch_ID": dispatch_id,
         "Start_Timestamp": start,
         "End_Timestamp": end,
         "Counter_Name": counter_name,
     }
-    if guid is not None:
-        row["GUID"] = guid
-    return row
 
 
 # =============================================================================
@@ -3054,6 +3057,7 @@ def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
                 "Function": function,
                 "Thread_Id": 42,
                 "Correlation_ID": 8,
+                "GUID": TEST_GUID,
                 "Start_Timestamp": 20,
                 "End_Timestamp": 70,
             }
@@ -3061,6 +3065,7 @@ def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
         [
             {
                 "Correlation_ID": 8,
+                "GUID": TEST_GUID,
                 "Kernel_Name": "addmm_kernel",
                 "Dispatch_ID": 1,
                 "Start_Timestamp": 30,
@@ -3244,6 +3249,7 @@ def test_process_ml_api_trace_output_leaves_no_ml_api_trace_dir(tmp_path):
                 ),
                 "Thread_Id": 1,
                 "Correlation_ID": 4,
+                "GUID": TEST_GUID,
                 "Start_Timestamp": 10,
                 "End_Timestamp": 80,
             }
@@ -3251,6 +3257,7 @@ def test_process_ml_api_trace_output_leaves_no_ml_api_trace_dir(tmp_path):
         [
             {
                 "Correlation_ID": 4,
+                "GUID": TEST_GUID,
                 "Kernel_Name": "addmm_kernel",
                 "Dispatch_ID": 1,
                 "Start_Timestamp": 20,
@@ -3296,6 +3303,7 @@ def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
     pd.DataFrame(
         columns=[
             "Correlation_ID",
+            "GUID",
             "Kernel_Name",
             "Dispatch_ID",
             "Start_Timestamp",
@@ -3423,17 +3431,30 @@ def test_process_unmatched_dispatch_two_counter_rows_is_one_row(tmp_path):
 
 def test_process_joins_on_guid_and_correlation_id(tmp_path):
     workload_dir = tmp_path / "guid_join"
-    marker = linear_marker_row(1, 0, 100)
-    marker["GUID"] = "gpu-a"
     write_ml_api_pass(
         workload_dir,
         0,
-        [marker],
-        [counter_row(1, "addmm_kernel", 10, 40, guid="gpu-a")],
+        [linear_marker_row(1, 0, 100, guid=TEST_GUID)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=TEST_GUID)],
     )
     workload = schema.Workload()
     process_ml_api_trace_output(workload, str(workload_dir))
     assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == ["addmm_kernel"]
+
+
+def test_process_same_correlation_id_different_guid_does_not_join(tmp_path):
+    workload_dir = tmp_path / "guid_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100, guid=TEST_GUID)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=TEST_GUID_OTHER)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    unmatched = workload.unmatched_kernel_frames[0]
+    assert unmatched.iloc[0]["Kernel_Name"] == "addmm_kernel"
 
 
 def test_process_one_pass_builds_ml_api_trace_df(tmp_path):
@@ -3552,6 +3573,7 @@ def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
     pd.DataFrame(
         columns=[
             "Correlation_ID",
+            "GUID",
             "Kernel_Name",
             "Dispatch_ID",
             "Start_Timestamp",
