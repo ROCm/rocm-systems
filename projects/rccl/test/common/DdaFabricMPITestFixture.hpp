@@ -47,8 +47,9 @@ inline bool fabricInitRequired()
 
 inline bool isGfx1250Device()
 {
+    int             device = 0;
     hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
+    if(hipGetDevice(&device) != hipSuccess || hipGetDeviceProperties(&props, device) != hipSuccess)
     {
         return false;
     }
