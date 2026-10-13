@@ -7,7 +7,7 @@
 import pytest
 from memory_chart_preview import main
 
-from memory_chart.loader import layout_files
+from memory_chart.loader import layout_files, load_layout
 from utils.utils_common import strip_ansi
 
 
@@ -18,10 +18,6 @@ def preview(capsys, *args):
 
 @pytest.mark.parametrize("path", layout_files(), ids=lambda p: p.stem)
 def test_placeholders_fill_every_metric_of_a_layout_file(path, capsys):
-    output = preview(capsys, str(path))
+    output = preview(capsys, load_layout(path).archs[0])
     assert path.name in output.splitlines()[0]
     assert "N/A" not in output
-
-
-def test_an_arch_previews_its_shipped_layout(capsys):
-    assert "gfx950.json" in preview(capsys, "gfx950").splitlines()[0]

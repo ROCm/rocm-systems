@@ -16,10 +16,14 @@ from typing import Any, NoReturn, Optional
 
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
-from utils.logger import console_error
+from utils.logger import console_warning
 from utils.utils_common import canonical_config_arch, load_panel_configs
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
+
+
+class LayoutError(Exception):
+    """A layout file that cannot be read or breaks the format rules."""
 
 
 @dataclass(frozen=True)
@@ -132,7 +136,10 @@ class Layout:
 
 
 class Layouts:
-    """The shipped layouts, read once and indexed by architecture."""
+    """The shipped layouts, read once and indexed by architecture.
+
+    A broken layout file is skipped with a warning, so only its archs lose the chart.
+    """
 
     _by_arch: Optional[dict[str, Layout]] = None
 
@@ -177,7 +184,7 @@ def layout_files() -> list[Path]:
 
 
 def load_layout(path: Path) -> Layout:
-    """Read and resolve a layout file; a missing or malformed file is an error."""
+    """Read and resolve a layout file; raise LayoutError if missing or malformed."""
     try:
         layout_json = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # ValueError covers invalid JSON
@@ -194,17 +201,26 @@ def load_layout(path: Path) -> Layout:
 # ---------------------------------------------------------------------------
 
 
-def _fail(path: Path, problem: str) -> NoReturn:  # console_error exits
-    console_error("memory chart", f"{path.name}: {problem}")
+def _fail(path: Path, problem: str) -> NoReturn:
+    raise LayoutError(f"{path.name}: {problem}")
 
 
 def _index_by_arch(paths: list[Path]) -> dict[str, Layout]:
     index: dict[str, Layout] = {}
     for path in paths:
-        layout = load_layout(path)
+        try:
+            layout = load_layout(path)
+        except LayoutError as error:
+            console_warning("memory chart", f"skipping {error}")
+            continue
         for arch in layout.archs:
             if arch in index:
-                _fail(path, f"{arch} is also listed by {index[arch].path.name}")
+                console_warning(
+                    "memory chart",
+                    f"skipping {arch} in {path.name}: "
+                    f"also listed by {index[arch].path.name}",
+                )
+                continue
             index[arch] = layout
     return index
 

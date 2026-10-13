@@ -9,7 +9,6 @@ config of the layout's first architecture.
 
 Usage:
     tools/memory_chart_preview.py gfx950
-    tools/memory_chart_preview.py src/memory_chart/layouts/gfx1250.json
 """
 
 import argparse
@@ -19,7 +18,7 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from memory_chart.loader import Layouts, PanelConfigs, load_layout
+from memory_chart.loader import Layouts, PanelConfigs
 from memory_chart.render import MemChart
 from memory_chart.units import PLAIN, display_unit, panel_units
 
@@ -35,17 +34,12 @@ def placeholder_values(metrics: set[str], units: dict[str, str]) -> dict[str, fl
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("layout", help="an architecture (gfx950) or a layout file")
+    parser.add_argument("arch", help="a GPU architecture, such as gfx950")
     args = parser.parse_args(argv)
 
-    path = Path(args.layout)
-    layout = (
-        load_layout(path.resolve())
-        if path.suffix == ".json"
-        else Layouts.for_arch(args.layout)
-    )
+    layout = Layouts.for_arch(args.arch)
     if layout is None:
-        parser.error(f"no layout for {args.layout!r}")
+        parser.error(f"no layout for {args.arch!r}")
 
     panel = PanelConfigs.for_arch(layout.archs[0])
     if panel is None:

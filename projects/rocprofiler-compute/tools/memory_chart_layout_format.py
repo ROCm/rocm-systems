@@ -29,6 +29,7 @@ from memory_chart.loader import (
     LAYOUT_KEYS,
     SCOPE_KEYS,
     Keys,
+    LayoutError,
     layout_files,
     load_layout,
 )
@@ -116,7 +117,11 @@ def main() -> int:
     args = parser.parse_args()
     stale = []
     for path in layout_files():
-        load_layout(path)
+        try:
+            load_layout(path)
+        except LayoutError as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
         text = path.read_text(encoding="utf-8")
         canonical = format_layout(json.loads(text))
         if text != canonical:

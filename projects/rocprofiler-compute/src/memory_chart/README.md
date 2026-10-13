@@ -12,7 +12,7 @@ goes and which way each arrow points. [`render.py`](render.py) draws it.
    to the analysis-config directory names it serves.
 2. Edit its blocks and arrows until the chart shows every metric of the architecture's
    `0300_memory_chart.yaml`, and nothing else.
-3. Check it without a GPU: `./tools/memory_chart_preview.py path/to/layout.json`.
+3. Check it without a GPU: `./tools/memory_chart_preview.py <arch>`.
 4. Run `python -m pytest tests/unit/memory_chart`.
 
 `analyze` and the tests find a layout by its `archs`, so no Python changes are needed.
@@ -103,8 +103,9 @@ An arrow has `from`, `to`, `metric`, `title`, and `category`, and an optional `g
 - An arrow with children at either end is an error. Point it at one of the children.
 - `group` is a heading drawn over consecutive arrows that share it, such as
   `Buffer Request`.
-- An arrow whose metric is a count, such as `(Requests + $normUnit)`, is drawn as a
-  request (`Read : 119`). Other arrows show a label, a value, and an arrow line.
+- An arrow whose metric is a count, such as requests per normalization unit, is drawn
+  as `<title> : <value>`, for example `Read : 119`. Other arrows show a label, a value,
+  and an arrow line.
 
 ### Categories
 

@@ -5,14 +5,20 @@
 
 import copy
 import json
+import re
 from collections import Counter
-from unittest.mock import Mock
 
 import common
 import pytest
 
 from memory_chart import loader
-from memory_chart.loader import Layouts, PanelConfigs, layout_files, load_layout
+from memory_chart.loader import (
+    LayoutError,
+    Layouts,
+    PanelConfigs,
+    layout_files,
+    load_layout,
+)
 from memory_chart.units import display_unit, panel_units
 
 MEMORY_CHART_ARCHS = common.memory_chart_archs()
@@ -31,18 +37,6 @@ READ_ARROW = {
     "category": "read",
 }
 INNER = {"id": "inner", "title": "Inner"}
-
-
-@pytest.fixture
-def console_error(monkeypatch):
-    """The loader's console_error, which records the message and exits."""
-    error = Mock(side_effect=SystemExit(1))
-    common.patch_console(monkeypatch, "memory_chart.loader", "error", error=error)
-    return error
-
-
-def error_message(console_error):
-    return console_error.call_args.args[1]
 
 
 def panel_metric_names(arch):
@@ -135,11 +129,20 @@ def test_arch_without_layout_has_no_chart(gpu_arch):
     assert Layouts.for_arch(gpu_arch) is None
 
 
-def test_an_arch_in_two_layout_files_is_an_error(tmp_path, console_error):
+def test_an_arch_in_two_layout_files_keeps_the_first(tmp_path, monkeypatch):
+    warning = common.patch_console(monkeypatch, "memory_chart.loader", "warning")
     paths = [write_layout(tmp_path, gfx950_data(), f"{n}.json") for n in "ab"]
-    with pytest.raises(SystemExit):
-        loader._index_by_arch(paths)
-    assert "gfx950 is also listed by a.json" in error_message(console_error)
+    assert loader._index_by_arch(paths)["gfx950"].path.name == "a.json"
+    assert "also listed by a.json" in warning["warning"].call_args.args[1]
+
+
+def test_a_broken_layout_is_skipped_and_others_still_load(tmp_path, monkeypatch):
+    warning = common.patch_console(monkeypatch, "memory_chart.loader", "warning")
+    broken = tmp_path / "broken.json"
+    broken.write_text("{", encoding="utf-8")
+    index = loader._index_by_arch([broken, write_layout(tmp_path, gfx950_data())])
+    assert list(index) == ["gfx950"]
+    assert "broken.json" in warning["warning"].call_args.args[1]
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +218,9 @@ def test_nested_blocks_take_their_parent_and_column():
         "arrow-from-an-attached-block",
     ],
 )
-def test_malformed_layout_is_rejected(tmp_path, console_error, data, message):
-    with pytest.raises(SystemExit):
+def test_malformed_layout_is_rejected(tmp_path, data, message):
+    with pytest.raises(LayoutError, match=re.escape(message)):
         load_layout(write_layout(tmp_path, data))
-    assert message in error_message(console_error)
 
 
 @pytest.mark.parametrize(
@@ -230,10 +232,9 @@ def test_malformed_layout_is_rejected(tmp_path, console_error, data, message):
     ],
     ids=["missing-file", "invalid-json", "not-an-object"],
 )
-def test_unreadable_layout_is_rejected(tmp_path, console_error, text, message):
+def test_unreadable_layout_is_rejected(tmp_path, text, message):
     path = tmp_path / "layout.json"
     if text is not None:
         path.write_text(text, encoding="utf-8")
-    with pytest.raises(SystemExit):
+    with pytest.raises(LayoutError, match=message):
         load_layout(path)
-    assert message in error_message(console_error)
