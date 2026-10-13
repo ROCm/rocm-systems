@@ -168,14 +168,22 @@ using __rccl_lds_char = __attribute__((address_space(3))) char;
 using __rccl_global_int32x4 = __attribute__((address_space(1))) __rccl_int32x4;
 using __rccl_lds_int32x4 = __attribute__((address_space(3))) __rccl_int32x4;
 
+// A generic-to-LDS pointer cast null-checks its operand, which costs a 64-bit compare and select per access. Every
+// pointer passed here is into LDS, whose generic addresses carry the LDS offset in their low 32 bits.
+template <typename T>
+__device__ inline T* toLds(const void* p) {
+  return (T*)static_cast<uint32_t>(reinterpret_cast<uintptr_t>(p));
+}
+
 // One b8 access (1 byte) for a single lane.
 template <AsyncDir DIR, CachePolicy cp>
 __device__ inline void asyncCopyB8(const uint8_t* global, uint8_t* lds) {
   if constexpr (DIR == AsyncDir::Load) {
-    __builtin_amdgcn_global_load_async_to_lds_b8((__rccl_global_char*)global, (__rccl_lds_char*)lds, ZERO_OFFSET, cp);
+    __builtin_amdgcn_global_load_async_to_lds_b8((__rccl_global_char*)global, toLds<__rccl_lds_char>(lds), ZERO_OFFSET,
+                                                 cp);
   } else {
-    __builtin_amdgcn_global_store_async_from_lds_b8((__rccl_global_char*)global, (__rccl_lds_char*)lds, ZERO_OFFSET,
-                                                    cp);
+    __builtin_amdgcn_global_store_async_from_lds_b8((__rccl_global_char*)global, toLds<__rccl_lds_char>(lds),
+                                                    ZERO_OFFSET, cp);
   }
 }
 
@@ -184,10 +192,11 @@ __device__ inline void asyncCopyB8(const uint8_t* global, uint8_t* lds) {
 template <AsyncDir DIR, CachePolicy cp, int32_t OFF = ZERO_OFFSET>
 __device__ inline void asyncCopyB128(const uint8_t* global, uint8_t* lds) {
   if constexpr (DIR == AsyncDir::Load) {
-    __builtin_amdgcn_global_load_async_to_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds, OFF, cp);
+    __builtin_amdgcn_global_load_async_to_lds_b128((__rccl_global_int32x4*)global, toLds<__rccl_lds_int32x4>(lds), OFF,
+                                                   cp);
   } else {
-    __builtin_amdgcn_global_store_async_from_lds_b128((__rccl_global_int32x4*)global, (__rccl_lds_int32x4*)lds, OFF,
-                                                      cp);
+    __builtin_amdgcn_global_store_async_from_lds_b128((__rccl_global_int32x4*)global, toLds<__rccl_lds_int32x4>(lds),
+                                                      OFF, cp);
   }
 }
 
@@ -329,10 +338,9 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
   if (lane < sizeInBytes - offset) asyncCopyB8<DIR, cp>(global + offset + lane, lds + offset + lane);
 }
 
-// Wait until at most N async ops are outstanding.  ASYNCcnt retires in issue order across loads and stores, so
-// this means every op older than the youngest N has completed.  The same ordering makes clamping to the 6-bit
-// field safe: if 63 or more ops were issued after the one being waited on and it were still in flight, all of them
-// would be too.
+// Wait until at most N async ops are outstanding.  ASYNCcnt counts loads and stores together, and they retire in
+// issue order among loads and among stores but not relative to each other, so this proves an op complete only if
+// at least N ops of its own kind were issued after it.  Clamping to the 6-bit field only makes the wait stricter.
 template <uint32_t N>
 __device__ inline void asyncWaitAtMost() {
   __builtin_amdgcn_s_wait_asynccnt(N > 63 ? 63 : N);
@@ -585,7 +593,7 @@ __device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
 #pragma unroll
     for (uint32_t k = 0; k < G; ++k) {
 #pragma unroll
-      for (uint32_t j = 0; j < 5; ++j) w[k][j] = *(const LdsWord*)(q + (i + k) * WARP_BYTES_B128 + 4 * j);
+      for (uint32_t j = 0; j < 5; ++j) w[k][j] = *toLds<const LdsWord>(q + (i + k) * WARP_BYTES_B128 + 4 * j);
     }
 #pragma unroll
     for (uint32_t k = 0; k < G; ++k) {
@@ -594,7 +602,7 @@ __device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
       o.y = __builtin_amdgcn_alignbyte(w[k][2], w[k][1], r);
       o.z = __builtin_amdgcn_alignbyte(w[k][3], w[k][2], r);
       o.w = __builtin_amdgcn_alignbyte(w[k][4], w[k][3], r);
-      *(LdsWord4*)(p + (i + k) * WARP_BYTES_B128) = o;
+      *toLds<LdsWord4>(p + (i + k) * WARP_BYTES_B128) = o;
     }
   }
   // The async store reads LDS behind the DS counter's back.
@@ -676,29 +684,25 @@ __device__ inline void loadPartial(const uint8_t* g, uint8_t* win, uint32_t slot
 // LDS side -- the combination the hardware is most sensitive to. The load leg reads the source at whatever
 // alignment it has; when src and dst agree mod 16 it is shifted so every load is 512B aligned too.
 //
-// The window is cut into S slots of B = U * 512 bytes, and chunk c of the range cycles through slot c % S. Loads
-// run A = S/2 chunks ahead of the stores, so up to A loads and D = S - A stores are in flight at once and the LDS
-// is never idle waiting for a whole window to fill or drain. ASYNCcnt retires in issue order across loads and
-// stores, so each dependency is a single s_wait_asynccnt on "the ops issued after it":
-//   * RAW: before storing chunk c, wait for load(c) -- SHIFTED, for the first instruction of load(c+1), which
-//     carries the slot's last t0 bytes;
-//   * WAR: before loading chunk c+A into its slot, wait for store(c-D), the slot's previous occupant.
-// Only the last chunk can be short, so with U and S fixed at compile time every one of those counts is a
-// constant once the first A-1 iterations and the last A are peeled. Ops left out of a count can only make the
-// wait stricter, never weaker.
+// The window is cut into S slots of B = U * 512 bytes, and chunk c of the range cycles through slot c % S. The
+// chunks go P at a time: each phase stores the chunks loaded so far and loads the next P, so a phase's loads and
+// stores are in flight together. ASYNCcnt counts both kinds, and loads retire in order among loads and stores
+// among stores but not relative to each other, so a partial wait only proves an op complete if that many ops of
+// its own kind follow it -- and while the other kind is in flight it has to drain anyway. Each phase therefore
+// starts with a full drain, which settles both dependencies:
+//   * RAW: a phase stores chunks loaded in earlier phases. In the ring frames a chunk's last t0 bytes come from
+//     the next chunk's load, so each phase holds back its last loaded chunk (L = 1) until the next;
+//   * WAR: a phase loads into slots whose previous chunks were stored in earlier phases, since 2P + L <= S.
 //
 // Returns with the final stores still in flight; the caller drains with asyncWait<0>().
 template <CachePolicy cp, uint32_t U, uint32_t S, LoadFrame F>
 __device__ __forceinline__ void pipelineCore(const uint8_t* s, uint8_t* d, uint8_t* win, size_t bytes, uint32_t lane,
                                              uint32_t t0) {
   using namespace async_detail;
-  constexpr bool SHIFT = F != LoadFrame::Slot;
   constexpr uint32_t B = U * WARP_BYTES_B128;
-  constexpr uint32_t A = S / 2;
-  constexpr uint32_t D = S - A;
-  constexpr uint32_t R = SHIFT ? 1 : 0;
-  static_assert(A >= 1 && U <= MAX_RUN, "pipeline needs >= 2 slots of at most MAX_RUN instructions");
-  static_assert(!SHIFT || A >= 2, "a shifted store needs the next load in flight before it");
+  constexpr uint32_t L = F == LoadFrame::Slot ? 0 : 1;
+  constexpr uint32_t P = (S - L) / 2;
+  static_assert(P >= 1 && U <= MAX_RUN, "pipeline needs >= 2 slots of at most MAX_RUN instructions");
 
   const uint32_t pos = lane * BYTES_PER_LANE_B128;
   const size_t K = (bytes + B - 1) / B;
@@ -728,43 +732,42 @@ __device__ __forceinline__ void pipelineCore(const uint8_t* s, uint8_t* d, uint8
     for (size_t c = 0; c < K; ++c) store(c, static_cast<uint32_t>(c));
     return;
   }
-  // K > S >= 2A, so chunks 0 .. 2A-2 are all full and none of the peeled iterations touches the last one.
-  staticFor<0, A>([&](auto c) { loadFull<cp, F, U, S, c == 0>(s + c * B, win, c, pos, t0); });
+  // K > S > P, so the first phase's chunks are all full.
+  staticFor<0, P>([&](auto c) { loadFull<cp, F, U, S, c == 0>(s + c * B, win, c, pos, t0); });
 
-  // Iterations 0 .. A-2: load(c) is followed by loads c+1 .. c+A-1 and stores 0 .. c-1 (SHIFTED: everything
-  // after the first instruction of load(c+1)). Slot c+A is fresh.
-  staticFor<0, A - 1>([&](auto c) {
-    asyncWaitAtMost<U*(A - 1 + c) - R>();
-    storeF(c, c);
-    loadF(c + A, c + A);
-  });
-
-  // Steady state, c in [A-1, K-A): A-1 loads and A-1 stores follow load(c) (SHIFTED: U-1, A-2 and A-2 after the
-  // head of load(c+1)); D loads and D stores follow store(c-D). Only load(c+A) can be the short last chunk.
-  uint32_t storeSlot = A - 1;
-  uint32_t loadSlot = (2 * A - 1) % S;
-  for (size_t c = A - 1; c < K - A; ++c) {
-    asyncWaitAtMost<SHIFT ? U * (2 * A - 3) - 1 : U * 2 * (A - 1)>();
-    storeF(c, storeSlot);
+  // st and ld are the next chunks to store and to load. A phase starts with st = ld - P - L (0 in the first), stores
+  // up to ld - L and loads [ld, ld + P), so the chunks it touches span at most 2P + L <= S slots.
+  uint32_t storeSlot = 0;
+  uint32_t loadSlot = P;
+  size_t st = 0;
+  size_t ld = P;
+  auto storeNext = [&](auto&& storeFn) {
+    storeFn(st++, storeSlot);
     storeSlot = (storeSlot + 1 == S) ? 0 : storeSlot + 1;
-    if (c >= D) asyncWaitAtMost<U * 2 * D>();
-    load(c + A, loadSlot);
+  };
+  auto loadNext = [&](auto&& loadFn) {
+    loadFn(ld++, loadSlot);
     loadSlot = (loadSlot + 1 == S) ? 0 : loadSlot + 1;
+  };
+  // Phases whose chunks are all full (the last chunk is the only short one). The first stores P - L chunks and each
+  // later one P, so every count is static: issue time after the drain is on the critical path.
+  if (ld + P < K) {
+    asyncWaitAtMost<0>();
+    staticFor<0, P - L>([&](auto) { storeNext(storeF); });
+    staticFor<0, P>([&](auto) { loadNext(loadF); });
   }
-
-  // Last A iterations, c = K-A+e. Unshifted, load(c) is followed by the A-1-e remaining loads (the last of them
-  // short, so at least one instruction) and A-1 full stores. SHIFTED, the head of load(c+1) is followed by the
-  // rest of that chunk, the A-2-e later loads (counted as U-1, A-3-e full and one) and A-2 full stores; the last
-  // store waits for all of the short chunk, which A-1 stores follow.
-  staticFor<0, A>([&](auto e) {
-    constexpr uint32_t after = !SHIFT       ? ((e < A - 1) ? U * (2 * A - 3 - e) + 1 : U * (A - 1)) :
-                               (e + 2 < A)  ? U * (2 * A - 4 - e) :
-                               (e + 2 == A) ? U * (A - 2) :
-                                              U * (A - 1);
-    asyncWaitAtMost<after>();
-    store(K - A + e, storeSlot);
-    storeSlot = (storeSlot + 1 == S) ? 0 : storeSlot + 1;
-  });
+  while (ld + P < K) {
+    asyncWaitAtMost<0>();
+    staticFor<0, P>([&](auto) { storeNext(storeF); });
+    staticFor<0, P>([&](auto) { loadNext(loadF); });
+  }
+  while (st < K) {
+    asyncWaitAtMost<0>();
+    const size_t storeEnd = ld < K ? ld - L : K;
+    while (st < storeEnd) storeNext(store);
+    const size_t loadEnd = ld + P < K ? ld + P : K;
+    while (ld < loadEnd) loadNext(load);
+  }
 }
 
 // pipelineCore, plus a constraint of the Ring4 and Shift frames: the last lane of their load leg writes up to 15
@@ -827,7 +830,7 @@ __device__ __forceinline__ void wholeStage(const uint8_t* s, uint8_t* d, uint8_t
 }
 
 // Slot geometry by window size, at least 2KB (Ring: 4KB, Ring4 and Shift: 7.5KB after their padding). The ring frames
-// make each store wait for one more load, so they favor more, smaller slots.
+// hold one chunk back per phase, so they favor more, smaller slots.
 //
 // Out of line: the tiers are up to ~85KB of code per frame, and inlined they scatter the setup and wholeStage paths
 // across it, which costs ~1.5us of instruction fetch on a cold launch. Everything above this (down to the public entry
