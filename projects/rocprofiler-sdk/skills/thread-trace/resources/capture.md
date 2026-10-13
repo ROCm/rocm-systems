@@ -70,9 +70,8 @@ numbers them from 1). `summary` reports how many dispatches the traced waves cam
 | `code.json` | The disassembly: one row per instruction with its source line and totals over the traced waves, plus a `; <kernel>` row before each kernel; `header` names the columns |
 | `wstates<k>.json` | How many traced waves were in wave state `k` over time (`time`, `state`); `k` is the state's `WaveStateType` value (1 IDLE, 2 EXEC, 3 WAIT, 4 STALL). `att_mine.py` uses the instruction records instead ([stalls.md](stalls.md#wave-time)) |
 | `occupancy.json` | Wave starts and ends on the traced shader engines (`occupancy_fields` names the fields), dispatches and other trace events per shader engine (`events`), and kernel names by `kernel_id` (`dispatches`) |
-| `filenames.json` | The GPU generation, the requested counter names, and an index of the wave, marker, and other-SIMD files |
+| `filenames.json` | The GPU generation, the requested counter names, and an index of the wave and other-SIMD files |
 | `source_*`, `snapshots.json` | Copies of the source files the code objects refer to, when they exist on this machine |
-| `shaderdata_*.json` | Markers the kernel wrote, when it has them ([python-api.md](python-api.md#phase-markers)) |
 | `realtime.json`, `other_simd_se*.json` | Shader clock and reference clock pairs, and (gfx11 and later) memory instructions (VMEM, FLAT, LDS) issued on the other SIMD |
 
 The code objects are also the kernel's ISA: `llvm-objdump -d` the one whose symbols

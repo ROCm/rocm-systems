@@ -151,18 +151,30 @@ def gpu_properties(path: Path) -> dict:
             }
     for csv_path in sorted(path.rglob("*agent_info.csv")):
         with csv_path.open(newline="") as handle:
+            gpus = []
             for r in csv.DictReader(handle):
                 if r.get("Agent_Type") == "GPU":
                     fields = {k.lower(): v for k, v in r.items()}
-                    return {
-                        "product": r.get("Product_Name"),
-                        "name": r.get("Name"),
-                        **{
-                            k: int(fields[k])
-                            for k in GPU_FIELDS
-                            if fields.get(k, "").isdigit()
-                        },
-                    }
+                    gpus.append(
+                        {
+                            "product": r.get("Product_Name"),
+                            "name": r.get("Name"),
+                            **{
+                                k: int(fields[k])
+                                for k in GPU_FIELDS
+                                if fields.get(k, "").isdigit()
+                            },
+                        }
+                    )
+        # The CSV does not record agent handles, so it cannot name the traced GPU.
+        if gpus and all(g == gpus[0] for g in gpus):
+            return gpus[0]
+        if gpus:
+            return {
+                "note": f"{csv_path.name} lists {len(gpus)} GPUs of different kinds and does "
+                "not name the traced one; the *_results.db of a capture without "
+                "--output-format csv does"
+            }
     return {}
 
 
@@ -437,7 +449,11 @@ def next_read(summary: dict, pipes: dict | None = None) -> str:
     seen = {page}
     also = [(p, w) for p, w in also if not (p in seen or seen.add(p))]
     text = f"{why}. Before changing the kernel, read {page_ref(page)}{page_lists(page)}"
-    same = [(p, w) for p, w in also if p.partition("#")[0] == page.partition("#")[0]]
+    same = [
+        (p, w)
+        for p, w in also
+        if "#" in p and p.partition("#")[0] == page.partition("#")[0]
+    ]
     other = [(p, w) for p, w in also if (p, w) not in same]
     for p, w in same:
         section = p.partition("#")[2].replace("-", " ").capitalize()
@@ -828,10 +844,12 @@ class Capture:
             for i in w.insts:
                 c = inst_class(i)
                 count[c] += 1
+                if c in WAIT_CLASSES:
+                    # On gfx11 and later the wait is in the duration, not the stall.
+                    waited[c] += i.latency
+                    continue
                 issue[c] += max(i.duration - i.stall, 0)
                 stall[c] += i.stall
-                if c in WAIT_CLASSES:
-                    waited[c] += i.latency
                 stalled_ops[c][i.text.split(" ", 1)[0]] += i.stall
                 issuing[(c, simd)].append((i.time + i.stall, i.time + i.duration))
         resident = sum(union_length(v) for v in lifetimes.values())

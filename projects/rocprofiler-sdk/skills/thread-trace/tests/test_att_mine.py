@@ -855,6 +855,42 @@ class GpuPropertiesTests(unittest.TestCase):
             },
         )
 
+    def test_the_csv_does_not_pick_one_of_several_different_gpus(self):
+        import tempfile
+
+        header = '"Agent_Type","Name","Product_Name","Cu_Count","Wave_Front_Size"\n'
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "1_agent_info.csv").write_text(
+                header + '"GPU","gfx942","GPU A",304,64\n"GPU","gfx1100","GPU B",48,32\n'
+            )
+            gpu = mine.gpu_properties(Path(d))
+        self.assertEqual(list(gpu), ["note"])
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "1_agent_info.csv").write_text(
+                header + '"GPU","gfx942","GPU A",304,64\n' * 2
+            )
+            gpu = mine.gpu_properties(Path(d))
+        self.assertEqual(gpu["wave_front_size"], 64)
+
+    def test_the_database_row_of_the_traced_agent_is_used(self):
+        import json
+        import sqlite3
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as d:
+            with sqlite3.connect(Path(d) / "cap_results.db") as db:
+                db.execute(
+                    "CREATE TABLE rocpd_info_agent (type TEXT, product_name TEXT, name TEXT, "
+                    "extdata TEXT)"
+                )
+                for handle, name in ((7, "gfxA"), (8, "gfxB")):
+                    db.execute(
+                        "INSERT INTO rocpd_info_agent VALUES ('GPU', ?, ?, ?)",
+                        (name, name, json.dumps({"id": {"handle": handle}})),
+                    )
+            (Path(d) / "100_8_shader_engine_0_1.att").write_bytes(b"")
+            self.assertEqual(mine.gpu_properties(Path(d))["name"], "gfxB")
+
 
 class CompareTests(unittest.TestCase):
     def test_cost_per_line_per_wave(self):
@@ -989,6 +1025,16 @@ class AlsoReadTests(unittest.TestCase):
         self.assertIn("Idle cycles", hint)
         self.assertIn("idle between instructions is 25% of wave time", hint)
 
+    def test_the_whole_main_page_is_not_named_as_one_of_its_sections(self):
+        hint = mine.next_read(summ({mine.ISSUE: 50, mine.STALL: 30, mine.WAIT: 20}))
+        self.assertNotIn("section ''", hint)
+        self.assertIn(
+            "Also read "
+            + str(mine.RESOURCES / "compute.md")
+            + " (stall is 30% of wave time)",
+            hint,
+        )
+
     def test_a_page_is_named_once(self):
         hint = mine.next_read(
             summ({mine.BARRIER: 50, mine.ISSUE: 30}), {"valu_busy": 90.0, "classes": []}
@@ -1065,6 +1111,7 @@ class WaitIsLatencyTests(unittest.TestCase):
         p = mine.Capture.from_waves([wave([barrier])]).pipes()
         b = next(c for c in p["classes"] if c["class"] == "barrier (s_barrier)")
         self.assertEqual((b["stall_share"], b["wait_share"]), (0.0, 100.0))
+        self.assertEqual((b["busy_share"], b["cycles_each"]), (0.0, 0.0))
 
     def test_the_flat_profile_hint_also_ends_with_the_guard(self):
         rows = {

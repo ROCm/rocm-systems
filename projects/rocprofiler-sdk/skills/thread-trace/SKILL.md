@@ -80,10 +80,8 @@ ATT does not show which threads of a wave were active, the addresses instruction
 cache or HBM traffic, host-side work such as API calls and launch overhead, or interconnect
 traffic, and its per-instruction and per-wave detail covers only the traced compute units
 (the occupancy records can span more). With `--att-consecutive-kernels` it
-records several dispatches, including the gaps between them on the GPU. Markers the kernel
-writes time its phases per iteration
-([python-api.md](resources/python-api.md#phase-markers)). Say so when a question needs what
-the trace lacks.
+records several dispatches, including the gaps between them on the GPU. Say so when a
+question needs what the trace lacks.
 
 ## Reading a capture
 
@@ -170,7 +168,7 @@ the lines that hold it, read against the source. Adapt it to the task.
 | --- | --- |
 | [capture.md](resources/capture.md) | Decoder setup, capture options, output files, troubleshooting |
 | [reading-the-trace.md](resources/reading-the-trace.md) | The stats CSV and every `att_mine.py` command |
-| [python-api.md](resources/python-api.md) | Using the decoder's Python API: decoding a capture, the calls and what they return, the records' fields, worked queries, and phase markers written by the kernel |
+| [python-api.md](resources/python-api.md) | Using the decoder's Python API: decoding a capture, the calls and what they return, the records' fields, and worked queries |
 | [stalls.md](resources/stalls.md) | What latency, stall, idle, hidden cycles, and the split of wave time mean |
 | [latency.md](resources/latency.md) | Waves waiting on earlier memory instructions, and too few waves |
 | [compute.md](resources/compute.md) | Waves stalled: instructions their pipe did not accept |

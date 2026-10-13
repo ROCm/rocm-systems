@@ -9,7 +9,6 @@ directly when a question is narrower than `att_mine.py`'s reports: one instructi
 - [Functions](#functions)
 - [Records](#records)
 - [Examples](#examples)
-- [Phase markers](#phase-markers)
 - [Sample scripts](#sample-scripts)
 
 ## Setup
@@ -66,8 +65,7 @@ and add up the results, as the first example does.
 ## Records
 
 `TraceRecords` holds, among other fields, `waves`, `occupancy`, and `dispatches`, plus `info` (decoder
-warnings); `shaderdata` is in [Phase markers](#phase-markers). Times are in shader clock
-cycles.
+warnings). Times are in shader clock cycles.
 
 | Record | Field | Meaning |
 | --- | --- | --- |
@@ -196,79 +194,6 @@ for begin, finish in spans[1:]:
     if begin > end:
         idle_gaps.append((end, begin - end))     # (when, how many cycles)
     end = max(end, finish)
-```
-
-## Phase markers
-
-Markers written by the kernel time a phase of it (a loop body, the span from a load to its
-use) per iteration and per wave, which the per-instruction reports do not. The sqtt-marker
-compiler plugin and its header, `amd_sqtt_marker/sqtt_marker.h`, insert them; the plugin's
-documentation, `projects/rocprof-trace-decoder/docs/markers/README.md` in rocm-systems,
-covers building and loading it, scope filters, automatic instrumentation of functions,
-barriers, and memory instructions, and the encoding.
-
-```cpp
-#include <amd_sqtt_marker/sqtt_marker.h>
-
-for (int k = 0; k < iters; ++k) {
-    sqtt_marker_enter("load");
-    float v = in[idx(k)];
-    sqtt_marker_exit("load");
-    sqtt_marker_enter("compute");
-    v = work(v);
-    sqtt_marker_exit("compute");
-}
-```
-
-```bash
-hipcc -DAMD_SQTT_MARKER_ENABLE=1 -fpass-plugin=<path>/libsqtt-marker.so \
-      -I <path>/include ... kernel.hip
-```
-
-- Without `-DAMD_SQTT_MARKER_ENABLE=1`, every marker compiles to nothing. Named markers need
-  the plugin; without it, the build fails with an undefined reference to `sqtt_marker_enter`.
-- Numeric markers need only the header: `sqtt_marker_enter_id(1)`, `sqtt_marker_exit_id(1)`,
-  and `sqtt_marker_point_id(3)`. The reports then name them by ID (`event#1`).
-- Each marker adds instructions: `s_ttracedata` and the instructions that set up its value
-  (with the plugin, on gfx10 and later, a small value can be one `s_ttracedata_imm`), so
-  time the kernel without them.
-- Markers are not limited to the traced compute unit: each record carries the `cu`, `simd`,
-  and `wave_id` of the wave that wrote it, so a phase's count can exceed the traced waves'.
-  Numeric markers come from every wave that runs them on the traced shader engines; with the
-  plugin, only waves on the compute units in `SQTT_SCOPE_CU` emit markers (by default CU 0
-  and 1; the plugin's documentation covers the scope filters).
-
-Reading them: `sqtt_flamegraph.py <capture dir>` (one of the decoder's scripts, in
-`projects/rocprof-trace-decoder/scripts`) prints one line per unique marker stack, with the
-stack, total cycles, number of executions, and cycles per execution, and writes a flame graph
-(`sqtt_flamegraph.svg`); `sqtt_perfetto.py` writes a timeline for Perfetto. Both read the
-`shaderdata_*.json` files rocprofv3 writes beside the capture, and name phases from the
-code object (`-c <code object>` when it is not found).
-
-In Python, each marker is a `ShaderData` record in `records.shaderdata`, with its `time`,
-its `value`, and the wave slot (`cu`, `simd`, `wave_id`) that wrote it. A numeric enter is
-the ID shifted left by 2, plus 2; an exit is 1, with no ID (it closes the latest enter); an
-exit fused with the next enter is that enter's ID shifted left by 2, plus 3; a point is the
-ID shifted left by 2. Phase lengths per marker ID, pairing each enter with the next exit on
-the same slot:
-
-```python
-phase = defaultdict(list)            # marker id -> [cycles, ...]
-for _, records in records_by_file:
-    by_slot = defaultdict(list)
-    for s in records.shaderdata:
-        by_slot[(s.cu, s.simd, s.wave_id)].append(s)
-    for marks in by_slot.values():
-        marks.sort(key=lambda s: s.time)
-        open_id = None
-        for s in marks:
-            if s.value & 1 and open_id is not None:      # exit
-                phase[open_id[0]].append(s.time - open_id[1])
-                open_id = None
-            if s.value & 2:                              # enter
-                open_id = (s.value >> 2, s.time)
-for mid, cycles in sorted(phase.items()):
-    print(mid, len(cycles), sum(cycles) / len(cycles))
 ```
 
 ## Sample scripts
