@@ -291,6 +291,7 @@ if(BUILD_TESTS)
     VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
+    SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
