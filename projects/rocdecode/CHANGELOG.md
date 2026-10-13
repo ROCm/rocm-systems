@@ -17,6 +17,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
+* Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content. The decoder silently downgrades a 16-bit `output_format` to its 8-bit counterpart when `bit_depth_minus_8` is 0, so a caller that trusted the mask would misread an 8-bit surface as 16-bit.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 

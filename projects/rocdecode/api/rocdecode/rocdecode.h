@@ -165,7 +165,12 @@ typedef struct _RocdecDecodeCaps {
     uint32_t reserved_1[3];                /**< Reserved for future use - set to zero */
     uint8_t is_supported;                  /**< OUT: 1 if codec supported, 0 if not supported */
     uint8_t num_decoders;                  /**< OUT: Number of Decoders that can support IN params */
-    uint16_t output_format_mask;           /**< OUT: each bit represents corresponding rocDecVideoSurfaceFormat enum */
+    uint16_t output_format_mask;           /**< OUT: each bit represents corresponding rocDecVideoSurfaceFormat enum.
+                                                The mask is filtered by the requested bit_depth_minus_8: when it is 0
+                                                (8-bit content), no 16-bit surface format is reported, because the
+                                                decoder will not produce a 16-bit surface for 8-bit content. Choosing
+                                                an output_format that is set in this mask therefore guarantees that
+                                                rocDecCreateDecoder will use exactly that format. */
     uint32_t max_width;                    /**< OUT: Max supported coded width in pixels */
     uint32_t max_height;                   /**< OUT: Max supported coded height in pixels */
     uint16_t min_width;                    /**< OUT: Min supported coded width in pixels */

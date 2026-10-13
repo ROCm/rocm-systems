@@ -81,6 +81,14 @@ static VaapiLoader *g_va_loader = nullptr;
 // clang-format on
 #endif // ROCDECODE_USE_DLOPEN_VA
 
+// Every rocDecVideoSurfaceFormat that stores 16 bits per sample. Used to keep the capability mask
+// from advertising a 16-bit output format for 8-bit content.
+static const uint16_t k16BitOutputFormatMask =
+    (1 << rocDecVideoSurfaceFormat_P016) |
+    (1 << rocDecVideoSurfaceFormat_YUV444_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV420_16Bit) |
+    (1 << rocDecVideoSurfaceFormat_YUV422_16Bit);
+
 VaapiVideoDecoder::VaapiVideoDecoder(RocDecoderCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info},
     output_surface_format_override_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_ {VAProfileNone},
     va_context_id_{0}, va_surface_ids_{{}}, supports_modifiers_{false},
@@ -1398,6 +1406,16 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 
     dec_cap->num_decoders = va_contexts_[va_ctx_id].num_dec_engines;
     dec_cap->output_format_mask = va_contexts_[va_ctx_id].output_format_mask;
+    // The cached mask comes from vaQuerySurfaceAttributes on the VA profile, and drivers list the
+    // 10/12-bit pixel formats on 8-bit profiles too. Advertising a 16-bit output format for 8-bit
+    // content would be a lie: VaapiVideoDecoder::ValidateOutputFormat() downgrades any 16-bit
+    // output_format back to its 8-bit counterpart when bit_depth_minus_8 == 0, and the caller has no
+    // way to observe that. A caller that trusts the mask would then interpret an 8-bit surface as
+    // 16-bit and read twice the bytes per sample. Keep the mask consistent with what we will
+    // actually produce.
+    if (dec_cap->bit_depth_minus_8 == 0) {
+        dec_cap->output_format_mask &= ~k16BitOutputFormatMask;
+    }
     dec_cap->max_width = va_contexts_[va_ctx_id].max_width;
     dec_cap->max_height = va_contexts_[va_ctx_id].max_height;
     dec_cap->min_width = va_contexts_[va_ctx_id].min_width;
