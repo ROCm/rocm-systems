@@ -21,9 +21,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SOURCE_INTERFACE_DIR = os.path.normpath(
     os.path.join(_THIS_DIR, "..", "..", "..", "..", "py-interface")
 )
-_SOURCE_CLI_DIR = os.path.normpath(
-    os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli")
-)
+_SOURCE_CLI_DIR = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", "..", "amdsmi_cli"))
 
 
 def _resolve_cli_dir():
