@@ -84,6 +84,15 @@ class RomeModelsParseGraphLightMicrotest : public ::testing::Test {
 // system has is accepted and transcribed into the first treeBase row, with the row
 // after it terminated so the row count reads back as one. GPU 14 is two digits, so
 // the multi-digit arms of both the accumulator and the transcription are exercised.
+// The tree is dereferenced before anything else is checked. Every caller in this file
+// happens to test for null first, so this does not fix a reachable crash; it makes the
+// function's own contract total, so a future caller need not know to repeat that test.
+// Reported as a bad argument rather than invalid usage, matching how the rest of the
+// codebase reports a null pointer.
+TEST_F(RomeModelsParseGraphLightMicrotest, NullString_IsRejected) {
+  EXPECT_EQ(parseGraphLight(nullptr, system(), graph(), nullptr), ncclInvalidArgument);
+}
+
 TEST_F(RomeModelsParseGraphLightMicrotest, WellFormedTree_IsTranscribedToTreeBase) {
   const char* tree = "(4(2(14)(1))(6(5)))";
   graph()->treeBase[1][0] = 'x';  // the fixture zeroes the graph, so dirty the terminator

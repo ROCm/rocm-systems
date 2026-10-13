@@ -3963,6 +3963,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int gpu = 0;
   int offset = 0;
   int start_offset = offset;
+  if (str == NULL) {
+    WARN("No user-defined trees to parse");
+    return ncclInvalidArgument;
+  }
   if (str[0] == 0) {
     graph->treeBase[0][0] = 0;
     return ncclSuccess;
