@@ -431,6 +431,21 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
  *
  * For WAIT operations, @p source_queue_id identifies where the event was originally recorded; for
  * RECORD operations it equals @p queue_id.
+ *
+ * The start and end timestamps are when the GPU command processor began processing and retired
+ * the barrier packet that the operation was carried on, in the same clock domain as kernel
+ * dispatch records. Every barrier retires only after the work submitted ahead of it on its own
+ * queue completes. A RECORD's end therefore marks that work completing. A WAIT's barrier also
+ * depends on the waited-on event's barrier, so it retires no earlier than both, and its end is
+ * not necessarily when the dependency was satisfied. When CLR folds a wait into a later barrier
+ * on the queue (for example, a record or a synchronization barrier), the wait reports that
+ * barrier's times, shared with any other waits it carries.
+ * A record that CLR coalesces onto an earlier barrier (no work submitted since) reports that
+ * barrier's times, which can precede its own API call.
+ * When the GPU did not write the barrier's timestamps (for example, the application disabled
+ * profiling on its queue), an error is logged and the operation is not reported.
+ * A WAIT on one agent for an event recorded on another compares timestamps translated by each
+ * agent's own clock calibration, so the WAIT can appear to end slightly before the RECORD.
  */
 typedef struct rocprofiler_buffer_tracing_hip_event_record_t
 {

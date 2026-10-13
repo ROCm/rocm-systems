@@ -269,16 +269,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     auto& queue_info_session = *_session;
 
-    // Emitted before the loop below, which returns pooled signals to the pool. Deferred
-    // waits are keyed by this submission's completion signal, and once that signal is
-    // released the pool can hand the same handle to another submission.
-    if(!queue_info_session.packet_data.empty())
-    {
-        hip::event::submission_complete(queue_info_session.queue,
-                                        queue_info_session.packet_data.back().completion_signal,
-                                        queue_info_session.enqueue_ts);
-    }
-
     for(auto& packet : queue_info_session.packet_data)
     {
         auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session, packet);
@@ -644,6 +634,8 @@ WriteInterceptor(const void* packets,
                                     bool                      is_replay_pass       = false,
                                     rocprofiler_dispatch_id_t reserved_dispatch_id = 0) {
         auto transformed_packets = packet_vector_t{};
+        // HIP event dependency barriers added ahead of dispatches; each has its own async handler
+        auto num_dependency_barriers = int64_t{0};
 
         auto thr_id           = corr_id->thread_idx;
         auto internal_corr_id = corr_id->internal;
@@ -694,7 +686,7 @@ WriteInterceptor(const void* packets,
                 }
 
                 auto plan = hip::event::plan_barrier(
-                    queue, _packets[i], is_barrier, hip_event_tracing_data_v, corr_id);
+                    queue, _packets[i], packet_type, is_barrier, hip_event_tracing_data_v, corr_id);
 
                 if(plan.intercepted)
                 {
@@ -705,8 +697,6 @@ WriteInterceptor(const void* packets,
                 {
                     transformed_packets.emplace_back(_packets[i]);
                 }
-
-                hip::event::claim_deferred_waits(_packets[i], packet_type, is_barrier);
 
                 continue;
             }
@@ -798,6 +788,23 @@ WriteInterceptor(const void* packets,
             _packet_data.kernel_packet = _packets[i];
             // create a reference for short hand access
             auto& kernel_packet = _packet_data.kernel_packet;
+
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
+            // gfx12.5 ext dispatch packets carry a single dependency on the dispatch packet
+            // itself instead of on a preceding barrier. When it satisfies a traced
+            // hipStreamWaitEvent, it moves onto a barrier ahead of everything submitted for
+            // this dispatch, which gives the wait a barrier of its own to be timed by.
+            if(is_ext_kernel_dispatch)
+            {
+                if(auto dep_barrier = hip::event::plan_dependency_barrier(
+                       queue, kernel_packet.ext_kernel_dispatch.dep_signal))
+                {
+                    transformed_packets.emplace_back(*dep_barrier);
+                    kernel_packet.ext_kernel_dispatch.dep_signal = hsa_signal_t{.handle = 0};
+                    ++num_dependency_barriers;
+                }
+            }
+#endif
 
             // create our own signal that we can get a callback on. if there is an original
             // completion signal we will create a barrier packet, assign the original completion
@@ -1032,49 +1039,24 @@ WriteInterceptor(const void* packets,
                     tracer_data);
             }
 
-            // gfx12.5 cluster-dispatch packets carry a single dep_signal directly on
-            // the kernel dispatch packet rather than on a preceding BARRIER_AND. Scan
-            // it here so that deferred hipStreamWaitEvent dependencies are captured.
-#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0D
-            if(is_ext_kernel_dispatch)
-            {
-                const auto dep = _packets[i].ext_kernel_dispatch.dep_signal;
-                if(dep.handle != 0)
-                {
-                    hip::event::claim_deferred_wait(dep.handle);
-                }
-            }
-#endif
-
             _info_session.packet_data.emplace_back(std::move(_packet_data));
         }
 
         using info_session_t = queue_info_session_t;
 
-        // A batch can contain both kernel dispatch packets and barrier packets carrying
-        // event dep_signals. When there are kernel packets, deferred waits ride on the
-        // last one's completion signal and are emitted after it retires. When there are
-        // none, event tracing supplies its own barrier so the waits still get a
-        // completion to hang off of.
         if(!_info_session.packet_data.empty())
         {
             auto* last_pooled_signal     = _info_session.packet_data.back().pooled_signal;
             auto  last_completion_signal = _info_session.packet_data.back().completion_signal;
 
-            hip::event::bind_staged_waits(last_completion_signal);
-
             auto shared = std::make_shared<info_session_t>(std::move(_info_session));
 
             // async_started is called here (rather than per-packet) because signal_async_handler
-            // fires when the LAST kernel completes; deferred waits are emitted at the same time.
+            // fires when the LAST kernel completes.
             queue.async_started();
             queue.signal_async_handler(last_pooled_signal,
                                        last_completion_signal,
                                        new std::shared_ptr<info_session_t>(shared));
-        }
-        else if(auto barrier = hip::event::flush_staged_waits(queue, _info_session.enqueue_ts))
-        {
-            transformed_packets.emplace_back(*barrier);
         }
         // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
         ROCP_TRACE << fmt::format("QueueID {}: {}",
@@ -1082,6 +1064,8 @@ WriteInterceptor(const void* packets,
                                   fmt::join(transformed_packets, fmt::format(" ")));
 
         _writer(std::move(transformed_packets));
+
+        return num_dependency_barriers;
     };
 
     // Forwards a finished packet batch to the real queue submit. Shared by the replay passes, the
@@ -1224,19 +1208,21 @@ WriteInterceptor(const void* packets,
                 kernel_replay::execute_pass_phase_enter(
                     replay_plan, pass, thr_id, internal_corr_id, ancestor_corr_id, pass_state);
 
-                process_packet_batch(packets_arr,
-                                     1,
-                                     forward_to_writer,
-                                     /*is_replay_pass=*/true,
-                                     replay_dispatch_id);
+                const auto num_dependency_barriers = process_packet_batch(packets_arr,
+                                                                          1,
+                                                                          forward_to_writer,
+                                                                          /*is_replay_pass=*/true,
+                                                                          replay_dispatch_id);
 
-                // Drain this pass's async handler (separate HSA thread: reads counters, emits
+                // Drain this pass's async handlers (separate HSA thread: reads counters, emits
                 // records, releases signals/corr-id refs) before PASS EXIT / continue-decision /
                 // restore() / next submit, else we race its record delivery and reuse buffers and
-                // signals it still holds. This also implies GPU drain. Exactly one handler is in
-                // flight per pass (we drain before each submit, under the agent writer lock).
-                ROCP_FATAL_IF(queue.active_async_packets() > 1) << fmt::format(
-                    "kernel replay: more than one async handler in flight during a replay pass");
+                // signals it still holds. This also implies GPU drain. One dispatch handler is in
+                // flight per pass (we drain before each submit, under the agent writer lock), plus
+                // one per HIP event dependency barrier submitted ahead of the dispatch.
+                ROCP_FATAL_IF(queue.active_async_packets() > 1 + num_dependency_barriers)
+                    << fmt::format("kernel replay: more async handlers in flight during a replay "
+                                   "pass than were submitted for it");
                 replay_drain_or_fatal(queue);
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);

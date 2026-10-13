@@ -32,6 +32,12 @@ find_package(rocprofiler-sdk REQUIRED)
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+# The SDK logs an error and drops the HIP events a barrier times when the barrier has no
+# valid GPU timestamps; treat that as a failure so a regression in GPU timing is not
+# silent.
+set(hip-event-fail-regex
+    "${ROCPROFILER_DEFAULT_FAIL_REGEX}|no valid GPU timestamps for a HIP event")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-hip-event-trace
     COMMAND
@@ -42,6 +48,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
     PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${hip-event-fail-regex}"
     FIXTURES_SETUP rocprofv3-test-hip-event-trace)
 
 # Direct otf2 output from rocprofv3 goes through the deprecated C++ generator; the
@@ -89,6 +96,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     LABELS "integration-tests"
     PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${hip-event-fail-regex}"
     FIXTURES_SETUP rocprofv3-test-hip-event-trace-no-hip-api)
 
 rocprofiler_add_integration_validate_test(
@@ -101,3 +109,34 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     LABELS "integration-tests"
     FIXTURES_REQUIRED rocprofv3-test-hip-event-trace-no-hip-api)
+
+# Test hip event tracing under kernel replay, which re-runs each dispatch once per counter
+# group. Replay first waits for all work in flight on the agent, so a record that a later
+# wait depends on can already be complete when the wait is made; CLR then creates no
+# dependency and no WAIT is reported. validate_no_hip_api.py checks the records and their
+# links rather than exact counts, so it holds here as well.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-hip-event-trace-kernel-replay
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-event-trace --kernel-trace --pmc
+        SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES SQ_INSTS_VALU GRBM_GUI_ACTIVE
+        --replay-mode kernel --kernel-replay-beta-enabled -d
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-events-kernel-replay-trace -o out --output-format
+        json --log-level env -- $<TARGET_FILE:hip-events>
+    DEPENDS hip-events
+    TIMEOUT 120
+    LABELS "integration-tests;kernel-replay"
+    PRELOAD "${PRELOAD_ENV}"
+    FAIL_REGULAR_EXPRESSION "${hip-event-fail-regex}"
+    FIXTURES_SETUP rocprofv3-test-hip-event-trace-kernel-replay)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-hip-event-trace-kernel-replay
+    TEST_PATHS validate_no_hip_api.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-kernel-replay-trace/out_results.json
+    TIMEOUT 45
+    LABELS "integration-tests;kernel-replay"
+    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace-kernel-replay)

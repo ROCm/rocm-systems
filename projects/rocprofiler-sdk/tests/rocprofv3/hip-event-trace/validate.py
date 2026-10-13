@@ -143,19 +143,14 @@ def test_hip_event_timestamps(json_data):
     """Verify timestamps are ordered and within the profiling window."""
     data = json_data["rocprofiler-sdk-tool"]
     init_time = data["metadata"]["init_time"]
-    data["metadata"]["fini_time"]
 
     for itr in data["buffer_records"]["hip_event"]:
         assert (
-            itr.start_timestamp < itr.end_timestamp
-        ), f"start >= end: {itr.start_timestamp} >= {itr.end_timestamp}"
+            itr.start_timestamp <= itr.end_timestamp
+        ), f"start > end: {itr.start_timestamp} > {itr.end_timestamp}"
         assert (
             itr.start_timestamp > init_time
         ), f"start {itr.start_timestamp} before init {init_time}"
-        # end_timestamp is a CPU timestamp taken when the async handler fires,
-        # which can occur after fini_time is recorded on a different thread.
-        # Unlike kernel dispatch (which uses GPU profiling timestamps), barrier
-        # completion timestamps are not bounded by fini_time.
 
 
 def test_hip_event_fields(json_data):

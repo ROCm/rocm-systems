@@ -77,59 +77,31 @@ struct barrier_plan_t
     hsa::rocprofiler_packet forwarding     = {};
 };
 
-// Decides whether pkt is the GPU barrier produced by a hipEventRecord or
-// hipStreamWaitEvent on this thread. When it is, substitutes a pooled completion signal,
-// fires the ENTER/EXIT callbacks, and registers the handler that emits the record. All
-// event bookkeeping stays inside this call; the caller only emits packets.
+// Decides how to submit a barrier packet. Intercepted when pkt is the GPU barrier produced by
+// a hipEventRecord or hipStreamWaitEvent on this thread, or when one of its dependency
+// signals satisfies a hipStreamWaitEvent that CLR folded into it. An intercepted barrier gets
+// a pooled completion signal and a handler that reports each of those events with the
+// barrier's GPU start and end once it retires. Fires the ENTER/EXIT callbacks for a captured
+// record or wait. All event bookkeeping stays inside this call; the caller only emits packets.
 //
-// is_barrier is supplied by the caller because AQL packet classification (including the
-// vendor BARRIER_VALUE header decode) belongs to the queue layer, and duplicating it here
-// would risk the two copies drifting apart.
+// packet_type and is_barrier are supplied by the caller because AQL packet classification
+// (including the vendor BARRIER_VALUE header decode) belongs to the queue layer, and
+// duplicating it here would risk the two copies drifting apart.
 barrier_plan_t
 plan_barrier(hsa::Queue&                    queue,
              const hsa::rocprofiler_packet& pkt,
+             uint32_t                       packet_type,
              bool                           is_barrier,
              const tracing::tracing_data&   tracing_data_v,
              context::correlation_id*       corr_id);
 
-// A hipStreamWaitEvent's GPU dependency is often folded by CLR into a later packet's
-// barrier rather than emitted as a standalone one. The interceptor reports candidate
-// dependency signals here as it walks a packet batch; any wait registered against one is
-// claimed and staged.
-//
-// Staging is thread-local and scoped to a single packet batch: every claim is followed by
-// either bind_staged_waits or flush_staged_waits before the interceptor returns, so
-// nothing carries over into the next batch on this thread.
-void
-claim_deferred_wait(uint64_t dep_signal_handle);
-
-// Claims deferred waits carried as dependencies of a barrier packet, reading whichever
-// dependency field matches the packet type. No-op when this barrier was itself the one
-// intercepted for a record or wait, since that path reports its own completion.
-//
-// Must be called after plan_barrier for the same packet: the two share the per-thread
-// record of whether that barrier was already captured.
-void
-claim_deferred_waits(const hsa::rocprofiler_packet& pkt, uint32_t packet_type, bool is_barrier);
-
-// Attach the staged waits to a submission that already has a completion signal. The
-// caller must invoke submission_complete for that signal before returning it to the
-// signal pool, otherwise the pool can hand the same handle to another submission while
-// waits are still bound to it.
-void
-bind_staged_waits(hsa_signal_t completion_signal);
-
-// Used when a batch has staged waits but no kernel packet whose signal they can ride on.
-// Allocates a signal, registers a private completion handler, and returns the barrier
-// packet the caller should append. Returns nullopt when nothing is staged.
+// For a dependency carried on a dispatch packet itself (the gfx12.5 ext kernel dispatch
+// dep_signal) rather than on a barrier. When dep_signal satisfies a traced
+// hipStreamWaitEvent, returns a barrier-AND packet on dep_signal, timed like an intercepted
+// barrier, that the caller must submit ahead of the dispatch in place of its dep_signal.
+// Returns nullopt otherwise, and the dispatch is submitted unchanged.
 std::optional<hsa::rocprofiler_packet>
-flush_staged_waits(hsa::Queue& queue, rocprofiler_timestamp_t enqueue_ts);
-
-// Emit a WAIT record for every wait bound to this completion signal.
-void
-submission_complete(const hsa::Queue&       queue,
-                    hsa_signal_t            completion_signal,
-                    rocprofiler_timestamp_t enqueue_ts);
+plan_dependency_barrier(hsa::Queue& queue, hsa_signal_t dep_signal);
 
 }  // namespace event
 }  // namespace hip

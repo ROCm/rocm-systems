@@ -8,6 +8,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+**API:**
+
+  - HIP event tracing: `HIP_EVENT` RECORD and WAIT start and end timestamps now come from the GPU, as the times the event's barrier packet started and retired. Previously they were host times taken when the barrier was enqueued and when its completion was observed. If the GPU did not write the barrier's timestamps, an error is logged and the operation is not reported.
+
 ### Resolved issues
 
 ### Known issues
