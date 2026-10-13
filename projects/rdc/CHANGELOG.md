@@ -14,7 +14,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
-- `rdci dmon` and `rdci health -s` name the missing group again, for example `Cannot find the group 4242`. Since ROCm 7.13 they printed only `Group not found` (or `Fieldgroup not found` for a missing field group in `rdci dmon`).
+- `rdci dmon` and `rdci health -s` name the missing group again, for example `Cannot find the group 4242`. Since ROCm 7.12 they printed only `Group not found` (or `Fieldgroup not found` for a missing field group in `rdci dmon`).
 
 ## RDC 1.3.1 for ROCm 7.14.0
 
@@ -56,7 +56,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
-- **The group APIs report a missing group with a dedicated status**.
+- **Since ROCm 7.12 (RDC 1.3.0), the group APIs report a missing group with a dedicated status**.
   - For a group that does not exist, the GPU group get-info, add, and destroy calls return `RDC_ST_GROUP_NOT_FOUND`, and the field group get-info and destroy calls return `RDC_ST_FLDGROUP_NOT_FOUND`, instead of `RDC_ST_NOT_FOUND`. `rdc_field_watch()` passes both statuses through, and `rdc_health_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a missing GPU group.
 
 ### Resolved Issues
