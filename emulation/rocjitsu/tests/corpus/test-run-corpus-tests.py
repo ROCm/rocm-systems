@@ -30,6 +30,7 @@ class RunCorpusTests(unittest.TestCase):
             'ROCM_PATH': str(self.root / 'rocm'),
             'ROCJITSU_SOURCE_DIR': str(SOURCE_DIR),
             'CORPUS_TEST_CALLS': str(self.calls),
+            'ROCJITSU_CPU_THREAD_BUDGET': '4',
         }
         self.write_tool('rocjitsu', '#!/bin/sh\nexit 0\n')
         self.write_tool(
@@ -93,6 +94,7 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
                 str(SOURCE_DIR / 'tests/corpus/corpus-process-supervisor.sh'), wrapper
             )
             self.assertIn('17s', wrapper)
+            self.assertEqual(wrapper[wrapper.index('--cpu-thread-budget') + 1], '4')
             self.assertEqual(self.option(call, '-n'), '3')
             self.assertEqual(self.option(call, '--timeout'), '32')
             if self.option(call, '--suite') == 'race':
