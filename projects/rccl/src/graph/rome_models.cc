@@ -3983,6 +3983,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         status = 1;
         break;
       case 1:
+        if (gpus[gpu] > (INT_MAX - digit) / 10) {
+          WARN("GPU number too large in user-defined trees, ignoring user-defined trees");
+          return ncclInvalidUsage;
+        }
         gpus[gpu] = gpus[gpu] * 10 + digit;
         break;
       }

@@ -96,4 +96,11 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
             ncclInvalidUsage);
 }
 
+// Each number is accumulated a digit at a time into an int. A number too wide for an
+// int must be refused, not wrapped: 4294967299 wraps to 3, which would otherwise be
+// silently accepted as a well-formed tree naming a GPU the string never asked for.
+TEST_F(RomeModelsParseGraphLightMicrotest, NumberWiderThanIntRange_IsRejected) {
+  EXPECT_EQ(parseGraphLight("(4294967299)", system(), graph(), nullptr), ncclInvalidUsage);
+}
+
 }  // namespace
