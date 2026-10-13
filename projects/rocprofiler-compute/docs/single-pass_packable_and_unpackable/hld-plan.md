@@ -48,7 +48,7 @@ Surrounding pieces, unchanged by this design:
 
 ### Shipping layout (gfx942 default profile)
 
-Offline inspector of the shipping allocator:
+Metric allocation statistics from the offline tool `tools/counter_grouping_inspector.py`:
 
 | Quantity | Value |
 |----------|------:|
