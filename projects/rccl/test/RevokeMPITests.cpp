@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -12,6 +13,7 @@
 #include "nccl.h"
 #include "rccl_common.h"
 
+#include <memory>
 #include <sched.h>
 #include <string>
 #include <vector>
@@ -21,6 +23,7 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+using namespace DdaMPITestHelpers;
 
 class RevokeMPITest : public MPITestBase {};
 
@@ -533,112 +536,128 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
 }
 
 /**
- * DDA fabric LL incomplete AllReduce + revoke. IncompleteCollective_Revoke_Shrink_Collective
- * uses 1M floats and can take DDA two-shot on gfx1250 by accident, but it does not
- * assert the path. These two cases pin DDA fabric LL via rcclGetCollImplInfo so a
- * generic-kernel fallback cannot mask a DDA abortFlag wait regression. The
- * reporting API names DDA LL, not the one-shot vs two-shot kernel; the two tests
- * still use those sizes so each wait loop is the one that size selects.
+ * Incomplete DDA collective + revoke. IncompleteCollective_Revoke_Shrink_Collective
+ * can take a DDA path by accident but does not assert it. These cases pin one DDA
+ * kernel each via rcclGetCollImplInfo, so a generic-kernel fallback cannot mask a
+ * regression in that kernel's abortFlag wait: rank np-1 skips the collective, the
+ * other ranks block in the DDA wait, and ncclCommRevoke must unblock them.
+ *
+ * The reporting API names the tier (LL / LL128 / VMM / IPC), not the one-shot vs
+ * two-shot AllReduce kernel; those cases are sized so the default sub-thresholds
+ * select the intended kernel, and skip when the environment moves them.
+ *
+ * Cases that force a tier through RCCL_DDA_* overrides only take effect if the
+ * parameter has not been read yet in this process (RCCL caches parameters), so
+ * they skip rather than fail when the expected tier is not selected. Run them in
+ * their own process, as the test-runner configs do.
  */
 namespace
 {
-constexpr size_t kDdaOneShotCount     = 65536; // 256 KiB f32; below the 1 MiB one-shot threshold
-constexpr size_t kDdaTwoShotBaseCount = 262176;
-
-bool ddaIsGfx1250Device()
+struct DdaEnvSetting
 {
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
-
-bool ddaAllRanksTrue(bool local)
-{
-    int vote    = local ? 1 : 0;
-    int minVote = 1;
-    MPI_Allreduce(&vote, &minVote, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-    return minVote != 0;
-}
-
-bool ddaLLTwoShotShapeOk(size_t count, int nRanks)
-{
-    const size_t bytes = count * sizeof(float);
-    if(bytes % static_cast<size_t>(nRanks) != 0)
-        return false;
-    return (bytes / static_cast<size_t>(nRanks)) % 16 == 0;
-}
-
-size_t ddaTwoShotCountForRanks(int nRanks)
-{
-    size_t count = kDdaTwoShotBaseCount;
-    if(ddaLLTwoShotShapeOk(count, nRanks))
-        return count;
-    count = (count + 3) & ~size_t(3);
-    for(int i = 0; i < 1024; ++i, count += 4)
-    {
-        if(ddaLLTwoShotShapeOk(count, nRanks))
-            return count;
-    }
-    return 0;
-}
-} // namespace
-
-class RevokeDdaMPITest : public MPITestBase
-{
-protected:
-    void SetUp() override
-    {
-        MPITestBase::SetUp();
-        if(!ddaAllRanksTrue(ddaIsGfx1250Device()))
-            GTEST_SKIP() << "DDA fabric LL AllReduce requires gfx1250 on every rank";
-    }
-
-    void runIncompleteDdaRevokeShrink(size_t count);
+    const char* name;
+    const char* value;
 };
 
-void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count)
+struct DdaRevokeCase
 {
-    ASSERT_TRUE(validateTestPrerequisites(4,
-                                          kNoProcessLimit,
-                                          kNoPowerOfTwoRequired,
-                                          1,
-                                          kNoNodeLimit))
-        << "Test requires at least 4 MPI processes";
+    ncclFunc_t                 func;
+    size_t                     count; // count argument of the collective
+    int                        expectedAlgo;
+    int                        expectedProtocol;
+    std::vector<DdaEnvSetting> overrides;
+};
 
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+size_t ddaSendElems(ncclFunc_t func, size_t count, int nRanks)
+{
+    const size_t n = static_cast<size_t>(nRanks);
+    return (func == ncclFuncReduceScatter || func == ncclFuncAlltoAll) ? count * n : count;
+}
 
-    ncclComm_t  parent     = getActiveCommunicator();
-    hipStream_t stream     = getActiveStream();
-    const int   rank       = MPIEnvironment::world_rank;
-    const int   worldSize  = MPIEnvironment::world_size;
-    const int   skipRank   = worldSize - 1;
-    const size_t bytes     = count * sizeof(float);
+size_t ddaRecvElems(ncclFunc_t func, size_t count, int nRanks)
+{
+    const size_t n = static_cast<size_t>(nRanks);
+    return (func == ncclFuncAllGather || func == ncclFuncAlltoAll) ? count * n : count;
+}
+
+ncclResult_t ddaLaunch(ncclFunc_t func, const void* sendBuf, void* recvBuf, size_t count,
+                       ncclComm_t comm, hipStream_t stream)
+{
+    switch(func)
+    {
+    case ncclFuncAllReduce:
+        return ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, comm, stream);
+    case ncclFuncAllGather:
+        return ncclAllGather(sendBuf, recvBuf, count, ncclFloat32, comm, stream);
+    case ncclFuncReduceScatter:
+        return ncclReduceScatter(sendBuf, recvBuf, count, ncclFloat32, ncclSum, comm, stream);
+    case ncclFuncAlltoAll:
+        return ncclAlltoAll(sendBuf, recvBuf, count, ncclFloat32, comm, stream);
+    default: return ncclInvalidArgument;
+    }
+}
+
+/// True when the AllReduce LL one-/two-shot sub-thresholds are at the defaults the
+/// DdaMPITestHelpers counts are sized against.
+bool ddaLLSubThresholdsAtDefault()
+{
+    constexpr int64_t kDefaultTwoShot = 2 * static_cast<int64_t>(kDefaultLLOneShotThresholdBytes);
+    return MPIHelpers::getEnvParam<int64_t>("RCCL_DDA_LL_ONESHOT_THRESHOLD",
+                                            kDefaultLLOneShotThresholdBytes)
+               == static_cast<int64_t>(kDefaultLLOneShotThresholdBytes)
+           && MPIHelpers::getEnvParam<int64_t>("RCCL_DDA_LL_TWOSHOT_THRESHOLD", kDefaultTwoShot)
+                  == kDefaultTwoShot;
+}
+
+/// Shared body: GTEST_SKIP() returns from here, so call it as the last statement of a test.
+void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
+{
+    std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards;
+    for(const DdaEnvSetting& e : tc.overrides)
+        envGuards.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(e.name, e.value));
+
+    ASSERT_MPI_EQ(ncclSuccess, test.createTestCommunicator());
+
+    ncclComm_t   parent    = test.getActiveCommunicator();
+    hipStream_t  stream    = test.getActiveStream();
+    const int    rank      = MPIEnvironment::world_rank;
+    const int    worldSize = MPIEnvironment::world_size;
+    const int    skipRank  = worldSize - 1;
+    const size_t sendElems = ddaSendElems(tc.func, tc.count, worldSize);
+    const size_t recvElems = ddaRecvElems(tc.func, tc.count, worldSize);
 
     void* sendBuf = nullptr;
     void* recvBuf = nullptr;
-    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, bytes));
-    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, bytes));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, sendElems * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, recvElems * sizeof(float)));
     auto sendGuard = makeScopeGuard([&]() { if(sendBuf) (void)hipFree(sendBuf); });
     auto recvGuard = makeScopeGuard([&]() { if(recvBuf) (void)hipFree(recvBuf); });
 
-    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, count));
-    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, count));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, sendElems));
+    HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, recvElems));
 
     int algo        = -1;
     int protocol    = -1;
     int maxChannels = -1;
     ASSERT_MPI_EQ(ncclSuccess,
-                  rcclGetCollImplInfo(parent, ncclFuncAllReduce, count, ncclFloat32, ncclSum,
-                                      sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                  rcclGetCollImplInfo(parent, tc.func, tc.count, ncclFloat32, ncclSum, sendBuf,
+                                      recvBuf, /*graphCapturing=*/0, &algo, &protocol,
                                       &maxChannels));
-    ASSERT_MPI_TRUE(algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL) &&
-                    protocol == NCCL_PROTO_LL);
+    const bool pathOk = algo == tc.expectedAlgo && protocol == tc.expectedProtocol;
+    if(!tc.overrides.empty())
+    {
+        const std::string skipReason = mpiCoordinatedSkipReason(
+            !pathOk,
+            "RCCL_DDA_* override did not select the expected DDA tier (parameters are cached per "
+            "process); run this test on its own");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason << " (algo=" << algo << " protocol=" << protocol << ")";
+    }
+    ASSERT_MPI_TRUE(pathOk);
 
     if(rank != skipRank)
     {
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, parent, stream));
+        ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -667,8 +686,7 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count)
 
     if(!isExcluded)
     {
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(sendBuf, recvBuf, count, ncclFloat32, ncclSum, child, stream));
+        ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, child, stream));
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
     }
 
@@ -680,18 +698,163 @@ void RevokeDdaMPITest::runIncompleteDdaRevokeShrink(size_t count)
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+constexpr int kDdaLL    = static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL);
+constexpr int kDdaLL128 = static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128);
+constexpr int kDdaVmm   = static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM);
+constexpr int kDdaIpc   = static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_IPC);
+
+const std::vector<DdaEnvSetting> kDisableAllReduceLL = {
+    {"RCCL_DDA_LL_ONESHOT_THRESHOLD", "0"},
+    {"RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0"},
+};
+const std::vector<DdaEnvSetting> kDisableLL = {{"RCCL_DDA_LL", "0"}};
+} // namespace
+
+/** DDA fabric (gfx1250): LL / LL128 wire waits and the FabricGpuBarrier. */
+class RevokeDdaMPITest : public MPITestBase
+{
+protected:
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        const std::string skipReason
+            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric requires gfx1250");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason;
+        if(!validateTestPrerequisites(4, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit))
+            GTEST_SKIP() << "Test requires at least 4 MPI processes";
+    }
+
+    void skipUnlessDefaultLLSubThresholds()
+    {
+        const std::string skipReason = mpiCoordinatedSkipReason(
+            !ddaLLSubThresholdsAtDefault(),
+            "count is sized against the default RCCL_DDA_LL_{ONESHOT,TWOSHOT}_THRESHOLD");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason;
+    }
+};
+
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlTwoShot)
 {
-    const size_t count = ddaTwoShotCountForRanks(MPIEnvironment::world_size);
+    skipUnlessDefaultLLSubThresholds();
+    if(IsSkipped())
+        return;
+    const size_t count = twoShotCountForRanks(MPIEnvironment::world_size);
     if(count == 0)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count";
 
-    runIncompleteDdaRevokeShrink(count);
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, {}});
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlOneShot)
 {
-    runIncompleteDdaRevokeShrink(kDdaOneShotCount);
+    skipUnlessDefaultLLSubThresholds();
+    if(IsSkipped())
+        return;
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAllReduce, kOneShotCount, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128OneShot)
+{
+    runIncompleteDdaRevokeShrink(
+        *this, {ncclFuncAllReduce, kOneShotCount, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128TwoShot)
+{
+    const size_t count = twoShotCountForRanks(MPIEnvironment::world_size);
+    if(count == 0)
+        GTEST_SKIP() << "Could not find a two-shot-aligned element count";
+
+    std::vector<DdaEnvSetting> overrides = kDisableAllReduceLL;
+    overrides.push_back({"RCCL_DDA_LL128_ONESHOT_THRESHOLD", "0"});
+    runIncompleteDdaRevokeShrink(
+        *this, {ncclFuncAllReduce, count, kDdaLL128, NCCL_PROTO_LL128, overrides});
+}
+
+// The fabric VMM (Simple) AllReduce kernel is the FabricGpuBarrier user.
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaVmmBarrier)
+{
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAllReduce,
+                                  kOneShotCount,
+                                  kDdaVmm,
+                                  NCCL_PROTO_SIMPLE,
+                                  {{"RCCL_DDA_LL", "0"}, {"RCCL_DDA_LL128", "0"}}});
+}
+
+// 512 B per rank keeps the gathered total under the 128 KiB AllGather LL cap at 144 ranks.
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAllGatherLl)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 128, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAllGatherLl128)
+{
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAllGather, 16384, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaReduceScatterLl)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncReduceScatter, 256, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaReduceScatterLl128)
+{
+    runIncompleteDdaRevokeShrink(
+        *this, {ncclFuncReduceScatter, 256, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+}
+
+// 256 B per peer keeps the total under the 64 KiB AlltoAll LL cap at 144 ranks.
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 64, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl128)
+{
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAlltoAll, 1024, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+}
+
+/** DDA IPC (gfx942/gfx950, one node, exactly 8 ranks): every collective waits in IpcGpuBarrier. */
+class RevokeDdaIpcMPITest : public MPITestBase
+{
+protected:
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        const std::string skipReason
+            = mpiCoordinatedSkipReason(!isDdaIpcArchDevice(), "DDA IPC requires gfx942 or gfx950");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason;
+        if(!validateTestPrerequisites(8, 8, kNoPowerOfTwoRequired, 1, 1))
+            GTEST_SKIP() << "DDA IPC requires exactly 8 MPI processes on one node";
+    }
+};
+
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllReduce)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllGather)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcReduceScatter)
+{
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncReduceScatter, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
 }
 
 static void computeAsymmetricExclude(int worldRank, int worldSize,

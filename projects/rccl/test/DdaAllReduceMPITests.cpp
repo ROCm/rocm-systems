@@ -21,6 +21,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -40,16 +41,10 @@
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
 using namespace RCCLTestHelpers;
+using namespace DdaMPITestHelpers;
 
 namespace
 {
-constexpr size_t kOneShotCount = 65536; // 256 KiB f32; below default 1 MiB one-shot threshold
-
-// Default thresholds put two-shot above 1 MiB; 262176 floats is 1 MiB + 128 B and
-// satisfies the two-shot shard alignment rules at typical MPI rank counts (see
-// DdaFabricEligibilityTests.cpp AllReduceLL_TwoShotClaimsPastOneShotThreshold).
-constexpr size_t kTwoShotBaseCount = 262176;
-
 constexpr char kOneShotLogNeedle[] = "taking DDA fabric LL one-shot path";
 constexpr char kTwoShotLogNeedle[] = "taking DDA fabric LL two-shot path";
 
@@ -77,44 +72,10 @@ bool launchesOnUserStream(int algo)
     }
 }
 
-bool isGfx1250Device()
-{
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
-
 void fillRankScalar(void* buf, size_t nElem, int rank)
 {
     std::vector<float> host(nElem, static_cast<float>(rank + 1));
     HIP_CHECK(hipMemcpy(buf, host.data(), nElem * sizeof(float), hipMemcpyHostToDevice));
-}
-
-bool ddaLLTwoShotShapeOk(size_t count, int nRanks)
-{
-    const size_t bytes = count * sizeof(float);
-    if(bytes % static_cast<size_t>(nRanks) != 0)
-        return false;
-    return (bytes / static_cast<size_t>(nRanks)) % 16 == 0;
-}
-
-// Pick a count past the default one-shot threshold whose total bytes satisfy the
-// two-shot per-rank shard alignment for the active communicator width.
-size_t twoShotCountForRanks(int nRanks)
-{
-    size_t count = kTwoShotBaseCount;
-    if(!ddaLLTwoShotShapeOk(count, nRanks))
-    {
-        count = (count + 3) & ~size_t(3);
-        for(int i = 0; i < 1024; ++i, count += 4)
-        {
-            if(ddaLLTwoShotShapeOk(count, nRanks))
-                return count;
-        }
-        return 0;
-    }
-    return count;
 }
 
 bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
