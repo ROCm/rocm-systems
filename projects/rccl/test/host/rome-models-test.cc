@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <climits>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -110,6 +111,34 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
 
   EXPECT_EQ(parseGraphLight(tooManyNumbers.c_str(), system(), graph(), nullptr),
             ncclInvalidUsage);
+}
+
+// A GPU number is rendered back into text through a fixed 10-byte buffer, which is one
+// byte short of the widest int. The number is only rendered once it has matched a real
+// device, so this needs a system whose device number is that wide -- but the function is
+// handed those numbers and does not get to assume they are small.
+TEST_F(RomeModelsParseGraphLightMicrotest, GpuNumberAsWideAsAnInt_IsTranscribed) {
+  // Ten digits: one more than the buffer holds.
+  constexpr int kWideDev = 2000000000;
+  system()->nodes[GPU].nodes[kGpus - 1].gpu.dev = kWideDev;
+  const std::string tree = "(" + std::to_string(kWideDev) + ")";
+
+  ASSERT_EQ(parseGraphLight(tree.c_str(), system(), graph(), nullptr), ncclSuccess);
+
+  EXPECT_STREQ(graph()->treeBase[0], tree.c_str());
+}
+
+// The widest an int can render is the most negative one, whose sign costs a further
+// byte. A tree cannot spell a negative number, so it can only arrive through the remap
+// table -- which is just an array of ints and is not constrained to hold GPU numbers.
+TEST_F(RomeModelsParseGraphLightMicrotest, MostNegativeGpuNumberFromGpuMap_IsTranscribed) {
+  system()->nodes[GPU].nodes[kGpus - 1].gpu.dev = INT_MIN;
+  std::vector<int> mapToMostNegative(kGpus, 0);
+  mapToMostNegative[0] = INT_MIN;
+
+  ASSERT_EQ(parseGraphLight("(0)", system(), graph(), mapToMostNegative.data()), ncclSuccess);
+
+  EXPECT_STREQ(graph()->treeBase[0], "(-2147483648)");
 }
 
 // The counterpart to the range check below: every number the table can hold is accepted

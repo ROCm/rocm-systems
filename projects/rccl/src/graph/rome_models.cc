@@ -4041,8 +4041,9 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
                 WARN("Malformed tree in user-defined trees, ignoring user-defined trees");
                 return ncclInvalidUsage;
               }
-              char number_str[10];
-              sprintf(number_str, "%d", g);
+              // Wide enough for any int, including "-2147483648", plus its terminator.
+              char number_str[12];
+              snprintf(number_str, sizeof(number_str), "%d", g);
               int k = 0;
               while (number_str[k] != 0) {
                 if (y >= maxTreeBaseLen) {
