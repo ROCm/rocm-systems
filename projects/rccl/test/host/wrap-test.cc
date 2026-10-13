@@ -70,6 +70,12 @@
 // src/rccl_wrap.cc, e.g. ${PROJECT_BINARY_DIR}/hipify/src/rccl_wrap.cc.
 #include WRAP_CC_PATH
 
+// The real arch tables, so tests read rcclArchThresholds_gfx1250 itself. The rename keeps
+// fakes/rccl_arch_thresholds_fakes.cc's null-returning rcclGetArchThresholds the one comms resolve through.
+#define rcclGetArchThresholds rcclGetArchThresholdsUnused
+#include ARCH_THRESHOLDS_CC_PATH
+#undef rcclGetArchThresholds
+
 #include "dev_runtime_internal.h"
 
 // Private layout consumed by the real ncclDevrFindWindow implementation in
@@ -1274,55 +1280,16 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_MultiNodeUsesTunedLLRange) 
 namespace {
 constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 
-// The gfx1250 arch-table entries this change reads (rccl_arch_thresholds.cc).
-// rccl-UnitTestsMicro links no real tables (the fake rcclGetArchThresholds returns
-// null), so tests hand this copy to the comm; RcclDdaTierThresholds.* (GPU) checks
-// that the real table resolves to the same caps.
-rcclArchThresholds MakeRankScaledTable() {
-  rcclArchThresholds t{};
-  t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
-  t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 16 * kMiB;
-  t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
-  t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
-  t.ddaLL128Max[ncclFuncReduceScatter] = 2 * kMiB;
-  t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
-  t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
-  t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
-  t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
-  t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
-  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 512 * kKiB;
-  t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
-  t.rankScaledMinRanks = 8;
-  t.rankScaledMaxBytes = 256 * kMiB;
-  t.ddaArVmmFirstMinRanks = 32;
-  t.ddaArVmmFirstMinBytes = 2 * kMiB;
-  t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
-  t.ddaVmmBlockBudget = 2048;
-  t.ddaVmmMinBlocks = 32;
-  t.ddaVmmMaxBlocks = 128;
-  t.arRingLL128MaxPerRank = 32 * kMiB;
-  t.arTreeLL128Unlimited = true;
-  t.arTreeMaxPerRank = 1 * kMiB;
-  t.arTreeLLMaxPerRank = 32 * kKiB;
-  t.agRingLL128MaxPerRank = 64 * kMiB;
-  t.rsRingLL128MinPerRank = 512 * kKiB;
-  t.rsRingLL128MaxPerRank = 8 * kMiB;
-  t.rsRingLL128MaxPerRank1B = 32 * kMiB;
-  t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
-  t.rsRingSimpleCappedChannels = 128;
-  return t;
-}
-
+// The real gfx1250 table (rccl_arch_thresholds.cc, included above). Comms resolve
+// tables through the null-returning fake, so tests hand this one to the comm.
 const rcclArchThresholds* Gfx1250Table() {
-  static const rcclArchThresholds table = MakeRankScaledTable();
-  return &table;
+  return &rcclArchThresholds_gfx1250;
 }
 
 // gfx942 / gfx950 shape: the same DDA totals, every rank-scaled and Ring / Tree entry 0, CE-Scratch forced.
 const rcclArchThresholds* UnscaledTable() {
   static const rcclArchThresholds table = [] {
-    const rcclArchThresholds scaled = MakeRankScaledTable();
+    const rcclArchThresholds& scaled = *Gfx1250Table();
     rcclArchThresholds t{};
     std::copy(std::begin(scaled.ddaLLMax), std::end(scaled.ddaLLMax), t.ddaLLMax);
     std::copy(std::begin(scaled.ddaLL128Max), std::end(scaled.ddaLL128Max), t.ddaLL128Max);
@@ -5000,8 +4967,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
 }
 
 namespace {
-// rccl-UnitTestsMicro links no real arch tables (the host fake rcclGetArchThresholds
-// returns null), so each case hands the comm the table it wants to exercise.
+// Comms resolve tables through the host fake rcclGetArchThresholds, which returns
+// null, so each case hands the comm the table it wants to exercise.
 // Every other CE-Scratch gate is armed: scratch probe true, unregistered windows,
 // no sysmem, receive fits ddaScratch, and ceNonRegMax[AG] = 0 so the window
 // cannot fire on its own.
@@ -5140,6 +5107,112 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchFollowsForceCeScratchResolve
       });
 }
 
+// rcclForceCeScratchEnabled under the default RCCL_FORCE_CE: the table entry decides, a missing
+// table forces, CTA ZERO forces, and FORCE_CE=0 turns every case off.
+TEST(WrapMicrotestIsolated, ForceCeScratchEnabled_TruthTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ForceCeScratchEnabled_TruthTable",
+      []() {
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        EXPECT_FALSE(rcclForceCeScratchEnabled(comm)) << "table false";
+        table.forceCeScratch = true;
+        EXPECT_TRUE(rcclForceCeScratchEnabled(comm)) << "table true";
+        comm->archThresholds = nullptr;
+        EXPECT_TRUE(rcclForceCeScratchEnabled(comm)) << "null table";
+        table.forceCeScratch = false;
+        comm->archThresholds = &table;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        EXPECT_TRUE(rcclForceCeScratchEnabled(comm)) << "CTA ZERO, table false";
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_FALSE(rcclForceCeScratchEnabled(comm)) << "FORCE_CE=0, CTA ZERO";
+          comm->config.CTAPolicy = 0;
+          table.forceCeScratch = true;
+          EXPECT_FALSE(rcclForceCeScratchEnabled(comm)) << "FORCE_CE=0, table true";
+          comm->archThresholds = nullptr;
+          EXPECT_FALSE(rcclForceCeScratchEnabled(comm)) << "FORCE_CE=0, null table";
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_FORCE_CE=1 forces CE-Scratch even where the table leaves it off.
+TEST(WrapMicrotestIsolated, ForceCeScratchEnabled_ExplicitForceCeOverridesTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_ForceCeScratchEnabled_ExplicitForceCeOverridesTable",
+      []() {
+        SetMicroEnv("RCCL_FORCE_CE", "1");
+        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        EXPECT_TRUE(rcclForceCeScratchEnabled(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// taskAppend's CE-Scratch route is the only one Gather and Scatter have, and it follows
+// rcclForceCeScratchEnabled: off for a forceCeScratch = false table, on under CTA ZERO or a
+// forceCeScratch = true table, off again under FORCE_CE=0. AllReduce never takes it.
+TEST(WrapMicrotestIsolated, TaskAppendCeScratch_GatherScatterFollowForceCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_TaskAppendCeScratch_GatherScatterFollowForceCeScratch",
+      []() {
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        for (ncclFunc_t coll : {ncclFuncGather, ncclFuncScatter}) {
+          table.forceCeScratch = false;
+          EXPECT_FALSE(rcclTaskAppendCeScratch(comm, coll, true, false, sizeof(scratch))) << coll;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          EXPECT_TRUE(rcclTaskAppendCeScratch(comm, coll, true, false, sizeof(scratch))) << coll << " CTA ZERO";
+          comm->config.CTAPolicy = 0;
+          table.forceCeScratch = true;
+          EXPECT_TRUE(rcclTaskAppendCeScratch(comm, coll, true, false, sizeof(scratch))) << coll << " table true";
+          {
+            ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+            EXPECT_FALSE(rcclTaskAppendCeScratch(comm, coll, true, false, sizeof(scratch))) << coll << " FORCE_CE=0";
+          }
+        }
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncAllReduce, true, false, sizeof(scratch)));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// With CE-Scratch forced, the route still needs the scratch probe, no sysmem segment, and
+// a receive that fits ddaScratch.
+TEST(WrapMicrotestIsolated, TaskAppendCeScratch_NeedsProbeNoSysmemAndScratchFit) {
+  RUN_ISOLATED_TEST(
+      "Wrap_TaskAppendCeScratch_NeedsProbeNoSysmemAndScratchFit",
+      []() {
+        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx942", &table, scratch, sizeof(scratch));
+        EXPECT_TRUE(rcclTaskAppendCeScratch(comm, ncclFuncGather, true, false, sizeof(scratch)));
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncGather, false, false, sizeof(scratch))) << "probe";
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncGather, true, true, sizeof(scratch))) << "sysmem";
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncGather, true, false, sizeof(scratch) + 1)) << "too big";
+        comm->ddaScratch = nullptr;
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncGather, true, false, sizeof(scratch))) << "no scratch";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// NCCL_ALGO hands Gather and Scatter back to the kernel path.
+TEST(WrapMicrotestIsolated, TaskAppendCeScratch_NcclAlgoSkipsIt) {
+  RUN_ISOLATED_TEST(
+      "Wrap_TaskAppendCeScratch_NcclAlgoSkipsIt",
+      []() {
+        SetMicroEnv("NCCL_ALGO", "Ring");
+        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCeScratchComm("gfx942", &table, scratch, sizeof(scratch));
+        EXPECT_FALSE(rcclTaskAppendCeScratch(comm, ncclFuncScatter, true, false, sizeof(scratch)));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // The LL128 two-shot AllReduce ceiling (AICOMRCCL-2875) follows the AllReduce LL128
 // tier cap where the arch table runs that tier; a table without it, or no table,
 // keeps RCCL_DDA_LL128_TWOSHOT_THRESHOLD's 64 MiB default.
@@ -5148,7 +5221,7 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_FollowsLL128TierElseEnvDefa
       "Wrap_DdaLL128TwoShotThreshold_FollowsLL128TierElseEnvDefault",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL128_TWOSHOT_THRESHOLD");
-        rcclArchThresholds table = MakeRankScaledTable();
+        rcclArchThresholds table = *Gfx1250Table();
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = &table;
         comm->nRanks = 8;
@@ -5249,7 +5322,7 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_FollowsRankScaledLLTier) {
       "Wrap_DdaLLTwoShotThreshold_FollowsRankScaledLLTier",
       []() {
         SetMicroEnvAbsent("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
-        rcclArchThresholds table = MakeRankScaledTable();
+        rcclArchThresholds table = *Gfx1250Table();
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = &table;
         comm->nRanks = 16;
@@ -5285,7 +5358,7 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaFabricVmmBlocks_BudgetPerRank",
       []() {
-        rcclArchThresholds table = MakeRankScaledTable();
+        rcclArchThresholds table = *Gfx1250Table();
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = &table;
         const std::pair<int, int> cases[] = {{4, 192}, {8, 128}, {16, 128}, {32, 64}, {64, 32}, {128, 32}};
@@ -5383,6 +5456,38 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
         comm->nRanks = 16;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
         DeleteCommWithArch(comm);
+      });
+}
+
+// The window top stops at ddaArVmmFirstMaxBytes (32 MiB, the 64-rank top): 128 ranks keep the 64-rank window.
+TEST(WrapMicrotestIsolated, DdaArVmmFirst_WindowTopCappedAtMaxBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaArVmmFirst_WindowTopCappedAtMaxBytes",
+      []() {
+        const rcclArchThresholds* t = Gfx1250Table();
+        const ncclSymRegType_t unreg = ncclSymSendNonregRecvNonreg;
+        EXPECT_TRUE(rcclDdaArVmmFirstTab(t, 64, 32 * kMiB, unreg));
+        EXPECT_FALSE(rcclDdaArVmmFirstTab(t, 64, 32 * kMiB + 1, unreg));
+        EXPECT_TRUE(rcclDdaArVmmFirstTab(t, 128, 32 * kMiB, unreg));
+        EXPECT_FALSE(rcclDdaArVmmFirstTab(t, 128, 32 * kMiB + 1, unreg)) << "nRanks x 512 KiB would be 64 MiB";
+      });
+}
+
+// The selector at 64 and 128 ranks: VMM at the 32 MiB top, LL right above it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindowTopAt128Ranks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250VmmFirstWindowTopAt128Ranks",
+      []() {
+        ArDdaHooks hooks;
+        ArVmmEligible vmmHook;
+        const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
+        const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
+        for (int nRanks : {64, 128}) {
+          ncclComm* comm = MakeTuningComm(nRanks);
+          EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 32 * kMiB)) << nRanks;
+          EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 32 * kMiB + 16)) << nRanks;
+          DeleteCommWithArch(comm);
+        }
       });
 }
 
@@ -5727,7 +5832,7 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveChannels_BandStartsAtDatatypeLL128Ed
           EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 32 * kMiB, 192, dt)) << dt;
         }
         // Without a 1-byte edge, 1-byte types share the 2/4-byte band.
-        rcclArchThresholds table = MakeRankScaledTable();
+        rcclArchThresholds table = *Gfx1250Table();
         table.rsRingLL128MaxPerRank1B = 0;
         comm->archThresholds = &table;
         EXPECT_EQ(128, CappedChannels(comm, ncclFuncReduceScatter, NCCL_PROTO_SIMPLE, 16 * kMiB, 192, ncclFloat8e4m3));

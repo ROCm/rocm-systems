@@ -80,8 +80,8 @@ struct rcclArchThresholds {
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
-  // rankScaledMinRanks ranks, a non-zero entry replaces the matching
-  // ddaLLMax / ddaLL128Max / ddaVmmMax total with nRanks * entry, clipped to
+  // rankScaledMinRanks ranks, on any node count, a non-zero entry replaces the
+  // matching ddaLLMax / ddaLL128Max / ddaVmmMax total with nRanks * entry, clipped to
   // rankScaledMaxBytes (which must not exceed the largest total above: fabric
   // scratch is sized from the totals). Smaller comms, and entries of 0, keep the
   // totals. The RCCL_DDA_*_THRESHOLD env vars still win over both.
@@ -92,12 +92,14 @@ struct rcclArchThresholds {
   size_t rankScaledMaxBytes;
 
   // AllReduce only: on comms of at least ddaArVmmFirstMinRanks ranks, DDA VMM
-  // takes unregistered messages in (ddaArVmmFirstMinBytes, nRanks *
-  // ddaArVmmFirstMaxPerRank] ahead of the LL tier, provided the VMM path is
-  // eligible. 0 ranks = off.
+  // takes unregistered messages in (ddaArVmmFirstMinBytes, min(nRanks *
+  // ddaArVmmFirstMaxPerRank, ddaArVmmFirstMaxBytes)] ahead of the LL tier,
+  // provided the VMM path is eligible. 0 ranks = off. ddaArVmmFirstMaxBytes is
+  // the largest swept window top, so larger comms keep the measured window.
   int ddaArVmmFirstMinRanks;
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
+  size_t ddaArVmmFirstMaxBytes;
 
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks

@@ -994,6 +994,13 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   return table == nullptr || table->forceCeScratch;
 }
 
+// The CE-Scratch route taskAppend gives undecided collectives (Gather, Scatter); AllReduce never takes it.
+bool rcclTaskAppendCeScratch(const ncclComm* comm, ncclFunc_t coll, bool ceScratchAvailable, bool hasSysmemSegment,
+                             size_t recvBytes) {
+  return !rcclNcclAlgoEnvIsSet() && coll != ncclFuncAllReduce && rcclForceCeScratchEnabled(comm) &&
+         ceScratchAvailable && !hasSysmemSegment && comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes;
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
@@ -1047,7 +1054,7 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
 // whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
 // otherwise the env var's default applies.
-// On those rank-scaled comms a user-set RCCL_DDA_LL_THRESHOLD is the tier cap, so it also bounds two-shot.
+// On those rank-scaled comms a user-set RCCL_DDA_LL_THRESHOLD is the tier cap, so it also sets the two-shot ceiling.
 inline size_t rcclDdaLLTwoShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
   static const bool envSet = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
   if (!envSet && rcclDdaRankScaled(table, nRanks) &&
@@ -1130,7 +1137,8 @@ inline bool rcclDdaArVmmFirstTab(const rcclArchThresholds* table, int nRanks, si
   if (twoShotEnvSet) {
     return false;
   }
-  return msgBytes > table->ddaArVmmFirstMinBytes && msgBytes <= (size_t)nRanks * table->ddaArVmmFirstMaxPerRank;
+  const size_t top = std::min((size_t)nRanks * table->ddaArVmmFirstMaxPerRank, table->ddaArVmmFirstMaxBytes);
+  return msgBytes > table->ddaArVmmFirstMinBytes && msgBytes <= top;
 }
 
 int rcclDdaFabricLocalVmmBlocks(const ncclComm* comm, int maxBlocks) {

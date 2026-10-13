@@ -3117,6 +3117,7 @@ TEST(RcclDdaTierThresholds, Gfx1250RankScaledEntriesOnlyOnGfx1250)
     EXPECT_EQ(t->ddaArVmmFirstMinRanks, 32);
     EXPECT_EQ(t->ddaArVmmFirstMinBytes, 2 * MiB);
     EXPECT_EQ(t->ddaArVmmFirstMaxPerRank, 512 * KiB);
+    EXPECT_EQ(t->ddaArVmmFirstMaxBytes, 32 * MiB);
     EXPECT_EQ(t->ddaVmmBlockBudget, 2048);
     EXPECT_EQ(t->ddaVmmMinBlocks, 32);
     EXPECT_EQ(t->ddaVmmMaxBlocks, 128);
@@ -3146,6 +3147,7 @@ TEST(RcclDdaTierThresholds, Gfx1250RankScaledEntriesOnlyOnGfx1250)
         EXPECT_EQ(o->ddaArVmmFirstMinRanks, 0) << arch;
         EXPECT_EQ(o->ddaArVmmFirstMinBytes, 0u) << arch;
         EXPECT_EQ(o->ddaArVmmFirstMaxPerRank, 0u) << arch;
+        EXPECT_EQ(o->ddaArVmmFirstMaxBytes, 0u) << arch;
         EXPECT_EQ(o->ddaVmmBlockBudget, 0) << arch;
         EXPECT_EQ(o->ddaVmmMinBlocks, 0) << arch;
         EXPECT_EQ(o->ddaVmmMaxBlocks, 0) << arch;
