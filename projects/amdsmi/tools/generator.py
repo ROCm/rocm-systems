@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import ctypes
 import os
 import re
 import argparse
@@ -121,22 +122,25 @@ def unify_bitfield_padding(full_path_file_name):
     # clang2py types each PADDING bit-field by its own width (c_uint8 for up to
     # 8 bits) instead of by the storage unit it completes. Python 3.14+ lays out
     # _layout_ = 'ms' structs with MSVC rules, where a bit-field of a different
-    # type starts a new unit, so such structs grow and later fields move. Give
-    # each padding bit-field the type of the unit it completes.
-    bitfield = re.compile(r"^(\s*)\('(\w+)', ctypes\.(c_u?int(8|16|32|64)), (\d+)\),\s*$")
+    # size starts a new unit, so such structs grow and later fields move. Give
+    # each padding bit-field the type of the unit it completes. Sizes come from
+    # ctypes, so aliases such as c_ubyte and c_ushort are handled too.
+    bitfield = re.compile(r"^(\s*)\('(\w+)', ctypes\.(c_\w+), (\d+)\),\s*$")
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, "w", encoding="UTF-8") as new_file:
         with open(full_path_file_name, "r", encoding="UTF-8") as old_file:
             unit_type, unit_width, used = None, 0, 0
             for line in old_file:
                 m = bitfield.match(line)
-                if not m:
+                storage = m and getattr(ctypes, m.group(3), None)
+                if not storage:
                     unit_type, unit_width, used = None, 0, 0
                     new_file.write(line)
                     continue
-                indent, name, ctype, width, bits = m.group(1, 2, 3, 4, 5)
-                width, bits = int(width), int(bits)
-                if name.startswith("PADDING_") and unit_type and ctype != unit_type:
+                indent, name, ctype, bits = m.group(1, 2, 3, 4)
+                width = ctypes.sizeof(storage) * 8
+                bits = int(bits)
+                if name.startswith("PADDING_") and unit_type and width != unit_width:
                     part = 0
                     while bits:
                         if used == unit_width:
@@ -150,7 +154,7 @@ def unify_bitfield_padding(full_path_file_name):
                         bits -= chunk
                         part += 1
                     continue
-                if ctype != unit_type or used + bits > width:
+                if width != unit_width or used + bits > width:
                     unit_type, unit_width, used = ctype, width, 0
                 used += bits
                 new_file.write(line)
