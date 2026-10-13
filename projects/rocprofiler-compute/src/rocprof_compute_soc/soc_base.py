@@ -21,7 +21,6 @@ from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
 from rocprof_compute_soc.counter_grouping_single_pass import (
-    single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
 from rocprof_compute_soc.counter_grouping_tcc import (
@@ -567,11 +566,11 @@ class OmniSoC_Base:
         after its *_ACCUM charges 0. Legacy SQ_ACCUM_PREV_HIRES pairing and
         dedicated accum buckets are not used.
 
-        The default path is single-pass-packable: every metric whose PMC set
-        fits one CounterFile gets a full-bucket collection (counters may be
-        duplicated across passes), then SPU PMCs are filled into existing
-        buckets. Set ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC=1 for the legacy
-        heuristic (priority coalesce, then first-fit).
+        The path is single-pass-packable: every metric whose PMC set fits one
+        CounterFile gets a full-bucket collection (counters may be duplicated
+        across passes), then SPU PMCs are filled into existing buckets. If that
+        allocation returns nothing, the priority coalesce and first-fit path
+        places the remaining counters.
 
         Returns:
             output_files, file_count, and accu_file_count.
@@ -583,16 +582,15 @@ class OmniSoC_Base:
         file_count = 0
         tcc_channel_counter_file_map: dict[str, CounterFile] = {}
 
-        if single_pass_packable_enabled_from_env():
-            single_pass = try_allocate_single_pass_packable(
-                self,
-                work_set,
-                self.__perfmon_config,
-                file_count_start=file_count,
-            )
-            if single_pass is not None:
-                output_files, file_count, _stats = single_pass
-                return output_files, file_count, accu_file_count
+        single_pass = try_allocate_single_pass_packable(
+            self,
+            work_set,
+            self.__perfmon_config,
+            file_count_start=file_count,
+        )
+        if single_pass is not None:
+            output_files, file_count, _stats = single_pass
+            return output_files, file_count, accu_file_count
 
         # Legacy path: priority coalesce, then first-fit.
         if self._same_bucket_priority_metric_ids():

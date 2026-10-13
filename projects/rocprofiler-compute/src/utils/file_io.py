@@ -23,7 +23,6 @@ from utils.logger import (
 from utils.metrics.pass_provenance import (
     PassLayout,
     build_pass_layout,
-    legacy_pass_merge_enabled,
     natural_pass_sort_key,
 )
 from utils.utils_common import (
@@ -402,7 +401,7 @@ def load_df_pmc(
     if long_df.empty:
         return pd.DataFrame(), PassLayout.empty()
 
-    if legacy_pass_merge_enabled() or not preserve_pass_provenance:
+    if not preserve_pass_provenance:
         long_df = long_df.drop(columns=["Pass_Key"])
         df, _slot_to_id = utils_analysis.process_rocpd_csv(long_df)
         layout = PassLayout.empty()
