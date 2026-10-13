@@ -8,9 +8,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added IFoE fabric RAS CPER API**.
+  - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
+  - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
+
 - **Added `AMDSMI_VRAM_TYPE_HBM4` to `amdsmi_vram_type_t`**.  
   - Identifies HBM Generation 4 VRAM, reported by `amdsmi_get_gpu_vram_info()`.
   - Also added the pre-existing `HBM3E` value to the Python `AmdSmiVramType` enum, which had been missing it.
+
+- **Added amdgpu version details to `amdsmi_get_gpu_driver_info()`**.  
+  - `driver_kernel_version` and `amdgpu_driver_version` split `/sys/module/amdgpu/version`, such as `6.19.14` and `31400000`. A 3-part version such as `6.19.4` fills only `driver_kernel_version`.
+  - `driver_build_version` reports the build number of the active DKMS package when its version matches the loaded module.
+  - `driver_full_version` is `driver_version` plus `-build` when the build is known, otherwise `driver_version`. `driver_version` is unchanged.
+  - On the WSL backend, `driver_full_version` is a copy of the WDDM `driver_version`.
 
 - **Added NPM (Node Power Management) power limit setting**.  
   - New `amd-smi set --node-power-limit`/`-n` to set the node-level power limit in watts (node-wide, not per-GPU).
