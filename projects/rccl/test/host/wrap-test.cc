@@ -6237,9 +6237,10 @@ TEST(WrapMicrotestIsolated, SymkQuery_PassesCallerAligned16BToTuner) {
       });
 }
 
-// In-place ReduceScatter whose per-rank slice is 24 B: on rank 0 the input and output
-// offsets match, but other ranks' differ by rank * 24, so every rank must report the
-// buffers as unaligned. Out-of-place with the same slice stays aligned.
+// In-place ReduceScatter whose per-rank slice is 24 B, on rank 2: the input and output
+// offsets differ by 48 B, which passes the plain modulo-16 check, but rank 1's differ by
+// 24 B, so only the in-place slice rule (which needs the real rank) keeps the ranks in
+// agreement. Out-of-place with the same slice stays aligned.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_InPlaceUnalignedSliceQueriesUnaligned",
@@ -6260,21 +6261,68 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InPlaceUnalignedSliceQueriesUnal
         });
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        comm->rank = 0;
+        comm->nRanks = 4;
+        comm->rank = 2;
         alignas(16) static char sendbuf[256];
         alignas(16) static char otherbuf[256];
         constexpr size_t kRecvcount = 6;  // 24 B per rank in float32
         rcclCollDecision decision{};
 
         aligned = true;
-        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, sendbuf, kRecvcount, ncclFloat32, ncclSum,
-                                                        /*query=*/true, &decision));
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, sendbuf + 2 * 24, kRecvcount, ncclFloat32,
+                                                        ncclSum, /*query=*/true, &decision));
         ASSERT_EQ(1, calls);
         EXPECT_FALSE(aligned);
 
         aligned = false;
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, otherbuf, kRecvcount, ncclFloat32, ncclSum,
                                                         /*query=*/true, &decision));
+        ASSERT_EQ(2, calls);
+        EXPECT_TRUE(aligned);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The AllGather counterpart: in place, rank 2's input sits 48 B into the output, so the
+// plain modulo-16 check passes and only the in-place slice rule reports it unaligned.
+TEST(WrapMicrotestIsolated, SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_InPlaceUnalignedSliceQueriesUnaligned",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        static int calls;
+        static bool aligned;
+        calls = 0;
+        ScopedHook tuningCompute(g_tuningCompute, [](struct ncclTuningInput_t* in, struct ncclTuningResult_t* out) {
+          ++calls;
+          aligned = in->symAligned16B;
+          out->symKernelId = ncclSymkKernelId_AllGather_ST;
+          out->maxChannels = 8;
+          return ncclSuccess;
+        });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        comm->rank = 2;
+        alignas(16) static char recvbuf[256];
+        alignas(16) static char otherbuf[256];
+        constexpr size_t kSendcount = 6;  // 24 B per rank in float32
+        rcclCollDecision decision{};
+
+        aligned = true;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, recvbuf + 2 * 24, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        ASSERT_EQ(1, calls);
+        EXPECT_FALSE(aligned);
+
+        aligned = false;
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, otherbuf, recvbuf, kSendcount, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
         ASSERT_EQ(2, calls);
         EXPECT_TRUE(aligned);
         DeleteCommWithArch(comm);
