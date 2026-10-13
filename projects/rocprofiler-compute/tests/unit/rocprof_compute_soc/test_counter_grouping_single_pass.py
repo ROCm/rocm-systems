@@ -13,8 +13,6 @@ from rocprof_compute_soc.counter_grouping_single_pass import (
     _reduce_passes,
     collect_unique_packable_unions,
     fill_slot_limit_into_existing_passes,
-    legacy_heuristic_enabled_from_env,
-    single_pass_packable_enabled_from_env,
     try_allocate_single_pass_packable,
 )
 from rocprof_compute_soc.soc_base import flat_counters_in_perfmon_file
@@ -56,28 +54,7 @@ def bucket_holding(files, group):
     return homes[0] if homes else None
 
 
-def test_env_gate_default_on(monkeypatch):
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
-    assert single_pass_packable_enabled_from_env() is True
-    assert legacy_heuristic_enabled_from_env() is False
-
-
-def test_legacy_heuristic_env_disables_spp(monkeypatch):
-    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", "1")
-    assert legacy_heuristic_enabled_from_env() is True
-    assert single_pass_packable_enabled_from_env() is False
-
-
-def test_explicit_spp_off_disables(monkeypatch):
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
-    monkeypatch.setenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", "0")
-    assert single_pass_packable_enabled_from_env() is False
-
-
-def test_allocator_default_places_leftovers_and_clears_work_set(monkeypatch):
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
+def test_allocator_default_places_leftovers_and_clears_work_set():
     work_set = {"SQ_A", "SQ_B"}
 
     result = try_allocate_single_pass_packable(
@@ -236,9 +213,6 @@ def test_slot_limit_fill_zero_extra_when_already_covered():
 
 def test_allocator_integrates_slot_limit_fill(monkeypatch):
     """try_allocate runs SPU fill after packable layout (may add passes)."""
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
-
     slot = frozenset({"SQ_C", "SQ_D", "SQ_E", "SQ_F"})
     monkeypatch.setattr(
         "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_packable_unions",
@@ -356,8 +330,6 @@ def test_collect_adds_request_channels_to_a_level_set(monkeypatch):
 
 
 def test_allocator_keeps_tcc_request_row_and_level_pairs(monkeypatch):
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_LEGACY_HEURISTIC", raising=False)
-    monkeypatch.delenv("ROCPROF_COMPUTE_PERFMON_SINGLE_PASS_PACKABLE", raising=False)
     read = channels("TCC_EA0_RDREQ")
     write = channels("TCC_EA0_WRREQ")
     atomic = channels("TCC_EA0_ATOMIC")
