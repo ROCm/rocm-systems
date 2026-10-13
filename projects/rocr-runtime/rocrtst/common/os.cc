@@ -64,3 +64,5 @@ char* GetEnv(const char* env_var_name) {
 }
 
 }  // namespace rocrtst
+
+// Touched to force a CI build for host-ASAN validation (TheRock#8455). Revert before merge.
