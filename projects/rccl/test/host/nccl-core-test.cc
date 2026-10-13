@@ -87,15 +87,15 @@ TEST_F(NcclCoreMicrotest, TeamCftMultimem_InitOnceFails_ReturnsZeroedTeam) {
 }
 
 TEST_F(NcclCoreMicrotest, TeamRail_SuccessPath_DividesCommNRanksAndRankByLsaSize) {
-  // nRanks=24, lsaSize=4 deliberately avoids lsaSize^2 == nRanks: with the
-  // earlier 16/4 the expected team.nRanks (4) was indistinguishable from a
-  // mutation that replaced the division with a bare `lsaSize` readback.
+  // Constants chosen so each field separates `/` from its look-alikes: nRanks 24/4=6 is
+  // neither lsaSize (4) nor 24%4=0, and rank 9/4=2 differs from 9%4=1 (ncclTeamInnerFactor
+  // uses `%` on the same field, so that mix-up is the realistic one).
   comm->nRanks = 24;
-  comm->rank = 10;
+  comm->rank = 9;
   comm->devrState.lsaSize = 4;
   ncclTeam_t team = ncclTeamRail(comm);
   EXPECT_EQ(team.nRanks, 6);  // 24 / 4
-  EXPECT_EQ(team.rank, 2);    // 10 / 4
+  EXPECT_EQ(team.rank, 2);    // 9 / 4
   EXPECT_EQ(team.stride, 4);  // == lsaSize
 }
 
