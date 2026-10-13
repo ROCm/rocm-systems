@@ -2564,6 +2564,20 @@ TEST_CASE("Unit_HRR_Context_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
+// hipLibraryGetModule is in this tree and in the capture amdhip64, but a HIP
+// translation unit is compiled and linked against the SDK, which lags the tree.
+// A direct call is an undeclared identifier there. The integration jobs load
+// the capture library first, so the symbol is present at run time.
+static hipError_t (*hrr_hip_library_get_module())(hipModule_t*, hipLibrary_t) {
+#ifndef _WIN32
+  using Fn = hipError_t (*)(hipModule_t*, hipLibrary_t);
+  static Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_DEFAULT, "hipLibraryGetModule"));
+  return fn;
+#else
+  return &hipLibraryGetModule;
+#endif
+}
+
 // ===========================================================================
 // Workload T: Module/Library/Kernel management APIs
 //
@@ -2659,9 +2673,11 @@ TEST_CASE("Unit_HRR_ModuleExtra_Direct", "[.][hrr-direct]") {
   // capture shim's rejection path only: every generated shim records under
   // `if (r == hipSuccess)`, so a failing call is deliberately not written to
   // the archive. Unit_HRR_ModuleAPI_Direct owns the recorded call, where a
-  // real HIPRTC code object makes hipLibraryGetModule succeed.
-  { hipModule_t lm = nullptr;
-    hipError_t e = hipLibraryGetModule(&lm, nullptr);
+  // real HIPRTC code object makes hipLibraryGetModule succeed. A runtime that
+  // does not export the symbol skips the probe.
+  if (auto hipLibraryGetModuleFn = hrr_hip_library_get_module()) {
+    hipModule_t lm = nullptr;
+    hipError_t e = hipLibraryGetModuleFn(&lm, nullptr);
     REQUIRE((e == hipSuccess || e == hipErrorInvalidValue
              || e == hipErrorInvalidHandle || e == hipErrorNotSupported)); }
 
@@ -3361,13 +3377,15 @@ TEST_CASE("Unit_HRR_ModuleAPI_Direct", "[.][hrr][direct]") {
     hipLibrary_t lib = nullptr;
     HRR_HIP_CHECK(hipLibraryLoadData(&lib, co.data(), nullptr, nullptr, 0,
                                      nullptr, nullptr, 0));
-    hipModule_t mod_lib = nullptr;
-    HRR_HIP_CHECK(hipLibraryGetModule(&mod_lib, lib));
-    REQUIRE(mod_lib != nullptr);
+    if (auto hipLibraryGetModuleFn = hrr_hip_library_get_module()) {
+      hipModule_t mod_lib = nullptr;
+      HRR_HIP_CHECK(hipLibraryGetModuleFn(&mod_lib, lib));
+      REQUIRE(mod_lib != nullptr);
 
-    hipFunction_t fn_lib = nullptr;
-    HRR_HIP_CHECK(hipModuleGetFunction(&fn_lib, mod_lib, "rtc_fill"));
-    REQUIRE(fn_lib != nullptr);
+      hipFunction_t fn_lib = nullptr;
+      HRR_HIP_CHECK(hipModuleGetFunction(&fn_lib, mod_lib, "rtc_fill"));
+      REQUIRE(fn_lib != nullptr);
+    }
 
     // The module belongs to the library, so hipLibraryUnload is what releases
     // it; hipModuleUnload on it is refused by design.
