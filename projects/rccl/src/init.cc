@@ -126,6 +126,12 @@ NCCL_PARAM(CheckPointers, "CHECK_POINTERS", 0);
 NCCL_PARAM(CommBlocking, "COMM_BLOCKING", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(RuntimeConnect, "RUNTIME_CONNECT", 0);
 // [RCCL] Deadline for the host-local rendezvous in commDestroySync(). 0 restores upstream's unbounded wait.
+//
+// What this bounds is the skew between host-local ranks of one comm reaching ncclCommDestroy, which in a correct
+// program is short -- they have just finished the same collective. 120s is therefore orders of magnitude above the
+// expected value, which is what we want: expiry is a guess that a peer is gone, and the cost of guessing wrong is
+// borne by a healthy peer. It is also kept below PyTorch's 600s ProcessGroupNCCL watchdog default, since a
+// deadline longer than the framework's own would never be the thing that fires.
 RCCL_PARAM(DestroyBarrierTimeoutMsec, "DESTROY_BARRIER_TIMEOUT_MSEC", 120000);
 // When enabled (default), defer PAT QP creation until PAT is first selected by an AG/RS; NCCL_PAT_LAZY_INIT=0 restores eager connect at init.
 NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
@@ -4276,9 +4282,22 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
     //    holds its own parent handle and would enter the full barrier, so filtering just moves the hang onto it.
     //
     // 2. When it does run, bound it.  A peer can fail to arrive for reasons no membership calculation can predict
-    //    (ncclCommAbort elsewhere in the process, a rank that died outright), so the barrier gets a deadline and
-    //    reports an error instead of blocking forever.  Expiry is already non-fatal here: the result is logged and
-    //    teardown continues, which degrades a deadlock into a late PXN connection failure on the peer.
+    //    -- most of all an ncclCommAbort elsewhere in the process, which makes that rank take the abortFlag branch
+    //    above and skip the barrier entirely -- so it gets a deadline and reports an error instead of blocking
+    //    forever.  Expiry is non-fatal: the result is logged and teardown continues.
+    //
+    //    What expiry costs is bounded.  Proceeding here means running ncclProxyStop() below while a peer might
+    //    still be establishing a PXN connection through us, which is the race the barrier exists to prevent, so it
+    //    is worth being precise about the consequence.  The proxy service thread force-closes its peer sockets and
+    //    its listen socket on stop (proxy.cc:2090-2095, 2108), so the peer gets a closed socket or ECONNREFUSED
+    //    and fails cleanly -- it does not hang, and it does not touch freed state.  In particular nothing shared is
+    //    unmapped out from under it: the ncclShmClose() in ncclProxyStop() releases only this rank's client-side
+    //    view, because a client attach leaves handle->shmPath NULL and ncclOsShmClose() unlinks only when that is
+    //    non-NULL (os/linux.cc:777, 892).  Teardown is also refCount-gated (proxy.cc:2284), so comms that share
+    //    this proxy state are untouched.
+    //
+    //    The residual risk is a false positive: a peer that was merely slow to reach destroy, rather than gone,
+    //    loses whatever it was establishing.  That is why the default is generous rather than tight.
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0 && ncclPxnDisable(comm) != 1) {
       int* hostRanks;
       int hostRank = 0;

@@ -2053,7 +2053,10 @@ static ncclResult_t bootstrapP2PBarrier(void* commState, int* ranks, int rank, i
     int src = (rank - mask + nranks) % nranks;
     int dst = (rank + mask) % nranks;
     NCCLCHECK(bootstrapSend(commState, ranks ? ranks[dst] : dst, tag, data, sizeof(data)));
-    // [RCCL] One deadline for the whole barrier, not one per round, so the total wait is what the caller asked for.
+    // [RCCL] One absolute deadline shared by every round rather than a fresh timeout per round, so rounds that
+    // waited cannot buy later rounds extra time. This bounds the wait for each peer to connect, not the whole
+    // call: bootstrapSend above keeps its own connect retry, so the wall-clock worst case is the deadline plus
+    // that retry, not the deadline alone.
     NCCLCHECK(bootstrapRecvDeadline(commState, ranks ? ranks[src] : src, tag, data, sizeof(data), deadlineNs));
   }
   return ncclSuccess;
@@ -2070,9 +2073,18 @@ ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, in
 
 // [RCCL] bootstrapIntraNodeBarrier with a bound on how long a missing peer can hold everyone up.
 //
-// The dissemination barrier has no cancellation protocol, so without this a single rank that never arrives --
-// because it aborted, or died, or was excluded by an NCCL_SHRINK_ABORT it alone knows about -- blocks every peer
-// that did arrive, forever. That is AICOMRCCL-2467 / AICOMRCCL-2468.
+// The dissemination barrier has no cancellation protocol, so without this a single rank that never arrives blocks
+// every peer that did arrive, forever (AICOMRCCL-2467 / AICOMRCCL-2468).
+//
+// The case this exists for is specifically a peer that is *alive but not participating* -- it took the
+// abortFlag != 0 branch in commDestroySync() and skipped the barrier, so it will never connect. A peer that
+// actually dies needs no timeout: the kernel closes its sockets on process exit, so the recv below sees a closed
+// socket and already returns an error. That asymmetry is also why the ack read in socketAccept() is left
+// unbounded -- reaching it means a peer completed the TCP connect, which a dead process cannot do.
+//
+// The cost is that an alive-but-not-participating peer is indistinguishable from a merely slow one. Expiry here
+// is a guess that the peer is gone, and if the guess is wrong the peer loses whatever it was establishing. So the
+// timeout wants to be comfortably longer than any legitimate skew between ranks reaching ncclCommDestroy.
 //
 // timeoutMsec <= 0 restores the unbounded behaviour. On expiry the caller gets ncclRemoteError and must decide
 // what to do; callers on a teardown path generally want to log and continue, since by then the alternative is a
@@ -2088,7 +2100,9 @@ ncclResult_t bootstrapIntraNodeBarrierTimeout(void* commState, int* ranks, int r
   ncclResult_t ret = bootstrapP2PBarrier(commState, ranks, rank, nranks, tag, deadlineNs);
   BOOTSTRAP_PROF_CLOSE(time);
   if (ret != ncclSuccess) {
-    WARN("bootstrapIntraNodeBarrier: rank %d of %d gave up after %" PRId64 " ms; a host-local peer never arrived",
+    WARN("bootstrapIntraNodeBarrierTimeout: rank %d of %d gave up after %" PRId64
+         " ms; a host-local peer never arrived. If that peer was healthy rather than gone, raise "
+         "RCCL_DESTROY_BARRIER_TIMEOUT_MSEC (0 disables the deadline).",
          rank, nranks, timeoutMsec);
     return ret;
   }
