@@ -1220,10 +1220,11 @@ static struct tuningModel tuning_model_11{
   .llProtoRanges =
     {
       // sizePerRank = totalBytes / nRanks (4 ranks default on gfx1250).
-      // Breakpoints from 8_29 (Helios) sweep data.
       /*ReduceScatter*/
-      {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
-       /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 4194304, 1, 64}},
+      // LL128 beats Simple from just above 256 KiB/rank to 32 MiB/rank; above
+      // that falls through to the default NCCL_PROTO_SIMPLE below.
+      {/*LL  (min/max/factor/thread_threshold)*/ {0, 262144,   1, 16},
+       /*LL128 (min/max/factor/thread_threshold)*/ {262144, 33554432, 1, 64}},
       /*AllGather*/
       {/*LL  (min/max/factor/thread_threshold)*/ {0, 1048576,   1, 16},
        /*LL128 (min/max/factor/thread_threshold)*/ {1048576, 16777216, 1, 64}},

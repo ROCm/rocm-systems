@@ -20,15 +20,18 @@
 //              SendRecv=5, Send=6, Recv=7, AlltoAll=8]. 0 disables that tier.
 // All collectives compare total message bytes against the table values.
 
-// gfx1250 placeholders -- validate against sweep data (AICOMRCCL-1756).
+// gfx1250 placeholders -- validated against sweep data.
 // Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
+// RS (index 3): LL wins through 1 MiB, LL128 wins 2-4 MiB. ddaVmmMax is kept
+// narrow (5 MiB, just past the LL128 boundary) since DDA/SIMPLE measurably
+// loses to Ring/LL128 above ~8 MiB on this hardware.
 static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     128ULL*1024,         // [2] AllGather
-    16ULL*1024*1024,     // [3] ReduceScatter
+    1ULL*1024*1024,      // [3] ReduceScatter
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -41,7 +44,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather
-    2ULL*1024*1024,      // [3] ReduceScatter
+    4ULL*1024*1024,      // [3] ReduceScatter
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -54,7 +57,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- 0 = disabled
-    0,                   // [3] ReduceScatter   -- 0 = disabled
+    5ULL*1024*1024,      // [3] ReduceScatter
     16ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
