@@ -228,6 +228,47 @@ TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
 
+// ---- NCCL_SYM_TMA_ENABLE left at its compile-time default (no loadParam hook): on, not forced ----
+
+TEST_F(SymKernelMaskTest, DefaultParam_ArchCapableAndAligned_TmaKernelOfferedAlongsideOthers) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_AllReduce_RSxLD_AGxST}) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "the default must leave the tuner a choice: " << (int)id;
+  }
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_EachCollectiveOffersItsTmaKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_AllGather_TmaST));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_ArchNotTmaCapable_TmaKernelCleared) {
+  MakeTmaIncapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_NotSymAligned16B_TmaKernelCleared) {
+  MakeTmaCapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/false);
+  EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+}
+
 // ---- NCCL_SYM_TMA_ENABLE=2: force by leaving nothing else in the mask ----
 
 // What force has to remove: the non-Tma AllReduce kernels that survive this fixture

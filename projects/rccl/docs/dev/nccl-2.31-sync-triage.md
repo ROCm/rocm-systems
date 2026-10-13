@@ -79,7 +79,7 @@ explicitly designed for downstream forks.
 | Per-collective CTA/CGA and `CTAPolicy` override | **Adapt** | `cgaClusterSize` is a Hopper+ cluster-dimension launch attribute with no HIP equivalent; accept and ignore it rather than rejecting it, so portable applications still run |
 | `userProfilerTag` plumbed to profiler | **Port** | `69e7c2c0`, `0dab2642`, `deb1f27a`. Depends on profiler v7 below |
 | Unified cost model (`src/tuning/cost_model.{cc,h}`, `src/include/tuning.h`) | **Adapt** | Replaces `ncclTopoGetAlgoTime` plus the separate `sym_kernels.cc` `queryModel_*` path with one `ncclTuningInput_t`/`ncclTuningResult_t` interface covering legacy, symmetric and CE methods. RCCL's CSV tuner and `rccl_wrap.cc` overrides must be re-expressed against it |
-| TMA kernels enabled by default and costed | **Skip** | RCCL pins `NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)` in `src/sym_kernels.cc`; the cost-model hooks come along with the refactor but stay inert |
+| TMA kernels enabled by default and costed | **Adapt** | The `Tma` kernels stage through the gfx1250 Tensor Data Mover. `NCCL_SYM_TMA_ENABLE` defaults to `1`, gated to gfx1250 by `ncclSymkTmaAvailable()`, and the TDM terms live in `src/tuning/sym_model/lsa_base.cc` and `lsa.cc`. The gfx1250 `symMaxR2` arch-table entries still keep registered AllReduce, and AllGather above 2 MiB, off the symmetric path |
 | Algorithm selection on newer Intel CPUs | **Defer** | Bandwidth-table tuning only. Low value on AMD platforms; revisit if Intel-host MI systems matter |
 | AMD EPYC topology modeling (`#2036`) | **Port** | Community contribution that improves AMD host modeling. RCCL currently classifies AMD CPUs only as `ZEN`/`ROME` in `src/graph/topo.cc`. Directly relevant despite arriving via upstream |
 
