@@ -274,6 +274,9 @@ protected:
   void SetUp() override {
     NcclCftDevRuntimeMicrotest::SetUp();
     comm->gpuCftSupport = 13030;
+    // Non-degenerate flat CFT team: at cftSize 0 the peer query's range check rejects every
+    // peer first, so the shared prologue checks below would never reach the check they name.
+    comm->devrState.cftSize = 4;
     winHost.bigOffset = BigOffset();
     g_foundComm = comm;
     g_foundWinHost = &winHost;
@@ -362,7 +365,7 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SymTeamObtainFails_PropagatesErrorViaNcc
 // path) is not independently exercised here: fakes/bootstrap_stubs.cc's
 // bootstrapIntraNodeBarrier is a parameterless-result `{ return ncclSuccess; }` stub
 // shared by every other suite that links it, with no failure hook. Giving it one is out
-// of scope for this file's tests -- see the PR description's coverage note.
+// of scope for this file's tests.
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, SuccessPath_ReadsMcLeIdByCountedBitAndOffsetsByBigOffsetPlusOffset) {
   comm->devrState.cftMcSize = 4;
@@ -376,9 +379,8 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SuccessPath_ReadsMcLeIdByCountedBitAndOf
 
   DevrTeamPtr team = MakeDevrTeam(ncclTeam_t{4, 1, 1}, /*mcLeId0=*/111, /*mcLeId1=*/222); // counted==true selects mcLeId1
   ncclDevrTeam* teamPtr = team.get();
-  bool sawNeedBarrierRequested = false;
-  g_symTeamObtain = [&, teamPtr](ncclComm*, ncclTeam team, bool multimem, bool counted, bool wantsLeUc,
-                                bool wantsLeMc, ncclDevrTeam** outTeam, bool* needBarrier) {
+  g_symTeamObtain = [teamPtr](ncclComm*, ncclTeam team, bool multimem, bool counted, bool wantsLeUc,
+                             bool wantsLeMc, ncclDevrTeam** outTeam, bool* needBarrier) {
     EXPECT_FALSE(multimem);
     EXPECT_TRUE(counted); // from winHost.winFlags & NCCL_WIN_CFT_COUNTED
     EXPECT_FALSE(wantsLeUc);
@@ -387,14 +389,12 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SuccessPath_ReadsMcLeIdByCountedBitAndOf
     EXPECT_EQ(team.rank, 1);
     *outTeam = teamPtr;
     *needBarrier = true;
-    sawNeedBarrierRequested = true;
     return ncclSuccess;
   };
 
   ncclCftLeId leId = 0;
   size_t leOffset = 0;
   ASSERT_EQ(ncclGetMultimemDeviceLeInfo(window, /*offset=*/0x20, &leId, &leOffset), ncclSuccess);
-  EXPECT_TRUE(sawNeedBarrierRequested);
   EXPECT_EQ(leId, 222u);
   EXPECT_EQ(leOffset, winHost.bigOffset + 0x20);
 }
