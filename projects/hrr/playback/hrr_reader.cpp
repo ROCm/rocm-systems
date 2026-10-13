@@ -18,12 +18,6 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
-// payload_length is file-supplied. Without a ceiling, a corrupt header can ask
-// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
-// smaller (the writer buffers 256 KiB and spills larger records to a direct
-// write); 64 MiB is well above any legitimate record.
-static constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
-
 // ---------------------------------------------------------------------------
 // Event move semantics
 // ---------------------------------------------------------------------------
@@ -324,9 +318,12 @@ bool load_archive(const std::string& path, Archive& archive) {
   // Read events sequentially. read_raw_record handles the framing and the
   // torn-tail recovery; a torn record means the capture was interrupted, and
   // everything parsed before it is kept. The clean-shutdown trailer
-  // (hrr_eof_record) explicitly marks a whole archive.
+  // (hrr_eof_record) explicitly marks a whole archive, and it ends the event
+  // stream.
   bool truncated = false;
   bool complete  = false;
+  bool trailer   = false;
+  uint64_t trailer_count = 0;
   const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
   while (true) {
     Event ev;
@@ -349,8 +346,9 @@ bool load_archive(const std::string& path, Archive& archive) {
         total == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
       const auto* er = reinterpret_cast<const hrr_eof_record*>(ev.raw_payload.data());
       if (er->eof_magic == HRR_EOF_MAGIC) {
-        complete = true;
-        continue;  // do not append trailer as a replay event
+        trailer = true;
+        trailer_count = er->total_events;
+        break;  // the trailer is not a replay event, and nothing after it is
       }
     }
 
@@ -598,11 +596,35 @@ bool load_archive(const std::string& path, Archive& archive) {
     archive.events.push_back(std::move(ev));
   }
 
+  // A runtime older than the writer fix for it could append a few records
+  // after the trailer, from calls still in flight at shutdown. They are not in
+  // the trailer's count, so they are counted and left out of the replay.
+  if (trailer) {
+    std::vector<uint8_t> rest;
+    while (read_raw_record(f, rest) == RecordStatus::Ok)
+      ++archive.skipped_after_trailer;
+    if (archive.skipped_after_trailer)
+      fprintf(stderr,
+              "[HRR] Ignored %zu records after the clean-shutdown trailer\n",
+              archive.skipped_after_trailer);
+  }
+
   fclose(f);
 
-  archive.complete  = complete;
-  archive.truncated = truncated;
-  if (!complete) {
+  if (trailer) {
+    complete = trailer_count == archive.events.size();
+    if (!complete)
+      fprintf(stderr,
+              "[HRR] Clean-shutdown trailer counts %llu events but %zu precede it; "
+              "the archive is not treated as complete\n",
+              static_cast<unsigned long long>(trailer_count), archive.events.size());
+  }
+
+  archive.complete       = complete;
+  archive.truncated      = truncated;
+  archive.trailer        = trailer;
+  archive.trailer_events = trailer_count;
+  if (!trailer) {
     fprintf(stderr,
             "[HRR] Archive has no clean-shutdown trailer (capture likely crashed); "
             "recovered %zu events%s\n",
@@ -653,6 +675,49 @@ bool load_archive(const std::string& path, Archive& archive) {
   }
 
   return true;
+}
+
+// fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
+// file position passes 2 GiB even for a small relative offset. events.bin can
+// be larger than that, so the walk seeks with the 64-bit call.
+static int seek64(FILE* f, int64_t offset, int origin) {
+#ifdef _WIN32
+  return _fseeki64(f, offset, origin);
+#else
+  return fseeko(f, static_cast<off_t>(offset), origin);
+#endif
+}
+
+// The framing checks are read_raw_record's, so a record the loader takes as
+// torn ends the walk here too, and like the loader the walk stops at the first
+// trailer. A payload that runs past the end of the file needs no check of its
+// own: the seek succeeds and the next header read fails.
+bool has_clean_trailer(const std::string& archive_dir) {
+  FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
+  if (!f) return false;
+  const uint32_t hdr_size = static_cast<uint32_t>(sizeof(hrr_event_header));
+  hrr_file_header fh{};
+  bool ok = fread(&fh, sizeof(fh), 1, f) == 1 && fh.magic == HRR_MAGIC &&
+            fh.version == HRR_VERSION;
+  uint64_t records = 0;
+  bool clean = false;
+  hrr_eof_record rec{};
+  while (ok && fread(&rec.hdr, hdr_size, 1, f) == 1) {
+    const uint32_t total = rec.hdr.payload_length;
+    if (total < hdr_size || total > kMaxRecordBytes) break;
+    if (rec.hdr.event_type == HRR_EOF_MARKER && total == sizeof(rec)) {
+      ok = fread(reinterpret_cast<char*>(&rec) + hdr_size, sizeof(rec) - hdr_size, 1, f) == 1;
+      if (ok && rec.eof_magic == HRR_EOF_MAGIC) {
+        clean = rec.total_events == records;
+        break;
+      }
+    } else {
+      ok = seek64(f, static_cast<int64_t>(total - hdr_size), SEEK_CUR) == 0;
+    }
+    ++records;
+  }
+  fclose(f);
+  return clean;
 }
 
 // ---------------------------------------------------------------------------

@@ -67,9 +67,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
     `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
-    `GroupEndInternalTest.*`, `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`,
-    `GroupJobAbortTest.*`, `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`.
-
+    `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
+    `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
+    `GroupApiWrapperTest.*`, `ArgsGlobalCheckTest.*`, `GroupJobUnlinkCommsTest.*`,
+    `JobFreeCallbacksTest.*`, `MgmtTaskJobFuncTest.*`,
+    `GroupRegisterSymmetricCeInitTest.*`, `GroupRegisterSymmetricTest.*`,
+    `GroupCleanupTest.*`, `AsyncJobLaunchDirectTest.*`.
   - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
     (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
     `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
@@ -136,6 +139,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     before validation. Its raw-byte fixture reproduces the enum UBSan failure;
     enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
     sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `rasnet-test.cc`); suite
+    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
+    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
+  - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
+    `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
+    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
+    collection and summaries, including failed NVML queries and bounded
+    driver-version strings.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
@@ -193,8 +204,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
-  `CeCollMicrotest.*`. Its own binary because every other target links
-  `fakes/ce_fakes.cc`, which fakes the symbols this file defines.
+  `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
+  `ce-coll-test.cc`. Its own binary because every other target links
+  `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
+  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
+  in `fakes/nccl_stubs.cc`, which this target drops via
+  `RCCL_STUBS_OMIT_ncclCeFinalize`.
 - **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
   `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
   `RasClientSupportMicrotest.*` and
@@ -402,7 +417,7 @@ symbol.
 |---|---|
 | `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
-| `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
+| `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
@@ -790,7 +805,7 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroGinHost, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -832,6 +847,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
 ```
 
@@ -883,6 +899,13 @@ clear `ncclCommsSorted`; installation validates allocation before replacing
 the old registry and preserves explicit vacant slots. The RAS and diagnostics
 suites use the same helper. `fakes/ras_diagnostics_test_support.h` shares the
 owned communicator and recording reporter used by the diagnostic suites.
+
+The GPU diagnostic suite exercises payload filling through the public collectors
+and owns returned records with RAII. Each summarizer has an over-capacity rank
+case; together they exercise all seven bounded rank arrays and check truncated
+rank sets with total counts. ECC maxima are checked with the largest values on
+an earlier rank, and incomplete-report fixtures include hexadecimal hashes
+larger than nine.
 
 `SetMicroEnviron` in `fakes/env_fakes.{h,cc}` replaces the scripted environment
 for enumeration tests, preserving input order and malformed entries while
