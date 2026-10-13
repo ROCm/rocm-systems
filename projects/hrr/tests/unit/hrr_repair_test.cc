@@ -339,6 +339,28 @@ HRR_TEST_CASE(Unit_HRR_Repair_KeepsFilePermissions) {
 /**
  * Test Description
  * ----------------
+ *   - Repair does not carry setuid or setgid over to the files it writes: a
+ *     04750 events.bin and a 02750 manifest.json come back as 0750.
+ */
+HRR_TEST_CASE(Unit_HRR_Repair_DropsSetuidAndSetgid) {
+  Scratch s("setid");
+  write_text(s.archive / "manifest.json", "{\"pid\": 7, \"complete\": false}\n");
+  REQUIRE(::chmod((s.archive / "events.bin").c_str(), 04750) == 0);
+  REQUIRE(::chmod((s.archive / "manifest.json").c_str(), 02750) == 0);
+
+  auto [ret, out] = hrr_playback_merged(s.archive, "--repair");
+  INFO(out);
+  REQUIRE(ret == 0);
+  struct stat st;
+  REQUIRE(::stat((s.archive / "events.bin").c_str(), &st) == 0);
+  CHECK((st.st_mode & 07777) == 0750);
+  REQUIRE(::stat((s.archive / "manifest.json").c_str(), &st) == 0);
+  CHECK((st.st_mode & 07777) == 0750);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - A link at the root's manifest.json is refused before any process
  *     directory is repaired: exit non-zero, every process left as it was, the
  *     link target untouched.
