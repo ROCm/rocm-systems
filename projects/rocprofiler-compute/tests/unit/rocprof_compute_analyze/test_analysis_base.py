@@ -69,7 +69,6 @@ def test_pre_processing_assigns_filters_to_each_workload(
 
     analyzer = OmniAnalyze_Base(args, {})
     monkeypatch.setattr(analyzer, "initalize_runs", lambda: runs)
-    monkeypatch.setattr(analyzer, "prepare_output_directory", lambda: None)
 
     analyzer.pre_processing()
 

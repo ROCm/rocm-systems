@@ -92,7 +92,14 @@ def analysis_artifacts(tmp_path):
 
         yield db_path, csv_dir
     finally:
-        Database.close()
+        if Database._session is not None:
+            Database._session.close()
+
+        if Database._engine is not None:
+            Database._engine.dispose()
+
+        Database._session = None
+        Database._engine = None
 
 
 def test_check_resource_allocation_no_ctest(monkeypatch):
