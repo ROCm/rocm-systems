@@ -128,6 +128,8 @@ TEST_CASE("Unit_HRR_CaptureCapabilities_Direct", "[.][hrr-direct]") {
     const int ret = proc_imp.run("\"Unit_HRR_CaptureCapabilitiesImport_Direct\"");
     printf("%s" HRR_CAPS_IMPORTER " %d\n", proc_imp.getOutput().c_str(), ret);
     fflush(stdout);
+    // An open the machine refuses still exits 0; anything else is a failure.
+    REQUIRE(ret == 0);
   }
 
   HRR_HIP_CHECK(hipEventDestroy(ev));
@@ -267,6 +269,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
     CHECK(value == 0);
   }
 
+  if (tags.count(HRR_CAPS_IMPORTER)) REQUIRE(tags[HRR_CAPS_IMPORTER] == "0");
   if (!imported) {
     WARN("this machine cannot open an IPC handle from another process; the open "
          "records and their replay are not checked");

@@ -1406,6 +1406,10 @@ def deref_covered_params(api: str) -> Set[str]:
 # ptr_members names the members holding recorded device addresses; replay
 # translates each through ctx.translate_ptr, because a faithfully restored
 # struct still points into the capturing process otherwise.
+#
+# The IPC handle types are the exception: they are capabilities, so their
+# fields keep their fixed size but stay zero (capability=True), and replay
+# pairs nothing on them.
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)

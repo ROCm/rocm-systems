@@ -1156,11 +1156,13 @@ semaphore imports (`hipImportExternalSemaphore`) are recorded as raw events, but
 opaque handle bytes and import descriptors are never captured. An IPC handle lets any
 process on the machine open the allocation while its exporter lives, so
 `hipIpcGetMemHandle`, `hipIpcOpenMemHandle` and `hipIpcOpenEventHandle` leave
-`handle_bytes` zero. Replay pairs no export whose field is zero, so every import is
-reported as unmatched; a process cannot open its own handle, so an archive never holds
-the export of one of its imports. At replay the shims call the real APIs with zeroed/stale
-handles (they are no longer literal no-ops), so the imported memory/semaphore is never
-validly mapped. Workloads that communicate with other processes via IPC handles cannot
+`handle_bytes` zero. Replay pairs no export whose field is zero, so every
+`hipIpcOpenMemHandle` is reported as unmatched and skipped; a process cannot open its own
+handle, so an archive never holds the export of one of its imports.
+`hipIpcOpenEventHandle` has no such pairing: replay calls it with the zeroed handle,
+which the runtime refuses, and reports that error. The other shims call the real APIs
+with zeroed/stale handles (they are no longer literal no-ops), so the imported
+memory/semaphore is never validly mapped. Workloads that communicate with other processes via IPC handles cannot
 be replayed in isolation.
 
 For a similar reason `hipGetProcAddress`, `hipGetDriverEntryPoint` and their `_spt`
