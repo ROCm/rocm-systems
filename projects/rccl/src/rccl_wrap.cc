@@ -1598,15 +1598,17 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // This call site never carries a bias buffer (ncclAllReduceWithBias_impl bypasses it entirely
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
-  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed && twoShotWindow &&
-                                  ceAr2ShotEligible && (force || symReg);
+  const bool ctaZero = comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO;
+  const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
+      ceAr2ShotEligible &&
+      (ctaZero || ((force || symReg) && twoShotWindow));
   if (!query)
     INFO(NCCL_TUNING,
          "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d"
-         " twoShotWindow=%d [min=%zu max=%zu] (force=%d or symReg=%d)"
+         " twoShotWindow=%d [min=%zu max=%zu] (force=%d symReg=%d ctaZero=%d)"
          " rcclUseCeAr2Shot=%d ceARTmpBuf!=NULL:%d",
          (int)symkRequested, (int)ceAllReduceAllowed, (int)twoShotWindow,
-         arTwoShotMin, arTwoShotMax, (int)force, (int)symReg,
+         arTwoShotMin, arTwoShotMax, (int)force, (int)symReg, (int)ctaZero,
          (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
@@ -1908,10 +1910,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
       const size_t agCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAllGather);
       const size_t agCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAllGather);
       const bool agCeNonRegWindow = rcclWindowFits(totalBytes, agCeNonRegMin, agCeNonRegMax);
-      if ((rcclForceCeScratchEnabled(comm) || agCeNonRegWindow) && ceScratch &&
+      if (rcclForceCeScratchEnabled(comm) && ceScratch &&
           winRegType == ncclSymSendNonregRecvNonreg &&
           !hasSysmemSegment &&
-          comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes) {
+          comm->ddaScratch != nullptr && totalBytes <= (size_t)comm->ddaScratchBytes &&
+          ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || agCeNonRegWindow)) {
         decision->algo = RCCL_CE_SCRATCH;
         return ncclSuccess;
       }
@@ -2283,8 +2286,13 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // Guard a2aWinRegType to reject registered recv windows (they must not be routed through
     // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
     // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
+    // CTAPolicy_ZERO bypasses the size window; RCCL_FORCE_CE=0 disables CE-scratch entirely.
+    const size_t a2aCeNonRegMax = rcclCeNonRegMaxTab(archTable, ncclFuncAlltoAll);
+    const size_t a2aCeNonRegMin = rcclCeNonRegMinTab(archTable, ncclFuncAlltoAll);
+    const bool a2aCeNonRegWindow = rcclWindowFits(totalBytes, a2aCeNonRegMin, a2aCeNonRegMax);
     if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem &&
         comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+        ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || a2aCeNonRegWindow) &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
