@@ -172,24 +172,6 @@ static int inverseRemapRankForCompactTree(int remappedRank, int nranks) {
   }
 }
 
-// Compact Btree optimized for sorted domain ordering
-ncclResult_t ncclGetBtreeCompact(int nranks, int rank, int* u, int* d0, int* d1,
-                                  int* parentChildType) {
-  // Remap to half-interleaved space
-  int remappedRank = remapRankForCompactTree(rank, nranks);
-
-  // Get tree structure in remapped space
-  int remappedU, remappedD0, remappedD1;
-  ncclGetBtree(nranks, remappedRank, &remappedU, &remappedD0, &remappedD1, parentChildType);
-
-  // Map connections back to sorted ordering
-  *u = remappedU == -1 ? -1 : inverseRemapRankForCompactTree(remappedU, nranks);
-  *d0 = remappedD0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD0, nranks);
-  *d1 = remappedD1 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD1, nranks);
-
-  return ncclSuccess;
-}
-
 // Compact Dtree optimized for sorted domain ordering
 ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1,
                                   int* parentChildType0, int* s1, int* d1_0, int* d1_1,
