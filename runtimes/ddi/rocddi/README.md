@@ -53,6 +53,8 @@ implementations. `DeviceDriverState` pairs one such reference with the state
 acquired for a single activated endpoint. One driver instance can activate
 several devices. `Endpoint::driver_instance` carries the numeric identity that
 routes a passive snapshot to its owning driver instance.
+`Device::gpu` borrows a GPU-only driver projection from that activated state,
+so other device families do not enter GPU operation routing.
 
 The driver registry routes endpoint activation by the instance identity in
 each passive record. With multiple drivers, enumeration stages their records
@@ -83,6 +85,8 @@ queue types contain private concrete-owner variants, so their Rust signatures
 do not contain KFD types. Linux descriptor, IPC, SVM, and event-page interop
 requires a KFD resource and checks that ownership before using KFD or DRM.
 Both C frontends route Linux interop through platform modules.
+Live allocations retain their driver after the creating device is dropped;
+failed final cleanup retains that driver through native quarantine.
 
 ## Architecture
 

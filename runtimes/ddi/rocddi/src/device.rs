@@ -34,7 +34,7 @@ impl DeviceResources {
         endpoint: &Endpoint,
         driver_state: &DeviceDriverState,
     ) -> Result<Self, Error> {
-        if endpoint.gpu().is_some() && driver_state.is_gpu() {
+        if endpoint.gpu().is_some() && driver_state.gpu_driver().is_some() {
             return Ok(Self::Gpu(Shared::new(gpu::GpuResources::default())?));
         }
         Ok(Self::None)
@@ -95,6 +95,10 @@ impl Device {
             kind: crate::ErrorKind::Unsupported,
             detail: "activated endpoint is not a GPU",
         })?;
+        let driver = self.driver_state.gpu_driver().ok_or(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "activated driver has no GPU capability",
+        })?;
         let resources = match &self.resources {
             DeviceResources::Gpu(resources) => &**resources,
             DeviceResources::None => {
@@ -106,6 +110,7 @@ impl Device {
         };
         Ok(crate::device::gpu::GpuDevice {
             device: self,
+            driver,
             info,
             resources,
         })
