@@ -154,6 +154,30 @@ TEST_F(HipFileStream, creates_resources_on_the_stream_device)
     EXPECT_CALL(mhip, hipGetDevice).WillRepeatedly(::testing::Return(0));
 }
 
+TEST_F(HipFileStream, destroys_copy_stream_when_signal_alloc_throws)
+{
+    auto handle = reinterpret_cast<hipStream_t>(0xC0C0);
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipStreamCreateWithFlags).WillOnce(::testing::Return(handle));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags)
+        .WillOnce(::testing::Throw(Hip::RuntimeError(hipErrorOutOfMemory)));
+    EXPECT_CALL(mhip, hipStreamDestroy(handle));
+    ASSERT_THROW(stream_map.registerStream(nonnull_stream, 0), Hip::RuntimeError);
+}
+
+TEST_F(HipFileStream, construction_failure_survives_throwing_stream_destroy)
+{
+    auto handle = reinterpret_cast<hipStream_t>(0xC0C0);
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    EXPECT_CALL(mhip, hipStreamCreateWithFlags).WillOnce(::testing::Return(handle));
+    EXPECT_CALL(mhip, hipExtMallocWithFlags)
+        .WillOnce(::testing::Throw(Hip::RuntimeError(hipErrorOutOfMemory)));
+    EXPECT_CALL(mhip, hipStreamDestroy(handle))
+        .WillOnce(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
+    EXPECT_CALL(msys, syslog);
+    ASSERT_THROW(stream_map.registerStream(nonnull_stream, 0), Hip::RuntimeError);
+}
+
 TEST_F(HipFileStream, no_signal_slot_when_wait_value_unsupported)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);

@@ -18,6 +18,7 @@
 #include <mutex>
 #include <syslog.h>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 
 namespace hipFile {
@@ -40,13 +41,38 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
 
     DeviceGuard device_guard{device_id};
 
-    copy_stream = Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking);
+    auto destroy_stream = [](hipStream_t s) noexcept {
+        if (s) {
+            try {
+                Context<Hip>::get()->hipStreamDestroy(s);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+            }
+        }
+    };
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(destroy_stream)> owned_stream{
+        Context<Hip>::get()->hipStreamCreateWithFlags(hipStreamNonBlocking), destroy_stream};
 
+    auto free_slot = [](uint64_t *p) noexcept {
+        if (p) {
+            try {
+                Context<Hip>::get()->hipFree(p);
+            }
+            catch (...) {
+                Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+            }
+        }
+    };
+    std::unique_ptr<uint64_t, decltype(free_slot)> owned_slot{nullptr, free_slot};
     if (can_use_stream_wait_value) {
-        signal_slot = static_cast<uint64_t *>(
-            Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory));
-        std::atomic_ref<uint64_t>{*signal_slot}.store(0, std::memory_order_release);
+        owned_slot.reset(static_cast<uint64_t *>(
+            Context<Hip>::get()->hipExtMallocWithFlags(sizeof(uint64_t), hipMallocSignalMemory)));
+        std::atomic_ref<uint64_t>{*owned_slot}.store(0, std::memory_order_release);
     }
+
+    copy_stream = owned_stream.release();
+    signal_slot = owned_slot.release();
 }
 
 hipStream_t
