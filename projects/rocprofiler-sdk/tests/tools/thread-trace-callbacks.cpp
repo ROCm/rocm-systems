@@ -26,11 +26,11 @@
 #endif
 
 #include "thread-trace-callbacks.hpp"
+#include "thread-trace-exec-mask.hpp"
 
 #include <unistd.h>
 #include <atomic>
 #include <cassert>
-#include <cstddef>
 #include <fstream>
 
 namespace Callbacks
@@ -39,10 +39,7 @@ rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
 std::atomic<bool>                     has_sdata{false};
 std::atomic<bool>                     has_excess_detail{false};
-bool                                  check_exec_mask = false;
-std::atomic<bool>                     has_exec_mask{false};
-std::atomic<bool>                     has_gfx12{false};
-std::atomic<bool>                     old_decoder{false};
+ExecMaskCheck                         exec_mask_check{};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -81,22 +78,12 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
     assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
     assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
 
-    struct trace_data_t
-    {
-        uint64_t gfxip;
-        uint64_t wave_size;
-    };
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
-                    void*                                          userdata) {
-        auto& trace = *static_cast<trace_data_t*>(userdata);
-        auto& gfxip = trace.gfxip;
-        if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP)
-        {
-            gfxip = reinterpret_cast<uintptr_t>(trace_events);
-            if(gfxip == 12) has_gfx12 = true;
-        }
+                    void*                                          callback_data) {
+        auto& trace = *static_cast<ExecMaskCheck::Trace*>(callback_data);
+        exec_mask_check.on_record(record_type_id, trace_events, trace);
         if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
         {
             const auto* events =
@@ -112,28 +99,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
         {
             const auto& wave =
                 *reinterpret_cast<const rocprofiler_thread_trace_decoder_wave_t*>(wave_data);
-            if(check_exec_mask && gfxip == 12)
-            {
-                // The loaded decoder may predate these fields, regardless of our header version.
-                constexpr size_t exec_size =
-                    offsetof(rocprofiler_thread_trace_decoder_wave_t, execmask_size) +
-                    sizeof(wave.execmask_size);
-                if(wave.size < exec_size)
-                    old_decoder = true;
-                else
-                {
-                    assert(wave.execmask_size == 0 || wave.execmask != nullptr);
-                    for(size_t i = 0; i < wave.execmask_size; ++i)
-                    {
-                        // branching_kernel's block-uniform condition leaves either the whole
-                        // wave active or none. Require a full-wave record at finalization.
-                        assert(trace.wave_size != 0);
-                        assert(wave.execmask[i].count == 0 ||
-                               wave.execmask[i].count == trace.wave_size);
-                        if(wave.execmask[i].count == trace.wave_size) has_exec_mask = true;
-                    }
-                }
-            }
+            exec_mask_check.check_wave(wave, trace);
             if(wave.instructions_size > 2) has_excess_detail = true;
             for(size_t i = 0; i < wave.instructions_size; i++)
                 latency += wave.instructions_array[i].duration;
@@ -141,7 +107,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
             wave_data += wave.size;
         }
     };
-    trace_data_t trace{0, userdata.value};
+    ExecMaskCheck::Trace trace{0, userdata.value};
     DECODER_CALL(
         rocprofiler_trace_decode(decoder, parse, shader_data.data, shader_data.data_size, &trace));
 }
@@ -149,7 +115,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 void
 init(bool enable_exec_mask_check)
 {
-    check_exec_mask = enable_exec_mask_check;
+    exec_mask_check.set_enabled(enable_exec_mask_check);
     if(rocprofiler_thread_trace_decoder_create(&decoder, "") != ROCPROFILER_STATUS_SUCCESS)
         DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
 }
@@ -172,15 +138,7 @@ finalize(void* /* tool_data */)
         // if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
     }
 
-    if(check_exec_mask && decoder.handle != 0 && has_gfx12)
-    {
-        if(old_decoder)
-            std::cout << "EXEC mask check skipped: decoder wave.size predates execmask fields\n";
-        else if(!has_exec_mask)
-            throw std::runtime_error("Missing EXEC mask record with a full wave of active lanes");
-        else
-            std::cout << "EXEC mask check passed: found records with a full wave of active lanes\n";
-    }
+    exec_mask_check.finalize(decoder.handle != 0);
 
     rocprofiler_thread_trace_decoder_destroy(decoder);
 }
