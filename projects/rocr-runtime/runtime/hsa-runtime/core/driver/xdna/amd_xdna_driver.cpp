@@ -3073,6 +3073,13 @@ hsa_status_t XdnaDriver::CheckAcceleratorReadiness(core::Agent& agent, bool* rea
   (void)ready;
   return HSA_STATUS_ERROR;
 }
+hsa_status_t XdnaDriver::SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) {
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+}
+hsa_status_t XdnaDriver::GetPersistingCacheInfo(uint32_t node_id, uint64_t* cache_size,
+                                                uint64_t* max_cache_size) const {
+  return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+}
 
 }  // namespace AMD
 }  // namespace rocr
