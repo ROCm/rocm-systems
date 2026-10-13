@@ -6,13 +6,11 @@
 #include <memory>
 
 #include "core/control/session.hpp"
-#include "core/timemory.hpp"
 
 #include <vector>
 
 namespace rocprofsys::rocprofiler_sdk
 {
-using hardware_counter_info = ::tim::hardware_counters::info;
 
 void
 setup();
@@ -50,6 +48,4 @@ create_roctx_trigger();
 void
 reset_sdk_session_guards();
 
-std::vector<hardware_counter_info>
-get_rocm_events_info();
 }  // namespace rocprofsys::rocprofiler_sdk

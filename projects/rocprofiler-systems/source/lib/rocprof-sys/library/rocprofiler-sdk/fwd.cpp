@@ -15,7 +15,6 @@
 
 #include <fmt/ranges.h>
 
-#include <algorithm>
 #include <utility>
 
 namespace rocprofsys::rocprofiler_sdk

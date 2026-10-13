@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/defines.h"
-#include "core/timemory.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/version.h>
@@ -16,14 +15,6 @@
 
 #include <cstdint>
 #include <vector>
-
-namespace rocprofsys::rocm
-{
-using hardware_counter_info = ::tim::hardware_counters::info;
-
-std::vector<hardware_counter_info>
-rocm_events();
-}  // namespace rocprofsys::rocm
 
 extern "C"
 {

@@ -736,21 +736,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t     record,
     }
 }
 
-auto&
-get_counter_dispatch_data()
-{
-    static auto _v =
-        container::stable_vector<rocprofiler_dispatch_counting_service_data_t>{};
-    return _v;
-}
-
-auto&
-get_counter_dispatch_records()
-{
-    static auto _v = std::vector<counter_dispatch_record>{};
-    return _v;
-}
-
 using counter_storage_map_t =
     std::unordered_map<rocprofiler_counter_id_t, counter_storage>;
 using agent_counter_storage_map_t =
@@ -1623,24 +1608,6 @@ pause()
     }
 
     flush_counter_tracks_to_zero(0);
-}
-
-std::vector<hardware_counter_info>
-get_rocm_events_info()
-{
-    if(!g_tool_data)
-    {
-        auto tool_data_v = client_data{};
-        tool_data_v.initialize_event_info();
-        return tool_data_v.events_info;
-    }
-
-    if(g_tool_data->events_info.empty())
-    {
-        g_tool_data->initialize_event_info();
-    }
-
-    return g_tool_data->events_info;
 }
 
 #if ROCPROFILER_VERSION >= 10200
