@@ -123,7 +123,7 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
             FunctionExitLog(g_rocdec_logger);
             return ROCDEC_RUNTIME_ERROR;
         }
-        // End of stream ends the coded video sequence, same as an in-band EOS
+        // End of sequence ends the coded video sequence, same as an in-band EOS
         // NAL unit. The next IRAP picture therefore has NoRaslOutputFlag equal
         // to 1, so its RASL pictures are not output (8.1.3).
         first_pic_after_eos_nal_unit_ = 1;
