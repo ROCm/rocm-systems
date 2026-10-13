@@ -13,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <string_view>
 #include <unistd.h>
 #include <unordered_map>
 
@@ -97,7 +98,9 @@ process_cpu_info_data()
 
         const std::string key =
             utility::string::to_lower(utility::string::trim(line.substr(0, colon_pos)));
-        const auto value = utility::string::trim(line.substr(colon_pos + 1));
+        // trim() returns a view, so slice `line` (outlives this scope), not a temporary.
+        const auto value =
+            utility::string::trim(std::string_view{ line }.substr(colon_pos + 1));
 
         auto const it = field_parsers.find(key);
         if(it != field_parsers.end())
