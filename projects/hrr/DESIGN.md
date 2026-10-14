@@ -114,7 +114,7 @@ written.
 A single `HIP_HRR_CAPTURE_OUTPUT` directory can be inherited by multiple
 processes. Every HIP-owning process writes an independent sub-archive at
 `<base>/pid-<pid>/`, with its own `events.bin`, `blobs/`, `code_objects/`,
-`writer_state.json`, and per-process `manifest.json`. This avoids interleaving
+and per-process `manifest.json`. This avoids interleaving
 two live writers into one `events.bin` without needing an advisory lock.
 
 On POSIX the archive is private to the user who captures it. Directories the writer
@@ -139,21 +139,18 @@ child of a multithreaded process may make only async-signal-safe calls until it
 execs, and a child that execs or exits without recording leaves no archive. The root
 `manifest.json` is a common aggregate index with the schema fields
 `version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
-it best-effort on clean shutdown by scanning existing `pid-*/manifest.json`
+it best-effort on clean shutdown by scanning existing `pid-<pid>/manifest.json`
 files. Per-process manifests carry `pid`, `parent_pid`, `complete`,
 `event_count`, and `blob_count`.
 
-Because the PID directory is always part of the archive path, a crashed process
-that is restarted with a new PID creates a new sub-archive rather than resuming
-the prior process's `events.bin`. Resuming still applies if the same process
-re-opens its own writer and finds an existing `pid-<pid>/events.bin`.
-
-A write, `fsync` or close of `events.bin` that fails marks the archive
-incomplete: the clean-shutdown trailer is omitted and `manifest.complete` is
-false. If closing the file fails after `flush()` wrote the trailer, `close()`
-cuts the trailer off again, through a descriptor it kept open, and rewrites the
-manifest. If the cut fails as well, the writer logs it and the manifest is the
-only mark that the archive is incomplete.
+A process never adds to an archive it finds. When its own `pid-<pid>/` already
+holds one from an earlier process with the same pid, common in containers where
+pids repeat from run to run, `writer::open()` renames that directory to the
+first free `pid-<pid>.prev-<n>/`, says so on stderr, and starts a fresh archive.
+If the rename fails, capture is disabled for the process and the earlier archive
+stays where it was. The root manifest, `hrr-playback` given a root, and
+`--repair` take only `pid-<decimal pid>/` directories for process archives, so a
+moved archive is not part of the capture; point `hrr-playback` at it to read it.
 
 **Playback note:** `hrr-playback --info <base>` prints the root process summary.
 Point `hrr-playback` at a specific `<base>/pid-<pid>/` for detailed event info or
@@ -178,12 +175,13 @@ capture.hrr/
   pid-<pid>/
     events.bin         hrr_file_header(8) + [EventHeader(32) + payload]* + [hrr_eof_record(44)]
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
-    writer_state.json  checkpoint cursor (present only mid-capture; removed on clean shutdown)
     active             names this process instance: present while its capture is on (see Transport)
     blobs/<2hex>/      content-addressed host buffers keyed by FNV-1a-128 hash
     code_objects/      .hsaco ELFs (unused in current fat-binary path)
     regions/*.hrrr     external region annotations (optional; written by producers
                        outside the runtime, never by capture — see below)
+  pid-<pid>.prev-<n>/  an earlier process's archive with the same pid, moved
+                       aside by writer::open(); not part of this capture
 ```
 All handle values (stream, event, module, graph, device pointer) are stored as raw `uint64_t` pointer casts. Sequence IDs are a global atomic counter providing causal ordering across threads.
 
@@ -421,8 +419,6 @@ Version history, so an archive written by an older runtime can be placed:
                       events.bin HRR_VERSION = 8)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
-    writer_state.json  checkpoint cursor (next_seq, event/blob counts, events file
-                       size); present only mid-capture, removed on clean shutdown
     active             one line naming the process instance (boot id and
                        start time; creation time on Windows), created as the
                        last step of a successful writer::open(), removed on
@@ -852,8 +848,7 @@ itself; "is capture active" reduces to whether that directory's `active` file
 exists and names this process. `writer::open()` removes a stale one before any
 step that can fail and creates it as its last step, and `flush()` removes it at
 shutdown. Neither the directory nor `events.bin` can carry the signal: a refused
-archive keeps its directory, and a same-pid resume that fails after opening
-`events.bin` keeps the earlier run's file. Existence alone is not enough either.
+archive keeps its directory, and can keep `events.bin`. Existence alone is not enough either.
 A process killed with `SIGKILL` leaves its marker, and a later process with the
 same pid can find it before its own HIP init. So the marker holds the boot id and
 the start time from `/proc/self/stat` (the creation time on Windows), and a
@@ -1139,6 +1134,45 @@ replay, `hipMalloc` returns different addresses. Translation is performed via
 recorded address that was never passed through a HIP API (e.g. computed from an
 `hipGetDeviceProperties` query or a device-side `malloc`), the capture layer cannot
 know about it and translation will fail.
+
+Translation cannot reach a pointer the application stored in device memory: it
+arrives inside an H2D payload, byte for byte. vLLM's block table is such a case
+([ROCM-31827](https://amd-hub.atlassian.net/browse/ROCM-31827)). On Linux, replay
+therefore places `hipMalloc` and `hipMallocAsync` allocations at their recorded
+addresses, so that pointer is right again; `--no-placement` turns this off.
+
+- Before `hipInit`, the recorded ranges of both APIs, rounded to 4 KiB and merged,
+  are held with `PROT_NONE` placeholders (`MAP_FIXED_NOREPLACE`), so the runtime
+  cannot take them. A range something else already occupies is not held.
+- Each replayed allocation drops the placeholder over the VMM granules holding it
+  (a `hipMallocAsync` pointer need not start on one), then `hipMemAddressReserve`
+  there, `hipMemCreate` on the current device, `hipMemMap` and `hipMemSetAccess`
+  for that device and every device `hipDeviceCanAccessPeer` says can reach it:
+  `hipDeviceEnablePeerAccess` does not cover VMM memory, so without this a peer
+  copy into a placed buffer faults.
+  If any step misses (granules not held, or shared with a live placed allocation,
+  runtime answers with another address, no VMM support), that allocation falls
+  back to the normal allocator, named under `--verbose`. The summary prints
+  `Placement : N placed at capture address, M fell back`.
+- `hipFree` first synchronizes the device, as it does for `hipMalloc` memory
+  (not for `hipMallocAsync` memory, unmapped at once); `hipFreeAsync` first
+  synchronizes its stream. Both then unmap and release. The range is then held again for the next allocation recorded there.
+  Inside a graph capture `hipFreeAsync` leaves the mapping in place, since the
+  graph may still use it.
+- After each such unmap replay allocates and frees 4 MiB with `hipMalloc`: on
+  gfx1201 with Linux 7.0.0-34's in-box amdgpu, `hipMemUnmap` leaves stale GPU TLB
+  entries, and KFD flushes them when it frees ordinary memory. This flushes the
+  current device only, and is skipped while a graph capture is open, where
+  `hipMalloc` is illegal; a remap at that address before the next flush can then
+  still reach the old pages on that driver.
+- Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
+  allocation node), allocations exported with `hipIpcGetMemHandle` and any other
+  recorded over the same pages (IPC refuses VMM memory), every other allocation
+  API, and everything under `--guard-segments`, with
+  `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` above 1 (a padded allocation would run over
+  its neighbours' recorded addresses) or on Windows.
+- Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
+  released so the timed pass can place them again.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 

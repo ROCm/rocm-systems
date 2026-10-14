@@ -13,7 +13,6 @@
 
 namespace rocprofsys
 {
-class output_file_registry;
 class track_registry;
 
 namespace trace_cache
@@ -29,8 +28,8 @@ namespace core
 class cached_perfetto_session
 {
 public:
-    cached_perfetto_session(output_file_registry& registry, pid_t root_pid,
-                            bool combine_traces, const std::vector<int>& source_pids,
+    cached_perfetto_session(pid_t root_pid, bool combine_traces,
+                            const std::vector<int>&      source_pids,
                             trace_cache::post_processor& processor);
     ~cached_perfetto_session() noexcept;
 

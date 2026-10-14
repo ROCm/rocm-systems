@@ -94,9 +94,8 @@ def capture_active():
             and fs.st_nlink == 1 and line == instance)
 ```
 
-Neither the directory nor its `events.bin` is enough: both stay when the
-writer refuses an archive, or fails to resume one with the same pid, and
-capture is then off. The runtime creates the marker when capture starts, which
+Neither the directory nor its `events.bin` is enough: both can stay when the
+writer refuses an archive, and capture is then off. The runtime creates the marker when capture starts, which
 may be after your producer loads, so re-check rather than deciding once at
 import time.
 

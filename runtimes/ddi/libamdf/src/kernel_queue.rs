@@ -14,7 +14,7 @@ use rocddi::device::gpu::queue::{
     KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
     KernelQueueWait,
 };
-use rocddi::host_storage::Owned;
+use rocddi::memory::storage::Owned;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -88,9 +88,7 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => KernelQueueFormat::Sdma,
             _ => return Err(UNSUPPORTED),
         };
-        let instance = instance::device_instance(device);
-        let slot =
-            Owned::<KernelQueue>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
+        let slot = Owned::<KernelQueue>::try_new_uninit().map_err(|_| EXHAUSTED)?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
             Ok(gpu) => gpu,

@@ -15,7 +15,8 @@ rocJPEG supports the following chroma subsamplings:
 * YUV 4:0:0
 
 The following table shows the capabilities of the VCN and total number of JPEG cores for each supported GPU
-architecture:
+architecture. Use ``rocJpegGetDecoderCaps()`` to query the capabilities available to a ``RocJpegHandle`` at runtime;
+on partitioned GPUs, the number of JPEG cores reported is the number of cores of the selected compute partition.
 
 .. csv-table::
   :header: "GPU Architecture", "VCN Generation", "Total number of JPEG cores", "Max width, Max height"
