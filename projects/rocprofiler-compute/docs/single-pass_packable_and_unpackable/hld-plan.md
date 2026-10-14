@@ -83,9 +83,9 @@ The 75 are metrics the old allocator split that now fit one pass. They are SPP l
 
 ### Terms
 
-A **single-pass packable (SPP)** metric is a metric whose counters fit in one pass and are read from that pass. Collection may also copy one of its counters into other passes. The pass name, and which pass is used when several hold the whole set, are in [Reading each metric from one pass](lld-metrics-grouping-algorithm.md#3-reading-each-metric-from-one-pass).
+A **single-pass packable (SPP)** metric is a metric whose counters all fit in one pass. Analyze reads all of them from that pass.
 
-A **single-pass unpackable (SPU)** metric is one whose counters cannot fit one empty pass under each block's counter limit. Phase 2 splits it into parts that each fit one pass, and combines parts from different passes only by addition, or by scaling by a non-negative constant.
+A **single-pass unpackable (SPU)** metric is a metric whose counters can't fit in one pass. It is split into parts that each fit, then recombined.
 
 `COLLECT_SUM`, `COLLECT_RATIO`, and `WEIGHTED_AVG` are functions Phase 2 adds to panel YAML. A split parent metric uses them to combine its parts. Phase 2 below states the rules.
 
