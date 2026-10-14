@@ -80,14 +80,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
-  - `src/include/nccl_device/utility.h` (header-only, from
-    `nccl-utility-test.cc`); suite `NcclUtilityMicrotest.*` (also caught by the
-    `Nccl*` pattern above). No `_CC_PATH` macro needed since it's a header,
-    not a `.cc` production TU, and no fakes since every targeted function
-    compiles cleanly in a host-only TU -- most are `NCCL_HOST_DEVICE_INLINE`
-    pure math with no HIP dependency; the four `memory_order` conversion
-    helpers sit inside `#if NCCL_CHECK_CUDACC`, which this build satisfies
-    because this target's `--offload-host-only` build still invokes hipcc.
+  - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
+    suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
     `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
     `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
