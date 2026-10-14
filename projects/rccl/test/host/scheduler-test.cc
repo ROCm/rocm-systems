@@ -360,12 +360,19 @@ TEST_F(SchedulerMicrotest, ConvertSymTaskDevOp_DefaultDatatype_LeavesScalarArgUn
   EXPECT_EQ(task.opDev.scalarArg, kPoison);
 }
 
+// symBatchAligned16B reads only comm->rank.
+static ncclComm* AlignComm(int rank = 0) {
+  static std::unique_ptr<ncclComm> comm(new ncclComm{});
+  comm->rank = rank;
+  return comm.get();
+}
+
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsAligned_ReturnsTrue) {
   ncclTaskColl t{};
   t.sendbuff = reinterpret_cast<void*>(0x1030);
   t.recvbuff = reinterpret_cast<void*>(0x1020);
   t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
+  EXPECT_TRUE(symBatchAligned16B(AlignComm(), &t));
 }
 
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_ReturnsFalse) {
@@ -373,7 +380,7 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_SingleTaskNoWindowsMisaligned_Retu
   t.sendbuff = reinterpret_cast<void*>(0x1028);  // offset 8: a multiple of 8 but not of 16
   t.recvbuff = reinterpret_cast<void*>(0x1020);
   t.isSymLast = 1;
-  EXPECT_FALSE(symBatchAligned16B(&t));
+  EXPECT_FALSE(symBatchAligned16B(AlignComm(), &t));
 }
 
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_TraversesAndReturnsFalse) {
@@ -386,7 +393,7 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstAlignedSecondMisaligned_Trave
   first.recvbuff = reinterpret_cast<void*>(0x1020);
   first.isSymLast = 0;
   first.next = &second;
-  EXPECT_FALSE(symBatchAligned16B(&first));
+  EXPECT_FALSE(symBatchAligned16B(AlignComm(), &first));
 }
 
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFalseWithoutTraversing) {
@@ -395,7 +402,7 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_FirstMisalignedNotLast_ReturnsFals
   first.recvbuff = reinterpret_cast<void*>(0x1020);
   first.isSymLast = 0;
   first.next = reinterpret_cast<ncclTaskColl*>(0x1);  // must never be dereferenced
-  EXPECT_FALSE(symBatchAligned16B(&first));
+  EXPECT_FALSE(symBatchAligned16B(AlignComm(), &first));
 }
 
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMisaligned_ReturnsTrue) {
@@ -409,7 +416,7 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_WindowOffsetsAligned_RawBuffersMis
   t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
   t.recvbuff = reinterpret_cast<void*>(0x2007);  // outputOff (via window) = 0
   t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
+  EXPECT_TRUE(symBatchAligned16B(AlignComm(), &t));
 }
 
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetForSend_ReturnsTrue) {
@@ -421,7 +428,61 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetFor
   t.sendbuff = reinterpret_cast<void*>(0x1013);  // inputOff (via window) = 16
   t.recvbuff = reinterpret_cast<void*>(0x2000);  // outputOff (raw, no window) = 0x2000
   t.isSymLast = 1;
-  EXPECT_TRUE(symBatchAligned16B(&t));
+  EXPECT_TRUE(symBatchAligned16B(AlignComm(), &t));
+}
+
+// In-place AllGather/ReduceScatter shift one side by rank * slice. With a 24 B slice the local
+// offset check passes on ranks 0 and 2 but fails on 1 and 3; every rank must agree, or ranks pick
+// different symmetric kernels and grids and hang at the LSA barrier.
+static bool InPlaceAligned16B(ncclFunc_t func, int rank, size_t sliceBytes) {
+  alignas(16) static char window[1024];
+  ncclDevrWindow win{};
+  win.userPtr = window;
+  ncclTaskColl t{};
+  t.func = func;
+  t.datatype = ncclInt8;
+  t.count = sliceBytes;
+  t.sendWin = t.recvWin = &win;
+  char* slice = window + size_t(rank) * sliceBytes;
+  t.sendbuff = func == ncclFuncAllGather ? slice : window;
+  t.recvbuff = func == ncclFuncAllGather ? window : slice;
+  t.isSymLast = 1;
+  return symBatchAligned16B(AlignComm(rank), &t);
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceUnalignedSlice_FalseOnEveryRank) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      EXPECT_FALSE(InPlaceAligned16B(func, rank, /*sliceBytes=*/24)) << "func " << int(func) << " rank " << rank;
+    }
+  }
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceAlignedSlice_TrueOnEveryRank) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      EXPECT_TRUE(InPlaceAligned16B(func, rank, /*sliceBytes=*/32)) << "func " << int(func) << " rank " << rank;
+    }
+  }
+}
+
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_OutOfPlaceUnalignedSlice_StaysAligned) {
+  alignas(16) static char sendWindow[64];
+  alignas(16) static char recvWindow[256];
+  ncclDevrWindow sendWin{};
+  sendWin.userPtr = sendWindow;
+  ncclDevrWindow recvWin{};
+  recvWin.userPtr = recvWindow;
+  ncclTaskColl t{};
+  t.func = ncclFuncReduceScatter;
+  t.datatype = ncclInt8;
+  t.count = 24;
+  t.sendWin = &sendWin;
+  t.recvWin = &recvWin;
+  t.sendbuff = sendWindow;
+  t.recvbuff = recvWindow;
+  t.isSymLast = 1;
+  EXPECT_TRUE(symBatchAligned16B(AlignComm(1), &t));
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_NoBcastTasks_ReturnsSuccessWithoutTouchingPeers) {

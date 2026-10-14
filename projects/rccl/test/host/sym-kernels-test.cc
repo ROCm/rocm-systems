@@ -228,6 +228,40 @@ TEST_F(SymKernelMaskTest, NotSymAligned16B_TmaKernelCleared) {
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
 }
 
+// ---- NCCL_SYM_TMA_ENABLE left at its compile-time default (no loadParam hook): on, not forced ----
+
+TEST_F(SymKernelMaskTest, DefaultParam_ArchCapableAndAligned_TmaKernelOfferedAlongsideOthers) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  uint32_t kmask =
+      ncclSymkMask(comm_.get(), ncclFuncAllReduce, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true);
+  EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST));
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_AllReduce_RSxLD_AGxST}) {
+    EXPECT_TRUE(KernelBitSet(kmask, id)) << "the default must leave the tuner a choice: " << (int)id;
+  }
+}
+
+TEST_F(SymKernelMaskTest, DefaultParam_EachCollectiveOffersItsTmaKernel) {
+  if (!TmaReachableOnThisBuild()) GTEST_SKIP() << "SDK ships no TDM descriptor header";
+  MakeTmaCapableComm();
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_AllGather_TmaST));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+  EXPECT_TRUE(KernelBitSet(
+      ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024, /*symAligned16B=*/true),
+      ncclSymkKernelId_ReduceScatter_TmaLD));
+}
+
+// Pins the default itself. Unlike the mask cases above, this runs on builds whose SDK lacks the TDM header.
+TEST_F(SymKernelMaskTest, DefaultParam_OffersButDoesNotForce) {
+  EXPECT_EQ(ncclParamSymTmaEnable(), 1);
+  MakeTmaCapableComm();
+  EXPECT_FALSE(ncclSymkTmaForced(comm_.get()));
+}
+
 // ---- NCCL_SYM_TMA_ENABLE=2: force by leaving nothing else in the mask ----
 
 // What force has to remove: the non-Tma AllReduce kernels that survive this fixture
@@ -471,6 +505,33 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
 // ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
 
 // Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
+// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label.
+TEST_F(SymKernelMicrotest, KernelIdIsTma_OnlyTheTdmKernels) {
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_TmaSTMC,
+                              ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclSymkKernelId_ReduceScatter_TmaLD}) {
+    EXPECT_TRUE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
+  }
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_ST, ncclSymkKernelId_AllGather_LL,
+                              ncclSymkKernelId_AllReduce_RSxLD_AGxST, ncclSymkKernelId_ReduceScatter_LD}) {
+    EXPECT_FALSE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsTma(ncclSymkKernelId_Count));
+}
+
+TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
+  for (ncclSymkKernelId id :
+       {ncclSymkKernelId_AllGather_LL, ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_ReduceScatter_LL}) {
+    EXPECT_TRUE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
+  }
+  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_ST,
+                              ncclSymkKernelId_ReduceScatter_LD}) {
+    EXPECT_FALSE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
+  }
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(-1));
+  EXPECT_FALSE(rcclSymkKernelIdIsLL(ncclSymkKernelId_Count));
+}
+
 TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
   EXPECT_FALSE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64));
 }

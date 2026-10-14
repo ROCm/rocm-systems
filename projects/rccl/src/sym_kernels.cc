@@ -139,10 +139,11 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
 // [RCCL] These kernels stage tiles through a DMA engine: TMA on NVIDIA, the Tensor
-// Data Mover on gfx1250. Still opt-in while the gfx1250 path is being brought up.
+// Data Mover on gfx1250. On by default as in NCCL 2.31; ncclSymkTmaAvailable() still
+// confines them to gfx1250 builds whose SDK ships the TDM descriptor header.
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
-NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 0)
+NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 1)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
   if (!ncclParamSymTmaEnable()) return false;
@@ -519,6 +520,11 @@ ncclResult_t ncclGetSymRegType(struct ncclDevrWindow* sendWin, struct ncclDevrWi
 bool rcclSymkKernelIdIsLL(int kernelId) {
   if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
   return (kernelMask_LL >> kernelId) & 1;
+}
+
+bool rcclSymkKernelIdIsTma(int kernelId) {
+  if (kernelId < 0 || kernelId >= (int)ncclSymkKernelId_Count) return false;
+  return (kernelMask_Tma >> kernelId) & 1;
 }
 
 #ifndef GENERATE_SYM_KERNELS
