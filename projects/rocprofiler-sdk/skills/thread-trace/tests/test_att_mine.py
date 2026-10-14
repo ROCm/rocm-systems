@@ -30,7 +30,6 @@ import importlib.util
 import re
 import sys
 import unittest
-from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
