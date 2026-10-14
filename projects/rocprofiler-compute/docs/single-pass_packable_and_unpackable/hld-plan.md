@@ -24,7 +24,7 @@ Analysis YAML defines a metric as an expression over PMC counters. A metric's PM
 ```mermaid
 flowchart LR
   yaml[Analysis YAML] --> alloc[Pass allocator]
-  slots[Per-block counter limits] --> alloc
+  slots[Hardware constraints] --> alloc
   alloc --> passes[Perfmon passes]
   passes --> collect[Counter collection]
   collect --> analyze[Analyze]
