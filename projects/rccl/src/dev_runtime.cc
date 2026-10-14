@@ -390,6 +390,7 @@ struct symLsaMessage {
   };
   CUmemLocationType type;
   size_t segmentSize;
+  int fdFallback;  // FABRIC export refused (allocation made without fabric handle support): import a POSIX fd via the owner's proxy
 };
 
 static ncclResult_t symMemorySetAccessForVASegment(struct ncclComm* comm, symLsaMessage* message, CUdeviceptr addr) {
@@ -408,10 +409,28 @@ static ncclResult_t symMemoryExportSegmentHandle(struct ncclComm* comm, symLsaMe
   CUCHECKGOTO(cuMemGetAllocationPropertiesFromHandle(&prop, memHandle), ret, fail);
   msg->type = prop.location.type;
   msg->segmentSize = segmentSize;
+  msg->fdFallback = 0;
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
     msg->memHandle = memHandle;
-  } else {
-    CUCHECKGOTO(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0), ret, fail);
+  } else if (CUPFN(cuMemExportToShareableHandle(&msg->fabricHandle, memHandle, ncclCuMemHandleType, 0)) != CUDA_SUCCESS) {
+    // An allocation made before comm init (e.g. ncclMemAlloc while the handle type was still POSIX_FD)
+    // refuses a FABRIC export. Same-host LSA peers can import a POSIX fd through this rank's proxy
+    // (proxyGetFd exports POSIX_FD in every handle mode).
+    (void)cudaGetLastError();
+    // The fd travels over the importer's host-local UDS: only same-host LSA peers can use it.
+    for (int i = 0; i < comm->devrState.lsaSize; i++) {
+      const int r = comm->devrState.lsaRankList[i];
+      if (comm->peerInfo[r].hostHash != comm->peerInfo[comm->rank].hostHash) {
+        WARN("Window segment was allocated without FABRIC handle support (e.g. ncclMemAlloc before comm init with "
+             "RCCL_MEMALLOC_FABRIC=0) and cannot be shared with rank %d on another host",
+             r);
+        ret = ncclInvalidUsage;
+        goto fail;
+      }
+    }
+    msg->memHandle = memHandle;
+    msg->fdFallback = 1;
+    INFO(NCCL_ALLOC, "symMemoryExportSegmentHandle: FABRIC export refused, POSIX fd fallback for segment of %zu bytes", segmentSize);
   }
 fail:
   return ret;
@@ -426,11 +445,11 @@ static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, in
   if (reuseLocal) {
     impHandle = memHandle;
   } else {
-    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+    if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR || msg->fdFallback) {
       ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], msg, &fd), ret, fail);
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
-                                                 ncclCuMemHandleType),
+                                                 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
                   ret, fail);
       SYSCHECKGOTO(ncclIpcFdClose(fd), "close", ret, fail);
     } else {
