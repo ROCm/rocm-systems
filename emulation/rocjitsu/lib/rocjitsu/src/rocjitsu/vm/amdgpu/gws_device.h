@@ -107,13 +107,19 @@ class Wavefront;
 ///    stale zero-runnable summary cannot survive workgroup turnover (a parked
 ///    wave replaced by a runnable producer) or a producer dispatched alongside a
 ///    parked wave. The guarantee covers waves that are *resident* when the scan
-///    runs plus waves the process has not admitted yet: when a dispatch's total
-///    size is known, escape is blocked while it still has waves to admit
-///    (expected > admitted), because a not-yet-admitted producer could still signal
-///    and bumping the version at admission cannot undo an escape that already fired.
-///    Once every expected wave has been admitted (and each then parks or retires)
-///    the scan proceeds as usual. Queued workgroups of a size-unknown dispatch
-///    still rely on @ref add_resident advancing the version as they become resident.
+///    runs plus waves the process has not admitted yet, but only while the latter
+///    can still be admitted: when a dispatch's total size is known and it still has
+///    waves to admit (expected > admitted), escape is blocked *iff some CU still
+///    has a free wave slot* (@ref ComputeUnitCore::has_free_wf_slot), because then
+///    the not-yet-admitted producer can be placed and could signal, and bumping the
+///    version at its admission cannot undo an escape that already fired. If every
+///    CU is full, the unadmitted producer is gated behind the parked waves being
+///    judged -- a genuine deadlock -- so escape proceeds; blocking unconditionally
+///    would forfeit termination (a parked GWS wave counts as runnable, so its CU
+///    would spin on it forever). Once every expected wave has been admitted (and
+///    each then parks or retires) the scan proceeds as usual. Queued workgroups of
+///    a size-unknown dispatch still rely on @ref add_resident advancing the version
+///    as they become resident.
 ///    Recovery policy: abandoning a wait is not a silent state change. The
 ///    backstop *invalidates* each resource it abandons (counter/credits cleared,
 ///    disarmed, generation bumped) via @ref invalidate_resource, so a later
@@ -177,6 +183,16 @@ public:
                     uint32_t expected_total_waves);
   /// @brief Drop @p count resident waves of a dispatch (clamped at zero).
   void remove_resident(uint32_t dispatch_id, uint32_t count);
+  /// @brief Un-admit @p count waves of a dispatch rolled back before execution.
+  /// @details A workgroup committed via @ref add_resident but rolled back (its
+  /// clustered peers failed to dispatch, so it never ran and will be re-admitted
+  /// on retry) must decrement the cumulative admitted count; otherwise the retry
+  /// double-counts and a prematurely-reached @c admitted==expected could stop the
+  /// quiescence scan from waiting for genuinely-pending work. Unlike
+  /// @ref remove_resident this is NOT called on normal retirement -- an executed
+  /// wave stays counted as admitted. Keeps the entry (expected is still the grid
+  /// size); @ref notify_dispatch_gone handles whole-dispatch teardown.
+  void remove_admitted(uint32_t dispatch_id, uint32_t count);
   /// @brief Forget a dispatch's participant accounting (abort/teardown).
   /// @details Called when a dispatch is torn down before it fully admits+retires
   /// (e.g. abort), so its never-to-arrive participants stop blocking the quiescence

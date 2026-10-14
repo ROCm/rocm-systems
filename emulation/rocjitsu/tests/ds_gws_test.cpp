@@ -1830,6 +1830,53 @@ TEST_P(DsGwsTest, BarrierRendezvousWithLateAdmittedParticipant) {
   wf1->halt();
 }
 
+// Termination guard for the late-admission accounting: a GWS grid larger than the
+// CU's wave-slot capacity must still terminate. The admitted waves park at a
+// barrier bounded by the (larger) grid size and hold every slot, so the remaining
+// participants can never be admitted. The quiescence backstop must notice no CU
+// has free capacity and escape the parked waves rather than wait forever on the
+// never-admittable producers. Regression: an unconditional expected>admitted
+// escape block spins here indefinitely (a parked GWS wave counts as runnable, so
+// the CU keeps stepping), on all seven ISAs.
+TEST_P(DsGwsTest, OversubscribedGridEscapesInsteadOfHanging) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_oversub_mem");
+  amdgpu::L2Cache l2("ds_gws_oversub_l2");
+  constexpr uint64_t kPc = 0x200000;
+  mem.write32(kPc, gws_s_endpgm_word(arch));
+  // Only two wave slots, but the grid declares four participants.
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/2);
+  auto decoder = Decoder::create(arch);
+  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  ASSERT_NE(wf0, nullptr);
+  ASSERT_NE(wf1, nullptr);
+  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2,
+                      /*num_named_barriers=*/0, /*process_id=*/0,
+                      /*dispatch_total_waves=*/4);
+  for (auto *wf : {wf0, wf1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  // Both resident waves arrive at a four-participant barrier (count = 3) and park;
+  // the grid-size bound keeps them off the oversized-count fallback. The other two
+  // participants can never be admitted -- both slots are full of parked waves.
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/3);
+  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/3);
+  ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+  ASSERT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
+
+  // No free capacity remains, so the backstop must escape the parked waves; they
+  // run their s_endpgm and the dispatch terminates instead of spinning forever.
+  for (int i = 0; i < 16 && (!wf0->is_halted() || !wf1->is_halted()); ++i)
+    cu->step();
+  EXPECT_TRUE(wf0->is_halted());
+  EXPECT_TRUE(wf1->is_halted());
+  EXPECT_TRUE(wf0->wait_counters().empty());
+  EXPECT_TRUE(wf1->wait_counters().empty());
+}
+
 // A CU torn down while it still hosts a parked GWS wave must not leave the shared
 // store's parked bookkeeping inflated (which would wedge any_parked() true and
 // mislead the quiescence backstop). unregister_compute_unit (run from the CU's

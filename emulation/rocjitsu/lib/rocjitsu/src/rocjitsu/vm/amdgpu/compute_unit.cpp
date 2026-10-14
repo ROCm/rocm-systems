@@ -815,8 +815,12 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   auto it = active_wgs_.find(key);
   if (it != active_wgs_.end()) {
     // Drop the WG's not-yet-retired waves from the GWS residency bound. GWS
-    // resource state is device-global and persists across dispatches.
+    // resource state is device-global and persists across dispatches. This WG was
+    // committed but never executed and will be re-admitted on retry, so also
+    // un-admit its waves from the participant accounting (unlike a normal retire)
+    // to avoid double-counting and a premature admitted==expected (see GwsDevice).
     gws_device_->remove_resident(dispatch_id, it->second);
+    gws_device_->remove_admitted(dispatch_id, it->second);
     active_wgs_.erase(it);
   }
   barrier_wgs_.erase(key);

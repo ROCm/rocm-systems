@@ -139,10 +139,28 @@ void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
   }
 }
 
+void GwsDevice::remove_admitted(uint32_t dispatch_id, uint32_t count) {
+  if (count == 0)
+    return;
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = admission_.find(dispatch_id);
+  if (it == admission_.end())
+    return; // No accounting tracked (size-unknown dispatch): nothing to un-admit.
+  it->second.admitted = it->second.admitted > count ? it->second.admitted - count : 0;
+  // A rolled-back producer may have been masking pending work; force peers to
+  // republish so the quiescence scan re-evaluates against the corrected count.
+  ++summary_epoch_;
+}
+
 void GwsDevice::notify_dispatch_gone(uint32_t dispatch_id) {
   std::lock_guard<std::mutex> lock(mutex_);
+  // A torn-down dispatch will never admit its remaining grid, so drop its whole-
+  // dispatch participant accounting. Residency is a per-CU contribution settled by
+  // each CU's own remove_resident as it aborts its share (abort_dispatch is called
+  // on every CU), so leave resident_waves_ to that path -- erasing it here would
+  // wipe a peer CU's not-yet-aborted contribution and transiently understate its
+  // barrier bound.
   admission_.erase(dispatch_id);
-  resident_waves_.erase(dispatch_id);
   // Removing pending work may permit a previously-blocked escape; force peers to
   // republish before any escape trusts a pre-teardown snapshot.
   ++summary_epoch_;
@@ -254,13 +272,28 @@ bool GwsDevice::escape_ready(uint32_t process) const {
   if (parked_it == parked_.end() || parked_it->second == 0)
     return false;
   // A dispatch of this process that has not yet admitted its whole grid may still
-  // produce a signaler (e.g. a producer workgroup not dispatched yet). Do not
-  // escape while such work is pending: bumping the version as it admits cannot undo
-  // an escape that already fired (see the pending-work note in the class doc).
+  // produce a signaler (e.g. a producer workgroup not dispatched yet), but only if
+  // that producer can actually be admitted. Admission needs a free wave slot:
+  //  * If some CU still has capacity, the pending producer can be placed and could
+  //    signal, so do not escape yet -- bumping the version at its admission cannot
+  //    undo an escape that already fired.
+  //  * If every CU is full, the only slots are held by the parked waves we are
+  //    judging, so the unadmitted producer is gated behind them -- a genuine
+  //    deadlock the backstop must break. Blocking on it unconditionally would
+  //    forfeit the termination guarantee (a parked GWS wave counts as runnable, so
+  //    the CU would spin on it forever). Fall through to the quiescence test.
+  bool pending_admission = false;
   for (const auto &[dispatch_id, adm] : admission_) {
     (void)dispatch_id;
-    if (adm.process == process && adm.admitted < adm.expected)
-      return false;
+    if (adm.process == process && adm.admitted < adm.expected) {
+      pending_admission = true;
+      break;
+    }
+  }
+  if (pending_admission) {
+    for (ComputeUnitCore *cu : cus_)
+      if (cu->has_free_wf_slot())
+        return false; // A producer can still be admitted into free capacity.
   }
   uint64_t total_runnable = 0;
   for (ComputeUnitCore *cu : cus_) {

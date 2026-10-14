@@ -789,6 +789,19 @@ public:
     return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) != 0;
   }
 
+  /// @brief Whether this CU has a wave slot free to admit a new wavefront.
+  /// @details A slot is free when it holds no non-halted wave; the low word of
+  /// wave_activity_ is the non-halted (active) wave count and halted slots are
+  /// reused by dispatch_wf(). The GWS quiescence backstop uses this (cross-CU,
+  /// race-free acquire load) to tell a pending-but-admittable producer -- free
+  /// capacity exists, so it can still be placed and signal -- from one gated
+  /// behind the parked waves it is judging, where every slot is full (see
+  /// GwsDevice::escape_ready).
+  bool has_free_wf_slot() const {
+    return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) <
+           config_.num_wf_slots;
+  }
+
   /// @brief Check whether any wavefront can currently make forward progress.
   /// @details A wave for which debug_paused() is true occupies its slot (so @ref has_active_wfs
   /// stays true and the wave is not retired) but cannot run, so it must not
