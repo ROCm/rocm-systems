@@ -634,14 +634,15 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // Wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
   // past our slot, we must not spin forever — bail out immediately.
-  // The wait is bounded (hrr::wait_for_turn): a gap or duplicate in the
-  // recorded sequence numbers means next_seq never reaches ours, and the
-  // replay must end with a diagnostic instead of hanging.
+  // The wait is bounded (hrr::wait_for_turn): a sequence number that is out
+  // of order on its thread (gaps and duplicates are refused in main) means
+  // next_seq never reaches ours, and the replay must end with a diagnostic
+  // instead of hanging.
   {
     uint64_t observed = 0;
     switch (hrr::wait_for_turn(ctx.next_seq, ev.header().sequence_id,
                                ctx.fatal_error, ctx.max_seq_waits, &observed,
-                               &ctx.turns_in_flight)) {
+                               &ctx.calls_in_flight)) {
       case hrr::TurnResult::Turn:
         break;
       case hrr::TurnResult::Fatal:
@@ -656,7 +657,7 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
                 (unsigned long long)ev.header().thread_id,
                 (unsigned long long)seq, (unsigned long long)observed,
                 observed > seq ? "duplicate or out-of-order sequence number"
-                               : "gap in the sequence numbers",
+                               : "out-of-order sequence number",
                 (unsigned long long)ctx.max_seq_waits);
         ctx.fatal_error.store(true, std::memory_order_release);
         return hipErrorUnknown;
@@ -669,11 +670,11 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
   // Every call counts, ordered or not: an unordered synchronize hands the turn
   // on before it blocks, and the next event may be this thread's own.
-  struct InFlight {
+  struct CallInFlight {
     std::atomic<int>& n;
-    explicit InFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
-    ~InFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
-  } in_flight{ctx.turns_in_flight};
+    explicit CallInFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
+    ~CallInFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
+  } call_in_flight{ctx.calls_in_flight};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
