@@ -51,6 +51,8 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#include <poll.h>
+#include <cerrno>
 #endif
 #include <mutex>
 #include <sys/stat.h>
@@ -1217,6 +1219,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     GpuMemoryCreateInfo cwsr_create_info{};
     cwsr_create_info.domain = Wkmi::kSystem;
     cwsr_create_info.size = AllocateCwsrSize(&ctx_save_restore_size, &debug_memory_size);
+    if (IsAqlSupported()) {
+      cwsr_create_info.mem_flags |= Wkmi::kAqlCwsr;
+    }
 
     GpuMemory *cwsr_gpu_mem = nullptr;
     ErrorCode cwsr_code = CreateGpuMemory(cwsr_create_info, &cwsr_gpu_mem);
@@ -1491,6 +1496,11 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
 // ================================================================================================
 HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
                                                bool wait_all, uint32_t msec) {
+  // num_elems sizes a stack allocation below; bound it to the event table width.
+  if (num_elems > kNumberOfHsaEvents) {
+    pr_err("event count %u exceeds maximum %u\n", num_elems, kNumberOfHsaEvents);
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 #if defined(WIN32)
   HANDLE* event_handles_ = reinterpret_cast<HANDLE*>(_alloca(sizeof(HANDLE) * num_elems));
   for (uint32_t i = 0; i < num_elems; ++i) {
@@ -1589,7 +1599,14 @@ bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
   memset(priv_data, 0, priv_size);
   Wkmi::FillinTrapHandlerPrivData(priv_data, tba, tma);
 
-  return Escape(priv_data, priv_size, true);
+  const bool ok = Escape(priv_data, priv_size, true);
+  if (ok) {
+    pr_info("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " accepted\n", tba, tma);
+  } else {
+    pr_err("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " rejected by KMD;"
+           " faults will fall back to stall detection\n", tba, tma);
+  }
+  return ok;
 }
 
 

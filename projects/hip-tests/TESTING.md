@@ -108,7 +108,7 @@ This table describes where the HIP runtime tests are validated. It is not a prod
 
 ## ASAN, TSAN, and sanitizer coverage
 
-AddressSanitizer builds are supported through `ENABLE_ADDRESS_SANITIZER` and through TheRock sanitizer settings such as `THEROCK_SANITIZER=ASAN` or `THEROCK_SANITIZER=HOST_ASAN`. Sanitizer builds can catch host-side memory errors in the test harness and runtime-facing code paths that execute on the host. Device-executed paths limit what host sanitizers observe, so sanitizer coverage of device-side behavior is inherently partial.
+AddressSanitizer builds are selected with `ENABLE_SANITIZER`, which takes `ASAN` for host and device instrumentation or `HOST_ASAN` for host only. Under TheRock it is set from `THEROCK_SANITIZER`. Sanitizer builds can catch host-side memory errors in the test harness and runtime-facing code paths that execute on the host. Device-executed paths limit what host sanitizers observe, so sanitizer coverage of device-side behavior is inherently partial.
 
 ThreadSanitizer and other sanitizer coverage are not part of the default per-PR gate for this component today. When sanitizer coverage is used, document the build option, architecture, tier, and limitations in the workflow that enables it rather than treating the sanitizer result as a complete substitute for device-executed testing.
 

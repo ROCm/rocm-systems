@@ -25,6 +25,7 @@ enum MemFlag {
   kFineGrain    = (1ULL << 0),  ///< Fine-grained coherent memory access
   kKernarg      = (1ULL << 1),  ///< Kernel argument memory (uncached)
   kQueueObject  = (1ULL << 2),  ///< Queue object memory (AQL queue support)
+  kAqlCwsr      = (1ULL << 3),  ///< AQL queue CWSR allocation for HSA event signaling
 };
 
 /// @brief GPU engine type flags
@@ -284,9 +285,9 @@ void SetAllocationInfo(void* data,                    ///< Pointer to allocation
                        uint64_t size,                 ///< Size of allocation in bytes
                        AllocDomain domain,            ///< Memory domain (kSystem, kLocal, kUserMemory, kUserQueue)
                        uint64_t addr,                 ///< Virtual address for user queue allocations
-                       uint32_t mem_flags,            ///< Memory flags (kFineGrain, kKernarg, kQueueObject)
+                       uint32_t mem_flags,            ///< Memory flags (kFineGrain, kKernarg, kQueueObject, kAqlCwsr)
                        uint32_t engine_flag,          ///< Engine flag for queue allocations
-                       const DeviceInfo& device_info);///< Device information structure (const reference)
+                       const DeviceInfo& device_info); ///< Device information structure (const reference)
 
 /// @brief Get the required sizes for allocation private data
 void GetAllocPrivDataSize(int* priv_drv_data_size,      ///< [out] Size of driver private data structure

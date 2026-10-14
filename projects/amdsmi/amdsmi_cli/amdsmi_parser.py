@@ -231,7 +231,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add all subparsers
         if sys_argv is not None:
-            if any(arg in sys_argv for arg in ["--help", "-h"]):
+            if os.getenv("_ARGCOMPLETE") or any(arg in sys_argv for arg in ["--help", "-h"]):
                 self._add_version_parser(self.subparsers, version)
                 self._add_list_parser(self.subparsers, list)
                 self._add_static_parser(self.subparsers, static)
@@ -1525,7 +1525,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Options arguments help text for Hypervisors and Baremetal
         # Might be able to remove Sudo requirement in ROCm 7.0
         ras_help = "Displays RAS features information;\n\tSudo may be required for some features"
-        numa_help = "All numa node information"  # Linux Baremetal only
+        numa_help = "All numa node information"  # Linux only
         partition_help = (
             "Partition information:\n\t"
             "No longer available in default output.\n\tArgument is required to display."
@@ -1629,7 +1629,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-o", "--profile", action="store_true", required=False, help=profile_help
                 )
 
-            if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+            if self.helpers.is_linux():
                 static_parser.add_argument(
                     "-u", "--numa", action="store_true", required=False, help=numa_help
                 )
@@ -2678,6 +2678,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
+                set_node_balancing_mode_help = "Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument(
+                    "--node-balancing-mode",
+                    action="store",
+                    choices=["POWER_BALANCING", "FREQUENCY_BALANCING"],
+                    type=str.upper,
+                    required=False,
+                    help=set_node_balancing_mode_help,
+                    metavar="{POWER_BALANCING,FREQUENCY_BALANCING}",
+                )
+
             # Node power limit is enabled on guest (1VF), maintain order
             max_node_power_limit = self.helpers.get_max_node_power_limit()
             set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
@@ -2899,6 +2910,15 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
+        # Improve the --gpu error message if combined with --node-balancing-mode;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-balancing-mode",),
+            reason="--node-balancing-mode is a system-wide setting, not per-GPU",
+        )
         # Improve the --gpu error message if combined with --node-power-limit;
         # actual rejection happens at runtime in set_value.py, since these two
         # flags sit in separate argparse groups and argparse itself never
@@ -3329,8 +3349,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_optionals_title = "Fabric arguments"
 
         # Help text for arguments
-        topology_help = "Display fabric topology data (counters per category, instance, and item)"
-        info_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        topology_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        telemetry_help = "Display fabric telemetry data (counters per category, instance, and item)"
 
         # Create fabric subparser
         fabric_parser = subparsers.add_parser(
@@ -3340,12 +3360,31 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         fabric_parser.set_defaults(func=func)
 
+        # --topology changed meaning without failing to parse, so warn on explicit use.
+        # The no-flag default that turns both flags on is not a user asking for it.
+        class _WarnTopologySemanticsChange(argparse.Action):
+            def __init__(self, option_strings, dest, **kwargs):
+                super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+            def __call__(self, parser, args, values, option_string=None):
+                print(
+                    "amd-smi fabric: warning: --topology now reports fabric device "
+                    "configuration; the counters it previously reported moved to --telemetry",
+                    file=sys.stderr,
+                )
+                setattr(args, self.dest, True)
+
         # Optional Args
         fabric_parser.add_argument(
-            "-t", "--topology", action="store_true", required=False, help=topology_help
+            "-t",
+            "--topology",
+            action=_WarnTopologySemanticsChange,
+            default=False,
+            required=False,
+            help=topology_help,
         )
         fabric_parser.add_argument(
-            "-i", "--info", action="store_true", required=False, help=info_help
+            "-T", "--telemetry", action="store_true", required=False, help=telemetry_help
         )
 
         # Add Universal Arguments

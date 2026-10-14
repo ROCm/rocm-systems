@@ -27,6 +27,12 @@ RUN set -euo pipefail; \
         wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/7.2/ubuntu/jammy/amdgpu-install_7.2.70200-1_all.deb && \
         apt-get install -y /tmp/amdgpu-install_7.2.70200-1_all.deb && \
         apt-get update && \
+        # Remove git 2.17.1 from base image before installing new version.
+        # The old git at /usr/local/bin/git lacks 'git switch' support.
+        ls -la /usr/local/bin/ && \
+        rm -f /usr/local/bin/git* && \
+        rm -rf /usr/local/libexec/git-core && \
+        rm -rf /git-2.17.1 && \
         apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
         python3 -m pip install -U awscli pipx && \
         python3 -m pip install -U --user -r /root/requirements.txt; \

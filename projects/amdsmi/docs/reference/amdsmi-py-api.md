@@ -574,7 +574,7 @@ Field | Content
 ``driver_version`` | driver version, such as ``6.19.14.31400000``
 ``driver_build_version`` | active DKMS build version, such as ``2370381``
 ``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
-``driver_date`` |  driver_date
+``driver_date`` | driver date, such as ``2015/01/01 00:00``, or ``N/A`` when the kernel does not report one
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 
@@ -3172,6 +3172,122 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_npm_balancing_mode
+
+Description: Returns the NPM balancing mode for a node: Power Balancing (`"PB"`,
+the default) or Frequency Balancing (`"FB"`). This is not gated on NPM
+enablement; it raises `AmdSmiLibraryException` (`AMDSMI_STATUS_NOT_SUPPORTED`)
+if the underlying value is missing or unreadable.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `str` — `"PB"` or `"FB"`
+
+Exceptions that can be thrown by `amdsmi_get_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        mode = amdsmi.amdsmi_get_npm_balancing_mode(node_handle)
+        print(mode)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_npm_balancing_mode
+
+Description: Sets the NPM balancing mode for a node to Power Balancing (`"PB"`)
+or Frequency Balancing (`"FB"`). This setting is AMD-SMI-only; it is not
+exposed via BMC Redfish/APML. Requires elevated (root) privileges.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+* `mode` `"PB"` or `"FB"`
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_npm_balancing_mode` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - NPM is disabled on this node
+- `AMDSMI_STATUS_SETTING_UNAVAILABLE` - requested mode absent from this platform's supported balancing modes
+- `AMDSMI_STATUS_NO_PERM` - Caller lacks elevated privileges
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        amdsmi.amdsmi_set_npm_balancing_mode(node_handle, "FB")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_npm_supported_balancing_modes
+
+Description: Returns the set of NPM balancing modes supported by this node's
+platform/ASIC, independent of current NPM enablement.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: `List[str]` — subset of `["PB", "FB"]` (e.g. `["PB", "FB"]` on
+platforms that support both)
+
+Exceptions that can be thrown by `amdsmi_get_npm_supported_balancing_modes` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi.amdsmi_get_node_handle(devices[0])
+        supported_modes = amdsmi.amdsmi_get_npm_supported_balancing_modes(node_handle)
+        print(supported_modes)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_tray_info
 
 Description: Returns node-scoped compute tray type and accelerator count via UALoE.
@@ -5622,6 +5738,85 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_link_topology
+
+Description: Return GPU link topology using the host API's fields.
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dst` the destination device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`weight` | The link weight
+`link_status` | Integer value of `amdsmi.AmdSmiLinkStatus`, retained for host API parity
+`link_type` | Integer `AMDSMI_LINK_TYPE_*` value
+`num_hops` | Abstracted topology steps, capped at 255, not physical xGMI links
+`fb_sharing` | 1 if P2P framebuffer access is available; 0 if unavailable or the query failed
+
+`amdsmi.AmdSmiLinkStatus` members:
+
+Member | Value
+---|---
+`AMDSMI_LINK_STATUS_ENABLED` | 0
+`AMDSMI_LINK_STATUS_DISABLED` | 1
+`AMDSMI_LINK_STATUS_INACTIVE` | 2
+`AMDSMI_LINK_STATUS_ERROR` | 3
+
+Baremetal notes:
+
+- Self pair: `INTERNAL`, `ENABLED`, zero weight and hops, `fb_sharing=1`.
+- Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+- Current successful calls always report `AMDSMI_LINK_STATUS_ENABLED` (0).
+- `UNKNOWN` to `DISABLED` (1) is defensive, not a current success case.
+- `INACTIVE` (2) and `ERROR` (3) are not produced.
+- Status is not link health or P2P access.
+- The topology CLI uses `amdsmi_is_P2P_accessible`; it can report `DISABLED` when this API reports `ENABLED`.
+- Queries are sequential, so topology changes can affect field consistency.
+
+Exceptions that can be thrown by `amdsmi_get_link_topology` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_INIT` - Library not initialized
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dst = devices[1]
+        topology = amdsmi.amdsmi_get_link_topology(processor_handle_src, processor_handle_dst)
+        print(topology['weight'])
+        print(topology['num_hops'])
+        print(topology['fb_sharing'])
+        print(amdsmi.AmdSmiLinkStatus(topology['link_status']).name)
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_topo_get_p2p_status
 
 Description: Retrieve the connection type and P2P capabilities between 2 GPUs
@@ -6683,7 +6878,7 @@ Output: Dictionary with the corresponding fields
 Field | Description
 ---|---
 `bdf` | BDF of the fabric device
-`version` | Fabric info structure version
+`version` | Fabric info layout that was actually filled: `2` for the nested layout, or `1` if the loaded library predates it and reports the flat layout instead
 `accelerator_id` | Accelerator identifier (range 0 to 1023)
 `fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
 `bandwidth` | Station bandwidth share in Mb/s
@@ -6693,9 +6888,16 @@ Field | Description
 `vpod_id` | Virtual PoD identifier
 `vpod_size` | Virtual PoD size
 `local_accelerators` | List of local accelerator IDs
-`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
+`local_accelerator_count` | Count of valid entries in `local_accelerators`
+`vpod_active_accelerators` | List of active accelerator IDs; unused slots read `UINT32_MAX` (UNSET), as with `local_accelerators`
 `addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
 `accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
+`station_flags` | DF/station flags
+`num_stations` | Number of stations
+`lane_en_bitmap` | Per-lane enable bitmap as a list of bytes
+`ppod_mask` | `amdsmi_fabric_ppod_field_t` bits actually read into the PPoD fields; a clear bit means that field holds its sentinel
+`vpod_mask` | `amdsmi_fabric_vpod_field_t` bits actually read into the vPoD fields
+`station_mask` | `amdsmi_fabric_df_field_t` bits actually read into the DF/station fields
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
 

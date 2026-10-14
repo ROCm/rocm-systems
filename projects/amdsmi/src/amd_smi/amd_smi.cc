@@ -62,6 +62,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 // a global instance of std::mutex to protect data passed during threads
@@ -723,7 +724,7 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
   try {
     // Navigate to the board directory from the DRM device path
     fs::path board_dir = drm_device_path / "board";
-    fs::path npm_status = board_dir / "npm_status";
+    fs::path npm_status = amd::smi::resolve_npm_dir(board_dir) / "npm_status";
 
     // Check if board directory and npm_status exist
     if (fs::exists(board_dir) && fs::is_directory(board_dir) && fs::exists(npm_status)) {
@@ -1757,6 +1758,25 @@ static_assert(offsetof(amdsmi_npm_info_t, current_node_power) ==
                   offsetof(rsmi_npm_info_t, current_node_power),
               "current_node_power offset mismatch between amdsmi_npm_info_t and rsmi_npm_info_t");
 
+// amdsmi_npm_balancing_mode_t and rsmi_npm_balancing_mode_t are static_cast
+// between each other; keep their enumerator values identical so that cast
+// stays correct if either enum changes.
+static_assert(
+    static_cast<int>(AMDSMI_NPM_BALANCING_MODE_INVALID) ==
+        static_cast<int>(RSMI_NPM_BALANCING_MODE_INVALID),
+    "AMDSMI_NPM_BALANCING_MODE_INVALID value mismatch with RSMI_NPM_BALANCING_MODE_INVALID");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_POWER_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_POWER_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
+              "AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING value mismatch with "
+              "RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING");
+static_assert(static_cast<int>(AMDSMI_NPM_BALANCING_MODE_MAX) ==
+                  static_cast<int>(RSMI_NPM_BALANCING_MODE_MAX),
+              "AMDSMI_NPM_BALANCING_MODE_MAX value mismatch with RSMI_NPM_BALANCING_MODE_MAX");
+
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* npm_info) {
   AMDSMI_CHECK_INIT();
 
@@ -1805,6 +1825,85 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || mode == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_npm_balancing_mode_t rsmi_mode;
+  rsmi_status_t rstatus =
+      rsmi_dev_npm_balancing_mode_get(0, reinterpret_cast<uintptr_t>(node_handle), &rsmi_mode);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *mode = static_cast<amdsmi_npm_balancing_mode_t>(rsmi_mode);
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  if (mode != AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  rsmi_status_t rstatus = rsmi_dev_npm_balancing_mode_set(
+      0, reinterpret_cast<uintptr_t>(node_handle), static_cast<rsmi_npm_balancing_mode_t>(mode));
+  return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
 amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t limit) {
   AMDSMI_CHECK_INIT();
 
@@ -1838,6 +1937,47 @@ amdsmi_status_t amdsmi_set_npm_limit(amdsmi_node_handle node_handle, uint64_t li
   rsmi_status_t rstatus =
       rsmi_dev_npm_limit_set(0, reinterpret_cast<uintptr_t>(node_handle), limit);
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes) {
+  AMDSMI_CHECK_INIT();
+
+  if (node_handle == nullptr || supported_modes == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Reject any node_handle this library did not itself hand out (via
+  // amdsmi_get_node_handle(), or a test-registered stand-in -- see
+  // is_registered_node_handle()) *before* the cast/dereference below: an
+  // unprivileged caller could otherwise pass an arbitrary non-null value and
+  // have it dereferenced as a std::string* here.
+  if (!is_registered_node_handle(node_handle)) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  auto board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  uint64_t bitmask = 0;
+  rsmi_status_t rstatus = rsmi_dev_npm_supported_balancing_modes_get(
+      0, reinterpret_cast<uintptr_t>(node_handle), &bitmask);
+  amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(rstatus);
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  *supported_modes = static_cast<amdsmi_bit_field_t>(bitmask);
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
@@ -3354,6 +3494,96 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
                                           reinterpret_cast<RSMI_IO_LINK_TYPE*>(type),
                                           reinterpret_cast<rsmi_p2p_capability_t*>(cap));
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info) {
+  AMDSMI_CHECK_INIT();
+
+  if (topology_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Keep defaults intact if a later query fails.
+  *topology_info = {};
+  topology_info->link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+  topology_info->link_status = AMDSMI_LINK_STATUS_DISABLED;
+
+  amd::smi::AMDSmiGPUDevice* src_device = nullptr;
+  amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle_src, &src_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  uint32_t src_id = src_device->get_gpu_id();
+  uint32_t dst_id = dst_device->get_gpu_id();
+
+#ifdef ENABLE_WSL_BACKEND
+  // WSL has no native sysfs topology; match amdsmi_topo_get_link_type.
+  if (src_device->backend() || dst_device->backend()) {
+    if (src_device == dst_device) {
+      topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+      topology_info->fb_sharing = 1;
+    } else {
+      topology_info->link_type = AMDSMI_LINK_TYPE_PCIE;
+      topology_info->num_hops = 1;
+    }
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+#endif
+
+  // Self pairs need no inter-device queries.
+  if (src_id == dst_id) {
+    topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    topology_info->fb_sharing = 1;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  uint64_t hops = 0;
+  RSMI_IO_LINK_TYPE rsmi_type = RSMI_IOLINK_TYPE_UNDEFINED;
+  amdsmi_status_t status =
+      amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_type(src_id, dst_id, &hops, &rsmi_type));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // Only PCIe and xGMI share enum values across the two APIs.
+  amdsmi_link_type_t link_type;
+  switch (rsmi_type) {
+    case RSMI_IOLINK_TYPE_PCIEXPRESS:
+      link_type = AMDSMI_LINK_TYPE_PCIE;
+      break;
+    case RSMI_IOLINK_TYPE_XGMI:
+      link_type = AMDSMI_LINK_TYPE_XGMI;
+      break;
+    default:
+      link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+      break;
+  }
+
+  uint64_t weight = 0;
+  status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_weight(src_id, dst_id, &weight));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // A failed P2P query leaves fb_sharing at 0.
+  uint8_t fb_sharing = 0;
+  bool accessible = false;
+  if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
+      AMDSMI_STATUS_SUCCESS) {
+    fb_sharing = accessible ? 1 : 0;
+  }
+
+  topology_info->link_type = link_type;
+  topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);  // clamp to uint8_t
+  topology_info->weight = weight;
+  // Host API parity, not link health or P2P access.
+  topology_info->link_status = (link_type == AMDSMI_LINK_TYPE_UNKNOWN) ? AMDSMI_LINK_STATUS_DISABLED
+                                                                       : AMDSMI_LINK_STATUS_ENABLED;
+  topology_info->fb_sharing = fb_sharing;
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 // Compute Partition functions
@@ -5866,7 +6096,6 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   }
 
   // Get the driver date
-  std::string driver_date;
   auto version = drm_get_version(drm_fd);
   if (version == nullptr) {
     libdrm.unload();
@@ -5876,12 +6105,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     return AMDSMI_STATUS_DRM_ERROR;
   }
 
-  driver_date = version->date;
-  // Reformat the driver date from 20150101 to 2015/01/01 00:00
-  if (driver_date.length() == 8) {
-    driver_date = driver_date.substr(0, 4) + "/" + driver_date.substr(4, 2) + "/" +
-                  driver_date.substr(6, 2) + " 00:00";
-  }
+  const auto driver_date = smi_amdgpu_format_driver_date(version->date);
   snprintf(info->driver_date, AMDSMI_MAX_STRING_LENGTH, "%s", driver_date.c_str());
 
   // Get the driver name
