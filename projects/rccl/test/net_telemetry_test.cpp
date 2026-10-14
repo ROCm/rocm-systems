@@ -74,6 +74,7 @@
 #include <fstream>
 #include <sstream>
 #include <unistd.h>
+#include <filesystem>
 #include <sys/stat.h>
 
 extern int rcclTelemetryEnabled;
@@ -946,12 +947,13 @@ static void testEthtoolFallbackOrder(void) {
   const uint64_t values[] = {11, 22, 33, 44};
 
   int64_t pfc = -1, onlyFb = -1, missing = -1;
+  const char* keys[] = {"rx_pfc_frames", "rx_pause_frames", "absent_primary", "only_fallback", "rx_pfc"};
+  int64_t* targets[] = {&pfc, &pfc, &onlyFb, &onlyFb, &missing};
   RcclEthtoolWantedEx w[5];
-  std::snprintf(w[0].key, sizeof(w[0].key), "rx_pfc_frames");   w[0].target = &pfc;
-  std::snprintf(w[1].key, sizeof(w[1].key), "rx_pause_frames"); w[1].target = &pfc;
-  std::snprintf(w[2].key, sizeof(w[2].key), "absent_primary");  w[2].target = &onlyFb;
-  std::snprintf(w[3].key, sizeof(w[3].key), "only_fallback");   w[3].target = &onlyFb;
-  std::snprintf(w[4].key, sizeof(w[4].key), "rx_pfc");          w[4].target = &missing;
+  for (int i = 0; i < 5; i++) {
+    std::snprintf(w[i].key, sizeof(w[i].key), "%s", keys[i]);
+    w[i].target = targets[i];
+  }
   rcclTelemetryEthtoolResolve(names, stride, values, n, w, 5);
   CHECK_EQ(pfc, 22);
   CHECK_EQ(onlyFb, 44);
@@ -986,9 +988,12 @@ static long long jsonInt(const std::string& json, const std::string& key) {
 static void testThor2SysfsNames(void) {
   std::printf("testThor2SysfsNames\n");
   resetState();
-  char root[] = "/tmp/rccl_tel_sysfs_XXXXXX";
-  CHECK(mkdtemp(root) != NULL);
-  const std::string r(root);
+  const char* tmp = std::getenv("TMPDIR");
+  std::string tmpl = std::string(tmp && tmp[0] ? tmp : "/tmp") + "/rccl_tel_sysfs_XXXXXX";
+  std::vector<char> root(tmpl.begin(), tmpl.end());
+  root.push_back('\0');
+  CHECK(mkdtemp(root.data()) != NULL);
+  const std::string r(root.data());
   const std::string dev = r + "/class/infiniband/bnxt_re0";
   const std::string hwc = dev + "/ports/1/hw_counters/";
   for (const std::string& d : {r + "/class", r + "/class/infiniband", dev, dev + "/device", dev + "/device/net",
@@ -1007,8 +1012,8 @@ static void testThor2SysfsNames(void) {
   };
   for (const Ctr& c : ctrs) writeFile(hwc + c.key, std::to_string(c.base));
 
-  rcclTelemetrySysRoot = root;
-  std::snprintf(rcclTelemetryCfg.output_dir, sizeof(rcclTelemetryCfg.output_dir), "%s/out", root);
+  rcclTelemetrySysRoot = root.data();
+  std::snprintf(rcclTelemetryCfg.output_dir, sizeof(rcclTelemetryCfg.output_dir), "%s/out", root.data());
   rcclTelemetryCfg.hw_counter_list[0] = '\0';
   CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
   CHECK(std::strcmp(rcclTelemetryDevs[0].eth_device, "telfake0") == 0);
@@ -1037,18 +1042,19 @@ static void testThor2SysfsNames(void) {
   CHECK_EQ(jsonInt(json, "rx_discards"), 4);
   CHECK_EQ(jsonInt(json, "tx_errors"), 5);
   CHECK_EQ(jsonInt(json, "tx_discards"), 0);
-  CHECK_EQ(jsonInt(json, "rx_roce_error_pkts"), 1);
-  CHECK_EQ(jsonInt(json, "rx_roce_discard_pkts"), 4);
   CHECK_EQ(jsonInt(json, "res_mem_error"), 4);
   CHECK_EQ(jsonInt(json, "to_retransmits"), 1);
   CHECK_EQ(jsonInt(json, "oos_drop_count"), 0);
   CHECK_EQ(jsonInt(json, "delta_tx_bytes"), 4000);
   CHECK_EQ(jsonInt(json, "delta_rx_packets"), 5);
   CHECK_EQ(jsonInt(json, "cnp_ignored"), -1);
-  CHECK_EQ(jsonInt(json, "local_ack_timeout_err"), -1);
+  CHECK_EQ(jsonInt(json, "rx_roce_error_pkts"), -1);
+  CHECK_EQ(jsonInt(json, "rx_roce_discard_pkts"), -1);
+  CHECK(json.find("\"local_ack_timeout_err\"") == std::string::npos);
   /* No such interface, so ethtool counters stay N/A. */
   CHECK_EQ(jsonInt(json, "pfc_rx_pause_frames"), -1);
   rcclTelemetrySysRoot = "/sys";
+  std::filesystem::remove_all(r);
 }
 
 int main(void) {
