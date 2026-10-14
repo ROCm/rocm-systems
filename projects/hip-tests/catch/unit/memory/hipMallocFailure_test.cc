@@ -18,15 +18,15 @@
 #include <algorithm>
 
 namespace {
-constexpr size_t ONE_MB = 1024 * 1024;
+constexpr size_t kOneMB = 1024 * 1024;
 // Noise allowed when comparing free memory, e.g. from the OS budget query
-constexpr size_t FREE_MEM_TOLERANCE = 64 * ONE_MB;
+constexpr size_t kFreeMemTolerance = 64 * kOneMB;
 // Memory held for the whole test to create memory pressure, as a share of the idle free memory
-constexpr size_t HELD_DEVICE_PERCENT = 40;
-constexpr size_t HELD_HOST_PERCENT = 20;
-constexpr size_t MAX_HELD_HOST_SIZE = 4096 * ONE_MB;
-// Requests grow in steps of 1/REQUEST_STEPS of the idle free memory until one fails
-constexpr size_t REQUEST_STEPS = 20;
+constexpr size_t kHeldDevicePercent = 40;
+constexpr size_t kHeldHostPercent = 20;
+constexpr size_t kMaxHeldHostSize = 4096 * kOneMB;
+// Requests grow in steps of 1/kRequestSteps of the idle free memory until one fails
+constexpr size_t kRequestSteps = 20;
 
 constexpr size_t PercentOf(size_t value, size_t percent) { return value / 100 * percent; }
 
@@ -107,10 +107,10 @@ class Allocation {
 // one fails. Free memory must be unchanged by the failure and grow again after the release.
 void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   const size_t idle = FreeMemory();
-  const size_t heldDevSize = PercentOf(idle, HELD_DEVICE_PERCENT);
-  const size_t heldHostSize = std::min(PercentOf(idle, HELD_HOST_PERCENT), MAX_HELD_HOST_SIZE);
-  INFO("Idle free memory : " << idle / ONE_MB << " MB, held device : " << heldDevSize / ONE_MB
-                             << " MB, held host : " << heldHostSize / ONE_MB << " MB");
+  const size_t heldDevSize = PercentOf(idle, kHeldDevicePercent);
+  const size_t heldHostSize = std::min(PercentOf(idle, kHeldHostPercent), kMaxHeldHostSize);
+  INFO("Idle free memory : " << idle / kOneMB << " MB, held device : " << heldDevSize / kOneMB
+                             << " MB, held host : " << heldHostSize / kOneMB << " MB");
 
   // Guards free the held memory even if a REQUIRE below fails
   LinearAllocGuard<char> heldDev(LinearAllocs::hipMalloc, heldDevSize);
@@ -121,8 +121,8 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
 
   bool failed = false;
   size_t beforeFailure = 0;
-  for (size_t step = 1; step <= REQUEST_STEPS && !failed; ++step) {
-    const size_t size = idle / REQUEST_STEPS * step;
+  for (size_t step = 1; step <= kRequestSteps && !failed; ++step) {
+    const size_t size = idle / kRequestSteps * step;
     Allocation alloc(kind);
     // Windows refusing the pageable memory is not a runtime failure
     if (!alloc.Prepare(size)) {
@@ -138,9 +138,9 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
     const size_t after = FreeMemory();
     failed = true;
     beforeFailure = before;
-    INFO("Request : " << size / ONE_MB << " MB -> " << hipGetErrorName(result) << ", free before : "
-                      << before / ONE_MB << " MB, after : " << after / ONE_MB << " MB");
-    REQUIRE(after + FREE_MEM_TOLERANCE >= before);
+    INFO("Request : " << size / kOneMB << " MB -> " << hipGetErrorName(result) << ", free before : "
+                      << before / kOneMB << " MB, after : " << after / kOneMB << " MB");
+    REQUIRE(after + kFreeMemTolerance >= before);
   }
 
   heldDev = LinearAllocGuard<char>();
@@ -153,8 +153,8 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   // Not compared with idle: freed host allocations can stay cached in the runtime. The held device
   // memory must come back, though.
   const size_t released = FreeMemory();
-  INFO("Free memory after releasing the held memory : " << released / ONE_MB << " MB");
-  REQUIRE(released + FREE_MEM_TOLERANCE >= beforeFailure + heldDevSize);
+  INFO("Free memory after releasing the held memory : " << released / kOneMB << " MB");
+  REQUIRE(released + kFreeMemTolerance >= beforeFailure + heldDevSize);
 }
 }  // namespace
 #endif /* _WIN32 */
