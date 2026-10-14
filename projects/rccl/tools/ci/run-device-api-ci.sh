@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 # Run the RCCL device-API benchmark suite (symmetric memory / GIN proxy)
 # against a freshly built rccl-tests tree. Mirrors the legacy rocJenkins
-# "device-api" testCommand. The non-GIN matrix launches LSA all_reduce_perf
-# (-D 1/-D 2). The GIN matrix does not: all_reduce_perf does not build under
+# "device-api" testCommand. The non-GIN matrix launches AllReduce, AllGather,
+# and ReduceScatter at -R 2, plus LSA all_reduce_perf (-D 1/-D 2). The GIN
+# matrix does not launch all_reduce_perf: it does not build under
 # ENABLE_ROCSHMEM_GIN.
 #
 # Consumes ROCM_PATH (rocm.env), MPI_HOME (ompi.env), ROCSHMEM_INSTALL_DIR
-# (rocshmem.env), and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR,
-# RCCL_TESTS_DIR). Build paths come from the environment (device-api.sbatch
-# exports them) or, when run standalone, from
-# $WORKDIR/.ci-out/{rocm,ompi,rocshmem,rccl}.env.
+# (rocshmem.env, written by device-api.sbatch from projects/rccl/ext/rocshmem),
+# and rccl.env (RCCL_INSTALL_PREFIX, RCCL_TESTS_BIN_DIR, RCCL_TESTS_DIR).
+# Build paths come from the environment (device-api.sbatch exports them) or,
+# when run standalone, from $WORKDIR/.ci-out/{rocm,ompi,rocshmem,rccl}.env.
 # librccl.so comes from RCCL_INSTALL_PREFIX/lib when that is set, else
 # projects/rccl/build/release. RCCL_TESTS_BIN_DIR defaults to rccl-tests/build.
 #
 # device-api.sbatch invokes this twice:
 #   1. CONFIG=device-api-nongin-tests.json against the install.sh ENABLE_DEVICE_API
-#      build (symmetric + LSA -D 1/-D 2), with RCCL_CI_SKIP_DEVTIME=1
+#      build (AR/AG/RS -R 2 + LSA -D 1/-D 2), with RCCL_CI_SKIP_DEVTIME=1
 #   2. CONFIG=device-api-tests.json against the cmake ENABLE_ROCSHMEM_GIN build
-#      (GIN suites, the five symmetric binaries, and the AllToAllDevtime smoke)
+#      (host-proxy gin-d3/gin-d4, and the AllToAllDevtime smoke)
 #
 # Each bench is wrapped in `timeout` so a hung mpirun/driver can't wedge the job;
 # failures are collected and surfaced at the end (exit non-zero iff any failed).
@@ -105,14 +106,14 @@ export PATH="${MPI_HOME}/bin:${ROCM_PATH}/bin:${PATH}"
 export LD_LIBRARY_PATH="${RCCL_LIB_DIR}${ROCSHMEM_INSTALL_DIR:+:${ROCSHMEM_INSTALL_DIR}/lib}:${MPI_HOME}/lib:${ROCM_PATH}/lib:${LD_LIBRARY_PATH:-}"
 
 PERF_DIR="${RCCL_TESTS_BIN_DIR:-${RCCL_TESTS_DIR}/build}"
-# alltoall_perf is built for both matrices. Fall back to broadcast_perf, which
-# the non-GIN symmetric matrix always launches.
+# alltoall_perf is built for both matrices. Fall back to all_reduce_perf, which
+# the non-GIN matrix always launches.
 if [[ ! -d "${PERF_DIR}" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la "${RCCL_TESTS_DIR}" 2>/dev/null || true
   exit 1
 fi
-if [[ ! -x "${PERF_DIR}/alltoall_perf" && ! -x "${PERF_DIR}/broadcast_perf" ]]; then
+if [[ ! -x "${PERF_DIR}/alltoall_perf" && ! -x "${PERF_DIR}/all_reduce_perf" ]]; then
   echo "rccl-tests perf binaries not found under ${PERF_DIR}"
   ls -la "${PERF_DIR}" 2>/dev/null || true
   exit 1

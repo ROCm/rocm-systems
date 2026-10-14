@@ -184,19 +184,16 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
         target_link_options(${target} PRIVATE -fgpu-rdc --hip-link -rdynamic)
     endfunction()
 
-    # Device-api CI builds one --rocshmem-gin librccl.so and runs the matrix
-    # against it. Every launched binary must RDC-link rocSHMEM so GIN host
-    # symbols resolve from the executable. all_reduce_perf is omitted: it
-    # still does not build under ENABLE_ROCSHMEM_GIN (gin.sbatch uses
-    # `make -k` for the same reason).
+    # Binaries launched against a --rocshmem-gin librccl.so must RDC-link
+    # rocSHMEM so GIN host symbols resolve from the executable.
+    # alltoall_perf: device-api GIN matrix (-D 3/-D 4) and gin-tests.json.
+    # all_gather_perf / broadcast_perf: gin-tests.json Anvil SDMA (-D 3).
+    # all_reduce_perf is omitted: it still does not build under
+    # ENABLE_ROCSHMEM_GIN (gin.sbatch uses `make -k` for the same reason).
     foreach(_gin_rdc_bin IN ITEMS
         all_gather_perf
         alltoall_perf
-        broadcast_perf
-        gather_perf
-        reduce_perf
-        scatter_perf
-        sendrecv_perf)
+        broadcast_perf)
       _rccl_tests_link_rocshmem_gin_rdc(${_gin_rdc_bin})
     endforeach()
 endif()
