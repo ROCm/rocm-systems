@@ -86,7 +86,9 @@ fault aborts the host, or a host SIGSEGV):
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
   `hrr_eof_record` (event_type `HRR_EOF_MARKER`, payload carries the final event
   count + `HRR_EOF_MAGIC`) and writes `manifest.json` with `complete:true`. The
-  trailer's **absence** is how the reader detects a crash-truncated archive.
+  reader takes an archive as complete only when the trailer is there and its
+  count matches the records before it; a missing trailer means the capture was
+  interrupted.
 
 Blobs and code objects were already crash-safe (written to a temp file then
 atomically renamed), so a crash never leaves a partial final blob.
@@ -94,10 +96,18 @@ atomically renamed), so a crash never leaves a partial final blob.
 On the read side, `load_archive` is append-only-aware: a torn record can only be
 the last one, so a partial header/payload at the tail is a recovery point — all
 complete records are kept and `Archive::truncated` is set, rather than failing
-the whole load. `Archive::complete` reflects whether the trailer was found.
-`hrr-playback --info` reports both; `hrr-playback --repair` rewrites a truncated
-archive (trimmed to the last complete record, trailer + manifest added) into a
-clean one.
+the whole load. The trailer ends the event stream. Records after it, which a
+runtime older than the writer fix could leave from calls still in flight at
+shutdown, are counted in `Archive::skipped_after_trailer`, reported once and
+not replayed. `Archive::complete` is set when the trailer was found and its
+`total_events` equals the number of records before it; a mismatch is reported
+and leaves the archive incomplete without setting `truncated`. The trailer and
+its count are kept in `Archive::trailer` and `Archive::trailer_events`, and
+`hrr-playback --info` says which of these cases an archive is. `hrr-playback --repair` rewrites any
+incomplete archive, whether its tail was torn, its trailer is missing or its
+trailer miscounts, into a clean one: the complete records before the tail or
+the trailer are kept, and a trailer that counts them and a manifest are
+written.
 
 ### Per-Process Archive Layout
 
@@ -149,8 +159,10 @@ sub-archive in turn and then rebuilds the root `manifest.json` from the results.
 This is the normal case for a multi-process serving stack, where the framework
 force-kills its workers at shutdown — the ranks that did all the GPU work are
 precisely the ones left without a trailer and absent from the root index, while
-the parent that exited cleanly needs no repair. Sub-archives that already carry
-a clean trailer are skipped without being read.
+the parent that exited cleanly needs no repair. A sub-archive is skipped when
+`hrr::has_clean_trailer`, a walk of its record headers that does not read the
+payloads, finds it complete in the sense `load_archive` uses. `--info` on a
+root applies the same check before it shows a process as complete.
 
 ### Archive Format (v9)
 ```
@@ -439,6 +451,8 @@ Version history, so an archive written by an older runtime can be placed:
             total_events   u64   real events written before the trailer
             eof_magic      u32   HRR_EOF_MAGIC ("HEOF")
           Absent => capture was interrupted (crash); reader recovers the tail.
+          Count != records before it => incomplete as well; --repair
+          rewrites either case.
 ```
 
 ### `hrr_args_*` Struct Layout Rules
@@ -1127,6 +1141,45 @@ replay, `hipMalloc` returns different addresses. Translation is performed via
 recorded address that was never passed through a HIP API (e.g. computed from an
 `hipGetDeviceProperties` query or a device-side `malloc`), the capture layer cannot
 know about it and translation will fail.
+
+Translation cannot reach a pointer the application stored in device memory: it
+arrives inside an H2D payload, byte for byte. vLLM's block table is such a case
+([ROCM-31827](https://amd-hub.atlassian.net/browse/ROCM-31827)). On Linux, replay
+therefore places `hipMalloc` and `hipMallocAsync` allocations at their recorded
+addresses, so that pointer is right again; `--no-placement` turns this off.
+
+- Before `hipInit`, the recorded ranges of both APIs, rounded to 4 KiB and merged,
+  are held with `PROT_NONE` placeholders (`MAP_FIXED_NOREPLACE`), so the runtime
+  cannot take them. A range something else already occupies is not held.
+- Each replayed allocation drops the placeholder over the VMM granules holding it
+  (a `hipMallocAsync` pointer need not start on one), then `hipMemAddressReserve`
+  there, `hipMemCreate` on the current device, `hipMemMap` and `hipMemSetAccess`
+  for that device and every device `hipDeviceCanAccessPeer` says can reach it:
+  `hipDeviceEnablePeerAccess` does not cover VMM memory, so without this a peer
+  copy into a placed buffer faults.
+  If any step misses (granules not held, or shared with a live placed allocation,
+  runtime answers with another address, no VMM support), that allocation falls
+  back to the normal allocator, named under `--verbose`. The summary prints
+  `Placement : N placed at capture address, M fell back`.
+- `hipFree` first synchronizes the device, as it does for `hipMalloc` memory
+  (not for `hipMallocAsync` memory, unmapped at once); `hipFreeAsync` first
+  synchronizes its stream. Both then unmap and release. The range is then held again for the next allocation recorded there.
+  Inside a graph capture `hipFreeAsync` leaves the mapping in place, since the
+  graph may still use it.
+- After each such unmap replay allocates and frees 4 MiB with `hipMalloc`: on
+  gfx1201 with Linux 7.0.0-34's in-box amdgpu, `hipMemUnmap` leaves stale GPU TLB
+  entries, and KFD flushes them when it frees ordinary memory. This flushes the
+  current device only, and is skipped while a graph capture is open, where
+  `hipMalloc` is illegal; a remap at that address before the next flush can then
+  still reach the old pages on that driver.
+- Not placed, as before: `hipMallocAsync` inside a graph capture (a graph
+  allocation node), allocations exported with `hipIpcGetMemHandle` and any other
+  recorded over the same pages (IPC refuses VMM memory), every other allocation
+  API, and everything under `--guard-segments`, with
+  `HIP_HRR_REPLAY_ALLOC_PAD_FACTOR` above 1 (a padded allocation would run over
+  its neighbours' recorded addresses) or on Windows.
+- Between the `--kernel-filter` warm-up and the timed pass, placed allocations are
+  released so the timed pass can place them again.
 
 ### `hipMemcpyDeviceToDevice` — Not Captured
 

@@ -47,6 +47,10 @@
 # which capture snapshots before each launch and replay writes back. Contains
 # its own hidden [.][hrr-direct] workloads.
 #
+# hrr_va_placement_test.cc covers capture-address placement: a device pointer
+# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
+# [.][hrr-direct] workload.
+#
 # hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
 # wrapped keeps its wrapper, nothing is recorded after the trailer, and a failed
 # blob write leaves the archive incomplete, in the parent only across fork().
@@ -84,6 +88,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
   hrr_pinned_host_test.cc
+  hrr_va_placement_test.cc
   hrr_disk_space_test.cc
 )
 

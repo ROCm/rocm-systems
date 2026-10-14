@@ -460,6 +460,11 @@ bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
 }
 
 void Memory::syncCacheFromHost(VirtualGPU& gpu, device::Memory::SyncFlags syncFlags) {
+  // HIP never records a writer or a version (see amd::Memory::signalWrite()), so the sync
+  // always does no work. Return before the lock, which costs time on each command.
+  if (amd::IS_HIP) {
+    return;
+  }
   std::scoped_lock lock(owner()->lockMemoryOps());
   // If the last writer was another GPU, then make a writeback
   if (!isHostMemDirectAccess() && (owner()->getLastWriter() != nullptr) &&
