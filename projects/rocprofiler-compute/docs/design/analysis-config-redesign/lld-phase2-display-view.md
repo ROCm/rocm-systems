@@ -33,6 +33,7 @@ New module `src/utils/layer3_schema.py`.
 | `id` | str | yes | Layer 2 metric id |
 | `archs` | list[str] | no | Metric-level arch filter |
 | `label` | str | no | Display name override for this view |
+| `unit` | str | no | Display unit for this view, e.g. `Bytes/s` for a metric defined in `GB/s` |
 
 **Render type mapping to current table types:**
 
@@ -74,6 +75,14 @@ New module `src/utils/layer3_reader.py`.
 5. Resolve each metric `id` against `library.metrics` -- error if not found.
 6. For each `ViewMetricRef`: if `label` is present, use it as display name; otherwise
    use `name` from the Layer 2 `MetricDefinition`.
+7. For each `ViewMetricRef` with a `unit` different from the metric's Layer 2 `unit`,
+   convert the value in code with one table of known unit conversions (e.g. `GB/s` ->
+   `Bytes/s`, factor 1e9). An unknown pair is a validation error. The metric definition
+   itself stays uniform; only the view's display changes.
+
+Display adjustments such as unit scaling, rounding and aggregation wrappers belong in code,
+not in static YAML. Moving the remaining ones into code is a follow-up outside this
+redesign.
 
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
