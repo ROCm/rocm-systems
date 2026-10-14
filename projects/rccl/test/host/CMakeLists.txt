@@ -97,6 +97,7 @@ function(rccl_define_micro_source_lists)
     devcomm-test.cc
     wrap-test.cc
     dev-runtime-test.cc
+    memalloc-fabric-test.cc              # src/include/rccl_memalloc_fabric.h (ncclMemAlloc FABRIC gate)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     process-isolated-runner-test.cc

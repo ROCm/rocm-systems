@@ -881,6 +881,16 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_MEMALLOC_FABRIC``
+        | Handle type of ``ncclMemAlloc`` allocations on devices that support FABRIC handles. FABRIC
+          allocations can be registered across the trays of a UALink clique; HIP allows only one handle
+          type per allocation, so a FABRIC allocation cannot be registered by a non-MNNVL communicator
+          (those fall back to the unregistered path).
+      - | ``-1``: FABRIC on gfx1250 when the device supports it and ``NCCL_MNNVL_ENABLE`` is not ``0``
+          (default); POSIX file descriptors everywhere else.
+        | ``1``: Always request FABRIC (falls back to POSIX file descriptors if refused).
+        | ``0``: POSIX file descriptors.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all

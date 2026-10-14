@@ -102,6 +102,8 @@ test_categories:
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      # allocator.cc ncclMemAlloc FABRIC gate (include/rccl_memalloc_fabric.h)
+      - "MemAllocFabricMicrotest.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
