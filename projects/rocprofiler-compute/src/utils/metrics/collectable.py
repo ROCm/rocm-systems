@@ -8,6 +8,7 @@ from different passes. A COLLECT_RATIO whose pieces sit on different passes,
 or a COLLECT_SUM that subtracts a piece from another pass, stays unset.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,7 +19,6 @@ import pandas as pd
 from utils.logger import console_warning
 from utils.metrics.aggregation import (
     merge_dispatch_collect_ratio,
-    merge_dispatch_collect_sum,
     merge_dispatch_weighted_avg,
 )
 from utils.metrics.expression import (
@@ -451,6 +451,49 @@ def _evaluate_weighted_composite(
     return float(merged)
 
 
+def _piece_value_on_dispatch_filter(
+    df: pd.DataFrame,
+    ref_name: str,
+    avg_col: str,
+    raw_pmc_df: pd.DataFrame,
+    sys_vars: Dict[str, Any],
+    empirical_peaks: Dict[str, Any],
+    parent_name: str,
+) -> Optional[float]:
+    """Evaluate one COLLECT_SUM piece once on the dispatch filter.
+
+    ``SUM(numerator) / SUM(denominator)`` stays that pooled ratio. The caller
+    adds the piece values.
+    """
+    negate = ref_name.startswith("-")
+    lookup_name = _resolve_collectable_name(df, _ref_base_name(ref_name))
+    built = _lookup_collectable_built_avg(df, lookup_name, avg_col)
+    if not built:
+        console_warning(
+            "metrics",
+            f"COLLECT_SUM: collectable '{ref_name}' not found in metric table.",
+        )
+        return None
+    scalar = _eval_built_expr_on_frame(built, raw_pmc_df, sys_vars, empirical_peaks)
+    if isinstance(scalar, (str, bool)):
+        value = None
+    else:
+        try:
+            value = float(scalar)
+        except (TypeError, ValueError):
+            value = None
+    if value is None or not math.isfinite(value):
+        console_warning(
+            "metrics",
+            f"COLLECT_SUM: {parent_name} piece '{ref_name}' is missing or its "
+            "denominator is zero; leaving the composite unset",
+        )
+        return None
+    if negate:
+        return -value
+    return value
+
+
 def _evaluate_collect_sum_composite(
     composite: CompositeDef,
     df: pd.DataFrame,
@@ -473,19 +516,22 @@ def _evaluate_collect_sum_composite(
         )
         return "N/A"
 
-    series_list: List[pd.Series] = []
+    parent_name = composite.metric_name or str(composite.metric_id)
+    total = 0.0
     for ref_name in composite.refs:
-        series = _collectable_series(
-            df, ref_name, avg_col, raw_pmc_df, sys_vars, empirical_peaks, "COLLECT_SUM"
+        value = _piece_value_on_dispatch_filter(
+            df,
+            ref_name,
+            avg_col,
+            raw_pmc_df,
+            sys_vars,
+            empirical_peaks,
+            parent_name,
         )
-        if series is None:
+        if value is None:
             return "N/A"
-        series_list.append(series)
-
-    merged = merge_dispatch_collect_sum(series_list)
-    if pd.isna(merged):
-        return "N/A"
-    return float(merged)
+        total += value
+    return total
 
 
 def _evaluate_collect_ratio_composite(
