@@ -266,6 +266,9 @@ jobs:
       # One workload failing says nothing about the others, and the scale
       # reservation is already paid for by the time it does.
       fail-fast: false
+      # Both legs want an exclusive 2-node salloc on the same partition, and
+      # queue time counts against the leg's --timeout-minutes.
+      max-parallel: 1
       matrix:
         workload:
           - llama-3.1-70b-training
