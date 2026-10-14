@@ -42,7 +42,12 @@ set(LibIberty_LIBRARYDIR
 
 # -------------- PACKAGES -----------------------------------------------------
 
-if(NOT ROCPROFSYS_BUILD_LIBIBERTY)
+rocprofiler_systems_resolve_tristate_option(
+    ROCPROFSYS_BUILD_LIBIBERTY
+    _rocprofsys_build_libiberty
+)
+
+if(NOT _rocprofsys_build_libiberty STREQUAL "ON")
     find_package(LibIberty)
 endif()
 
@@ -57,6 +62,11 @@ elseif(STERILE_BUILD)
     rocprofiler_systems_message(
         FATAL_ERROR
         "LibIberty not found and cannot be downloaded because build is sterile."
+    )
+elseif(_rocprofsys_build_libiberty STREQUAL "OFF")
+    rocprofiler_systems_message(
+        FATAL_ERROR
+        "LibIberty was not found. Either configure cmake to find LibIberty properly or set ROCPROFSYS_BUILD_LIBIBERTY=AUTO or ON to download and build"
     )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
