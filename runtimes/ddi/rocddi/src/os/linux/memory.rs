@@ -15,7 +15,7 @@ pub(crate) use reservation::Reservation;
 
 use super::{invalid_data, process_identity};
 use crate::error::error;
-use crate::host_storage::{Allocator, Owned};
+use crate::memory::storage::Shared;
 use crate::os::native_error;
 use crate::{Error, ErrorKind};
 use std::ffi::{c_int, c_void};
@@ -117,15 +117,10 @@ pub(crate) struct HostAllocation {
 }
 
 impl HostAllocation {
-    /// Allocates ownership metadata before acquiring page-aligned host memory.
-    /// `size` must be page-multiple and `alignment` a page-sized or larger
-    /// power of two. The retained `process` guards later unmapping.
-    pub(crate) fn create(
-        size: u64,
-        alignment: u64,
-        allocator: Allocator,
-        process: u32,
-    ) -> Result<Owned<Self>, Error> {
+    /// Validates size and alignment, reserves shared ownership metadata, then
+    /// acquires page-aligned host memory. The retained `process` guards later
+    /// unmapping.
+    pub(crate) fn create(size: u64, alignment: u64, process: u32) -> Result<Shared<Self>, Error> {
         process_identity::prepare_for_hot_checks();
         let size = usize::try_from(size).map_err(|_| {
             error(
@@ -151,7 +146,7 @@ impl HostAllocation {
                 "invalid host allocation extent or alignment",
             ));
         }
-        let owner = Owned::<Self>::try_new_uninit(allocator)?;
+        let owner = Shared::try_new_uninit()?;
         let mapping =
             Reservation::new_host_in_process(size, alignment, (0, isize::MAX as u64), process)
                 .map_err(|e| native_error("host allocation mmap", e))?;
@@ -205,62 +200,67 @@ impl Drop for HostAllocation {
 #[allow(unsafe_code, clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::memory::{host_cache_control, host_cache_line_size, host_page_size};
+    use crate::memory::host::{
+        HostAllocation as PublicHostAllocation, host_cache_control, host_cache_line_size,
+        host_page_size,
+    };
     use crate::os::linux::errno;
     use crate::session::{DriverContextLifetime, Session};
-    use std::sync::atomic::Ordering;
     #[test]
-    fn cpu_storage_supports_both_lifetimes_and_retains_custom_allocator() {
-        for policy in [
-            DriverContextLifetime::Session,
-            DriverContextLifetime::Process,
-        ] {
-            let callbacks = crate::test_support::allocator::State::default();
-            // SAFETY: State remains stationary until all native owners drop.
-            let allocator = unsafe { callbacks.allocator() };
-            let count = crate::test_support::allocation_counter::allocations(|| {
-                let mut session = Session::with_allocator(policy, allocator).unwrap();
-                let page = host_page_size().unwrap();
-                let size = page * 2;
-                let alignment = page * 16;
-                let mut allocation = session.allocate_host(size, alignment).unwrap();
-                assert_eq!(allocation.info().host_address as u64 % alignment, 0);
-                assert_eq!(allocation.info().size, size);
-                if let Ok(line) = host_cache_line_size() {
-                    // SAFETY: The newly allocated extent remains mapped.
-                    unsafe {
-                        host_cache_control(allocation.info().host_address, size, line).unwrap();
-                    }
-                }
-                allocation.free().unwrap();
-                allocation.free().unwrap();
-                drop(allocation);
-                session.destroy().unwrap();
-                assert!(session.allocate_host(page, page).is_err());
-            });
-            assert_eq!(count, 0);
-            let allocations = callbacks.allocations.load(Ordering::Relaxed);
-            assert!(allocations >= 2);
-            assert_eq!(callbacks.frees.load(Ordering::Relaxed), allocations);
+    fn cpu_storage_remains_available_after_session_shutdown() {
+        let mut session = Session::new(DriverContextLifetime::Session).unwrap();
+        session.destroy().unwrap();
+        let page = host_page_size().unwrap();
+        let size = page * 2;
+        let alignment = page * 16;
+        let mut allocation = PublicHostAllocation::allocate(size, alignment).unwrap();
+        assert_eq!(allocation.info().host_address as u64 % alignment, 0);
+        assert_eq!(allocation.info().size, size);
+        if let Ok(line) = host_cache_line_size() {
+            // SAFETY: The newly allocated extent remains mapped.
+            unsafe {
+                host_cache_control(allocation.info().host_address, size, line).unwrap();
+            }
         }
+        allocation.free().unwrap();
+        allocation.free().unwrap();
     }
     #[test]
     fn failed_host_free_preserves_the_mapping_and_retries_only_remaining_work() {
         let page = host_page_size().unwrap();
-        let mut allocation =
-            HostAllocation::create(page, page, Allocator::default(), std::process::id()).unwrap();
+        let mut allocation = HostAllocation::create(page, page, std::process::id()).unwrap();
         let extent = allocation.extent();
-        allocation
+        Shared::get_mut(&mut allocation)
+            .unwrap()
             .mapping
             .as_mut()
             .unwrap()
             .fail_release_once(errno::EIO);
         assert_eq!(
-            allocation.free().unwrap_err().native_error_code(),
+            Shared::get_mut(&mut allocation)
+                .unwrap()
+                .free()
+                .unwrap_err()
+                .native_error_code(),
             Some(errno::EIO)
         );
         assert_eq!(allocation.extent(), extent);
-        allocation.free().unwrap();
+        Shared::get_mut(&mut allocation).unwrap().free().unwrap();
         assert!(allocation.mapping.is_none());
+    }
+
+    #[test]
+    fn invalid_host_extent_fails_before_metadata_allocation() {
+        let page = host_page_size().unwrap();
+        let count = crate::test_support::allocation_counter::allocations(|| {
+            assert_eq!(
+                HostAllocation::create(0, page, std::process::id())
+                    .err()
+                    .unwrap()
+                    .kind(),
+                ErrorKind::InvalidArgument
+            );
+        });
+        assert_eq!(count, 0);
     }
 }

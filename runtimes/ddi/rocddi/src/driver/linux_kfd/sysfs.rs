@@ -9,7 +9,8 @@
 //! Parsers reject incomplete, duplicate, overflowing, or internally inconsistent
 //! properties rather than filling important device facts with defaults.
 use super::{errno, error, native_error, sys};
-use crate::host_storage::{Allocator, Buffer, Shared};
+use crate::memory::storage::Shared;
+use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
     CacheInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink, MemoryLinkInfo,
@@ -229,18 +230,13 @@ fn cache_properties(text: &str) -> Result<CacheInfo, Error> {
     })
 }
 
-fn caches(
-    root: &str,
-    node: u32,
-    count: u32,
-    allocator: Allocator,
-) -> Result<Option<Shared<Buffer<CacheInfo>>>, Error> {
+fn caches(root: &str, node: u32, count: u32) -> Result<Option<Shared<Vec<CacheInfo>>>, Error> {
     if count == 0 {
         return Ok(None);
     }
     let capacity = usize::try_from(count)
         .map_err(|_| error(ErrorKind::ResourceExhausted, "native cache count overflow"))?;
-    let mut records = Buffer::try_with_capacity(capacity, allocator)?;
+    let mut records = crate::memory::storage::try_vec_with_capacity(capacity)?;
     let path = StackPath::new(format_args!("{root}/nodes/{node}/caches"))?;
     sys::numeric_directories(path.path(), &mut |ordinal| {
         if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
@@ -273,13 +269,11 @@ fn caches(
             "native cache ordinals are not contiguous",
         ));
     }
-    let mut cache_info = Buffer::try_with_capacity(capacity, allocator)?;
+    let mut cache_info = crate::memory::storage::try_vec_with_capacity(capacity)?;
     for (_, cache) in records {
         cache_info.try_push(cache)?;
     }
-    Shared::new(cache_info, allocator)
-        .map(Some)
-        .map_err(Into::into)
+    Shared::new(cache_info).map(Some).map_err(Into::into)
 }
 
 fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
@@ -295,12 +289,7 @@ fn memory_bank_properties(text: &str) -> Result<Option<(u32, u32)>, Error> {
     )))
 }
 
-fn memory_bus(
-    root: &str,
-    node: u32,
-    count: u32,
-    allocator: Allocator,
-) -> Result<(u32, u32), Error> {
+fn memory_bus(root: &str, node: u32, count: u32) -> Result<(u32, u32), Error> {
     if count == 0 {
         return Ok((0, 0));
     }
@@ -310,7 +299,7 @@ fn memory_bus(
             "native memory-bank count overflow",
         )
     })?;
-    let mut records = Buffer::try_with_capacity(capacity, allocator)?;
+    let mut records = crate::memory::storage::try_vec_with_capacity(capacity)?;
     let path = StackPath::new(format_args!("{root}/nodes/{node}/mem_banks"))?;
     sys::numeric_directories(path.path(), &mut |ordinal| {
         if ordinal >= count || records.iter().any(|(seen, _)| *seen == ordinal) {
@@ -354,7 +343,6 @@ fn memory_bus(
 pub(super) fn enumerate(
     root: &str,
     drm: &str,
-    allocator: Allocator,
     visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
 ) -> Result<(), Error> {
     for _ in 0..3 {
@@ -363,10 +351,10 @@ pub(super) fn enumerate(
             Err(e) if e.native_error_code() == Some(errno::ENOENT) => return Ok(()),
             Err(e) => return Err(e),
         };
-        let mut records = Buffer::new(allocator);
+        let mut records = Vec::new();
         let nodes = StackPath::new(format_args!("{root}/nodes"))?;
         let result = sys::numeric_directories(nodes.path(), &mut |node| {
-            if let Some(endpoint) = read_node(root, drm, node, allocator)? {
+            if let Some(endpoint) = read_node(root, drm, node)? {
                 records.try_push(endpoint)?;
             }
             Ok(())
@@ -388,15 +376,10 @@ pub(super) fn enumerate(
     ))
 }
 
-pub(super) fn open_endpoint(
-    root: &str,
-    drm: &str,
-    id: [u8; 16],
-    allocator: Allocator,
-) -> Result<Endpoint, Error> {
+pub(super) fn open_endpoint(root: &str, drm: &str, id: [u8; 16]) -> Result<Endpoint, Error> {
     let node = u32::from_le_bytes([id[0], id[1], id[2], id[3]]);
     let before = scalar(format_args!("{root}/generation_id"))?;
-    let endpoint = read_node(root, drm, node, allocator)?
+    let endpoint = read_node(root, drm, node)?
         .ok_or_else(|| error(ErrorKind::DeviceLost, "native GPU endpoint disappeared"))?;
     let after = scalar(format_args!("{root}/generation_id"))?;
     if before != after {
@@ -443,8 +426,7 @@ fn node_memory_links(
     io_link_count: u32,
     p2p_link_count: u32,
     target_filter: Option<u32>,
-    allocator: Allocator,
-) -> Result<Buffer<MemoryLink>, Error> {
+) -> Result<Vec<MemoryLink>, Error> {
     const OVERRIDE: u32 = 1;
     const NON_COHERENT: u32 = 1 << 1;
     const NO_ATOMICS_32: u32 = 1 << 2;
@@ -454,7 +436,7 @@ fn node_memory_links(
         .ok()
         .and_then(|count| count.checked_add(p2p_link_count as usize))
         .ok_or_else(|| error(ErrorKind::ResourceExhausted, "native link count overflow"))?;
-    let mut links: Buffer<MemoryLink> = Buffer::try_with_capacity(capacity, allocator)?;
+    let mut links: Vec<MemoryLink> = crate::memory::storage::try_vec_with_capacity(capacity)?;
     for (directory, expected) in [("io_links", io_link_count), ("p2p_links", p2p_link_count)] {
         if expected == 0 {
             continue;
@@ -547,21 +529,12 @@ fn memory_links(
     gpu_id: u32,
     io_link_count: u32,
     p2p_link_count: u32,
-    allocator: Allocator,
-) -> Result<Option<Shared<Buffer<MemoryLink>>>, Error> {
-    let mut links = node_memory_links(
-        root,
-        node,
-        gpu_id,
-        io_link_count,
-        p2p_link_count,
-        None,
-        allocator,
-    )?;
+) -> Result<Option<Shared<Vec<MemoryLink>>>, Error> {
+    let mut links = node_memory_links(root, node, gpu_id, io_link_count, p2p_link_count, None)?;
     let outgoing_count = links.len();
-    let mut host_nodes = Buffer::try_with_capacity(outgoing_count, allocator)?;
+    let mut host_nodes = crate::memory::storage::try_vec_with_capacity(outgoing_count)?;
     for link in links.iter().take(outgoing_count) {
-        if link.target_is_host && !host_nodes.iter().any(|node| *node == link.target.group) {
+        if link.target_is_host && !host_nodes.contains(&link.target.group) {
             host_nodes.try_push(link.target.group)?;
         }
     }
@@ -576,7 +549,6 @@ fn memory_links(
             properties.optional_u32("io_links_count")?.unwrap_or(0),
             properties.optional_u32("p2p_links_count")?.unwrap_or(0),
             Some(node),
-            allocator,
         )?;
         for link in incoming {
             if link.target.member != gpu_id {
@@ -598,7 +570,7 @@ fn memory_links(
     if links.is_empty() {
         Ok(None)
     } else {
-        Shared::new(links, allocator).map(Some).map_err(Into::into)
+        Shared::new(links).map(Some).map_err(Into::into)
     }
 }
 
@@ -606,12 +578,7 @@ fn memory_links(
     clippy::too_many_lines,
     reason = "all immutable native facts share one identity and generation bracket"
 )]
-fn read_node(
-    root: &str,
-    drm: &str,
-    node: u32,
-    allocator: Allocator,
-) -> Result<Option<Endpoint>, Error> {
+fn read_node(root: &str, drm: &str, node: u32) -> Result<Option<Endpoint>, Error> {
     let gpu_id = u32::try_from(scalar(format_args!("{root}/nodes/{node}/gpu_id"))?)
         .map_err(|_| error(ErrorKind::InvalidData, "GPU ID exceeds u32"))?;
     if gpu_id == 0 {
@@ -669,23 +636,14 @@ fn read_node(
     let hive_id = p.optional("hive_id")?.unwrap_or(0);
     let family_id = p.optional_u32("family_id")?.unwrap_or(0);
     let maximum_engine_clock_mhz = p.optional_u32("max_engine_clk_fcompute")?.unwrap_or(0);
-    let (memory_bus_width_bits, maximum_memory_clock_mhz) = memory_bus(
-        root,
-        node,
-        p.optional_u32("mem_banks_count")?.unwrap_or(0),
-        allocator,
-    )?;
+    let (memory_bus_width_bits, maximum_memory_clock_mhz) =
+        memory_bus(root, node, p.optional_u32("mem_banks_count")?.unwrap_or(0))?;
     let sdma_xgmi_engines = p.optional_u32("num_sdma_xgmi_engines")?.unwrap_or(0);
     let gws_count = p.optional_u32("num_gws")?.unwrap_or(0);
     let io_link_count = p.optional_u32("io_links_count")?.unwrap_or(0);
     let p2p_link_count = p.optional_u32("p2p_links_count")?.unwrap_or(0);
-    let caches = caches(
-        root,
-        node,
-        p.optional_u32("caches_count")?.unwrap_or(0),
-        allocator,
-    )?;
-    let memory_links = memory_links(root, node, gpu_id, io_link_count, p2p_link_count, allocator)?;
+    let caches = caches(root, node, p.optional_u32("caches_count")?.unwrap_or(0))?;
+    let memory_links = memory_links(root, node, gpu_id, io_link_count, p2p_link_count)?;
     let identity_tail = unique_id.unwrap_or((u64::from(domain) << 32) | u64::from(location));
     let mut id = [0; 16];
     id[..4].copy_from_slice(&node.to_le_bytes());
@@ -1031,7 +989,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         assert_eq!(
@@ -1069,7 +1026,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         let gpu = endpoint.gpu().unwrap();
@@ -1082,7 +1038,7 @@ mod tests {
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
         let mut found = None;
-        enumerate(&root, &drm, Allocator::default(), &mut |e| {
+        enumerate(&root, &drm, &mut |e| {
             assert!(found.is_none());
             found = Some(e);
             Ok(())
@@ -1129,16 +1085,14 @@ mod tests {
         );
         std::fs::create_dir(fixture.0.join("topology/nodes/2")).unwrap();
         std::fs::write(fixture.0.join("topology/nodes/2/gpu_id"), "not a number").unwrap();
-        let opened = open_endpoint(&root, &drm, endpoint.id, Allocator::default()).unwrap();
+        let opened = open_endpoint(&root, &drm, endpoint.id).unwrap();
         assert_eq!(opened.id, endpoint.id);
         assert_eq!(opened.selector, endpoint.selector);
-        assert!(enumerate(&root, &drm, Allocator::default(), &mut |_| Ok(())).is_err());
+        assert!(enumerate(&root, &drm, &mut |_| Ok(())).is_err());
         let mut stale = endpoint.id;
         stale[8] ^= 1;
         assert_eq!(
-            open_endpoint(&root, &drm, stale, Allocator::default())
-                .unwrap_err()
-                .kind(),
+            open_endpoint(&root, &drm, stale).unwrap_err().kind(),
             ErrorKind::DeviceLost
         );
     }
@@ -1185,7 +1139,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         let mut owner = endpoint.clone();
@@ -1232,7 +1185,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         let first =
@@ -1288,7 +1240,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         let to_host = endpoint.memory_link_to_host().unwrap();
@@ -1347,7 +1298,6 @@ mod tests {
             &root,
             &drm,
             [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-            Allocator::default(),
         )
         .unwrap();
         assert_eq!(endpoint.caches().len(), 4);
@@ -1398,7 +1348,6 @@ mod tests {
                     &root,
                     &drm,
                     [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-                    Allocator::default(),
                 )
                 .unwrap_err()
                 .kind(),
@@ -1434,7 +1383,6 @@ mod tests {
                 &root,
                 &drm,
                 [1, 0, 0, 0, 42, 0, 0, 0, 123, 0, 0, 0, 0, 0, 0, 0],
-                Allocator::default(),
             )
             .unwrap_err();
             assert_eq!(error.kind(), ErrorKind::InvalidData);
@@ -1457,7 +1405,7 @@ mod tests {
             .unwrap();
             let (root, drm) = fixture.roots();
             let mut found = None;
-            enumerate(&root, &drm, Allocator::default(), &mut |endpoint| {
+            enumerate(&root, &drm, &mut |endpoint| {
                 found = Some(endpoint);
                 Ok(())
             })
@@ -1526,7 +1474,7 @@ mod tests {
             .unwrap();
             let (root, drm) = fixture.roots();
             let mut found = None;
-            enumerate(&root, &drm, Allocator::default(), &mut |e| {
+            enumerate(&root, &drm, &mut |e| {
                 found = Some(e);
                 Ok(())
             })
@@ -1540,21 +1488,18 @@ mod tests {
 
     #[test]
     #[allow(unsafe_code)]
-    fn passive_enumeration_uses_the_instance_allocator_without_global_metadata() {
+    fn passive_enumeration_fails_before_visiting_on_metadata_exhaustion() {
         let fixture = Fixture::new();
         let (root, drm) = fixture.roots();
         let callbacks = crate::test_support::allocator::State::default();
-        // SAFETY: Test state outlives the enumeration buffer and allocator.
-        let allocator = unsafe { callbacks.allocator() };
+        // SAFETY: Test state outlives the scoped metadata fault hook.
+        let _scope = unsafe { callbacks.allocator() }.scope();
         let mut endpoint = None;
-        let count = crate::test_support::allocation_counter::allocations(|| {
-            enumerate(&root, &drm, allocator, &mut |e| {
-                endpoint = Some(e);
-                Ok(())
-            })
-            .unwrap();
-        });
-        assert_eq!(count, 0);
+        enumerate(&root, &drm, &mut |e| {
+            endpoint = Some(e);
+            Ok(())
+        })
+        .unwrap();
         assert_eq!(callbacks.allocations.load(Ordering::Relaxed), 1);
         assert_eq!(callbacks.frees.load(Ordering::Relaxed), 1);
         let session =
@@ -1566,7 +1511,7 @@ mod tests {
         callbacks.fail.store(true, Ordering::Relaxed);
         let mut visited = false;
         assert_eq!(
-            enumerate(&root, &drm, allocator, &mut |_| {
+            enumerate(&root, &drm, &mut |_| {
                 visited = true;
                 Ok(())
             })
@@ -1632,7 +1577,7 @@ mod tests {
         std::fs::write(path, properties.replace("max_slots_scratch_cu 32\n", "")).unwrap();
         let mut visited = false;
         assert_eq!(
-            enumerate(&root, &drm, Allocator::default(), &mut |_| {
+            enumerate(&root, &drm, &mut |_| {
                 visited = true;
                 Ok(())
             })
