@@ -141,6 +141,14 @@ def print_torch_trace_overhead_report(wall_clock):
 
 
 @pytest.fixture(scope="module")
+def addmm_operator_name():
+    torch_version = torch_trace_collector._workload_torch_version()
+    if torch_version in torch_trace_collector._SUPPORTED_TORCH_VERSIONS:
+        return "aten::addmm"
+    return "torch.ops.aten.addmm"
+
+
+@pytest.fixture(scope="module")
 def torch_trace_workload_state():
     """Clean the shared profiled workload directory at module teardown.
 
@@ -455,7 +463,10 @@ def test_profile_invalid_workloads_no_torch_trace(
 
 
 def test_list_torch_operators_prints_call_tree(
-    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    addmm_operator_name,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -469,7 +480,7 @@ def test_list_torch_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "PyTorch Operator Call Tree:" in out
     assert "nn.Module.Linear.forward" in out
-    assert find_addmm_marker(out)
+    assert addmm_operator_name in out
     assert "(id " in out
     assert not (
         Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
@@ -477,7 +488,10 @@ def test_list_torch_operators_prints_call_tree(
 
 
 def test_torch_operator_addmm_selects_kernels(
-    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+    torch_trace_profiled_workload,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+    addmm_operator_name,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -491,7 +505,7 @@ def test_torch_operator_addmm_selects_kernels(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "Matched PyTorch Operators:" in out
-    assert find_addmm_marker(out)
+    assert addmm_operator_name in out
     assert "nn.Module.Linear.forward" in out
     assert "operator filter selected" in out
 
