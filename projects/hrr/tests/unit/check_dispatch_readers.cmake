@@ -6,7 +6,8 @@
 # table slot directly instead of through HIP_LOAD_DISPATCH_TABLE_FN or
 # HIP_LOAD_COMPILER_TABLE_FN, which load the slot atomically.
 file(READ "${SOURCE}" text)
-string(REGEX MATCHALL "Get[A-Za-z]*DispatchTable\\(\\)->[A-Za-z0-9_]+_fn" plain "${text}")
+# clang-format can break a long read before "->", so allow whitespace there.
+string(REGEX MATCHALL "Get[A-Za-z]*DispatchTable\\(\\)[ \t\r\n]*->[A-Za-z0-9_]+_fn" plain "${text}")
 string(REGEX MATCHALL "HIP_LOAD_(DISPATCH|COMPILER)_TABLE_FN\\([A-Za-z0-9_]+_fn\\)" loaded "${text}")
 list(LENGTH plain n_plain)
 list(LENGTH loaded n_loaded)
