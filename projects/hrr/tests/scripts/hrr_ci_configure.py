@@ -201,6 +201,13 @@ def labelled_families(labels: Iterable[str], matrix: dict) -> list[str]:
     return wanted
 
 
+def label_matters(label: str, config: Config) -> bool:
+    """Whether adding this label can change what runs. hrr-ci.yml's concurrency
+    group makes the same test, so that other labels do not cancel a run."""
+    label = label.strip().lower()
+    return label == config.capture_label.lower() or label.startswith("ci:gfx")
+
+
 def runner_for(
     linux: dict, pick_weighted: Callable[[list, str], str], multi_gpu: bool = False
 ) -> str:
@@ -269,10 +276,17 @@ def decide(
     config: Config,
     matrix: dict,
     pick_weighted: Callable[[list, str], str],
+    added_label: str | None = None,
 ) -> Decision:
-    """paths is None when the change set could not be listed in full."""
+    """paths is None when the change set could not be listed in full.
+
+    added_label is the label a labeled event added; the run for any other
+    pull request event already covers a label that cannot change what runs.
+    """
     if event not in EVENTS:
         return Decision(False, False, f"event {event} does not run HRR CI")
+    if added_label is not None and not label_matters(added_label, config):
+        return Decision(False, False, f"the label {added_label} does not change what HRR CI runs")
 
     if event in ("schedule", "workflow_dispatch"):
         run_cpu, capture, why = True, True, f"{event} run"
@@ -365,6 +379,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--before", default="")
     parser.add_argument("--after", default="")
     parser.add_argument("--labels", default="[]", help="JSON list of label names")
+    parser.add_argument("--action", default="", help="The pull_request event's action")
+    parser.add_argument("--label", default="", help="The label a labeled event added")
     parser.add_argument(
         "--head-repo", default="", help="owner/name of the pull request's head repository"
     )
@@ -395,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
         decision = decide(
             args.event, paths, labels, is_fork(args.event, args.head_repo, args.repo), requested,
             config, matrix, pick_weighted,
+            added_label=args.label if args.action == "labeled" else None,
         )
     except ConfigError as e:
         print(f"::error::{e}")

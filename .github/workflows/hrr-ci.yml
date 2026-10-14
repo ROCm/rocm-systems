@@ -28,8 +28,16 @@ on:
 permissions:
   contents: read
 
+# Adding a label that cannot change what runs (label_matters() in
+# hrr_ci_configure.py makes the same test) gets a group of its own, so it does
+# not cancel the run in progress; configure then runs nothing for it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}${{
+    github.event.action == 'labeled'
+    && github.event.label.name != 'ci:hrr-capture'
+    && !startsWith(github.event.label.name, 'ci:gfx')
+    && format('-label-{0}', github.event.label.name) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -98,6 +106,8 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
           # Empty when the head repository was deleted, which counts as a fork.
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           FAMILIES: ${{ inputs.families }}
@@ -105,7 +115,7 @@ jobs:
           python projects/hrr/tests/scripts/hrr_ci_configure.py
           --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
           --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
-          --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
+          --action "${ACTION}" --label "${LABEL}" --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
           --therock-dir therock
 
   codegen:
@@ -150,10 +160,11 @@ jobs:
         with:
           persist-credentials: false
           # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
-          # which gen_hrr_api_args.py reads on import.
+          # which gen_hrr_api_args.py reads on import. A test reads hrr-ci.yml.
           sparse-checkout: |
             projects/hrr
             projects/clr/hipamd/src/hrr
+            .github/workflows
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:

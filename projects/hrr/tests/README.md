@@ -141,7 +141,8 @@ applies (`scripts/hrr_ci_configure.py`):
   jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
   `paths.excluded` counts for neither.
 - `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
-  no capture path.
+  no capture path. Adding it or a `ci:gfx...` label restarts the run; adding any
+  other label leaves the run in progress alone.
 - `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
   TheRock's family matrix names. By default each runs on every event (`pull_request`,
   `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to

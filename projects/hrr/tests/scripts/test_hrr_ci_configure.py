@@ -318,6 +318,40 @@ class DecideTest(unittest.TestCase):
         self.assertFalse(d.run_gpu)
 
 
+class LabelEventTest(unittest.TestCase):
+    CAPTURE = ["projects/hrr/playback/x.cpp"]
+    WORKFLOW = Path(__file__).resolve().parents[4] / ".github" / "workflows" / "hrr-ci.yml"
+
+    def test_which_labels_matter(self):
+        for label in ("ci:hrr-capture", "CI:HRR-Capture", "ci:gfx110x", "ci:gfx110X-all"):
+            self.assertTrue(cfg.label_matters(label, REPO), label)
+        for label in ("documentation", "ci:skip", "hrr"):
+            self.assertFalse(cfg.label_matters(label, REPO), label)
+
+    def test_other_label_runs_nothing(self):
+        d = cfg.decide(
+            "pull_request", self.CAPTURE, ["ci:hrr-capture", "documentation"], False, [],
+            CONFIG, MATRIX, pick_first, added_label="documentation",
+        )
+        self.assertFalse(d.run_cpu)
+        self.assertFalse(d.run_gpu)
+        self.assertIn("documentation", d.reason)
+
+    def test_capture_or_family_label_reruns(self):
+        for label in ("ci:hrr-capture", "ci:gfx110x"):
+            d = cfg.decide(
+                "pull_request", self.CAPTURE, [label], False, [],
+                CONFIG, MATRIX, pick_first, added_label=label,
+            )
+            self.assertTrue(d.run_gpu, label)
+
+    def test_concurrency_group_makes_the_same_test(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        group = text[text.index("concurrency:"):text.index("cancel-in-progress:")]
+        self.assertIn(f"github.event.label.name != '{REPO.capture_label}'", group)
+        self.assertIn("!startsWith(github.event.label.name, 'ci:gfx')", group)
+
+
 class ForkTest(unittest.TestCase):
     REPO = "ROCm/rocm-systems"
 
