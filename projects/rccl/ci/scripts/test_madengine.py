@@ -125,6 +125,7 @@ WORKLOAD_CONFIGS = {
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
         "multiple_results": "perf_primus-megatron-Llama-4-Scout-17B-16E.csv",
+        "precisions": ["BF16"],  # what MAD's run.sh trains on gfx950
         "reference_values": {
             "2N": 2734,
             "4N": 2337,
