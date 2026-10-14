@@ -62,6 +62,9 @@ class RdciSubSystem {
 
 typedef std::shared_ptr<RdciSubSystem> RdciSubSystemPtr;
 
+// "3" for device 3; "g3.1" or "c3.1" for partition 1 of GPU or CPU 3.
+std::string entity_to_string(uint32_t entity_index);
+
 }  // namespace rdc
 }  // namespace amd
 

@@ -61,19 +61,6 @@ void RdciDmonSubSystem::set_terminating(int sig) {
   }
 }
 
-std::string entity_to_string(uint32_t entity_index) {
-  rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_index);
-
-  if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-    if (info.device_type == RDC_DEVICE_TYPE_CPU) {
-      return "c" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
-    } else {
-      return "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
-    }
-  }
-  return std::to_string(info.device_index);
-}
-
 void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
   const int LIST_ALL_FIELDS_OPT = 1001;

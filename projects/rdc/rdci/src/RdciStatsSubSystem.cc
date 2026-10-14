@@ -28,6 +28,8 @@ THE SOFTWARE.
 #include <ctime>
 #include <iomanip>
 #include <limits>
+#include <sstream>
+#include <string>
 
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
@@ -150,67 +152,61 @@ void RdciStatsSubSystem::show_help() const {
             << "all job statistics.\n";
 }
 
+// See rdc_stats_summary_t: min_value is UINT64_MAX for a statistic without samples.
+static bool has_samples(const rdc_stats_summary_t& stats) {
+  return stats.min_value != std::numeric_limits<uint64_t>::max();
+}
+
+// The four JSON values of a statistic, each null without samples. The deviation
+// keys keep their published spellings.
+static void show_stats_json(const std::string& name, const rdc_stats_summary_t& stats,
+                            const std::string& deviation_key) {
+  auto value = [&stats](auto v) {
+    std::ostringstream out;
+    if (has_samples(stats)) {
+      out << v;
+    } else {
+      out << "null";
+    }
+    return out.str();
+  };
+  std::cout << "\"" << name << "_max\": " << value(stats.max_value) << ",";
+  std::cout << "\"" << name << "_min\": " << value(stats.min_value) << ",";
+  std::cout << "\"" << name << "_avg\": " << value(stats.average) << ",";
+  std::cout << "\"" << deviation_key << "\": " << value(stats.standard_deviation) << ",";
+}
+
 void RdciStatsSubSystem::show_job_stats_json(const rdc_gpu_usage_info_t& gpu_info) const {
   std::cout << "\"start_time\": " << gpu_info.start_time << ",";
   std::cout << "\"end_time\": " << gpu_info.end_time << ",";
   std::cout << "\"execution_time\": " << (gpu_info.end_time - gpu_info.start_time) << ",";
   std::cout << "\"energy_consumed\": " << gpu_info.energy_consumed << ",";
 
-  std::cout << "\"power_usage_max\": " << gpu_info.power_usage.max_value << ",";
-  std::cout << "\"power_usage_min\": " << gpu_info.power_usage.min_value << ",";
-  std::cout << "\"power_usage_avg\": " << gpu_info.power_usage.average << ",";
-  std::cout << "\"power_usage_stanard_deviation\": " << gpu_info.power_usage.standard_deviation
-            << ",";
-
-  std::cout << "\"gpu_clock_max\": " << gpu_info.gpu_clock.max_value << ",";
-  std::cout << "\"gpu_clock_min\": " << gpu_info.gpu_clock.min_value << ",";
-  std::cout << "\"gpu_clock_avg\": " << gpu_info.gpu_clock.average << ",";
-  std::cout << "\"gpu_clock_stanard_deviation\": " << gpu_info.gpu_clock.standard_deviation << ",";
-
-  std::cout << "\"memory_clock_max\": " << gpu_info.memory_clock.max_value << ",";
-  std::cout << "\"memory_clock_min\": " << gpu_info.memory_clock.min_value << ",";
-  std::cout << "\"memory_clock_avg\": " << gpu_info.memory_clock.average << ",";
-  std::cout << "\"memory_clock_stanard_deviation\": " << gpu_info.memory_clock.standard_deviation
-            << ",";
-
-  std::cout << "\"gpu_utilization_max\": " << gpu_info.gpu_utilization.max_value << ",";
-  std::cout << "\"gpu_utilization_min\": " << gpu_info.gpu_utilization.min_value << ",";
-  std::cout << "\"gpu_utilization_avg\": " << gpu_info.gpu_utilization.average << ",";
-  std::cout << "\"gpu_utilization_deviation\": " << gpu_info.gpu_utilization.standard_deviation
-            << ",";
-
+  show_stats_json("power_usage", gpu_info.power_usage, "power_usage_stanard_deviation");
+  show_stats_json("gpu_clock", gpu_info.gpu_clock, "gpu_clock_stanard_deviation");
+  show_stats_json("memory_clock", gpu_info.memory_clock, "memory_clock_stanard_deviation");
+  show_stats_json("gpu_utilization", gpu_info.gpu_utilization, "gpu_utilization_deviation");
   std::cout << "\"max_gpu_memory_used\": " << gpu_info.max_gpu_memory_used << ",";
-
-  std::cout << "\"memory_utilization_max\": " << gpu_info.memory_utilization.max_value << ",";
-  std::cout << "\"memory_utilization_min\": " << gpu_info.memory_utilization.min_value << ",";
-  std::cout << "\"memory_utilization_avg\": " << gpu_info.memory_utilization.average << ",";
-  std::cout << "\"memory_utilization_stanard_deviation\": "
-            << gpu_info.memory_utilization.standard_deviation << ",";
-
-  std::cout << "\"gpu_temperature_max\": " << gpu_info.gpu_temperature.max_value << ",";
-  std::cout << "\"gpu_temperature_min\": " << gpu_info.gpu_temperature.min_value << ",";
-  std::cout << "\"gpu_temperature_avg\": " << gpu_info.gpu_temperature.average << ",";
-  std::cout << "\"gpu_temperature_stanard_deviation\": "
-            << gpu_info.gpu_temperature.standard_deviation << ",";
-
-  std::cout << "\"pcie_rx_max\": " << gpu_info.pcie_rx.max_value << ",";
-  std::cout << "\"pcie_rx_min\": " << gpu_info.pcie_rx.min_value << ",";
-  std::cout << "\"pcie_rx_avg\": " << gpu_info.pcie_rx.average << ",";
-  std::cout << "\"pcie_rx_stanard_deviation\": " << gpu_info.pcie_rx.standard_deviation << ",";
-
-  std::cout << "\"pcie_tx_max\": " << gpu_info.pcie_tx.max_value << ",";
-  std::cout << "\"pcie_tx_min\": " << gpu_info.pcie_tx.min_value << ",";
-  std::cout << "\"pcie_tx_avg\": " << gpu_info.pcie_tx.average << ",";
-  std::cout << "\"pcie_tx_stanard_deviation\": " << gpu_info.pcie_tx.standard_deviation << ",";
-
-  std::cout << "\"pcie_total_max\": " << gpu_info.pcie_total.max_value << ",";
-  std::cout << "\"pcie_total_min\": " << gpu_info.pcie_total.min_value << ",";
-  std::cout << "\"pcie_total_avg\": " << gpu_info.pcie_total.average << ",";
-  std::cout << "\"pcie_total_stanard_deviation\": " << gpu_info.pcie_total.standard_deviation
-            << ",";
+  show_stats_json("memory_utilization", gpu_info.memory_utilization,
+                  "memory_utilization_stanard_deviation");
+  show_stats_json("gpu_temperature", gpu_info.gpu_temperature, "gpu_temperature_stanard_deviation");
+  show_stats_json("pcie_rx", gpu_info.pcie_rx, "pcie_rx_stanard_deviation");
+  show_stats_json("pcie_tx", gpu_info.pcie_tx, "pcie_tx_stanard_deviation");
+  show_stats_json("pcie_total", gpu_info.pcie_total, "pcie_total_stanard_deviation");
 
   std::cout << "\"ecc_correct\": " << gpu_info.ecc_correct << ",";
   std::cout << "\"ecc_uncorrect\": " << gpu_info.ecc_uncorrect;
+}
+
+// "Max: 3 Min: 1 Avg: 2 SD: 0.82", or N/A for a statistic without samples.
+static std::string stats_text(const rdc_stats_summary_t& stats) {
+  if (!has_samples(stats)) {
+    return "N/A";
+  }
+  std::ostringstream out;
+  out << "Max: " << stats.max_value << " Min: " << stats.min_value << " Avg: " << stats.average
+      << " SD: " << std::fixed << std::setprecision(2) << stats.standard_deviation;
+  return out.str();
 }
 
 void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) const {
@@ -229,76 +225,19 @@ void RdciStatsSubSystem::show_job_stats(const rdc_gpu_usage_info_t& gpu_info) co
   std::cout << "+------- Performance Stats --------"
             << "+------------------------------------\n";
   std::cout << "| Energy Consumed (Joules)         | " << gpu_info.energy_consumed << "\n";
-  std::cout << "| Power Usage (Watts)              | "
-            << "Max: " << gpu_info.power_usage.max_value
-            << " Min: " << gpu_info.power_usage.min_value
-            << " Avg: " << gpu_info.power_usage.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.power_usage.standard_deviation << "\n";
-  std::cout << "| GPU Clock (MHz)                  | "
-            << "Max: " << gpu_info.gpu_clock.max_value << " Min: " << gpu_info.gpu_clock.min_value
-            << " Avg: " << gpu_info.gpu_clock.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.gpu_clock.standard_deviation << "\n";
-  std::cout << "| Memory Clock (MHz)               | "
-            << "Max: " << gpu_info.memory_clock.max_value
-            << " Min: " << gpu_info.memory_clock.min_value
-            << " Avg: " << gpu_info.memory_clock.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.memory_clock.standard_deviation << "\n";
-  std::cout << "| GPU Utilization (%)              | "
-            << "Max: " << gpu_info.gpu_utilization.max_value
-            << " Min: " << gpu_info.gpu_utilization.min_value
-            << " Avg: " << gpu_info.gpu_utilization.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.gpu_utilization.standard_deviation << "\n";
+  std::cout << "| Power Usage (Watts)              | " << stats_text(gpu_info.power_usage) << "\n";
+  std::cout << "| GPU Clock (MHz)                  | " << stats_text(gpu_info.gpu_clock) << "\n";
+  std::cout << "| Memory Clock (MHz)               | " << stats_text(gpu_info.memory_clock) << "\n";
+  std::cout << "| GPU Utilization (%)              | " << stats_text(gpu_info.gpu_utilization)
+            << "\n";
   std::cout << "| Max GPU Memory Used (bytes)      | " << gpu_info.max_gpu_memory_used << "\n";
-  std::cout << "| Memory Utilization (%)           | "
-            << "Max: " << gpu_info.memory_utilization.max_value
-            << " Min: " << gpu_info.memory_utilization.min_value
-            << " Avg: " << gpu_info.memory_utilization.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.memory_utilization.standard_deviation << "\n";
-  std::cout << "| GPU Temperature (Celsius)        | "
-            << "Max: " << gpu_info.gpu_temperature.max_value
-            << " Min: " << gpu_info.gpu_temperature.min_value
-            << " Avg: " << gpu_info.gpu_temperature.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.gpu_temperature.standard_deviation << "\n";
-  std::cout << "| PCIe Rx Bandwidth (megabytes)    | "
-            << "Max: "
-            << (gpu_info.pcie_rx.max_value == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_rx.max_value))
-            << " Min: "
-            << (gpu_info.pcie_rx.min_value == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_rx.min_value))
-            << " Avg: "
-            << (gpu_info.pcie_rx.average == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_rx.average))
-            << " SD: " << std::fixed << std::setprecision(2)
-            << (gpu_info.pcie_rx.standard_deviation == std::numeric_limits<float>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_rx.standard_deviation))
+  std::cout << "| Memory Utilization (%)           | " << stats_text(gpu_info.memory_utilization)
             << "\n";
-  std::cout << "| PCIe Tx Bandwidth (megabytes)    | "
-            << "Max: "
-            << (gpu_info.pcie_tx.max_value == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_tx.max_value))
-            << " Min: "
-            << (gpu_info.pcie_tx.min_value == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_tx.min_value))
-            << " Avg: "
-            << (gpu_info.pcie_tx.average == std::numeric_limits<uint64_t>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_tx.average))
-            << " SD: " << std::fixed << std::setprecision(2)
-            << (gpu_info.pcie_tx.standard_deviation == std::numeric_limits<float>::max()
-                    ? "N/A"
-                    : std::to_string(gpu_info.pcie_tx.standard_deviation))
+  std::cout << "| GPU Temperature (Celsius)        | " << stats_text(gpu_info.gpu_temperature)
             << "\n";
-  std::cout << "| PCIe Total Bandwidth (megabytes) | "
-            << "Max: " << gpu_info.pcie_total.max_value << " Min: " << gpu_info.pcie_total.min_value
-            << " Avg: " << gpu_info.pcie_total.average << " SD: " << std::fixed
-            << std::setprecision(2) << gpu_info.pcie_total.standard_deviation << "\n";
+  std::cout << "| PCIe Rx Bandwidth (megabytes)    | " << stats_text(gpu_info.pcie_rx) << "\n";
+  std::cout << "| PCIe Tx Bandwidth (megabytes)    | " << stats_text(gpu_info.pcie_tx) << "\n";
+  std::cout << "| PCIe Total Bandwidth (megabytes) | " << stats_text(gpu_info.pcie_total) << "\n";
   std::cout << "| Correctable ECC Errors           | " << gpu_info.ecc_correct << "\n";
   std::cout << "| Uncorrectable ECC Errors         | " << gpu_info.ecc_uncorrect << "\n";
   std::cout << "+----------------------------------"
@@ -361,11 +300,12 @@ void RdciStatsSubSystem::process() {
       return;
     }
     for (uint32_t i = 0; i < job_info.num_gpus; i++) {
+      const std::string gpu = entity_to_string(job_info.gpus[i].gpu_id);
       if (!is_json_output()) {
-        std::cout << "|         GPU " << i << "\n";
+        std::cout << "|         GPU " << gpu << "\n";
         show_job_stats(job_info.gpus[i]);
       } else {
-        std::cout << ", \"gpu_" << i << "\": {";
+        std::cout << ", \"gpu_" << gpu << "\": {";
         show_job_stats_json(job_info.gpus[i]);
         std::cout << "}";
       }

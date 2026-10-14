@@ -280,12 +280,12 @@ rdc_status_t RdcCacheManagerImpl::rdc_update_job_stats(uint32_t gpu_index,
   return RDC_ST_OK;
 }
 
-void RdcCacheManagerImpl::set_summary(const FieldSummaryStats& stats, rdc_stats_summary_t& gpu,
-                                      rdc_stats_summary_t& summary, unsigned int adjuster) {
+bool RdcCacheManagerImpl::set_summary(const FieldSummaryStats& stats, rdc_stats_summary_t& gpu,
+                                      rdc_stats_summary_t& summary, int64_t adjuster) {
   if (stats.count == 0) {
     gpu.min_value = std::numeric_limits<uint64_t>::max();
     gpu.max_value = gpu.average = 0;
-    return;
+    return false;
   }
 
   gpu.max_value = stats.max_value / adjuster;
@@ -300,16 +300,37 @@ void RdcCacheManagerImpl::set_summary(const FieldSummaryStats& stats, rdc_stats_
   gpu.standard_deviation =
       std::sqrt((stats.count > 1) ? stats.new_s / (stats.count - 1) : 0.0) / adjuster;
   summary.standard_deviation += gpu.standard_deviation;
+  return true;
+}
+
+// Marks every statistic of `info` as without samples (see rdc_stats_summary_t), as
+// set_summary() also leaves a field without samples.
+static void mark_unsampled(rdc_gpu_usage_info_t& info) {
+  const rdc_stats_summary_t no_samples = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+  for (auto* stats : {&info.power_usage, &info.gpu_clock, &info.memory_clock, &info.gpu_utilization,
+                      &info.memory_utilization, &info.gpu_temperature, &info.pcie_tx, &info.pcie_rx,
+                      &info.pcie_total}) {
+    *stats = no_samples;
+  }
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
                                                     const rdc_gpu_gauges_t& gpu_gauges,
                                                     rdc_job_info_t* p_job_info) {
+  *p_job_info = {};
   std::lock_guard<std::mutex> guard(cache_mutex_);
   auto job_stats = cache_jobs_.find(jobId);
 
   if (job_stats == cache_jobs_.end()) {
     return RDC_ST_NOT_FOUND;
+  }
+
+  // rdc_job_start_stats() rejects a group larger than gpus[].
+  const auto& gpu_stats = job_stats->second.gpu_stats;
+  if (gpu_stats.size() > RDC_MAX_NUM_GPUS_PER_JOB) {
+    RDC_LOG(RDC_ERROR, "Job " << jobId << " has " << gpu_stats.size()
+                              << " GPUs; a job holds at most " << RDC_MAX_NUM_GPUS_PER_JOB << ".");
+    return RDC_ST_MAX_LIMIT;
   }
 
   //< Init the summary info
@@ -326,27 +347,21 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
   summary_info.max_gpu_memory_used = 0;
   summary_info.ecc_correct = 0;
   summary_info.ecc_uncorrect = 0;
-  summary_info.power_usage = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.pcie_tx = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.pcie_rx = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.pcie_total = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
   summary_info.pcie_lc_perf_other_end_recovery_count = 0;
   summary_info.pcie_nak_sent_count_acc = 0;
   summary_info.pcie_nak_rcvd_count_acc = 0;
-  summary_info.gpu_temperature = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.memory_clock = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.gpu_clock = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.gpu_utilization = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
-  summary_info.memory_utilization = {0, std::numeric_limits<uint64_t>::max(), 0, 0};
+  mark_unsampled(summary_info);
 
-  p_job_info->num_gpus = job_stats->second.gpu_stats.size();
-
-  //< Populate information for each GPUs
-
-  auto gpus = job_stats->second.gpu_stats.begin();
-  for (; gpus != job_stats->second.gpu_stats.end(); gpus++) {
-    auto& gpu_info = p_job_info->gpus[gpus->first];
-    gpu_info.gpu_id = gpus->first;  // Explicit assignment
+  //< Populate information for each GPU. gpus[] is packed in GPU ID order;
+  //< gpu_id, not the slot, names the GPU (an entity ID can exceed the array).
+  //< Each summary average is over the GPUs with samples for that field.
+  std::map<uint32_t, uint32_t> gpus_with_samples;
+  p_job_info->num_gpus = 0;
+  auto gpus = gpu_stats.begin();
+  for (; gpus != gpu_stats.end(); gpus++) {
+    auto& gpu_info = p_job_info->gpus[p_job_info->num_gpus++];
+    mark_unsampled(gpu_info);
+    gpu_info.gpu_id = gpus->first;
     gpu_info.start_time = summary_info.start_time;
     gpu_info.end_time = summary_info.end_time;
     gpu_info.energy_consumed = gpus->second.energy_consumed;
@@ -414,60 +429,76 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
       gpu_info.pcie_nak_rcvd_count_acc = 0;
     }
 
-    if (gpu_gauges.find({gpus->first, RDC_FI_GPU_MEMORY_TOTAL}) == gpu_gauges.end()) {
-      RDC_LOG(RDC_ERROR, "Cannot find the total memory");
-      return RDC_ST_BAD_PARAMETER;
+    // Total memory is known for the GPUs rdc_device_get_all() lists, not for
+    // partition entities; without it, memory utilization is not available.
+    uint64_t tmemory = 0;
+    auto total = gpu_gauges.find({gpus->first, RDC_FI_GPU_MEMORY_TOTAL});
+    if (total != gpu_gauges.end()) {
+      tmemory = total->second;
     }
-    uint64_t tmemory = gpu_gauges.at({gpus->first, RDC_FI_GPU_MEMORY_TOTAL});
 
     auto ite = gpus->second.field_summaries.begin();
     for (; ite != gpus->second.field_summaries.end(); ite++) {
+      bool sampled = false;
       if (ite->first == RDC_FI_POWER_USAGE) {
-        set_summary(ite->second, gpu_info.power_usage, summary_info.power_usage, 1000000);
+        sampled = set_summary(ite->second, gpu_info.power_usage, summary_info.power_usage, 1000000);
       } else if (ite->first == RDC_FI_GPU_MEMORY_USAGE) {
-        set_summary(ite->second, gpu_info.memory_utilization, summary_info.memory_utilization,
-                    tmemory / 100);
+        // Utilization is in percent of the total memory, which a partition has no reading for.
+        if (tmemory >= 100) {
+          sampled = set_summary(ite->second, gpu_info.memory_utilization,
+                                summary_info.memory_utilization, tmemory / 100);
+        }
         gpu_info.max_gpu_memory_used = ite->second.max_value;
         summary_info.max_gpu_memory_used =
             std::max(summary_info.max_gpu_memory_used, gpu_info.max_gpu_memory_used);
       } else if (ite->first == RDC_FI_GPU_CLOCK) {
-        set_summary(ite->second, gpu_info.gpu_clock, summary_info.gpu_clock, 1000000);
+        sampled = set_summary(ite->second, gpu_info.gpu_clock, summary_info.gpu_clock, 1000000);
       } else if (ite->first == RDC_FI_GPU_UTIL) {
-        set_summary(ite->second, gpu_info.gpu_utilization, summary_info.gpu_utilization, 1);
+        sampled =
+            set_summary(ite->second, gpu_info.gpu_utilization, summary_info.gpu_utilization, 1);
       } else if (ite->first == RDC_FI_GPU_TEMP) {
-        set_summary(ite->second, gpu_info.gpu_temperature, summary_info.gpu_temperature, 1000);
+        sampled =
+            set_summary(ite->second, gpu_info.gpu_temperature, summary_info.gpu_temperature, 1000);
       } else if (ite->first == RDC_FI_MEM_CLOCK) {
-        set_summary(ite->second, gpu_info.memory_clock, summary_info.memory_clock, 1000000);
+        sampled =
+            set_summary(ite->second, gpu_info.memory_clock, summary_info.memory_clock, 1000000);
       } else if (ite->first == RDC_FI_PCIE_TX) {
-        set_summary(ite->second, gpu_info.pcie_tx, summary_info.pcie_tx, 1024 * 1024);
+        sampled = set_summary(ite->second, gpu_info.pcie_tx, summary_info.pcie_tx, 1024 * 1024);
       } else if (ite->first == RDC_FI_PCIE_RX) {
-        set_summary(ite->second, gpu_info.pcie_rx, summary_info.pcie_rx, 1024 * 1024);
+        sampled = set_summary(ite->second, gpu_info.pcie_rx, summary_info.pcie_rx, 1024 * 1024);
       } else if (ite->first == RDC_FI_PCIE_BANDWIDTH) {
-        set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
+        sampled = set_summary(ite->second, gpu_info.pcie_total, summary_info.pcie_total, 1);
+      }
+      if (sampled) {
+        ++gpus_with_samples[ite->first];
       }
     }
-    // Set the average of the summary
-    set_average_summary(summary_info.power_usage, p_job_info->num_gpus);
-    set_average_summary(summary_info.gpu_clock, p_job_info->num_gpus);
-    set_average_summary(summary_info.gpu_utilization, p_job_info->num_gpus);
-    set_average_summary(summary_info.memory_utilization, p_job_info->num_gpus);
-    set_average_summary(summary_info.pcie_tx, p_job_info->num_gpus);
-    set_average_summary(summary_info.pcie_rx, p_job_info->num_gpus);
-    set_average_summary(summary_info.gpu_temperature, p_job_info->num_gpus);
-    set_average_summary(summary_info.memory_clock, p_job_info->num_gpus);
-
-    // Set process start/stop info
-    auto& je = cache_jobs_[jobId];
-    p_job_info->num_processes = je.num_processes;
-    for (uint32_t i = 0; i < je.num_processes; ++i) {
-      p_job_info->processes[i] = je.processes[i];
-    }
-
-    return RDC_ST_OK;
   }
+
+  set_average_summary(summary_info.power_usage, gpus_with_samples[RDC_FI_POWER_USAGE]);
+  set_average_summary(summary_info.gpu_clock, gpus_with_samples[RDC_FI_GPU_CLOCK]);
+  set_average_summary(summary_info.gpu_utilization, gpus_with_samples[RDC_FI_GPU_UTIL]);
+  set_average_summary(summary_info.memory_utilization, gpus_with_samples[RDC_FI_GPU_MEMORY_USAGE]);
+  set_average_summary(summary_info.pcie_tx, gpus_with_samples[RDC_FI_PCIE_TX]);
+  set_average_summary(summary_info.pcie_rx, gpus_with_samples[RDC_FI_PCIE_RX]);
+  set_average_summary(summary_info.pcie_total, gpus_with_samples[RDC_FI_PCIE_BANDWIDTH]);
+  set_average_summary(summary_info.gpu_temperature, gpus_with_samples[RDC_FI_GPU_TEMP]);
+  set_average_summary(summary_info.memory_clock, gpus_with_samples[RDC_FI_MEM_CLOCK]);
+
+  // Set process start/stop info
+  const auto& je = job_stats->second;
+  p_job_info->num_processes = je.num_processes;
+  for (uint32_t i = 0; i < je.num_processes; ++i) {
+    p_job_info->processes[i] = je.processes[i];
+  }
+
+  return RDC_ST_OK;
 }
 
 void RdcCacheManagerImpl::set_average_summary(rdc_stats_summary_t& summary, uint32_t num_gpus) {
+  if (num_gpus == 0) {
+    return;  // No samples: the average stays 0 and min_value at its maximum (N/A).
+  }
   summary.average = summary.average / num_gpus;
   summary.standard_deviation = summary.standard_deviation / num_gpus;
 }
