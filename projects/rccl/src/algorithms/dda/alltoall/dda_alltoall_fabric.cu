@@ -148,5 +148,7 @@ ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t 
 
 // One-shot PUSH variant (separate buffer + protocol); shares this TU's build rule.
 #include "algorithms/dda/alltoall/dda_alltoall_fabric_push_host.h"
-// Lazy creation of the push buffer (first eligible AllToAll).
+// Zero-copy variant for receive buffers in a symmetric window.
+#include "algorithms/dda/alltoall/dda_alltoall_fabric_direct_host.h"
+// Lazy creation of the push / Direct buffers (first eligible AllToAll).
 #include "algorithms/dda/alltoall/dda_alltoall_fabric_lazy_host.h"

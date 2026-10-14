@@ -1,17 +1,20 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Lazy creation of the DDA AllToAll push staging buffer (dda_alltoall_fabric_push_host.h).
- * Included at the end of dda_alltoall_fabric.cu, after it.
+ * Lazy creation of the DDA AllToAll fabric buffers: the push staging buffer
+ * (dda_alltoall_fabric_push_host.h) and the Direct flag buffer
+ * (dda_alltoall_fabric_direct_host.h). Included at the end of dda_alltoall_fabric.cu,
+ * after both.
  *
- * The buffer is not created at comm init: comms that never run an AllToAll in the push window
- * allocate nothing (the push buffer is RCCL_DDA_A2A_PUSH_BUFFER_SIZE, 1 GiB by default).
- * The first ncclAlltoAll whose size the selector could route to push (a collective
- * input: count, datatype, nRanks, in-place-ness and alignment are the same on every rank) creates
- * it on every rank, with one agreement (dda_alltoall_lazy.h): each rank allocates and exports
- * what it can, one allgather of {parts, size, export descriptors}, peer imports, one allgather of
- * the import results. A part that failed anywhere is disabled everywhere; nothing is retried.
- * If any rank's comm is nonblocking it is created at init instead (an API call of a nonblocking
+ * Neither buffer is created at comm init: comms that never run an AllToAll in the push / Direct
+ * windows allocate nothing (the push buffer is RCCL_DDA_A2A_PUSH_BUFFER_SIZE, 1 GiB by default;
+ * the Direct flag buffer 2 MiB). The first ncclAlltoAll that push or Direct would take once the
+ * buffers exist (a collective input: count, datatype, nRanks, in-place-ness, alignment and, for
+ * Direct, a symmetric-window recvbuff are the same on every rank) creates both on every rank, with
+ * one agreement (dda_alltoall_lazy.h): each rank allocates and exports what it can, one allgather
+ * of {parts, size, export descriptors}, peer imports, one allgather of the import results. A part
+ * that failed anywhere is disabled everywhere; nothing is retried.
+ * If any rank's comm is nonblocking they are created at init instead (an API call of a nonblocking
  * comm must not wait for its peers; ncclDdaFabricCommInit gathers the flag so all ranks agree).
  *
  * Host rendezvous contract: the triggering call blocks in bootstrap until every rank makes it, so
@@ -35,7 +38,9 @@ namespace {
 
 struct DdaA2aLazyBlob {
   ncclCuDesc push;
+  ncclCuDesc direct;
   uint64_t pushAlloc;    // exporter's mapped size (the importer maps the same size)
+  uint64_t directAlloc;
 };
 
 class DdaA2aLazyOps {
@@ -78,9 +83,19 @@ class DdaA2aLazyOps {
       INFO(NCCL_INIT, "DDA A2A: rank %d offers no push buffer: %zu bytes free, needs %lld more than the buffer",
            comm_->rank, freeB, (long long)kPushMinFreeBytes);
     }
+    if (want & kDirect) {
+      direct_.alloc = dda::common::kDdaA2aDirectFlagBytes;
+      if (createExport(&direct_, &mine->blob.direct)) {
+        mine->ok |= kDirect;
+        mine->blob.directAlloc = direct_.alloc;
+      } else {
+        releasePart(&direct_);
+      }
+    }
     // Zeroing done before any peer learns that this rank is ready.
     if (mine->ok && cudaStreamSynchronize(stream_) != cudaSuccess) {
       releasePart(&push_);
+      releasePart(&direct_);
       mine->ok = 0;
     }
     (void)cudaGetLastError();
@@ -89,7 +104,8 @@ class DdaA2aLazyOps {
   uint32_t import(const Rec* all, uint32_t parts, int64_t /*pushBytes*/) {
     using namespace dda_a2a_lazy;
     uint32_t ok = 0;
-    if ((parts & kPush) && importPart(&push_, all)) ok |= kPush;
+    if ((parts & kPush) && importPart(&push_, all, true)) ok |= kPush;
+    if ((parts & kDirect) && importPart(&direct_, all, false)) ok |= kDirect;
     if (ok && cudaStreamSynchronize(stream_) != cudaSuccess) ok = 0;
     (void)cudaGetLastError();
     return ok;
@@ -97,6 +113,7 @@ class DdaA2aLazyOps {
 
   void release(uint32_t parts) {
     if (parts & dda_a2a_lazy::kPush) releasePart(&push_);
+    if (parts & dda_a2a_lazy::kDirect) releasePart(&direct_);
   }
 
   // Successful parts change owner (the comm state); release() no longer touches them.
@@ -107,7 +124,7 @@ class DdaA2aLazyOps {
     std::vector<void*> peerMaps;  // imported peer buffers (self slot = base)
     char** peerDev = nullptr;     // device table of peerMaps
   };
-  Part push_;
+  Part push_, direct_;
 
  private:
   bool createExport(Part* p, ncclCuDesc* desc) {
@@ -123,14 +140,14 @@ class DdaA2aLazyOps {
     return cuMemExportToShareableHandle(desc, p->handle, ncclCuMemHandleType, 0) == CUDA_SUCCESS;
   }
 
-  bool importPart(Part* p, const Rec* all) {
+  bool importPart(Part* p, const Rec* all, bool push) {
     const int n = comm_->nRanks;
     p->peerMaps.assign(n, nullptr);
     p->peerMaps[comm_->rank] = p->base;
     for (int i = 0; i < n; ++i) {
       if (i == comm_->rank) continue;
-      ncclCuDesc desc = all[i].blob.push;
-      const size_t size = all[i].blob.pushAlloc;
+      ncclCuDesc desc = push ? all[i].blob.push : all[i].blob.direct;
+      const size_t size = push ? all[i].blob.pushAlloc : all[i].blob.directAlloc;
       CUmemGenericAllocationHandle h{};
       if (cuMemImportFromShareableHandle(&h, (void*)&desc, ncclCuMemHandleType) != CUDA_SUCCESS) return false;
       void* ptr = nullptr;
@@ -174,11 +191,16 @@ ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) {
   pushBytes = pushBytes > 0 ? pushBytes / 4096 * 4096 : 0;
   uint32_t want = 0;
   if (rcclParamDdaA2aPush() != 0 && comm->nRanks <= dda::common::kDdaA2aPushMaxRanks && pushBytes > 0) want |= kPush;
+  if (rcclParamDdaA2aDirect() != 0 && comm->nRanks <= dda::common::kDdaA2aDirectMaxRanks &&
+      comm->localRanks == comm->nRanks)
+    want |= kDirect;
   // Parts no rank wants still go through the agreement (a rank with a part disabled by env joins as
   // a failure): the bootstrap call sequence must not depend on per-rank env.
   // Host state objects first: nothing may fail after the agreement.
   auto* pst = new (std::nothrow) DdaA2aPushState();
+  auto* dst = new (std::nothrow) DdaA2aDirectState();
   if (pst == nullptr) want &= ~kPush;
+  if (dst == nullptr) want &= ~kDirect;
 
   const uint64_t t0 = clockNano();
   // From here on no early return: a local failure joins the agreement as "nothing set up".
@@ -194,6 +216,7 @@ ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) {
   (void)cudaGetLastError();
   if (modeSet) (void)cudaThreadExchangeStreamCaptureMode(&mode);
   if (r != ncclSuccess || !(res.parts & kPush)) delete pst;
+  if (r != ncclSuccess || !(res.parts & kDirect)) delete dst;
   if (r != ncclSuccess) {
     WARN("DDA AllToAll: rank %d: agreement on the fabric buffers failed (bootstrap error %d)", comm->rank, (int)r);
     return r;
@@ -217,13 +240,22 @@ ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) {
     comm->ddaA2aPushState = st;
     ops.push_ = DdaA2aLazyOps::Part{};
   }
+  if (res.parts & kDirect) {
+    auto* st = dst;
+    st->peerMaps = std::move(ops.direct_.peerMaps);
+    st->base = ops.direct_.base;
+    st->peerFlagsDev = ops.direct_.peerDev;
+    comm->ddaA2aDirectState = st;
+    ops.direct_ = DdaA2aLazyOps::Part{};
+  }
   comm->ddaA2aLazy = kDone;
   {
     const auto* st = static_cast<const DdaA2aPushState*>(comm->ddaA2aPushState);
     INFO(NCCL_INIT,
-         "DDA AllToAll: rank %d created the fabric buffers in %.3f ms: push %s (data %lld bytes), same-package "
-         "sibling rank %d (topology), every rank paired %d (CU-split push %s)",
+         "DDA AllToAll: rank %d created the fabric buffers in %.3f ms: push %s (data %lld bytes), direct %s, "
+         "same-package sibling rank %d (topology), every rank paired %d (CU-split push %s)",
          comm->rank, (clockNano() - t0) / 1e6, (res.parts & kPush) ? "on" : "off", (long long)res.pushBytes,
+         (res.parts & kDirect) ? "on" : "off",
          st != nullptr ? st->sibRank : -1, st != nullptr && st->allPaired ? 1 : 0,
          st != nullptr && st->allPaired ? "allowed" : "off: no verified sibling for every rank");
   }
@@ -236,5 +268,8 @@ ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) {
     INFO(NCCL_INIT, "DDA AllToAll: rank %d: push buffer %lld bytes instead of %lld (largest size every rank could allocate)",
          comm->rank, (long long)res.pushBytes, (long long)pushBytes);
   }
+  if ((want & kDirect) && !(res.parts & kDirect))
+    WARN("DDA AllToAll: rank %d: the zero-copy flag buffer could not be created on every rank; Direct is off on "
+         "this communicator", comm->rank);
   return ncclSuccess;
 }

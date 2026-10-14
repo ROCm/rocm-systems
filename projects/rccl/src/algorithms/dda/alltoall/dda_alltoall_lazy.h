@@ -1,8 +1,8 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Lazy, collective creation of the DDA AllToAll push staging buffer: the agreement protocol,
- * independent of HIP so host tests can drive it with fakes.
+ * Lazy, collective creation of the DDA AllToAll fabric buffers (push staging buffer, Direct flag
+ * buffer): the agreement protocol, independent of HIP so host tests can drive it with fakes.
  * The HIP side (allocation, export, import, peer tables) is DdaA2aLazyOps in
  * dda_alltoall_fabric_lazy_host.h.
  * See LICENSE.txt for license information.
@@ -20,7 +20,8 @@
 namespace dda_a2a_lazy {
 
 // Parts (bit mask).
-constexpr uint32_t kPush = 1u;  // push staging buffer ([flags | data])
+constexpr uint32_t kPush = 1u;    // push staging buffer ([flags | data])
+constexpr uint32_t kDirect = 2u;  // Direct flag buffer
 
 // ncclComm::ddaA2aLazy
 constexpr int kUntried = 0;  // fabric path up, buffers not created yet
@@ -101,7 +102,7 @@ ncclResult_t agree(Ops& ops, uint32_t want, int64_t wantPushBytes, Result* out) 
     ops.release(mine.ok);
     return r;
   }
-  uint32_t parts = kPush;
+  uint32_t parts = kPush | kDirect;
   int64_t pushBytes = 0;
   for (int i = 0; i < n; ++i) {
     parts &= all[i].ok;

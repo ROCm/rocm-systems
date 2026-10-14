@@ -18,7 +18,7 @@ struct ncclComm;
 // negative controls). Production builds compile each knob to its default (no env lookup, the
 // dead branches fold away); build with -DRCCL_DDA_A2A_TUNING=1 to read RCCL_<env> again.
 // Env that stays in production (documented in docs/api-reference/env-variables.rst):
-// RCCL_DDA_A2A_PUSH (kill switch), RCCL_DDA_A2A_PUSH_BUFFER_SIZE, RCCL_DDA_A2A_TIMEOUT
+// RCCL_DDA_A2A_DIRECT / _PUSH (kill switches), RCCL_DDA_A2A_PUSH_BUFFER_SIZE, RCCL_DDA_A2A_TIMEOUT
 // (alltoall_dda_watchdog.h), RCCL_MEMALLOC_FABRIC.
 // Selection thresholds live in rcclArchThresholds (a2a* fields), not in env.
 // Define each knob in exactly one translation unit (RCCL_PARAM has external linkage).
@@ -80,7 +80,7 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
 ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                         ncclComm* comm, cudaStream_t stream);
 
-// Creates the push staging buffer on every rank (collective: every
+// Creates the push staging buffer and the Direct flag buffer on every rank (collective: every
 // rank must call it on the same AllToAll; dda_alltoall_fabric_lazy_host.h). No-op unless
 // comm->ddaA2aLazy is dda_a2a_lazy::kUntried. Returns an error only if bootstrap failed.
 ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm);
@@ -97,10 +97,25 @@ size_t ncclAllToAllDdaFabricPushRoundBytes(ncclComm* comm, size_t perPeer);
 ncclResult_t ncclAllToAllDdaFabricPush(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                        ncclComm* comm, cudaStream_t stream);
 
-// Same-package sibling of `rank` from topology, for the CU-split push kernel's sibling row. The two
-// logical GPUs of one gfx1250 DPX package share the host and the PCI bus/device, and differ in the
-// function digit of busId (e.g. 0x104000 / 0x104001); separate physical GPUs (SPX) differ in
-// bus/device. Group = ranks with the same host hash and busId >> 4; a rank has a sibling only if its
+// Zero-copy one-shot push into the peers' recvbuff in a symmetric window (gfx1250); flag buffer
+// from ncclDdaA2aLazyInit (dda_alltoall_fabric_direct_host.h).
+ncclResult_t ncclDdaA2aDirectCommFini(ncclComm* comm);
+// Shape + "recvbuff in a symmetric window", independent of the path's state (the lazy trigger);
+// no side effects.
+bool ncclAllToAllDdaFabricDirectWindowed(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                         ncclDataType_t datatype);
+// Windowed + the agreed flag buffer + geometry + every peer's mapping; no side effects.
+bool ncclAllToAllDdaFabricDirectEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                         ncclDataType_t datatype);
+uint32_t ncclAllToAllDdaFabricDirectBlocks(ncclComm* comm);
+// Any failure poisons the comm (ncclDdaA2aPoison, kDdaA2aErrLaunch), as a push call does.
+ncclResult_t ncclAllToAllDdaFabricDirect(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                                         ncclComm* comm, cudaStream_t stream);
+
+// Same-package sibling of `rank` from topology, for the CU-split push kernel's sibling row and the
+// two-rank push-over-Direct rule (rcclSelectAlltoAllFabric). The two logical GPUs of one gfx1250 DPX
+// package share the host and the PCI bus/device, and differ in the function digit of busId (e.g.
+// 0x104000 / 0x104001); separate physical GPUs (SPX) differ in bus/device. Group = ranks with the same host hash and busId >> 4; a rank has a sibling only if its
 // group is exactly two ranks with different busIds (two ranks on one device are not siblings).
 // Symmetric by construction; -1 when there is none. hostOf(r) / busOf(r): peer r's host hash / busId.
 template <class HostOf, class BusOf>
@@ -137,8 +152,9 @@ ncclResult_t rcclDdaA2aPushRun(size_t perPeer, size_t c, Launch launch, Poison p
 // (the caller aborted), but a later ncclAlltoAll on a comm that outlived the flag (shrink-abort, or
 // a sibling sharing it) is refused, since that comm's A2A protocol state is out of step.
 constexpr uint32_t kDdaA2aErrConcurrent = 30;
-// Host-side: a push call failed on the host (launch error) after the comm's device epoch may have
-// gone out of step with its peers (rcclDdaA2aPushRun): ncclUnhandledCudaError from then on.
+// Host-side: a push / Direct call failed on the host (launch error) after the comm's device epoch may
+// have gone out of step with its peers (rcclDdaA2aPushRun, ncclAllToAllDdaFabricDirect):
+// ncclUnhandledCudaError from then on.
 constexpr uint32_t kDdaA2aErrLaunch = 31;
 constexpr uint32_t kDdaA2aErrAborted = 0xAB;
 inline ncclResult_t rcclDdaA2aErrorResult(uint32_t site) {

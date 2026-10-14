@@ -141,6 +141,14 @@ struct rcclArchThresholds {
   // Push kernel variant: CU-split (one block per CU, separate copy-out CUs) from this total size
   // of one push round; 0 = never.
   size_t a2aPushCuMin;
+  // Zero-copy direct (out of place, nRanks <= kDdaA2aDirectMaxRanks): takes over from LL128 V2
+  // once P > a2aDirectPerPeerCut (the LL128-vs-Direct crossover is a per-peer quantity), up to
+  // a2aDirectMax total. a2aDirectMax = 0 disables Direct.
+  size_t a2aDirectPerPeerCut;
+  size_t a2aDirectMax;
+  // ... and only from a2aDirectMin total (T >= a2aDirectMin): below it LL128 V2 wins at small n
+  // (Direct needs both P > a2aDirectPerPeerCut and T >= a2aDirectMin).
+  size_t a2aDirectMin;
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);

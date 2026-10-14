@@ -67,6 +67,8 @@ enum : uint32_t {
   kDdaWdPushReady = 3,
   kDdaWdPushCuEntry = 4,
   kDdaWdPushCuReady = 5,
+  kDdaWdDirectEntry = 11,
+  kDdaWdDirectDone = 12,
   kDdaWdLL = 21,
   kDdaWdLL128V2 = 23,
   // Two push/direct kernels of one communicator in flight at once (ordering violation by the caller).

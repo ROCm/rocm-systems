@@ -881,12 +881,24 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_A2A_DIRECT``
+        | gfx1250 MNNVL communicators of up to 16 ranks: enables the zero-copy DDA AllToAll path, which
+          writes straight into each peer's receive buffer when that buffer lies in a symmetric window
+          (``ncclCommWindowRegister`` with ``NCCL_WIN_COLL_SYMMETRIC``; every rank passes its buffer at
+          the same window offset). Out of place only; the size window comes from the per-architecture
+          table (gfx1250: per-peer size above 1 MiB, total 16 MiB to 16 GiB). Buffers registered only
+          with ``ncclCommRegister`` do not use it. Its 2 MiB per-rank flag buffer is created with the
+          push buffer (see ``RCCL_DDA_A2A_PUSH``).
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled; those calls use LL128, the one-shot push path or p2p.
+
     * - | ``RCCL_DDA_A2A_PUSH``
         | gfx1250 MNNVL communicators: enables the one-shot push DDA AllToAll path for out-of-place calls
           above the LL128 window up to 1 GiB (in-place calls never use it), which stages through a
           per-rank fabric buffer (see ``RCCL_DDA_A2A_PUSH_BUFFER_SIZE``). The buffer is created on every
-          rank by the first AllToAll that can use it (a communicator that never runs one allocates
-          nothing; if any rank's communicator is nonblocking it is created at initialization). That
+          rank, together with the zero-copy path's flag buffer, by the first AllToAll that can use
+          either (a communicator that never runs one allocates nothing; if any rank's communicator is
+          nonblocking they are created at initialization). That
           first call waits on the host until every rank has made it, so ranks must issue AllToAlls of a
           communicator, and the first ones of different communicators, in the same order (the usual
           collective contract). A rank only creates a buffer that leaves 2 GiB of
