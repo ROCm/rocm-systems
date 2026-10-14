@@ -89,8 +89,9 @@ jobs:
       amdgpu_targets: ${{ inputs.amdgpu_targets || 'gfx950' }}
 
   # GIN suite (WIP) on Tensorwave. Failures show red with logs on this job.
-  # non_gating keeps test failures from blocking; build/infra failures gate via
-  # gin-build-gate below. AICOMRCCL-1478: enable full gating once GIN lands in develop.
+  # non_gating keeps most test failures from failing the run; gin-sdma-gate below
+  # fails it for the SDMA gating_tests. AICOMRCCL-1478: enable full gating once
+  # GIN lands in develop.
   gin:
     name: GIN
     uses: ./.github/workflows/rccl-suite.yml
@@ -123,4 +124,36 @@ jobs:
     steps:
       - run: |
           echo "GIN build/infra failed; see the GIN job logs." >&2
+          exit 1
+
+  # Fails this run unless every gating_tests entry in lib/gin-tests.json (the Anvil
+  # SDMA, NCCL_GIN_TYPE=7, cases) ran and passed. A build break, a SLURM job that
+  # never started, or a job timeout reports not-run and fails here too. The rest
+  # of the GIN matrix stays non-gating. This workflow is not PR-triggered, so the
+  # gate does not block merges. AICOMRCCL-1478.
+  gin-sdma-gate:
+    name: GIN SDMA gate
+    needs: gin
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GATING_STATUS: ${{ needs.gin.outputs.gating_status || 'not-run' }}
+          GIN_RESULT: ${{ needs.gin.result }}
+        run: |
+          if [[ "${GATING_STATUS}" == "passed" ]]; then
+            echo "GIN SDMA gating tests passed."
+            exit 0
+          fi
+          if [[ "${GATING_STATUS}" == "failed" ]]; then
+            reason="one or more SDMA gating tests failed or were skipped"
+          else
+            reason="the SDMA gating tests did not run (GIN job result: ${GIN_RESULT})"
+          fi
+          {
+            echo "### GIN SDMA gate: ${GATING_STATUS}"
+            echo ""
+            echo "Failed because ${reason}. The GIN job's Summary tab lists the failed tests; its \`build\`, \`test\`, and \`scheduler\` log groups show why tests did not run."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::error::GIN SDMA gate: ${reason}."
           exit 1
