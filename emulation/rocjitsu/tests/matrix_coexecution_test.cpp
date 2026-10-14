@@ -664,8 +664,8 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
   using Clock = std::chrono::steady_clock;
   const auto begin = Clock::now();
   std::array<uint64_t, kIssuerCount> previous{};
-  std::array<Clock::time_point, kIssuerCount> advanced;
-  advanced.fill(begin);
+  std::array<Clock::time_point, kIssuerCount> last_progress_time;
+  last_progress_time.fill(begin);
   while (!stop.load(std::memory_order_relaxed) && Clock::now() - begin < std::chrono::seconds(20)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     const auto now = Clock::now();
@@ -673,8 +673,8 @@ TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
       const auto completed = progress[i].completed.load(std::memory_order_relaxed);
       if (completed != previous[i]) {
         previous[i] = completed;
-        advanced[i] = now;
-      } else if (now - advanced[i] >= std::chrono::seconds(6)) {
+        last_progress_time[i] = now;
+      } else if (now - last_progress_time[i] >= std::chrono::seconds(6)) {
         ADD_FAILURE() << "SharedPool issuer " << i << " made no progress for six seconds";
         std::cerr << "SharedPool handoff progress:";
         for (const auto &issuer : progress)
