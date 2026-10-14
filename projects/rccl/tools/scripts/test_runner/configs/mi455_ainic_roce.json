@@ -6138,7 +6138,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
-        "NCCL_DEBUG_SUBSYS": "REG",
+        "NCCL_DEBUG_SUBSYS": "REG,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_WIN_ENABLE": "1",
