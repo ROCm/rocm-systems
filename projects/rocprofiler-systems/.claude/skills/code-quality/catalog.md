@@ -1,9 +1,9 @@
 # Code Quality Catalog
 
-Full reference of 22 code smells and 60+ refactoring techniques. Organized in two parts:
+Reference for writing code that does not contain these smells. Organized in two parts:
 
-- **Part 1: Smell Detection** -- what to look for, thresholds, severity
-- **Part 2: Refactoring Techniques** -- how to fix each smell, with step-by-step instructions and code examples
+- **Part 1: Smell Detection** -- what not to write, with thresholds
+- **Part 2: Techniques** -- the shape to write instead, with steps and examples
 
 Search the tables below, then open the matching `####` heading. Do not scan the whole file. **Fixes** names are Part 2 headings, in the order to try them.
 
@@ -538,7 +538,7 @@ Excessive coupling between classes or excessive delegation.
 ---
 ---
 
-## Part 2: Refactoring Techniques
+## Part 2: Techniques
 
 ### Category A: Composing Methods
 
