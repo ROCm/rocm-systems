@@ -98,7 +98,9 @@ resolve_scalar_register_range(const Wavefront &wf, uint32_t selector, uint32_t c
 /// Resolve MOVREL within its original SGPR/VCC or TTMP region and allocation.
 /// Missing sources use SGPR0; missing destinations suppress the instruction.
 /// B64 alignment follows RDNA3/3.5 and measured RDNA4 behavior. CDNA requires
-/// even indices; its odd-index handling is extrapolated from RDNA.
+/// even indices; its odd-index handling is extrapolated from RDNA. The shared
+/// SGPR/VCC region and CDNA FLAT_SCRATCH exclusion are also extrapolations;
+/// CDNA manuals do not explicitly specify the RDNA SGPR-to-VCC exception.
 [[nodiscard]] inline std::optional<uint32_t>
 relative_scalar_selector(const Wavefront &wf, uint32_t selector, uint32_t m0, uint32_t width,
                          bool destination, bool split) {
