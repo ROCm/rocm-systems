@@ -9,6 +9,13 @@
  *   Each stream owns its own GPU buffer; ordering is stream-local
  *   (read[i] -> write[i] on stream[i]) so the streams can run in parallel.
  *
+ *   These streams are not registered with hipFileStreamRegister. Async I/O
+ *   works on unregistered non-default streams, but it serializes on a single
+ *   driver host-function thread, so the streams do not actually overlap.
+ *   Registering each stream gives it a dedicated copy stream and signal memory
+ *   so the transfers overlap. For the registered variant, see
+ *   roundtrip-async-multi-stream-registered.
+ *
  * Usage: ./roundtrip-async-multi-stream READ_FILE WRITE_FILE [GPUID]
  *
  *   READ_FILE   Path to the input file. Created/truncated and seeded with
