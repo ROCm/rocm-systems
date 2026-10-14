@@ -460,6 +460,10 @@ had become before this map existed.
 dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
 so it fakes the file's own entry points). The two never define the same
 symbol.
+`src/dev_runtime.cc` has two rows for a narrower reason: `rccl-UnitTestsMicroNcclDeviceCft`
+needs only the four `dev_runtime.cc` symbols `cft_dev_runtime.cc` calls, kept in their own
+file so that target does not drag in the rest of `fakes/dev_runtime_fakes.cc`'s seams.
+The two never define the same symbol either.
 
 | Production TU | Fakes file |
 |---|---|
@@ -468,6 +472,7 @@ symbol.
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
+| `src/dev_runtime.cc`'s callees from `src/cft_dev_runtime.cc` (`computeLsaSize`, `symTeamObtain`, `findCommAndHostWindowFromDeviceWindow`, `ncclDevrWinRegEnabled`; `rccl-UnitTestsMicroNcclDeviceCft`, which compiles the real `cft_dev_runtime.cc`) | `fakes/cft_dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
