@@ -26,11 +26,16 @@ constexpr std::array ioTypes{
     hipFile::IoType::Read,
     hipFile::IoType::Write,
 };
+
 constexpr std::array backends{
     hipFile::StatsBackend::Fastpath,
     hipFile::StatsBackend::Fallback,
     hipFile::StatsBackend::Host,
 };
+
+std::span<StatsBackend> getStatBackends() {
+    return backends;
+}
 
 } // namespace
 

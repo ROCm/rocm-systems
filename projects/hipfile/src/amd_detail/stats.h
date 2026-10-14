@@ -38,6 +38,8 @@ enum class StatsBackend {
     Count,
 };
 
+std::span<StatsBackend> getStatBackends();
+
 struct StatsHistogram {
     static constexpr size_t   MaxBuckets{16};
     static constexpr uint64_t FirstBucketBits{12};
