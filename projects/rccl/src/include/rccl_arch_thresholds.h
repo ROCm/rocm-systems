@@ -138,6 +138,13 @@ struct rcclArchThresholds {
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
   // unregistered buffers). RCCL_FORCE_CE=0 turns it off everywhere. A null table forces it.
   bool forceCeScratch;
+
+  // ---- AllToAll fabric paths (gfx1250 MNNVL; rcclSelectAlltoAll). Scalars, A2A only. ----
+  // P = per-peer bytes (count * typesize), T = nRanks * P. Tables that omit these fields get 0
+  // (path off). The LL and LL128 V2 tiers use the DDA tier caps above: LL rcclDdaLLThreshold
+  // (ddaLLMax[A2A], or nRanks x ddaLLMaxPerRank[A2A] on rank-scaled comms -- the LL-vs-LL128
+  // crossover is a per-peer size), LL128 ddaLL128Max[A2A] (a total; also an input of the
+  // ddaScratch size).
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

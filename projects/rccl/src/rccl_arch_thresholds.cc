@@ -50,7 +50,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    1ULL*1024*1024,      // [8] AlltoAll
+    16ULL*1024*1024,     // [8] AlltoAll        -- LL128 v2 (register-packed) beats p2p 1-8M (A06) and the push one-shot at 16M (A07)
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -199,7 +199,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- unchanged
+    // [8] AlltoAll: LL vs LL128 V2, R0 OOP busBW (P02 oracle, mt4): 16r T=128K (P=8K) LL 15.8 vs
+    // LL128 13.9 (-12%, 14 samples), 16r T=256K (P=16K) LL128 +12%; 8r T=64K (P=8K) LL,
+    // T=128K/256K (P=16K/32K) tie. The crossover fits P = 8 KiB at 8 and 16 ranks; at 8 ranks
+    // nRanks x 8K = the 64 KiB total, so this widens LL only above 8 ranks.
+    // Unmeasured: n >= 32 (LL grid cap ddaFabricMaxBlocks/n blocks per peer).
+    8ULL*1024,
   },
   .ddaLL128MaxPerRank = {
     0,                   // [0] Broadcast      -- not used

@@ -4,8 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu: eligibility against the fixed
-// LL128 slot stride, the grid-shape overrides and epoch clamp, and the launch.
+// Host-only microtests for src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu: eligibility against the
+// slot carved from one scratch bank, the epoch cells and the buffer alignment, the warp-per-slice grid and its
+// caps, and the launch.
 
 #include <gtest/gtest.h>
 
@@ -33,14 +34,14 @@ void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
-// Two banks of nRanks slots of ceil(512 KiB / 120 B) = 4370 128-byte lines.
-constexpr size_t kScratchPerRank = 2 * 4370 * 128;
-// A 128-byte line carries 120 bytes, 30 floats.
-constexpr size_t kLineFloats = 30;
+// A 2 KiB wire slice carries 1920 bytes, 480 floats; one warp moves one slice.
+constexpr size_t kSliceFloats = 480;
+// 256 threads = 8 warps per block.
+constexpr size_t kWarpsPerBlock = 8;
 
 template <int N>
 const void* Kernel() {
-  return KernelPtr(&dda::common::ddaAllToAllFabricLL128<int8_t, N>);
+  return KernelPtr(&dda::common::ddaAllToAllFabricLL128V2<int8_t, N, 1>);
 }
 
 class DdaAlltoallFabricLL128Microtest : public ::testing::Test {
@@ -81,7 +82,6 @@ class DdaAlltoallFabricLL128Microtest : public ::testing::Test {
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
-  ScopedEnv lpb_{"RCCL_DDA_LL128_A2A_LPB", nullptr};
   ScopedEnv maxBpp_{"RCCL_DDA_LL128_A2A_MAXBPP", nullptr};
 };
 
@@ -142,18 +142,40 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_OnlyDatatypesTheDdaGateAdmits) 
   EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesMultipleOf16UpTo512KiB) {
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesMultipleOf16) {
   EXPECT_FALSE(Eligible(2));
   EXPECT_FALSE(Eligible(12, ncclFloat16));
-  EXPECT_TRUE(Eligible((512u << 10) / 4));
-  EXPECT_FALSE(Eligible((512u << 10) / 4 + 4));
+  EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
-  comm().ddaScratchBytes = 4 * kScratchPerRank;
+// Each bank holds nRanks slots of whole 2 KiB slices; a slot of S slices carries S * 1920 bytes.
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_PerPeerBytesUpToTheSlotCapacity) {
+  constexpr size_t kSlices = 10;
+  comm().ddaScratchBytes = 2 * 4 * kSlices * 2048;
+  EXPECT_TRUE(Eligible(kSlices * kSliceFloats));
+  EXPECT_FALSE(Eligible(kSlices * kSliceFloats + 4));
+  comm().ddaScratchBytes = 2 * 4 * kSlices * 2048 - 1;
+  EXPECT_FALSE(Eligible(kSlices * kSliceFloats));
+  EXPECT_TRUE(Eligible((kSlices - 1) * kSliceFloats));
+}
+
+// The grid has nRanks - 1 columns and at least one block per column, each owning one epoch cell.
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_NeedsAnEpochCellPerPeer) {
+  comm().ddaLLEpochLen = 3;
   EXPECT_TRUE(Eligible(4));
-  comm().ddaScratchBytes = 4 * kScratchPerRank - 1;
+  comm().ddaLLEpochLen = 2;
   EXPECT_FALSE(Eligible(4));
+  comm().ddaLLEpochLen = 256;
+  comm().ddaLLEpochDev = nullptr;
+  EXPECT_FALSE(Eligible(4));
+}
+
+TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_Needs16ByteAlignedBuffers) {
+  char* const base = reinterpret_cast<char*>(0x10000);
+  EXPECT_TRUE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 16, 4, ncclFloat32));
+  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 8, base + 16, 4, ncclFloat32));
+  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base, base + 4, 4, ncclFloat32));
+  EXPECT_FALSE(ncclAllToAllDdaFabricLL128Eligible(mock_.get(), base + 4, base + 4, 4, ncclFloat32));
 }
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Launch_UnsupportedDatatypeReturnsInvalidArgument) {
@@ -170,12 +192,12 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOthersRu
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
     EXPECT_EQ(launch.kernel, kernel) << "nRanks " << nRanks;
-    EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks));
+    EXPECT_EQ(launch.grid.x, static_cast<unsigned>(nRanks - 1)) << "no self column";
     EXPECT_EQ(launch.Arg<int>(5), nRanks);
   }
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersPerPeerBytesAndEpoch) {
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersSlicesBankAndAbortFlag) {
   ASSERT_EQ(Run(8, ncclBfloat16), ncclSuccess);
   ASSERT_EQ(g_ddaLaunches.size(), 1u);
   const DdaLaunch& launch = g_ddaLaunches[0];
@@ -186,7 +208,7 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersPerPeerBytesAndEpoch
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 9u);
+  ASSERT_EQ(launch.args.size(), 11u);
   EXPECT_EQ(launch.Arg<int8_t**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<int8_t*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const int8_t*>(2), kSendbuff);
@@ -194,54 +216,60 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_PassesBuffersPerPeerBytesAndEpoch
   EXPECT_EQ(launch.Arg<int>(4), 2);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(8).flag, comm().abortFlagDev);
+  EXPECT_EQ(launch.Arg<size_t>(8), 1u);
+  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaScratchBytes));
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
-// One block per peer up to 4 lines per peer, then one per 4 lines, at most 8 per peer.
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlocksPerPeerFollowLinesCappedAtEight) {
+// One warp per slice: blocks per peer = ceil(slices / 8), capped by the CU budget per peer.
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_BlocksPerPeerFollowSlicesPerWarp) {
+  const size_t perBlock = kWarpsPerBlock * kSliceFloats;
+  const unsigned cap = 256 / 3;
   const std::pair<size_t, unsigned> cases[] = {
-      {4, 1}, {4 * kLineFloats, 1}, {4 * kLineFloats + 2, 2}, {32 * kLineFloats, 8}, {33 * kLineFloats, 8}};
+      {4, 1}, {perBlock, 1}, {perBlock + 4, 2}, {cap * perBlock, cap}, {(cap + 20) * perBlock, cap}};
   for (const auto& [count, bpp] : cases) {
     const DdaLaunch& launch = RunOne(count);
-    EXPECT_EQ(launch.grid.x, 4u);
+    EXPECT_EQ(launch.grid.x, 3u);
     EXPECT_EQ(launch.grid.y, bpp) << "count " << count;
-    EXPECT_EQ(launch.block.x, 1024u);
-    EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32), 4 * bpp);
+    EXPECT_EQ(launch.block.x, 256u);
+    EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32), 3 * bpp);
   }
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_GridStaysWithinTheEpochCells) {
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_GridStaysWithinTheEpochCellsAndCuBudget) {
+  const size_t big = 1000 * kWarpsPerBlock * kSliceFloats;
   comm().ddaLLEpochLen = 13;
-  EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 3u);
+  EXPECT_EQ(RunOne(big).grid.y, 4u);
   comm().ddaLLEpochLen = 3;
-  EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 1u);
-  comm().ddaLLEpochLen = 32;
-  EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 8u);
+  EXPECT_EQ(RunOne(big).grid.y, 1u);
+  comm().ddaLLEpochLen = 256;
+  comm().ddaFabricMaxBlocks = 30;
+  EXPECT_EQ(RunOne(big).grid.y, 10u);
+  comm().ddaFabricMaxBlocks = 2;
+  EXPECT_EQ(RunOne(big).grid.y, 1u);
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_LinesPerBlockAndMaxBlocksPerPeerFromEnv) {
-  {
-    ScopedEnv lpb("RCCL_DDA_LL128_A2A_LPB", "2");
-    EXPECT_EQ(RunOne(5 * kLineFloats).grid.y, 3u);
-    EXPECT_EQ(RunOne(2 * kLineFloats).grid.y, 1u);
-  }
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_MaxBlocksPerPeerFromEnv) {
+  const size_t big = 64 * kWarpsPerBlock * kSliceFloats;
   {
     ScopedEnv maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", "3");
-    EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 3u);
+    EXPECT_EQ(RunOne(big).grid.y, 3u);
     ScopedEnv one("RCCL_DDA_LL128_A2A_MAXBPP", "1");
-    EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 1u);
+    EXPECT_EQ(RunOne(big).grid.y, 1u);
+  }
+  {
+    ScopedEnv aboveCap("RCCL_DDA_LL128_A2A_MAXBPP", "1000");
+    EXPECT_EQ(RunOne(big).grid.y, 64u);
   }
   for (const char* bad : {"", "0", "-2", "x"}) {
-    ScopedEnv lpb("RCCL_DDA_LL128_A2A_LPB", bad);
     ScopedEnv maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", bad);
-    EXPECT_EQ(RunOne(5 * kLineFloats).grid.y, 2u) << "env '" << bad << "'";
-    EXPECT_EQ(RunOne(64 * kLineFloats).grid.y, 8u) << "env '" << bad << "'";
+    EXPECT_EQ(RunOne(big).grid.y, 64u) << "env '" << bad << "'";
   }
 }
 
-TEST_F(DdaAlltoallFabricLL128Microtest, Launch_ThreadsOverrideMustBeALineMultipleUpTo1024) {
-  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {16, 16},  {1024, 1024}, {8, 1024},
-                                                {24, 1024}, {1040, 1024}, {0, 1024}};
+TEST_F(DdaAlltoallFabricLL128Microtest, Launch_ThreadsOverrideMustBeAWarpMultipleUpTo1024) {
+  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {32, 32},  {1024, 1024}, {16, 256},
+                                                {48, 256},  {1056, 256}, {0, 256}};
   for (const auto& [env, threads] : cases) {
     params_["RCCL_DDA_LL128_A2A_THREADS"] = env;
     EXPECT_EQ(RunOne(4).block.x, threads) << "DDA_LL128_A2A_THREADS " << env;
@@ -249,8 +277,9 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_ThreadsOverrideMustBeALineMultipl
 }
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Blocks_SizedOnBytesNotElements) {
-  EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), 8 * kLineFloats, ncclFloat16), 4u);
-  EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), 8 * kLineFloats, ncclFloat32), 8u);
+  const size_t count = 2 * kWarpsPerBlock * kSliceFloats;
+  EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), count, ncclFloat16), 3u);
+  EXPECT_EQ(ncclAllToAllDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32), 6u);
 }
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Launch_LaunchErrorIsReported) {

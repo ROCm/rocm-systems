@@ -3066,7 +3066,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 64 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), n * 8 * KiB) << nRanks;
             }
         },
         {});
@@ -3294,7 +3294,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 1 MiB total):
+// (ddaLL128Max[A2A] = 16 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
 // gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
 // a message just above the LL ceiling must fall to Direct p2p, not LL128.
@@ -3318,8 +3318,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
-// anything above the LL128 ceiling falls to Direct p2p.
+// gfx1250, message above the LL128 cap (ddaLL128Max[A2A] = 16 MiB; ddaVmmMax[A2A] = 0 disables VMM):
+// falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3338,6 +3338,21 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+}
+
+// gfx1250 AllToAll arch-table windows (rcclSelectAlltoAllFabric): LL to 64 KiB total or (from 8
+// ranks) 8 KiB per peer, LL128 V2 to 16 MiB. CE-Scratch is not forced (forceCeScratch = false).
+TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
+{
+    const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
+    ASSERT_NE(tbl, nullptr);
+    EXPECT_EQ(tbl->ddaLLMax[ncclFuncAlltoAll], 64ul << 10);
+    EXPECT_EQ(tbl->ddaLLMaxPerRank[ncclFuncAlltoAll], 8ul << 10);
+    EXPECT_EQ(tbl->rankScaledMinRanks, 8);
+    EXPECT_EQ(tbl->ddaLL128Max[ncclFuncAlltoAll], 16ul << 20);
+    EXPECT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul);
+    EXPECT_EQ(tbl->ceNonRegMax[ncclFuncAlltoAll], 0ul);
+    EXPECT_FALSE(tbl->forceCeScratch);
 }
 
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):
