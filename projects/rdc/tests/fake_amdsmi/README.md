@@ -29,7 +29,7 @@ a value shown for the wrong GPU or the wrong field fails the comparison.
 | `RDC_FAKE_HIVES=H` | XGMI hives, 1 to 128; GPU `g` is in hive `g % H` (default 1) |
 | `RDC_FAKE_FAIL=rule,...` | `rule` is `api[@gpu][=status]` (`gpu` is the processor index, which counts partitions when `RDC_FAKE_PARTITIONS` is set): the call returns `status` (a number or an `AMDSMI_STATUS_*` name, default `AMDSMI_STATUS_UNKNOWN_ERROR`; anything else aborts). `api` `*` matches every call that takes a GPU. Calls without a GPU argument, such as `amdsmi_init`, match only rules without `@gpu`. |
 | `RDC_FAKE_POISON=1` | a failing call first fills its outputs with `0xA5` bytes, as a caller that ignores the status would read from a dirty stack |
-| `RDC_FAKE_SENTINEL=api[@gpu],...` | the call succeeds but reports amd-smi's "not available" value (all bits set); honored by `amdsmi_get_power_info`, `amdsmi_get_gpu_activity`, `amdsmi_get_gpu_busy_percent`, `amdsmi_get_clock_info` and `amdsmi_get_gpu_metrics_info` |
+| `RDC_FAKE_SENTINEL=api[@gpu],...` | the call succeeds but reports what amd-smi reports for a value it cannot read: all bits set in `amdsmi_get_power_info`, `amdsmi_get_gpu_metrics_info` and `amdsmi_get_violation_status`; activities of `0xFFFF` in `amdsmi_get_gpu_activity`; `clk` = `UINT32_MAX` in `amdsmi_get_clock_info`; `current` = `UINT32_MAX` (no current level) in `amdsmi_get_clk_freq` |
 | `RDC_FAKE_ARM=path` | `FAIL` and `SENTINEL` rules apply only once `path` exists, so a test can set RDC up first |
 | `RDC_FAKE_EVENT_WAIT_MS=ms` | upper bound for the event-notification wait (default 100), so `rdcd` stops promptly |
 | `RDC_FAKE_LOG=path` | append `api gpu` for every call (`-1` for calls without a GPU), plus ` !` when a rule failed the call |
