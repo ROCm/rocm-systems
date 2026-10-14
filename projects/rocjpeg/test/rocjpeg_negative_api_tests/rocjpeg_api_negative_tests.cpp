@@ -751,7 +751,17 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
                       << rocJpegGetErrorName(rocjpeg_status) << std::endl;
             return EXIT_FAILURE;
         }
-        // A rejected submit must not leave decodes pending for any destination in the batch.
+        // A rejected submit must not leave decodes pending for any destination in the batch. Check each destination
+        // on its own first: rocJpegDecodeBatchedSync stops at the first destination with nothing pending, so on its
+        // own it would also pass if only some destinations of the batch were left pending.
+        for (int k = 0; k < 2; k++) {
+            rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[k]);
+            if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+                std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected crop rectangle (" << crop_case.name
+                          << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
         rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, destinations, 2);
         if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
             std::cerr << "rocJpegDecodeBatchedSync after a rejected crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
