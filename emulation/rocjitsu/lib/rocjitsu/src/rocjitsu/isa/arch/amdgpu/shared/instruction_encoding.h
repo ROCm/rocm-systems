@@ -10,6 +10,7 @@
 #include "rocjitsu/base/api.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -62,6 +63,20 @@ constexpr unsigned ds_permute_lane(unsigned lane, uint32_t address, unsigned off
 }
 
 constexpr unsigned ds_swizzle_lane(unsigned lane, unsigned offset) {
+  const unsigned group = lane & ~31u;
+  const unsigned index = lane & 31u;
+  const unsigned mask = offset & 31u;
+  if (offset >= 0xe000) {
+    unsigned reversed = 0;
+    for (unsigned bit = 0; bit < 5; ++bit)
+      reversed |= ((index >> bit) & 1u) << (4u - bit);
+    return group | (reversed >> std::popcount(mask)) | (index & mask);
+  }
+  if (offset >= 0xc000) {
+    const unsigned distance = (offset >> 5) & 31u;
+    const unsigned rotated = offset & 0x400u ? index - distance : index + distance;
+    return group | (index & mask) | (rotated & ~mask & 31u);
+  }
   if (offset & 0x8000)
     return (lane & ~3u) | ((offset >> (2 * (lane & 3))) & 3);
   return (lane & ~31u) +

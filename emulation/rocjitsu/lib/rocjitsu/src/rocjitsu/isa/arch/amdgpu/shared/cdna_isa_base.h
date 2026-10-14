@@ -98,8 +98,9 @@ struct CdnaIsaBase {
   static constexpr uint32_t MAX_SGPRS_PER_WF = 102;  ///< SGPRs per wavefront.
   static constexpr uint32_t MAX_VGPRS_PER_WF = 256;  ///< VGPRs per wavefront.
   static constexpr uint32_t MAX_ADDRESSABLE_VGPRS_PER_WF =
-      MAX_VGPRS_PER_WF;                                 ///< Maximum ordinary VGPR address span.
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 0;   ///< AccVGPRs (0 = absent; CDNA1 default).
+      MAX_VGPRS_PER_WF; ///< Maximum ordinary VGPR address span.
+  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
+      0; ///< AccVGPRs (0 = absent; overridden by CDNA1-4).
   static constexpr uint8_t WAITCNT_LGKMCNT_MASK = 0x0F; ///< lgkmcnt mask in S_WAITCNT [11:8].
   static constexpr bool SRAM_ECC = false;               ///< CDNA1 default: no SRAM ECC.
   static constexpr bool MODE_HAS_GPR_IDX_EN = true;     ///< MODE[27] is GPR_IDX_EN on CDNA.

@@ -395,15 +395,15 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
         return derive_all_semantics(spec)
 
     gfx1250 = semantics_for(Cdna5Profile())
-    assert Cdna5Profile().ds_addtid_uses_m0_byte_base
+    assert Cdna5Profile().ds_addtid_wraps_20bit_address
     assert gfx1250['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert gfx1250[name].semantic_class == 'ds_atomic2'
         assert gfx1250[name].operation == 'swap'
 
     rdna4 = semantics_for(Rdna4Profile())
-    assert not Rdna4Profile().ds_addtid_uses_m0_byte_base
-    assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
+    assert not Rdna4Profile().ds_addtid_wraps_20bit_address
+    assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert rdna4[name].semantic_class == 'ds_atomic2'
 

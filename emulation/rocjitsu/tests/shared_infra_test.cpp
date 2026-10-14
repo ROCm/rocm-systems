@@ -219,9 +219,9 @@ static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
 static_assert(cdna5::Isa::WF_SIZE_MAX == 32);
 
-// CDNA1 and GFX1250 have no AccVGPRs; CDNA2/3/4 have 256.
+// CDNA1-4 have 256 AccVGPRs; GFX1250 has none.
 constexpr uint32_t kCdnaAccVgprsPerWf = cdna2::Isa::MAX_ACC_VGPRS_PER_WF;
-static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);

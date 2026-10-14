@@ -2384,6 +2384,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
             num_elems=1,
             operation='st64' if is_st64 else None,
         )
+    # ADDTID uses M0 as a byte base and an implicit thread index.
+    if 'ADDTID' in upper:
+        if is_write:
+            return InstructionSemantics(
+                name, 'ds_write_addtid', elem_size=4, num_elems=1
+            )
+        if is_read:
+            return InstructionSemantics(
+                name, 'ds_read_addtid', elem_size=4, num_elems=1
+            )
+        return InstructionSemantics(name, 'nop')
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2406,17 +2417,6 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 num_elems=ne,
                 transpose_kind=transpose_kind,
             )
-    # ADDTID instructions: address = thread_id * M0_stride + offset.
-    if 'ADDTID' in upper:
-        if is_write:
-            return InstructionSemantics(
-                name, 'ds_write_addtid', elem_size=4, num_elems=1
-            )
-        if is_read:
-            return InstructionSemantics(
-                name, 'ds_read_addtid', elem_size=4, num_elems=1
-            )
-        return InstructionSemantics(name, 'nop')
     if is_read:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):

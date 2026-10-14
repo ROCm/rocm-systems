@@ -9401,7 +9401,7 @@ class CodeGenerator:
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
         lines.append('    uint32_t m0 = wf.m0();')
-        if self.isa_spec.profile.ds_addtid_uses_m0_byte_base:
+        if self.isa_spec.profile.ds_addtid_wraps_20bit_address:
             lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             lines.append('      if (!(exec & (1ULL << lane))) continue;')
             lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
@@ -9409,11 +9409,11 @@ class CodeGenerator:
                 '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
             )
         else:
-            lines.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
+            lines.append('    uint32_t byte_base = m0 & 0xFFFFu;')
             lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
             lines.append('      if (!(exec & (1ULL << lane))) continue;')
             lines.append(
-                '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
+                '      d->per_lane_addr[lane] = byte_base + lane * 4u + offset + wf.lds_base();'
             )
         lines.append('    }')
         lines.append('  }')
@@ -9452,6 +9452,18 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
+        L.extend(
+            [
+                '  if (exec) {',
+                '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
+                '    if (data.valid()) {',
+                '      data.copy_dwords_lane_major(d->store_data, exec);',
+                '      set_data(std::move(d));',
+                '      return;',
+                '    }',
+                '  }',
+            ]
+        )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(

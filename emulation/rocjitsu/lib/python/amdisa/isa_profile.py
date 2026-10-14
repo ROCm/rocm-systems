@@ -776,8 +776,8 @@ class IsaProfile(ABC):
         return {}
 
     @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        """True when DS ADDTID addresses use M0 as a byte-address base."""
+    def ds_addtid_wraps_20bit_address(self) -> bool:
+        """True when DS ADDTID wraps M0 plus lane offset to twenty bits."""
         return False
 
     @property
@@ -1970,7 +1970,7 @@ class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
 
     Differs from CDNA3/4 (the CdnaProfile defaults):
-    - No AccVGPRs.
+    - Separate accumulator VGPRs, with selectors starting at 768.
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
@@ -1983,7 +1983,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        return False
+        return True
 
     @property
     def dpp_64bit_input_row_select_only(self) -> bool:
@@ -1991,11 +1991,11 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        return 0
+        return 768
 
     @property
     def max_acc_vgprs(self) -> int:
-        return 0
+        return 256
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
@@ -2958,7 +2958,7 @@ class Cdna5Profile(Rdna4Profile):
         }
 
     @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
+    def ds_addtid_wraps_20bit_address(self) -> bool:
         return True
 
     @property

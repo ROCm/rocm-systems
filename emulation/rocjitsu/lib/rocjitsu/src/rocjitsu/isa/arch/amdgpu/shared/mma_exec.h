@@ -14,7 +14,7 @@
 ///   - Unified:  CDNA3/4 — VGPR and AccVGPR share a single file; encoding
 ///               range 256-511 = VGPR, 768-1023 = AccVGPR (alias).
 ///   - Separate: CDNA2 — dedicated AccVGPR file, src2 ranges differ.
-///   - VgprOnly: CDNA1 — no AccVGPR; src2 is always a VGPR or constant.
+///   - VgprOnly: VGPR-only targets; src2 is a VGPR or constant.
 ///
 /// Key conventions:
 ///   - Output D[i][j]: i is the register dimension (matrix column),
@@ -57,7 +57,7 @@ namespace amdgpu {
 enum class AccMode {
   Unified,  ///< CDNA3/4: VGPR and AccVGPR are in a unified file.
   Separate, ///< CDNA2: dedicated AccVGPR file (encoding base 512 for dst).
-  VgprOnly, ///< CDNA1: no AccVGPR; src2 is always a VGPR or constant.
+  VgprOnly, ///< VGPR-only accumulator operands.
 };
 
 struct InputLoc {
