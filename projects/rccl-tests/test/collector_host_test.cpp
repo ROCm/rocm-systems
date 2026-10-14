@@ -9,11 +9,17 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "collector.cu"
+
+// The counter filter is read once; keep it from narrowing the tables.
+static const int kUnsetFilter = unsetenv("RCCL_TESTS_NIC_COUNTER_LIST");
 
 static NetworkCounterSnapshot Snap(std::map<std::string, uint64_t> c, int64_t tsUs) {
   NetworkCounterSnapshot s;
@@ -39,7 +45,7 @@ TEST(Collector, Bnxt_ColumnOrderKept) {
       "rx_pfc_ena_frames_pri", "tx_pfc_ena_frames_pri", "pfc_pri3_rx_transitions", "pfc_pri3_tx_transitions",
       "rx_cnp_pkts",           "tx_cnp_pkts",           "rx_roce_discards",        "rx_stat_discards",
       "to_retransmits",        "max_retry_exceeded",    "oos_drop_count",          "seq_err_naks_rcvd",
-      "pfc_pri*_rx_transitions", "pfc_pri*_tx_transitions"};
+      "pfc_rx_transitions",    "pfc_tx_transitions"};
   EXPECT_EQ(Names(NetCounterGetCounterList(NIC_BNXT_RE)), expect);
 }
 
@@ -49,7 +55,72 @@ TEST(Collector, Bnxt_RetransmitCountersReadFromSysfs) {
         d.name == "seq_err_naks_rcvd") {
       EXPECT_EQ(d.source, COUNTER_SRC_IB_HW) << d.name;
     }
+    if (d.name == "rx_stat_discards") {
+      EXPECT_EQ(d.source, COUNTER_SRC_ETHTOOL);
+    }
+    if (d.name == "oos_drop_count") {  // same order as RCCL telemetry
+      EXPECT_EQ(d.key, "res_oos_drop_count");
+      EXPECT_EQ(d.fallback_name, "oos_drop_count");
+    }
   }
+}
+
+TEST(Collector, Tables_DisplayNamesHaveNoPattern) {
+  for (NicType t : {NIC_BNXT_RE, NIC_IONIC, NIC_MLX5, NIC_UNKNOWN}) {
+    for (const auto& d : NetCounterGetCounterList(t)) {
+      EXPECT_EQ(d.name.find('*'), std::string::npos) << d.name;
+    }
+  }
+}
+
+TEST(Collector, Unknown_UsesBnxtTable) {
+  EXPECT_EQ(Names(NetCounterGetCounterList(NIC_UNKNOWN)), Names(NetCounterGetCounterList(NIC_BNXT_RE)));
+}
+
+TEST(Collector, Ethtool_FallbackKeyAndPerQueueLines) {
+  std::vector<CounterDescriptor> sel = {{"rx_stat_discards", COUNTER_SRC_ETHTOOL, false, "rx_stat_discard"},
+                                        {"rx_discards", COUNTER_SRC_ETHTOOL, false, ""},
+                                        {"pfc_rx_transitions", COUNTER_SRC_ETHTOOL, true, "",
+                                         "pfc_pri*_rx_transitions"}};
+  std::map<std::string, uint64_t> out;
+  NetCounterParseEthtool("NIC statistics:\n"
+                         "     [0]: rx_discards: 9\n"
+                         "     rx_stat_discard: 5\n"
+                         "     pfc_pri3_rx_transitions: 4\n"
+                         "     pfc_pri3_rx_duration_us: 100\n",
+                         sel, out);
+  EXPECT_EQ(out["rx_stat_discards"], 5u);
+  EXPECT_EQ(out.count("rx_discards"), 0u);
+  EXPECT_EQ(out.count("pfc_pri3_rx_transitions"), 1u);
+  EXPECT_EQ(out.count("pfc_pri3_rx_duration_us"), 0u);
+}
+
+TEST(Collector, Ethtool_PrimaryWinsOverFallback) {
+  std::vector<CounterDescriptor> sel = {{"rx_stat_discards", COUNTER_SRC_ETHTOOL, false, "rx_stat_discard"}};
+  std::map<std::string, uint64_t> out;
+  NetCounterParseEthtool("     rx_stat_discard: 5\n     rx_stat_discards: 7\n", sel, out);
+  EXPECT_EQ(out["rx_stat_discards"], 7u);
+}
+
+TEST(Collector, Mlx5_PausePatternSkipsDuration) {
+  std::vector<CounterDescriptor> sel;
+  for (const auto& d : NetCounterGetCounterList(NIC_MLX5)) {
+    if (d.name == "rx_prio_pause") { sel.push_back(d); }
+  }
+  ASSERT_EQ(sel.size(), 1u);
+  std::map<std::string, uint64_t> out;
+  NetCounterParseEthtool("     rx_prio0_pause: 1\n     rx_prio3_pause: 2\n     rx_prio3_pause_duration: 9\n", sel, out);
+  EXPECT_EQ(out.size(), 2u);
+  EXPECT_EQ(out.count("rx_prio3_pause_duration"), 0u);
+}
+
+TEST(Collector, Debugfs_ExactKeyOnly) {
+  std::map<std::string, uint64_t> out;
+  NetCounterParseDebugfs("\tres_oos_drop_count: 3\n\toos_drop_count: 8\n\tto_retransmits = 2\n",
+                         {"oos_drop_count", "to_retransmits"}, out);
+  EXPECT_EQ(out["oos_drop_count"], 8u);
+  EXPECT_EQ(out["to_retransmits"], 2u);
+  EXPECT_EQ(out.size(), 2u);
 }
 
 TEST(Collector, Mlx5_TableSelected) {
@@ -70,7 +141,7 @@ TEST(Collector, Delta_MissingCounterIsNotZero) {
 }
 
 TEST(Collector, Delta_PriorityPatternSumsAllPriorities) {
-  CounterDescriptor d{"pfc_pri*_rx_transitions", COUNTER_SRC_ETHTOOL, true, ""};
+  CounterDescriptor d{"pfc_rx_transitions", COUNTER_SRC_ETHTOOL, true, "", "pfc_pri*_rx_transitions"};
   std::map<std::string, uint64_t> before = {{"pfc_pri0_rx_transitions", 1},
                                             {"pfc_pri3_rx_transitions", 10},
                                             {"pfc_pri3_rx_duration_us", 100},
@@ -115,6 +186,12 @@ TEST(Collector, Table_NotAvailablePrintsNA) {
   EXPECT_EQ(t[4], "N/A");
 }
 
+TEST(Collector, Table_NoData) {
+  testing::internal::CaptureStdout();
+  NetCounterPrintTable({}, {}, {}, 3, {});
+  EXPECT_NE(testing::internal::GetCapturedStdout().find("rank=3 status=NO_DATA"), std::string::npos);
+}
+
 TEST(Collector, IbHca_PrefixExactExcludePort) {
   std::vector<std::string> devs = {"bnxt_re10", "bnxt_re1", "bnxt_re0", "mlx5_0"};
   using V = std::vector<std::string>;
@@ -126,4 +203,22 @@ TEST(Collector, IbHca_PrefixExactExcludePort) {
   EXPECT_EQ(NetCounterFilterIbHca("=bnxt_re0:1, mlx5_0:2", devs), (V{"bnxt_re0:1", "mlx5_0:2"}));
   EXPECT_EQ(NetCounterFilterIbHca("nosuchdev", devs), V{});
   EXPECT_EQ(NetCounterFilterIbHca("", devs), V{});
+}
+
+TEST(Collector, IbHca_RcclEdgeCases) {
+  std::vector<std::string> devs = {"bnxt_re1", "bnxt_re0", "mlx5_0"};
+  using V = std::vector<std::string>;
+  // Entry order is kept.
+  EXPECT_EQ(NetCounterFilterIbHca("=bnxt_re1,bnxt_re0", devs), (V{"bnxt_re1", "bnxt_re0"}));
+  // Excluding another port keeps the collected port 1.
+  EXPECT_EQ(NetCounterFilterIbHca("^mlx5_0:2", devs), (V{"bnxt_re0", "bnxt_re1", "mlx5_0"}));
+  EXPECT_EQ(NetCounterFilterIbHca("^mlx5_0:1", devs), (V{"bnxt_re0", "bnxt_re1"}));
+  // Both ports of one device.
+  EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:1,mlx5_0:2", devs), (V{"mlx5_0:1", "mlx5_0:2"}));
+  // Port 0 or a non-number matches no port; rail/plane fields are ignored.
+  EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:0,bnxt_re0:x", devs), V{});
+  EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:1:3:0", devs), (V{"mlx5_0:1"}));
+  // An empty list selects every device; '^' alone selects none.
+  EXPECT_EQ(NetCounterFilterIbHca(",", devs), (V{"bnxt_re0", "bnxt_re1", "mlx5_0"}));
+  EXPECT_EQ(NetCounterFilterIbHca("^", devs), V{});
 }
