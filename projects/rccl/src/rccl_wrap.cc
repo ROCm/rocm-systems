@@ -2085,8 +2085,8 @@ static inline size_t rcclA2aWindow(int64_t knob, size_t tableValue) { return kno
 //   Direct    out of place, recvbuff in a symmetric window (NCCL_WIN_COLL_SYMMETRIC, LSA), nRanks
 //             <= 16 on one LSA team, P % 16 == 0, 16B-aligned buffers, P > a2aDirectPerPeerCut and
 //             a2aDirectMin <= T <= a2aDirectMax. Takes the call ahead of LL128 V2.
-//             Two ranks on one physical GPU (topology siblings, rcclDdaA2aTopoSibling): push instead
-//             above a2aDirectMin, at any T (in rounds above the push buffer).
+//             Two ranks on one physical GPU (topology siblings, rcclDdaA2aTopoSibling): never above
+//             a2aDirectMin; those calls take the push rule below (stock path above a2aPushMax).
 //   LL128 V2  T <= ddaLL128Max[A2A]
 //   Push      out of place, P % 16 == 0, 16B-aligned buffers, table LL128 window < T <= a2aPushMax
 //             (multi-round if T exceeds its agreed buffer). The floor is the ARCH-TABLE LL128 window,
@@ -2161,21 +2161,24 @@ static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclAr
   }
 
   if (directTakes) {
-    // Two ranks on one physical GPU (topology siblings: the two DPX partitions of one package): push
-    // beats Direct there above 16 MiB. P05 2r GPUs 0,1 R0 OOP busBW Direct / push: 16M 433/410,
+    // Two ranks on one physical GPU (topology siblings: the two DPX partitions of one package):
+    // Direct loses there above 16 MiB, so the call takes what #5 would, push inside its window and
+    // the stock path above it. P05 2r GPUs 0,1 R0 OOP busBW Direct / push: 16M 433/410,
     // 32M 450/511, 128M 330/527, 256M 331/530, 512M 385/544, 1G 384/567; cross-chip 0,2 the reverse:
-    // 128M 438/318, 1G 460/310. 4r with sibling pairs keeps Direct (256M 515 vs push 448). Above the
-    // push buffer push runs in rounds (P07 2r 0,1: 2G-16G Direct 375-446 vs push 565-575).
+    // 128M 438/318, 1G 460/310. 4r with sibling pairs keeps Direct (256M 515 vs push 448). Above
+    // a2aPushMax the stock windowed path beats push in rounds (2r 0,1 -R 2: 2G 597-611 vs 571-582,
+    // 4G 659.5 vs 576.9) and Direct (P07: 2G-16G 375-446).
     const bool siblingPair =
       comm->nRanks == 2 && comm->peerInfo != nullptr &&
       rcclDdaA2aTopoSibling(
         comm->nRanks, comm->rank, [comm](int r) { return comm->peerInfo[r].hostHash; },
         [comm](int r) { return comm->peerInfo[r].busId; }) >= 0;
-    if (siblingPair && totalBytes > directMin &&
-        ncclAllToAllDdaFabricPushEligible(comm, sendbuff, recvbuff, count, datatype)) {
-      decision->algo = RCCL_DDA_FABRIC_A2A_PUSH;
-      decision->nMaxChannels = ncclAllToAllDdaFabricPushBlocks(comm, count, datatype);
-      *taken = true;
+    if (siblingPair && totalBytes > directMin) {
+      if (pushShape && ncclAllToAllDdaFabricPushEligible(comm, sendbuff, recvbuff, count, datatype)) {
+        decision->algo = RCCL_DDA_FABRIC_A2A_PUSH;
+        decision->nMaxChannels = ncclAllToAllDdaFabricPushBlocks(comm, count, datatype);
+        *taken = true;
+      }
       return ncclSuccess;
     }
     decision->algo = RCCL_DDA_FABRIC_A2A_DIRECT;

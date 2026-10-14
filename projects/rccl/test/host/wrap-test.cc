@@ -8249,8 +8249,9 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectNeedsWindow) {
 }
 
 // Two ranks on one physical GPU (topology siblings: same host, busId differs only in the PCI
-// function, rcclDdaA2aTopoSibling): push replaces Direct above a2aDirectMin, also above the push
-// buffer (rounds). Two physical GPUs, or two ranks with the same busId, keep Direct.
+// function, rcclDdaA2aTopoSibling): push replaces Direct above a2aDirectMin inside the push window,
+// and above a2aPushMax no fabric path takes the call (stock). Two physical GPUs, or two ranks with
+// the same busId, keep Direct.
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectSiblingPairUsesPush) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAlltoAll_Gfx1250DirectSiblingPairUsesPush",
@@ -8272,8 +8273,12 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectSiblingPairUsesPush) {
           ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 16u << 20, kA2aSend, kA2aWinRecv, true, &d));
           EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;  // T = 32 MiB
           EXPECT_EQ(145u, d.nMaxChannels);
-          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 2ull << 30, kA2aSend, kA2aWinRecv, true, &d));
-          EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;  // T = 4 GiB > a2aPushMax: rounds
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 256u << 20, kA2aSend, kA2aWinRecv, true, &d));
+          EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;  // T = 512 MiB
+          d = rcclCollDecision{};
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 30, kA2aSend, kA2aWinRecv, true, &d));
+          EXPECT_NE((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;  // T = 2 GiB > a2aPushMax: stock
+          EXPECT_NE((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo) << rank;
           ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 8u << 20, kA2aSend, kA2aWinRecv, true, &d));
           EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo) << rank;  // T = 16 MiB == a2aDirectMin
           ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 4u << 20, kA2aSend, kA2aWinRecv, true, &d));
