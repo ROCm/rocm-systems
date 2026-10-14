@@ -144,8 +144,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
     const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
@@ -193,8 +194,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
@@ -251,8 +253,9 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
+    if (!AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
+        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_TRUE(MPIHelpers::allRanksTrue(RegMr(window->ptr, window->totalSize, &mh, &gh) == ncclSuccess));
