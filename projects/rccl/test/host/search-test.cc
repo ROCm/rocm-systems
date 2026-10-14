@@ -1666,4 +1666,50 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyNgpusGpuSubs_AreStillAccepted) {
   }
 }
 
+TEST_F(SearchXmlChannelMicrotest, RankAttributeTooWideForAnInt_IsRejected) {
+  // strtol yields a long; the assignment to int truncates. 4294967296 is the
+  // interesting case: it truncates to 0, a perfectly plausible rank, so the
+  // graph silently gains the wrong one rather than failing a later check.
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", "4294967296");
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
+}
+
+TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", "-5");
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+}
+
+TEST_F(SearchXmlChannelMicrotest, LargestRepresentableRankAttribute_IsStillAccepted) {
+  // The tightest accepted input at the top of the range. The rank= attribute
+  // exists so a file can name ranks the local dev lookup cannot resolve, so
+  // the bound must stay at INT_MAX rather than the local system's rank set.
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", std::to_string(INT_MAX).c_str());
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->intra[0], INT_MAX);
+}
+
+TEST_F(SearchXmlChannelMicrotest, ZeroRankAttribute_IsStillAccepted) {
+  // The tightest accepted input at the bottom of the range: rank 0 must not
+  // be swept up by a bound tightened from "< 0" to "<= 0".
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "1");
+  SetAttr(gpu, "rank", "0");
+  graph()->intra[0] = -7;  // dirty it: the fixture zeroes the graph
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->intra[0], 0);
+}
+
 }  // namespace
