@@ -1,6 +1,10 @@
 # Changelog for rocSHMEM
 ## Unreleased - rocSHMEM 3.8.0 for ROCm 10.x
 
+### Fixed
+* Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
+  Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
+
 ### Added
 * GDA device code refactor (#7217)
   * Core GDA device code is now header-only.

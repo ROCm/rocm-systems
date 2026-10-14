@@ -6,7 +6,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+- HSA API tracing support for `hsa_amd_enable_high_precision_timestamps`.
+
 ### Changed
+
+- Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
 
 ### Resolved issues
 
