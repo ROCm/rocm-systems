@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <limits>
 #include <map>
 #include <string>
 
@@ -68,11 +67,10 @@ static uint64_t effective_level_mask(uint64_t requested_mask, const amdsmi_frequ
 }
 
 // Binary string for a bitmask, trimmed of leading zeros (down to at least one
-// digit) for display. Formats every bit of the mask, not only the
-// AMDSMI_MAX_NUM_FREQUENCIES level bits, so a bit past the last possible
-// level still shows.
+// digit) for display. Covers every level bit plus bit
+// AMDSMI_MAX_NUM_FREQUENCIES, the out-of-range bit the test sets.
 static std::string to_bit_string(uint64_t mask) {
-  std::string s = std::bitset<std::numeric_limits<uint64_t>::digits>(mask).to_string();
+  std::string s = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES + 1>(mask).to_string();
   s.erase(0, std::min(s.find_first_not_of('0'), s.size() - 1));
   return s;
 }
