@@ -985,6 +985,45 @@ add_test(
 )
 
 # -----------------------------------
+# Single-pass packable (SPP) + bucket helper unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_counter_grouping_single_pass
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_counter_grouping_single_pass.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_soc/test_counter_grouping_single_pass.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_grouping_tcc
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_counter_grouping_tcc.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_counter_grouping_tcc.py
+        ${WORKING_DIR_OPTION}
+)
+
+# Same-pass bind (SPP analyze)
+add_test(
+    NAME test_pass_provenance
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_pass_provenance.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_pass_provenance.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_counter_grouping_buckets
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_counter_grouping_buckets.xml ${COV_OPTION}
+        tests/unit/rocprof_compute_soc/test_counter_grouping_buckets.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # TTY table rendering unit tests
 # -----------------------------------
 
@@ -1122,6 +1161,10 @@ if(${ENABLE_COVERAGE})
         test_profiler_base
         test_rocprofv3_avail_interface
         test_soc_base
+        test_counter_grouping_single_pass
+        test_counter_grouping_tcc
+        test_pass_provenance
+        test_counter_grouping_buckets
         test_tty
         test_file_io
         test_utils_profile_csv

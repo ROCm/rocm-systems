@@ -8,6 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
+from typing import Collection, Dict, Optional, Set, Tuple
 
 from utils.logger import console_error
 
@@ -39,7 +40,7 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # SUM($denom) == N and Avg is the mean per dispatch.
 UNIT_COUNTER = "Dispatch_Unit"
 
-SUPPORTED_DENOM: dict[str, str] = {
+SUPPORTED_DENOM: Dict[str, str] = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
@@ -48,7 +49,7 @@ SUPPORTED_DENOM: dict[str, str] = {
 }
 
 
-def get_build_in_vars(gpu_series: str) -> dict[str, str]:
+def get_build_in_vars(gpu_series: str) -> Dict[str, str]:
     """Return the architecture-specific built-in variables for *gpu_series*.
 
     Args:
@@ -65,7 +66,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
             "(unknown GPU arch?)."
         )
 
-    build_in_vars: dict[str, dict[str, str]] = {
+    build_in_vars: Dict[str, Dict[str, str]] = {
         "cdna": {
             "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
             "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
@@ -111,7 +112,7 @@ def get_build_in_vars(gpu_series: str) -> dict[str, str]:
 # Block remapping: SQC and SP counters belong to the SQ IP block
 # ---------------------------------------------------------------------------
 
-BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
+BLOCK_REMAP: Dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 
 
-def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
+def parse_counters_text(text: str) -> Tuple[Set[str], Set[str]]:
     """Extract HW counter names and $variable names from formula text.
 
     Returns (hw_counters, variables) where variables are the names without
@@ -135,7 +136,7 @@ def parse_counters_text(text: str) -> tuple[set[str], set[str]]:
 
 def extract_counters_and_variables(
     text: str, gpu_series: str, include_supported_denom: bool = True
-) -> tuple[set[str], set[str]]:
+) -> Tuple[Set[str], Set[str]]:
     """Return (hw_counters, builtin_vars) referenced by text, with transitive
     resolution. Recognizes both $var and ammolite__var forms.
 
@@ -154,10 +155,10 @@ def extract_counters_and_variables(
             variables.update(var_d)
 
     build_in_vars = get_build_in_vars(gpu_series)
-    builtin_vars: set[str] = set()
-    seen: set[str] = set()
+    builtin_vars: Set[str] = set()
+    seen: Set[str] = set()
     while variables - seen:
-        new_vars: set[str] = set()
+        new_vars: Set[str] = set()
         for var in variables - seen:
             seen.add(var)
             if var in build_in_vars:
@@ -180,3 +181,58 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
+
+
+_ACCUM_SUFFIX = "_ACCUM"
+
+
+def _pmc_bare_name(counter: str) -> str:
+    """Strip TCC channel suffix ``[N]`` if present."""
+    return counter.split("[", 1)[0]
+
+
+def accum_base_counter(counter: str) -> Optional[str]:
+    """Return the base PMC for a named ``*_ACCUM`` counter, else None."""
+    name = _pmc_bare_name(counter)
+    if not name.endswith(_ACCUM_SUFFIX):
+        return None
+    return name[: -len(_ACCUM_SUFFIX)]
+
+
+def pmc_slot_cost(counter: str, present: Optional[Collection[str]] = None) -> int:
+    """Perfmon register slots charged when adding ``counter`` to a bucket.
+
+    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics and
+    need two registers (BASE + HIGH_RES accum) when alone. If ``BASE`` is
+    already in ``present``, only the HIGH_RES slot is charged (+1). Conversely,
+    adding ``BASE`` when ``BASE_ACCUM`` is already present charges 0 (BASE was
+    included in the ACCUM cost). All other PMCs cost 1.
+
+    For an order-independent total over a finished set, use
+    ``pmc_bucket_slot_cost``.
+    """
+    name = _pmc_bare_name(counter)
+    present_names = {_pmc_bare_name(p) for p in present} if present else set()
+
+    base = accum_base_counter(name)
+    if base is not None:
+        return 1 if base in present_names else 2
+
+    if f"{name}{_ACCUM_SUFFIX}" in present_names:
+        return 0
+    return 1
+
+
+def pmc_bucket_slot_cost(counters: Collection[str]) -> int:
+    """Order-independent slot total for a set of PMC names in one block bucket.
+
+    Equivalent to ``len(names) +`` number of ``*_ACCUM`` whose BASE is not also
+    in the set (each such ACCUM still needs its BASE register).
+    """
+    names = {_pmc_bare_name(c) for c in counters}
+    missing_base = 0
+    for name in names:
+        base = accum_base_counter(name)
+        if base is not None and base not in names:
+            missing_base += 1
+    return len(names) + missing_base
