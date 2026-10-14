@@ -436,7 +436,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       }
       const unsigned width = std::max(1, operand.size_bits() / 32);
       const auto selector =
-          relative_scalar_selector(operand.encoding_value(), width, wf.m0(), write, split);
+          relative_scalar_selector(operand.encoding_value(), wf.m0(), write, split);
       if (auto range = resolve_scalar_register_range(wf, selector, width)) {
         if (auto reg = range->register_ref())
           access(*reg, ~uint64_t{0}, 0xf, write);

@@ -543,6 +543,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VMovB64Vop1 : public Vop1 {

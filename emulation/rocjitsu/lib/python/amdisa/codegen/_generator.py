@@ -6972,6 +6972,9 @@ class CodeGenerator:
         if cls == 'nop':
             return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
 
+        if cls == 'setkill':
+            return '  if (inst_.simm16 & 1u) wf.end();'
+
         if cls == 'endpgm':
             # Use end() instead of halt() to drain outstanding memory ops.
             # If all wait counters are zero, end() halts immediately.
@@ -7309,7 +7312,7 @@ class CodeGenerator:
                 )
                 L.append(
                     f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), width_words, wf.m0(), false, false);'
+                    f'{src_ops[0]}.encoding_value(), wf.m0(), false, false);'
                 )
                 L.append(
                     f'  Operand indexed_src({src_ops[0]}.size_bits(), OperandType::OPR_SSRC, '
@@ -7332,7 +7335,7 @@ class CodeGenerator:
                 )
                 L.append(
                     f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), width_words, wf.m0(), true, false);'
+                    f'{dst_ops[0]}.encoding_value(), wf.m0(), true, false);'
                 )
                 L.append(
                     f'  Operand indexed_dst({dst_ops[0]}.size_bits(), OperandType::OPR_SDST, '
@@ -7351,11 +7354,11 @@ class CodeGenerator:
             if op == 'srcdst2':
                 L.append(
                     f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), 1, wf.m0(), false, true);'
+                    f'{src_ops[0]}.encoding_value(), wf.m0(), false, true);'
                 )
                 L.append(
                     f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), 1, wf.m0(), true, true);'
+                    f'{dst_ops[0]}.encoding_value(), wf.m0(), true, true);'
                 )
                 L.append(
                     '  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));'
@@ -12589,6 +12592,10 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'setkill':
+                        ctor_body_parts.append(
+                            'if (inst_.simm16 & 1u) flags_ |= PROGRAM_TERMINATOR;'
+                        )
                     if _mem_sem and _mem_sem.semantic_class == 'endpgm':
                         # BasicBlock splitting treats PROGRAM_TERMINATOR as a hard
                         # stop with no fallthrough successor. Only S_ENDPGM ends the

@@ -3759,7 +3759,8 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
       auto decoded = decoder->decode_window(words, 0, error.emitter());
       ASSERT_TRUE(decoded.succeeded()) << error.message();
       for (uint32_t m0 : {0u, 3u, 35u, 37u, 74u, 92u, 102u, 104u, 0x2303u}) {
-        if ((op == 1 && (m0 & 0xffu) > 100) || (op == 3 && (m0 & 0xffu) >= 48) ||
+        if ((op != 4 && m0 > 255) || ((op == 1 || op == 3) && (m0 & 1)) ||
+            (op == 1 && (m0 & 0xffu) > 100) || (op == 3 && (m0 & 0xffu) >= 48) ||
             (op == 2 && (m0 & 0xffu) >= 96))
           continue;
         SCOPED_TRACE(m0);
@@ -3773,10 +3774,8 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
         // Named-register getters/setters do not issue scalar-observer callbacks.
         // Supplement those aliases from the documented scalar selector map.
         const unsigned width = op == 1 || op == 3 ? 2 : 1;
-        const unsigned src = 4 + (op < 2 || op == 4 ? (m0 & 0xffu) * width : 0);
-        const unsigned dst = 32 + (op == 4   ? (m0 >> 8) & 0xffu
-                                   : op >= 2 ? (m0 & 0xffu) * width
-                                             : 0);
+        const unsigned src = 4 + (op == 4 ? (m0 & 0xffu) : op < 2 ? m0 : 0);
+        const unsigned dst = 32 + (op == 4 ? (m0 >> 8) & 0xffu : op >= 2 ? m0 : 0);
         auto named = [&](unsigned selector, auto &accesses) {
           for (unsigned word = 0; word < width; ++word) {
             const auto current = selector + word;

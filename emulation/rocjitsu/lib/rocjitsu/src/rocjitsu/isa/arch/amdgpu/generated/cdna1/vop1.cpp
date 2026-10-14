@@ -2913,6 +2913,7 @@ VScreenPartition4seB32Vop1::VScreenPartition4seB32Vop1(const MachineInst *inst)
   }
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {

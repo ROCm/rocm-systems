@@ -231,7 +231,7 @@ void SAndNot1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
   uint32_t src_reg =
-      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), width_words, wf.m0(), false, false);
+      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), wf.m0(), false, false);
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
     amdgpu::RegisterAccess(wf).write_scalar64(
@@ -245,7 +245,7 @@ void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
   uint32_t src_reg =
-      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), width_words, wf.m0(), false, false);
+      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), wf.m0(), false, false);
   Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
   if (width_words == 2) {
     amdgpu::RegisterAccess(wf).write_scalar64(
@@ -258,8 +258,7 @@ void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg =
-      amdgpu::relative_scalar_selector(sdst.encoding_value(), width_words, wf.m0(), true, false);
+  uint32_t dst_reg = amdgpu::relative_scalar_selector(sdst.encoding_value(), wf.m0(), true, false);
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
     amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
@@ -272,8 +271,7 @@ void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
 
 void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg =
-      amdgpu::relative_scalar_selector(sdst.encoding_value(), width_words, wf.m0(), true, false);
+  uint32_t dst_reg = amdgpu::relative_scalar_selector(sdst.encoding_value(), wf.m0(), true, false);
   Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
   if (width_words == 2) {
     amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
@@ -285,10 +283,8 @@ void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t src_reg =
-      amdgpu::relative_scalar_selector(ssrc0.encoding_value(), 1, wf.m0(), false, true);
-  uint32_t dst_reg =
-      amdgpu::relative_scalar_selector(sdst.encoding_value(), 1, wf.m0(), true, true);
+  uint32_t src_reg = amdgpu::relative_scalar_selector(ssrc0.encoding_value(), wf.m0(), false, true);
+  uint32_t dst_reg = amdgpu::relative_scalar_selector(sdst.encoding_value(), wf.m0(), true, true);
   Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
   Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
   amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
