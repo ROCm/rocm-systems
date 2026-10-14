@@ -108,5 +108,7 @@ void ResetBootstrapStubs() {
   g_bcastGrowHandleCalls = 0;
   g_bcastGrowHandleIsRoot = false;
   g_bootstrapHandleMagic = 0xB007ULL;
+  g_bootstrapIntraNodeBarrierCall = BootstrapIntraNodeBarrierCall{};
+  g_bootstrapIntraNodeBarrierResult = ncclSuccess;
   ResetBootstrapHandleTemplate();
 }

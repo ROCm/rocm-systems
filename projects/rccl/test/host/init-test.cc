@@ -5490,6 +5490,85 @@ TEST_F(InitMicrotest, CommDestroySync_ProxyStopFails_WarnsAndReturnsThatError) {
   EXPECT_TRUE(LogHas(log, "proxy stop error")) << "actual log:\n" << log;
 }
 
+// --- The destroy-path intranode barrier: when it runs, and what a missing peer costs ---
+//
+// The barrier is a cross-process rendezvous with no cancellation protocol, so a rank that does not arrive strands
+// every peer that did (AICOMRCCL-2467). These pin both halves of the fix: the gate that keeps it off the comms it
+// cannot help, and the deadline that keeps it from blocking forever on the comms where it runs.
+
+TEST_F(InitMicrotest, CommDestroySync_PxnEnabled_RunsBarrierWithTheConfiguredDeadline) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook pxn(g_pxnDisable, [](ncclComm*) { return 0; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+
+  const BootstrapIntraNodeBarrierCall& rec = g_bootstrapIntraNodeBarrierCall;
+  ASSERT_EQ(1, rec.calls);
+  // The bounded entry point, never the unbounded one: a zero or negative deadline would restore the hang.
+  EXPECT_GT(rec.timeoutMsec, 0);
+  EXPECT_EQ(rcclParamDestroyBarrierTimeoutMsec(), rec.timeoutMsec);
+  // Membership is still upstream's: host-local ranks only, with this rank's index into that list.
+  EXPECT_EQ(std::vector<int>{0}, rec.ranks);
+  EXPECT_EQ(1, rec.nranks);
+  EXPECT_EQ(0, rec.rank);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_DefaultDeadlineIsTwoMinutes) {
+  // Pins the default rather than just its sign. It is deliberately far above any legitimate skew between
+  // host-local ranks reaching ncclCommDestroy, and below PyTorch's 600s ProcessGroupNCCL watchdog.
+  EXPECT_EQ(120000, rcclParamDestroyBarrierTimeoutMsec());
+}
+
+TEST_F(InitMicrotest, CommDestroySync_PxnDisabled_SkipsBarrierButStillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook pxn(g_pxnDisable, [](ncclComm*) { return 1; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  // The barrier exists only to protect PXN connection establishment; with PXN off it is pure deadlock risk.
+  EXPECT_EQ(0, g_bootstrapIntraNodeBarrierCall.calls);
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortFlagSet_SkipsBarrier) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook pxn(g_pxnDisable, [](ncclComm*) { return 0; });
+  *c.get()->abortFlag = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  // This skip is upstream's, and it is the divergence the deadline below has to absorb: an aborting rank leaves
+  // the rendezvous without telling anyone, so its peers must not wait on it forever.
+  EXPECT_EQ(0, g_bootstrapIntraNodeBarrierCall.calls);
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_BarrierDeadlineExpires_StopsProxyAndReportsTheError) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook pxn(g_pxnDisable, [](ncclComm*) { return 0; });
+  g_bootstrapIntraNodeBarrierResult = ncclRemoteError;
+
+  ncclResult_t ret = ncclSuccess;
+  const std::string log = CaptureInfoLog([&] { ret = Teardown_RunDestroySync(c.get()); });
+
+  EXPECT_EQ(1, g_bootstrapIntraNodeBarrierCall.calls);
+  // Expiry must not abandon teardown: the proxy still stops, which is what the barrier was delaying.
+  EXPECT_EQ(1, proxyStop.calls);
+  // It is reported rather than swallowed -- a peer that never arrived is a real fault, just no longer a fatal one.
+  EXPECT_EQ(ncclRemoteError, ret);
+  EXPECT_TRUE(LogHas(log, "intranode barrier error")) << "actual log:\n" << log;
+}
+
 TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallbacksClearThem) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
@@ -8053,11 +8132,6 @@ class Grow_ParentComm {
     comm_->cudaDev = kGrow_ParentCudaDev;
     comm_->config.minCTAs = kGrow_ParentMinCTAs;
     comm_->config.maxCTAs = kGrow_ParentMinCTAs;
-    for (int i = 0; i < kGrow_TargetRanks; i++) {
-      memset(&peerInfo_[i], 0, sizeof(peerInfo_[i]));
-      peerInfo_[i].hostHash = static_cast<uint64_t>(i) + 1;
-    }
-    comm_->peerInfo = peerInfo_;
   }
   ncclComm* get() { return comm_.get(); }
   ncclComm* operator->() { return comm_.get(); }
@@ -8066,7 +8140,6 @@ class Grow_ParentComm {
   uint32_t abortFlag_ = 0;
   uint32_t abortFlagDev_ = 0;
   int abortFlagRefCount_ = 1;
-  ncclPeerInfo peerInfo_[kGrow_TargetRanks] = {};
   std::unique_ptr<ncclComm> comm_;
 };
 
