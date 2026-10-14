@@ -15,7 +15,7 @@
 #include "nccl.h"
 #include "comm.h"
 #include "graph.h"
-#include "topo.h"
+#include "graph/topo.h"
 
 #include "fakes/nccl_fakes.h"
 
