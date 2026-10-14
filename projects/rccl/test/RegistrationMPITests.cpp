@@ -465,17 +465,17 @@ TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
     // and ncclCuMemEnable() is already 0 when the param was latched off or the
     // runtime has no dma-buf cuMem. Coordinate so one rank skipping cannot leave
     // the others blocked in ncclAllGather.
-    const bool noCuMem = !ncclCuMemEnable();
+    const bool cuMemEnabled = ncclCuMemEnable();
     const char* cuMemSkipWhy =
-        !noCuMem ? nullptr
-                 : (ncclCuMemRuntimeSupported()
-                        ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
-                          "communicator in this process; run with "
-                          "--gtest_filter=GdrFlush_CuMem.* or launch with "
-                          "NCCL_CUMEM_ENABLE=1"
-                        : "Requires a kernel/runtime that can enable cuMem "
-                          "(dma-buf, kernel >= 6.8)");
-    if (auto reason = mpiCoordinatedSkipReason(noCuMem, cuMemSkipWhy); !reason.empty()) {
+        cuMemEnabled ? nullptr
+                     : (ncclCuMemRuntimeSupported()
+                            ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                              "communicator in this process; run with "
+                              "--gtest_filter=GdrFlush_CuMem.* or launch with "
+                              "NCCL_CUMEM_ENABLE=1"
+                            : "Requires a kernel/runtime that can enable cuMem "
+                              "(dma-buf, kernel >= 6.8)");
+    if (auto reason = mpiCoordinatedSkipReason(!cuMemEnabled, cuMemSkipWhy); !reason.empty()) {
         GTEST_SKIP() << reason;
     }
 
