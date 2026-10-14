@@ -151,7 +151,7 @@ if [ "${MODE}" = "clean" ]; then
             continue
         fi
         case "${ENTRY_PATH}" in
-            "${SYSFS_BASE}"*) ;;
+            "${SYSFS_BASE}"|"${SYSFS_BASE}/"*) ;;
             *) echo "  REFUSED (outside ${SYSFS_BASE}): ${ENTRY_PATH}"; FAILED=$((FAILED + 1)); continue ;;
         esac
         if [ -d "${ENTRY_PATH}" ]; then
