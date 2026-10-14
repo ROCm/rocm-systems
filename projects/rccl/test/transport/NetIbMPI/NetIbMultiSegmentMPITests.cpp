@@ -437,14 +437,15 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, net_ == &netIbCast, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     if (rank == 0) {
-        EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 receiver still registered a multi-segment buffer";
+        EXPECT_EQ(r, ncclInvalidUsage)
+            << "recv side registered a multi-segment buffer without the peer CTS side table";
         EXPECT_EQ(mh, nullptr);
-        if (mh != nullptr) (void)net_->deregMr(comm, mh);
     } else {
-        EXPECT_EQ(r, ncclSuccess) << "sender multi-segment registration must not depend on the peer cap";
+        EXPECT_EQ(r, ncclSuccess)
+            << "send side should retain local per-segment MRs without the peer CTS side table";
         EXPECT_NE(mh, nullptr);
-        if (mh != nullptr) EXPECT_EQ(ncclSuccess, net_->deregMr(comm, mh));
     }
+    if (mh != nullptr) EXPECT_EQ(net_->deregMr(comm, mh), ncclSuccess);
 #else
     (void)r;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";

@@ -15,6 +15,7 @@
 #include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "../../../src/transport/net_ib/gin.h"
+#include "../../../src/transport/net_ib/rma_multiseg.h"
 #include "rccl_common.h"
 
 #include <algorithm>
