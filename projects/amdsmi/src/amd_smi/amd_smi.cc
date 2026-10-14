@@ -1724,7 +1724,8 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Get the PLX temperature from the gpu_metrics
+  // PLX comes from gpu_metrics. The unit tests cover the helper; this
+  // delegation is covered by TempRead on an APU, where the sensor is absent.
   if (sensor_type == AMDSMI_TEMPERATURE_TYPE_PLX) {
     amdsmi_gpu_metrics_t metric_info;
     auto r_status = amdsmi_get_gpu_metrics_info(processor_handle, &metric_info);

@@ -1178,28 +1178,24 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
     return errno;
   }
 
-  // Count bytes rather than whole items, so a node that came up short can be
-  // told apart from one that produced nothing at all.
+  // Count bytes, not items: an empty node must be told from a short one.
   errno = 0;
   const std::size_t bytes_read = fread(p_binary_data, 1, b_size, ptr);
   const int read_errno = errno;
-  // fread() reports an empty node, a short node and a refused read alike, and
-  // only the stream says which. Ask before fclose() invalidates it.
+  // Only the stream says which of the three it was. Ask before fclose().
   const bool read_failed = (std::ferror(ptr) != 0);
   fclose(ptr);
   if (bytes_read != b_size) {
     auto result = EIO;
     const auto* cause = "the node came up short of the size it declared";
     if (read_failed) {
-      // The driver refused the read: a suspended or resetting device answers
-      // EBUSY and a runtime-inactive one EPERM. Hand back what it said, so
-      // those keep reaching the caller as the device states they are.
+      // Suspended or resetting answers EBUSY, runtime-inactive EPERM: pass
+      // it on, so each keeps reaching the caller as the state it is.
       result = (read_errno != 0) ? read_errno : EIO;
       cause = "the driver refused the read";
     } else if (bytes_read == 0) {
-      // An ASIC whose driver has no metrics callback publishes an empty node.
-      // That is the device saying it has nothing to report, not a malformed
-      // table, so it has to stay NOT_SUPPORTED rather than become a size error.
+      // A driver with no metrics callback publishes an empty node: nothing
+      // to report, not a bad table, so it stays NOT_SUPPORTED.
       result = ENOENT;
       cause = "the node is empty";
     }

@@ -688,9 +688,8 @@ TEST(GpuUnit, TruncatedMetricsTableReportsUnexpectedSize) {
   EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
 }
 
-// An ASIC whose driver has no metrics callback still publishes the node, and
-// reading it returns nothing at all. That is the device reporting it has no
-// metrics, so it has to stay unsupported rather than be read as a bad table.
+// A driver with no metrics callback still publishes the node, and reading it
+// returns nothing: the device has no metrics, rather than a bad table.
 TEST(GpuUnit, EmptyMetricsNodeReportsNotSupported) {
   PRINT_VERBOSITY();
 

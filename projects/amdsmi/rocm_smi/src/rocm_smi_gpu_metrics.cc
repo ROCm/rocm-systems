@@ -5092,9 +5092,9 @@ auto Device::dev_read_gpu_metrics_all_data(DevInfoTypes type) -> rsmi_status_t {
     // instead of indeterminate data.
     auto* metrics_table = m_gpu_metrics_ptr->get_metrics_table().get();
     const auto table_size = m_gpu_metrics_ptr->sizeof_metric_table();
-    // Stop here rather than only skipping the fill: readDevInfo() below would
-    // be handed the same null pointer, and its assert() is compiled out of a
-    // release build, so the read would run on it.
+    // readDevInfo() below would take the same pointer, and its assert() is
+    // compiled out of a release build. Unreachable from sysfs, so untested:
+    // the flag and the table come from one decision.
     if (metrics_table == nullptr || table_size == 0) {
       status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
       ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
