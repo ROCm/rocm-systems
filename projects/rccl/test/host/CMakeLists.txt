@@ -1074,7 +1074,7 @@ set(_roctx_nvml_common_args
     ${_MICRO_MODE_DEFS}
     ROCTX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/roctx.cc"
     NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_roctx_nvml.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml ${_roctx_nvml_common_args})
 # -roctx builds roctx.cc's ROCTX_ENABLE arm against the stand-in fakes/roctx_include.

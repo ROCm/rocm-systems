@@ -251,7 +251,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroRoctxNvml`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
   `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH` / `NVMLWRAP_STUB_CC_PATH`,
   from `roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. Its own binary because
-  `fakes/comm_fakes.cc` stubs the `roctx_scoped_range_in` this file defines.
+  `fakes/comm_fakes.cc` stubs the `roctx_scoped_range_in` this file defines. See
+  `test_categories_micro_roctx_nvml.yaml`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
