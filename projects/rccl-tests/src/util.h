@@ -26,6 +26,10 @@ struct memInfo_t {
 // The top-level object remains open for the rest of the output.
 void jsonOutputInit(const char *path, int argc, char **argv, char **envp);
 
+// Extra top-level keys for a non-default buffer layout. No-op unless JSON output is enabled.
+void jsonOutputBufferLayout(const char* kind, size_t mappedBytes, int gpuSegments,
+                            int hostSegments, size_t segmentBytes, int registerMode);
+
 // Should be called to identify main thread after threads are started to ensure we don't duplicate output
 void jsonIdentifyWriter(bool is_writer);
 
