@@ -232,7 +232,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
           // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != 0) {
           }
           patAlgo.getNextOp(ps);
           int last = ps->last;
@@ -259,13 +259,13 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) { // Wait for compute thread
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) { // Wait for compute thread
           }
           int last = ps->last;
           prims.patReduce(ps, shmem);
           if (tidInGroup == 0)
-            __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                               __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+            __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
+                               __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
           if (last) break;
           step += nGroups;
         }
@@ -283,10 +283,10 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != -1) {
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != -1) {
           }
           patAlgo.getNextOp(ps);
-          __hip_atomic_store(schedulerStep, step, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+          __scoped_atomic_store_n(schedulerStep, step, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
           int last = ps->last;
           step++;
           if (last == 2) break;
@@ -312,12 +312,12 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) {
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) {
           }
           int last = ps->last;
           prims.template patReduce<true>(ps, shmem);
           if (tidInGroup == 0)
-            __hip_atomic_store(schedulerStep, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+            __scoped_atomic_store_n(schedulerStep, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
           if (last) break;
           step += nGroups;
         }
@@ -341,7 +341,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) {
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) {
           }
           int last = ps->last;
           prims.patScatter(ps, shmem, step, parallelFactor, localRanks, count);

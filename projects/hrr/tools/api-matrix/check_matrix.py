@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """
 check_matrix.py — the HRR API matrix reporter.
 
-Three jobs, one source of truth:
+Four jobs, one source of truth:
 
   --emit-cxx [PATH] Generate the C++ expectations header the Catch2 tests
                     compile against, so the tests and this reporter cannot
@@ -28,11 +30,15 @@ does not have to re-run a GPU workload to produce a report.
 Verdicts per API:
 
   PASS           observed class == expected class.
-  XFAIL          expected to be broken and still broken. Payload-loss APIs sit
-                 here; they turn into XPASS when P2 fixes them, which is the
-                 signal to update api_matrix.yaml.
-  XPASS          expected to be broken and isn't. Not a failure, but it means
-                 the matrix is now describing the past.
+  XFAIL          declared as broken and still matching that declaration: a
+                 real handler whose recorded arguments are incomplete
+                 (payload_loss), or one that returns a HIP error or kills the
+                 replay. Nothing flips an XFAIL by itself when the cause is
+                 fixed; update api_matrix.yaml (drop payload_loss, or change
+                 the declared class) once it is.
+  XPASS          a declared absence that no longer holds: an API declared as
+                 never captured or unreachable that a tier reached after all.
+                 Not a failure, but the declaration is stale.
   FAIL           observed class != expected class. Something was reclassified
                  without the matrix being updated.
   NOT_CAPTURED   declared as never reaching the archive under its own name, and
@@ -48,8 +54,10 @@ Verdicts per API:
   SKIPPED        the overlay asks for no assertion at all, or the tier did not
                  run in this pass.
 
-Exit codes: 0 all good, 1 at least one FAIL, an undeclared coverage gap, or a
-tier below its coverage floor, 2 usage/tool error.
+Exit codes: 0 all good, 1 at least one FAIL, an undeclared coverage gap, a
+tier below its coverage floor, or a tier that omits a configured workload,
+2 usage/tool error (bad overlay, manifest or observation file, or a file that
+cannot be read or written).
 """
 
 from __future__ import annotations
@@ -58,10 +66,12 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Collection, Dict, List, Optional
 
 import matrix_common as mc  # noqa: E402
 
@@ -101,12 +111,10 @@ CLASS_CODE = {mc.CLASS_REAL: 0, mc.CLASS_NOOP: 1, mc.CLASS_ERROR_STUB: 2,
               mc.CLASS_HANDLER_ERROR: 3, mc.CLASS_CRASH: 4,
               mc.CLASS_UNREPLAYABLE: 5}
 
-# Must match HrrAppliesWhen in the emitted header.
-WHEN_CODE = {mc.UNREACHABLE_ALWAYS: 0, mc.UNREACHABLE_NO_IMAGE_SUPPORT: 1}
-
 # Classes that mean the API ran a real handler and did not come back cleanly.
-# Both are known-broken rather than misclassified, so they report as XFAIL and
-# flip to XPASS the day the handler is fixed.
+# Both are known-broken rather than misclassified, so they report as XFAIL
+# while they stay that way. Once fixed the observed class no longer matches the
+# declaration and the API reports FAIL until api_matrix.yaml is updated.
 BROKEN_CLASSES = (mc.CLASS_HANDLER_ERROR, mc.CLASS_CRASH)
 
 # Placeholder for "two tiers saw this API do different things". Not a class an
@@ -127,17 +135,17 @@ CXX_HEADER = '''/*
 /**
  * GENERATED FILE — do not edit by hand.
  *
- * Regenerate with:
- *   projects/hrr/tools/api-matrix/check_matrix.py --emit-cxx \\
- *       projects/hrr/tests/integration/{basename}
+ * Regenerate with, from projects/hrr/tools/api-matrix:
+ *   ./derive_manifest.py
+ *   ./check_matrix.py --emit-cxx ../../tests/integration/{basename}
  *
- * Source of truth is the pair api_classes.json (derived from HRR's generator)
- * and api_matrix.yaml (the authored tier and expectation overlay). Generating
- * this header rather than transcribing it is what keeps the Catch2 tests and
- * the matrix reporter from drifting into disagreeing about what an API is
- * supposed to do at replay.
+ * Source of truth is the pair api_classes.json (derived from HRR's generator
+ * by derive_manifest.py) and api_matrix.yaml (the authored tier and
+ * expectation overlay). Generating this header rather than transcribing it is
+ * what keeps the Catch2 tests and the matrix reporter from drifting into
+ * disagreeing about what an API is supposed to do at replay.
  *
- * Generated {timestamp} from {api_count} HIP APIs.
+ * Generated from {api_count} HIP APIs.
  */
 
 #pragma once
@@ -156,29 +164,17 @@ enum HrrExpectCode {{
                                // with the reason, instead of being attempted
 }};
 
-enum HrrAppliesWhen {{
-  kHrrWhenAlways = 0,          // holds on any part
-  kHrrWhenNoImageSupport = 1,  // only where hipDeviceAttributeImageSupport = 0
-}};
-
 struct HrrApiExpectation {{
   const char* api;
   const char* tier;
   int expect;          // HrrExpectCode
-  bool payload_loss;   // counted as faithful but cannot replay (section 8.3)
+  bool payload_loss;   // counted as faithful but cannot replay
   bool expect_captured;  // false: HIP folds it away before HRR records it
   // The handler is real and works, but for the arguments one of this tier's
   // own workloads records it returns an error. Observing HANDLER_ERROR is
   // then a known failure rather than the API having been reclassified.
   bool handler_error_ok;
   bool skip;           // not assertable from a single-process Catch2 workload
-  // Device capability this API's unreachable: declaration was measured under.
-  // kHrrWhenAlways for everything that holds on any part. Otherwise the matrix
-  // has only ever seen the API on a part with that capability, and on any
-  // other one it is unmeasured: whether a texture or array handle can exist is
-  // a property of the device, so a declaration taken where none can is not
-  // evidence about a part where they can.
-  int applies_when;
 }};
 
 // A tier's workloads and the coverage floor its run must clear.
@@ -194,7 +190,6 @@ struct HrrTierFloor {{
   const char* tier;
   int min_covered;
   int gpus;
-  bool skip_by_default;
   const char* const* workloads;
 }};
 
@@ -215,18 +210,42 @@ inline constexpr size_t kHrrTierFloorCount =
 '''
 
 
+def write_atomic(path: Path, text: str) -> None:
+    """Replace `path` with `text` without ever exposing a partial file.
+
+    Creates missing parent directories. The target's existing mode is kept;
+    a new file gets what the process umask allows, not mkstemp's 0600.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+    try:
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
 def emit_cxx(rows: List[mc.ApiRow], overlay: Dict[str, Any], path: Path) -> None:
     body = []
     for r in sorted(rows, key=lambda x: (x.tier, x.api)):
         body.append(
             '    {{"{api}", "{tier}", {expect}, {ploss}, {cap}, {herr}, '
-            '{skip}, {when}}},'.format(
+            '{skip}}},'.format(
                 api=r.api, tier=r.tier, expect=CLASS_CODE[r.expect_class],
                 ploss="true" if r.payload_loss else "false",
                 cap="true" if r.expect_captured else "false",
                 herr="true" if r.tier in r.handler_error_in else "false",
-                skip="true" if r.skip else "false",
-                when=WHEN_CODE[r.unreachable_when]))
+                skip="true" if r.skip else "false"))
 
     floors = []
     workload_arrays = []
@@ -241,16 +260,13 @@ def emit_cxx(rows: List[mc.ApiRow], overlay: Dict[str, Any], path: Path) -> None
             f"inline constexpr const char* const {array}[] = {{{entries}\n"
             "    nullptr,\n};\n")
         floors.append(
-            '    {{"{t}", {n}, {g}, {s}, {a}}},'.format(
+            '    {{"{t}", {n}, {g}, {a}}},'.format(
                 t=tier, n=int(meta.get("min_covered", 0)),
                 g=int(meta.get("gpus", 1)),
-                s="true" if meta.get("skip_by_default") else "false",
                 a=array))
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(CXX_HEADER.format(
+    write_atomic(path, CXX_HEADER.format(
         basename=path.name,
-        timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         api_count=len(rows),
         rows="\n".join(body),
         workload_arrays="\n".join(workload_arrays),
@@ -262,7 +278,52 @@ def emit_cxx(rows: List[mc.ApiRow], overlay: Dict[str, Any], path: Path) -> None
 # Observation loading and verdicts
 # ---------------------------------------------------------------------------
 
-def load_observations(results_dir: Path) -> Dict[str, Any]:
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_observation(f: Path, data: Any, known_apis: Collection[str]) -> None:
+    """Raise MatrixError unless one tier's file is what the tests write."""
+    if not isinstance(data, dict):
+        raise mc.MatrixError(f"{f.name} is not a JSON object")
+    tier = data.get("tier")
+    if tier not in mc.TIER_ORDER:
+        raise mc.MatrixError(
+            f"{f.name} declares unknown tier {tier!r}; expected one of "
+            f"{', '.join(mc.TIER_ORDER)}")
+    if tier != f.stem:
+        raise mc.MatrixError(
+            f"{f.name} declares tier {tier}; a file may only claim the tier "
+            "it is named for")
+    replay_exit = data.get("replay_exit")
+    if not _is_int(replay_exit):
+        raise mc.MatrixError(
+            f"{f.name} has no integer 'replay_exit' (got {replay_exit!r})")
+    workloads = data.get("workloads")
+    if not (isinstance(workloads, list)
+            and all(isinstance(w, str) for w in workloads)):
+        raise mc.MatrixError(f"{f.name}: 'workloads' must be a list of strings")
+    captured, observed = data.get("captured"), data.get("observed")
+    if not (isinstance(captured, dict)
+            and all(isinstance(k, str) and _is_int(v) and v >= 0
+                    for k, v in captured.items())):
+        raise mc.MatrixError(
+            f"{f.name}: 'captured' must map API names to counts >= 0")
+    if not (isinstance(observed, dict)
+            and all(isinstance(k, str) and v in mc.VALID_CLASSES
+                    for k, v in observed.items())):
+        raise mc.MatrixError(
+            f"{f.name}: 'observed' must map API names to one of "
+            f"{', '.join(mc.VALID_CLASSES)}")
+    unknown = sorted((set(captured) | set(observed)) - set(known_apis))
+    if unknown:
+        raise mc.MatrixError(
+            f"{f.name} names APIs that are not in api_classes.json: "
+            f"{', '.join(unknown)}")
+
+
+def load_observations(results_dir: Path,
+                      known_apis: Collection[str]) -> Dict[str, Any]:
     """Merge the per-tier JSON files the Catch2 tests wrote.
 
     Shape of each file:
@@ -271,9 +332,13 @@ def load_observations(results_dir: Path) -> Dict[str, Any]:
          "captured": {"hipMalloc": 4, ...},
          "observed": {"hipMalloc": "REAL", ...},
          "replay_exit": 0}
+
+    A file may only claim the tier it is named for, so one tier cannot be
+    reported twice or under another tier's name. Anything else the tests would
+    not have written is a tool error rather than something to report on.
     """
     if not results_dir.is_dir():
-        raise SystemExit(f"error: results dir not found: {results_dir}")
+        raise mc.MatrixError(f"results dir not found: {results_dir}")
 
     merged: Dict[str, Any] = {"tiers": {}, "captured": {}, "observed": {},
                               "by_tier": {}}
@@ -284,27 +349,28 @@ def load_observations(results_dir: Path) -> Dict[str, Any]:
     files = [f for f in sorted(results_dir.glob("T*.json"))
              if f.stem in mc.TIER_ORDER]
     if not files:
-        raise SystemExit(
-            f"error: no observation files in {results_dir}.\n"
+        raise mc.MatrixError(
+            f"no observation files in {results_dir}.\n"
             "The Catch2 tests write these when HRR_MATRIX_RESULTS_DIR is set; "
-            "run them through run-api-matrix.sh.")
+            "run the Unit_HRR_ApiMatrix_T*_Roundtrip tests.")
 
     for f in files:
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise SystemExit(f"error: {f} is not valid JSON: {exc}")
-        tier = data.get("tier")
-        if not tier:
-            raise SystemExit(f"error: {f} has no 'tier' field")
+            raise mc.MatrixError(f"{f} is not valid JSON: {exc}")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise mc.MatrixError(f"cannot read {f}: {exc}")
+        _check_observation(f, data, known_apis)
+        tier = data["tier"]
         merged["tiers"][tier] = {
-            "workloads": data.get("workloads", []),
-            "replay_exit": data.get("replay_exit"),
+            "workloads": data["workloads"],
+            "replay_exit": data["replay_exit"],
             "source_file": f.name,
         }
-        for api, count in (data.get("captured") or {}).items():
-            merged["captured"][api] = merged["captured"].get(api, 0) + int(count)
-        for api, klass in (data.get("observed") or {}).items():
+        for api, count in data["captured"].items():
+            merged["captured"][api] = merged["captured"].get(api, 0) + count
+        for api, klass in data["observed"].items():
             merged["by_tier"].setdefault(api, {})[tier] = klass
             # If two tiers both reached an API they must agree; a disagreement
             # is itself worth surfacing rather than silently taking the last.
@@ -403,12 +469,14 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         if declared_error:
             where = ", ".join(sorted(row.handler_error_in))
             result["verdict"] = VERDICT_XFAIL
-            result["observed"] = row.expect_class
+            result["cause"] = "handler_error"
+            result["observed_by_tier"] = dict(by_tier)
             result["detail"] = (
                 f"real handler, but it still returns an error for the "
                 f"arguments {where} records")
             return result
         result["verdict"] = VERDICT_FAIL
+        result["observed_by_tier"] = dict(by_tier)
         result["detail"] = ("tiers disagree: " + ", ".join(
             f"{t}={k}" for t, k in sorted(by_tier.items())))
         return result
@@ -420,9 +488,12 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
     # A declared handler error or crash is a known-broken API that is still
-    # broken, which is what XFAIL is for. It flips to XPASS the day it replays.
+    # broken, which is what XFAIL is for. Once it replays cleanly it no longer
+    # matches the declaration and reports FAIL until the overlay is updated.
     if row.expect_class in BROKEN_CLASSES:
         result["verdict"] = VERDICT_XFAIL
+        result["cause"] = ("crash" if row.expect_class == mc.CLASS_CRASH
+                           else "handler_error")
         result["detail"] = (
             "handler still takes the replay process down with a signal"
             if row.expect_class == mc.CLASS_CRASH
@@ -444,11 +515,14 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
     # Class matches. For a payload-loss API that is not the end of the story:
-    # the handler runs, which is exactly why the loss is invisible.
-    if row.payload_loss:
+    # the handler runs, which is exactly why the loss is invisible. Only a REAL
+    # class has a handler that runs; a NOOP or ERROR_STUB API does nothing with
+    # whatever arguments it was given, so there is no loss to assert on.
+    if row.payload_loss and row.expect_class == mc.CLASS_REAL:
         result["verdict"] = VERDICT_XFAIL
+        result["cause"] = "payload_loss"
         result["detail"] = ("real handler runs but the recorded arguments are "
-                            "incomplete (section 8.3)")
+                            "incomplete")
         return result
 
     result["verdict"] = VERDICT_PASS
@@ -485,6 +559,17 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
     # there to catch that tier's workloads quietly reaching less than before.
     floors = {}
     problems = []
+    # A tier that ran must show every workload the overlay gives it. A missing
+    # one means a workload failed before it was recorded, and everything only
+    # that workload calls looks unexercised for a reason the floor can miss.
+    for tier in sorted(ran_tiers):
+        seen = set(observations["tiers"][tier]["workloads"])
+        for workload in mc.tier_workloads(overlay, tier):
+            if workload not in seen:
+                problems.append(
+                    f"{tier}: configured workload {workload} is missing from "
+                    "its observation")
+
     for tier, bucket in per_tier.items():
         meta = (overlay.get("tiers") or {}).get(tier, {}) or {}
         floor = int(meta.get("min_covered", 0))
@@ -576,18 +661,20 @@ def render_markdown(report: Dict[str, Any], overlay: Dict[str, Any]) -> str:
 
     xfails = [r for r in report["results"] if r["verdict"] == VERDICT_XFAIL]
     if xfails:
-        out.append("## Known payload loss (XFAIL)")
+        out.append("## Known failures (XFAIL)")
         out.append("")
-        out.append("These have a real playback handler and are counted in the "
-                   "\"faithfully replayed\" figure, but the arguments they "
-                   "need never reached the archive. They flip to XPASS when "
-                   "P2 lands, which is the signal to update the overlay.")
+        out.append("Each is declared in `api_matrix.yaml` as broken, and still "
+                   "is. The cause says which way: `payload_loss` (real "
+                   "handler, arguments incomplete in the archive), "
+                   "`handler_error` or `crash`. Nothing here flips by itself; "
+                   "when one is fixed, update the overlay.")
         out.append("")
-        out.append("| API | Tier | Why |")
-        out.append("|---|---|---|")
+        out.append("| API | Tier | Cause | Why |")
+        out.append("|---|---|---|---|")
         for r in sorted(xfails, key=lambda x: (x["tier"], x["api"])):
             why = " ".join((r["note"] or r["detail"]).split())
-            out.append(f"| `{r['api']}` | {r['tier']} | {why} |")
+            out.append(f"| `{r['api']}` | {r['tier']} | "
+                       f"{r.get('cause', '')} | {why} |")
         out.append("")
 
     not_run = [r for r in report["results"]
@@ -685,7 +772,8 @@ def check_workloads(overlay: Dict[str, Any], test_dir: Path) -> int:
 
     defined: Dict[str, str] = {}
     for src in sorted(test_dir.glob("*.cc")):
-        for match in _DIRECT_CASE_RE.finditer(src.read_text()):
+        for match in _DIRECT_CASE_RE.finditer(
+                src.read_text(encoding="utf-8")):
             defined[match.group(1)] = src.name
 
     referenced: Dict[str, List[str]] = {}
@@ -717,7 +805,7 @@ def check_workloads(overlay: Dict[str, Any], test_dir: Path) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -742,23 +830,22 @@ def main() -> int:
     ap.add_argument("--report-dir", type=Path, default=None,
                     help="where to write matrix_report.{json,md} "
                          "(default: alongside --results)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
+    try:
+        return run(args, ap)
+    except (mc.MatrixError, OSError, UnicodeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+def run(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
     # Reads only the overlay and the test sources, so it still runs in a fresh
     # clone where api_classes.json has not been derived yet.
     if args.check_workloads:
-        try:
-            return check_workloads(mc.load_overlay(args.overlay),
-                                   args.test_dir)
-        except mc.MatrixError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
+        return check_workloads(mc.load_overlay(args.overlay), args.test_dir)
 
-    try:
-        rows = mc.load_rows(args.manifest, args.overlay)
-    except mc.MatrixError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+    rows = mc.load_rows(args.manifest, args.overlay)
     overlay = mc.load_overlay(args.overlay)
 
     did_something = False
@@ -778,15 +865,15 @@ def main() -> int:
             return 2
         return 0
 
-    observations = load_observations(args.results)
+    observations = load_observations(args.results, {r.api for r in rows})
     report = build_report(rows, overlay, observations)
 
     report_dir = args.report_dir or args.results
     report_dir.mkdir(parents=True, exist_ok=True)
     json_path = report_dir / "matrix_report.json"
     md_path = report_dir / "matrix_report.md"
-    json_path.write_text(json.dumps(report, indent=2) + "\n")
-    md_path.write_text(render_markdown(report, overlay))
+    write_atomic(json_path, json.dumps(report, indent=2) + "\n")
+    write_atomic(md_path, render_markdown(report, overlay))
 
     print(f"wrote {json_path}")
     print(f"wrote {md_path}")

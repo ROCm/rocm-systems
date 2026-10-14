@@ -198,10 +198,13 @@ namespace {
 
 constexpr size_t kHsaSegBytes = 256 * 1024;
 
-// The coarse-grained global pool of the first GPU agent, plus every agent in
-// the system. Access has to be granted to all of them, not just the owning GPU:
-// the copy HIP issues is serviced by a DMA engine, and on an unshared coarse
-// grained allocation that engine faults exactly like a stray kernel would.
+// The coarse-grained global pool of the first GPU agent, plus the CPU and GPU
+// agents. Access has to be granted to those, not just the owning GPU: the copy
+// HIP issues is serviced by a DMA engine, and on an unshared coarse grained
+// allocation that engine faults exactly like a stray kernel would.
+// hsa_amd_agents_allow_access rejects every other agent with
+// HSA_STATUS_ERROR_INVALID_AGENT. gfx1151 enumerates an NPU, and including it
+// fails the call before the copy runs.
 struct HsaTarget {
   hsa_agent_t gpu{};
   hsa_amd_memory_pool_t pool{};
@@ -239,12 +242,15 @@ hsa_status_t hrr_find_pool(hsa_amd_memory_pool_t pool, void* data) {
 
 hsa_status_t hrr_visit_agent(hsa_agent_t agent, void* data) {
   auto* target = static_cast<HsaTarget*>(data);
-  target->all_agents.push_back(agent);
 
   hsa_device_type_t type{};
   if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) !=
           HSA_STATUS_SUCCESS ||
-      type != HSA_DEVICE_TYPE_GPU)
+      (type != HSA_DEVICE_TYPE_CPU && type != HSA_DEVICE_TYPE_GPU))
+    return HSA_STATUS_SUCCESS;
+  target->all_agents.push_back(agent);
+
+  if (type != HSA_DEVICE_TYPE_GPU)
     return HSA_STATUS_SUCCESS;
   if (target->ok) return HSA_STATUS_SUCCESS;  // keep collecting agents
 
@@ -294,18 +300,9 @@ TEST_CASE("Unit_HRR_Regions_MemcpyDirect", "[.][hrr-direct]") {
   }
   // Without this the copy faults at capture instead of being recorded, and the
   // test would then be measuring a broken workload rather than the replay.
-  // Some consumer iGPUs enumerate a pool they then refuse to grant access to.
-  // Report the refusal and its status separately from "no pool", so the parent
-  // can name it when it skips instead of hiding a ROCr regression as "none".
-  const hsa_status_t access = hsa_amd_agents_allow_access(
-      static_cast<uint32_t>(target.all_agents.size()),
-      target.all_agents.data(), nullptr, seg);
-  if (access != HSA_STATUS_SUCCESS) {
-    (void)hsa_amd_memory_pool_free(seg);
-    printf("%s denied %d\n", HRR_HSA_SEG_MARKER, static_cast<int>(access));
-    fflush(stdout);
-    return;
-  }
+  REQUIRE(hsa_amd_agents_allow_access(
+              static_cast<uint32_t>(target.all_agents.size()),
+              target.all_agents.data(), nullptr, seg) == HSA_STATUS_SUCCESS);
 
   printf("%s 0x%llx %zu\n", HRR_HSA_SEG_MARKER,
          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(seg)),
@@ -414,7 +411,7 @@ bool covered_by_recorded_alloc(const fs::path& archive_path, uint64_t addr) {
 // CPU-only: the sidecar framing
 // ===========================================================================
 
-TEST_CASE("Unit_HRR_Regions_StreamFraming", "[hrr][cpu]") {
+TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
   ScopedDir dir(fs::temp_directory_path() / "hrr_region_framing");
   const fs::path archive = dir.path / "pid-1";
   const fs::path stream = archive / "regions" / "synthetic.hrrr";
@@ -540,7 +537,7 @@ void install_sidecar(const fs::path& archive_path,
 // The layout HRR could not see, supplied after the fact, changes what replay
 // can say about the same archive.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_Roundtrip", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_roundtrip.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -591,7 +588,10 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
   }
 
   SECTION("--guard-blocks makes the overrun fault") {
-    auto [rc, out] = hrr_playback_merged(archive, "--guard-blocks");
+    // The overrun is meant to fault; keep the driver from writing a GPU core
+    // dump for it. The variable is set on the spawned hrr-playback only.
+    auto [rc, out] = hrr_playback_merged(
+        archive, "--guard-blocks", {{"HSA_DISABLE_COREDUMP_ON_EXCEPTION", "1"}});
     INFO("Guarded replay:\n" << out);
     if (rc == 0) {
       // The only acceptable clean run is one where nothing was guarded — no VMM
@@ -614,7 +614,7 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[hrr]") {
 // already has must not allocate anything, or the captured layout the replay is
 // reproducing would be shadowed by a second buffer.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_segments.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -670,7 +670,7 @@ TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[hrr]") {
 // exclusively inside the struct. A replay that ignores embedded pointers
 // materialises nothing at all.
 // ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_embedded.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
   const fs::path archive = hrr_single_process_archive(cap.path);
@@ -719,9 +719,8 @@ namespace {
 // the child reports it and the parent reads it here.
 inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
     const std::string& direct_case, const fs::path& cap_path) {
-  hrr_skip_without_gpu();
   std::string out;
-  { hrr::test::SpawnProc proc(hrr_test_exe(), /*capture_stdout=*/true);
+  { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"" + direct_case + "\"");
@@ -731,19 +730,6 @@ inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
 
   const size_t at = out.find(HRR_HSA_SEG_MARKER);
   if (at == std::string::npos) return {0, 0};
-  int denied_status = 0;
-  if (sscanf(out.c_str() + at, HRR_HSA_SEG_MARKER " denied %d",
-             &denied_status) == 1) {
-    // gfx1151 enumerates the pool and then rejects the grant with
-    // INVALID_AGENT. Any other refusal is a ROCr regression, not a platform
-    // limit, and has to fail.
-    if (denied_status == HSA_STATUS_ERROR_INVALID_AGENT) {
-      HRR_SKIP_CASE("HSA pool refused allow_access (status="
-                    << denied_status << ")");
-    }
-    FAIL("hsa_amd_agents_allow_access failed (status=" << denied_status
-                                                       << ")");
-  }
   unsigned long long base = 0, size = 0;
   if (sscanf(out.c_str() + at, HRR_HSA_SEG_MARKER " 0x%llx %llu", &base,
              &size) != 2)
@@ -753,13 +739,15 @@ inline std::pair<uint64_t, uint64_t> hrr_capture_direct_hsa(
 
 }  // namespace
 
-TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[hrr]") {
+TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_memcpy.hrr");
   auto [hsa_base, hsa_size] =
       hrr_capture_direct_hsa("Unit_HRR_Regions_MemcpyDirect", cap.path);
 
   if (hsa_base == 0 || hsa_size == 0) {
-    HRR_SKIP_CASE("No HSA agent with a coarse-grained pool on this platform");
+    WARN("No HSA agent with a coarse-grained pool on this platform; "
+         "skipping the memcpy-first-touch assertions for this run");
+    return;
   }
 
   const fs::path archive = hrr_single_process_archive(cap.path);

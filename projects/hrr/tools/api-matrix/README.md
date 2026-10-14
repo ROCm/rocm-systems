@@ -20,42 +20,13 @@ api_matrix.yaml      ->  check_matrix.py --emit-cxx  ->  hrr_api_matrix_expectat
 
 `api_classes.json` is **derived**: one row per API with its capture class,
 replay class and mechanically-detected payload-loss shape, read straight out of
-the generator's `MANUAL_PLAYBACK_APIS` / `NOOP_PLAYBACK_APIS` /
-`ERROR_STUB_PLAYBACK_APIS` sets plus `is_special()` in `hrr_playback.cpp`.
+the generator's `UNREPLAYABLE_PLAYBACK_APIS` / `ERROR_STUB_PLAYBACK_APIS` /
+`NOOP_PLAYBACK_APIS` / `CUSTOM_PLAYBACK_BODIES` / `MANUAL_PLAYBACK_APIS` sets
+plus `is_special()` in `hrr_playback.cpp`.
 
 `api_matrix.yaml` is **authored**: the tier definitions, coverage floors,
 per-tier workload lists, and the rationale for every API the matrix admits it
 cannot reach.
-
-## Regenerating the header
-
-`hrr_api_matrix_expectations.h` is checked in, so the build never runs these
-scripts. `api_classes.json` is not checked in, so derive it once per clone
-(see below), then after changing `api_matrix.yaml`:
-
-```sh
-./check_matrix.py --emit-cxx      # writes the header in tests/integration
-./check_matrix.py --summary       # tier table, runs nothing
-```
-
-Adding a workload to a tier means adding its Catch2 test name to that tier's
-list in `api_matrix.yaml` and regenerating. Skipping the regeneration leaves
-the tests compiling against the old tier lists, and the new coverage simply
-does not count.
-
-That is worth guarding, because the failure is quiet: the workload still
-compiles and still passes when invoked by name, and only the coverage count
-moves. This reads the two sides against each other, with no GPU and no derived
-manifest:
-
-```sh
-./check_matrix.py --check-workloads
-```
-
-It fails when a tier names a workload nothing defines (a rename or a typo), and
-when `hrr_api_matrix_workload_test.cc` or `hrr_spt_workload_test.cc` defines a
-workload no tier names. Workloads in the other test files are driven by their
-own roundtrip tests and are not expected to appear in a tier.
 
 ## Deriving the manifest
 
@@ -77,22 +48,73 @@ now have an expected verdict that no longer matches reality:
 ./derive_manifest.py --update-baseline    # only after reviewing the delta
 ```
 
+## Regenerating the header
+
+`hrr_api_matrix_expectations.h` is checked in, so the build never runs these
+scripts. After changing `api_matrix.yaml`, or after the manifest changes,
+derive the manifest first (see above), then regenerate the header:
+
+```sh
+./derive_manifest.py
+./check_matrix.py --emit-cxx      # writes the header in tests/integration
+./check_matrix.py --summary       # tier table, runs nothing
+```
+
+The header is deterministic, so the checked-in copy must match the output
+exactly.
+
+Adding a workload to a tier means adding its Catch2 test name to that tier's
+list in `api_matrix.yaml` and regenerating. Skipping the regeneration leaves
+the tests compiling against the old tier lists, and the new coverage simply
+does not count.
+
+That is worth guarding, because the failure is quiet: the workload still
+compiles and still passes when invoked by name, and only the coverage count
+moves. This reads the two sides against each other, with no GPU and no derived
+manifest:
+
+```sh
+./check_matrix.py --check-workloads
+```
+
+It fails when a tier names a workload nothing defines (a rename or a typo), and
+when `hrr_api_matrix_workload_test.cc` or `hrr_spt_workload_test.cc` defines a
+workload no tier names. Workloads in the other test files are driven by their
+own roundtrip tests and are not expected to appear in a tier.
+
 ## Dependencies
 
-Python 3.8+ and PyYAML. No ROCm, no GPU and no build are required; these run on
-the host. PyYAML is needed only by the two scripts above, which are developer
-tools rather than build steps, so it is not a build dependency of HRR.
+Python 3.8+. `derive_manifest.py` needs only the standard library;
+`check_matrix.py` also needs PyYAML to read `api_matrix.yaml`. No ROCm, no GPU
+and no build are required for either. They are developer tools rather than
+build steps, so PyYAML is not a build dependency of HRR.
 
 ## Running the matrix against hardware
 
-Generating the header is the host-side half. Actually capturing and replaying
-each tier is a GPU job driven by the Catch2 tests
-(`Unit_HRR_ApiMatrix_T*_Roundtrip`), which write per-tier observations to
-`$HRR_MATRIX_RESULTS_DIR`. Turn those into a coverage report with:
+Generating the header is the host-side half. Capturing and replaying each tier
+is a GPU job driven by the Catch2 tests `Unit_HRR_ApiMatrix_T*_Roundtrip`. Each
+one writes its observations as `T<n>.json` into `$HRR_MATRIX_RESULTS_DIR` when
+that variable is set. T3 needs two visible GPUs and skips itself on a host with
+fewer.
+
+Build the integration tests and set up `LD_LIBRARY_PATH` as described in
+[`tests/README.md`](../../tests/README.md#running-the-integration-tests), then,
+from the repository root:
 
 ```sh
-./check_matrix.py --results DIR
+export HRR_MATRIX_RESULTS_DIR=$PWD/matrix-results
+tests=build/hrr/tests/integration/hrr-integration-tests
+
+# T0 to T4: tagged [hrr], hidden by default, so select them by tag.
+"$tests" "[api-matrix][hrr]~[cpu]"
+
+# T5 (deprioritised families) is tagged [T5] and not [hrr], so neither this
+# selection nor CI's "[hrr]~[direct]" picks it up. Run it by name when wanted.
+"$tests" Unit_HRR_ApiMatrix_T5_Roundtrip
+
+projects/hrr/tools/api-matrix/check_matrix.py --results "$HRR_MATRIX_RESULTS_DIR"
 ```
 
-The containerised sweep that builds, runs every tier and collects the report
-lives in aim-labs under `scenarios/prep/hrr-api-matrix/`.
+`--results` needs the derived manifest. It writes `matrix_report.json` and
+`matrix_report.md` beside the observations and exits non-zero on a failed
+assertion, an undeclared coverage gap, or a tier below its coverage floor.

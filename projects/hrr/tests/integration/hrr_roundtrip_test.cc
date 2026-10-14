@@ -37,8 +37,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -158,7 +160,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
+    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
+    {
+      set_proc_search_path(proc);
+    }
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    INFO("Capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   // -------------------------------------------------------------------------
@@ -194,6 +205,120 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
+ *     its start notice exactly once, naming the per-process archive directory
+ *     and the base directory that child processes record to.
+ *   - Repeats the capture with only stdout captured: the notice is on stderr,
+ *     so stdout holds none.
+ *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_notice"};
+  const std::string kNotice =
+      "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
+      "arguments and code objects, to ";
+  auto count_notices = [&](const std::string& out) {
+    size_t n = 0;
+    for (size_t at = out.find(kNotice); at != std::string::npos;
+         at = out.find(kNotice, at + kNotice.size()))
+      ++n;
+    return n;
+  };
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    REQUIRE(count_notices(out) == 1);
+
+    const size_t begin = out.find(kNotice);
+    std::string line = out.substr(begin, out.find('\n', begin) - begin);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const std::string base = cap.path.string();
+    const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+    // The writer joins the pid-<pid> component with '/' on every platform.
+    const std::string expected = kNotice + base + "/" + pid_dir +
+                                 " (child processes record to their own pid-* directories in " +
+                                 base + ")";
+    CHECK(line == expected);
+  }
+
+  {
+    // Same capture with only stdout captured: the notice goes to stderr, so the
+    // program's own stdout stays exactly what it was without capture.
+    ScopedDir cap_stdout{fs::temp_directory_path() / "hrr_capture_notice_stdout"};
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/false);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_stdout.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess stdout:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
+    // still enables capture. Unset the variable so an inherited value cannot arm it.
+    proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Subprocess output without capture:\n" << out);
+    REQUIRE(ret == 0);
+    CHECK(count_notices(out) == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
+ *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
+ *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>
+ *     directory the archive was written to, the same one the start notice names,
+ *     not the base directory.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_exit_summary"};
+  hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  // The summary goes through the CLR log at LOG_INFO with LOG_ALWAYS, which no
+  // mask filters out; AMD_LOG_MASK=0 keeps the per-API traces out of the output.
+  proc.setEnv("AMD_LOG_LEVEL", "3");
+  proc.setEnv("AMD_LOG_MASK", "0");
+  set_proc_search_path(proc);
+  int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+  const std::string out = proc.getOutput();
+  INFO("Capture subprocess output:\n" << out);
+  REQUIRE(ret == 0);
+
+  const std::string kSummary = "[HRR capture] Wrote ";
+  const size_t begin = out.find(kSummary);
+  REQUIRE(begin != std::string::npos);
+  CHECK(out.find(kSummary, begin + kSummary.size()) == std::string::npos);
+  std::string line = out.substr(begin, out.find('\n', begin) - begin);
+  if (!line.empty() && line.back() == '\r') line.pop_back();
+  INFO("Summary line: " << line);
+  const std::string pid_dir = hrr_single_process_archive(cap.path).filename().string();
+  // The writer joins the pid-<pid> component with '/' on every platform.
+  const std::string tail = " blobs to: " + cap.path.string() + "/" + pid_dir;
+  REQUIRE(line.size() >= tail.size());
+  CHECK(line.compare(line.size() - tail.size(), tail.size(), tail) == 0);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
  *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
  *     HIP APIs covering device queries, streams, events, malloc variants
@@ -212,7 +337,14 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr_spawn_direct("Unit_HRR_AllApis_Direct", cap.path, "AllApis capture");
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      set_proc_search_path(proc);
+    }
+    int ret = proc.run("\"Unit_HRR_AllApis_Direct\"");
+    INFO("AllApis capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   // -------------------------------------------------------------------------
@@ -260,8 +392,14 @@ HRR_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr_spawn_direct("Unit_HRR_HostMemWorkload_Direct", cap.path,
-                     "HostMem capture");
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      set_proc_search_path(proc);
+    }
+    int ret = proc.run("\"Unit_HRR_HostMemWorkload_Direct\"");
+    INFO("HostMem capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   // -------------------------------------------------------------------------
@@ -310,8 +448,16 @@ HRR_TEST_CASE(Unit_HRR_GraphRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr_spawn_direct("Unit_HRR_GraphWorkload_Direct", cap.path,
-                     "Graph capture");
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
+    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
+    {
+      set_proc_search_path(proc);
+    }
+    int ret = proc.run("\"Unit_HRR_GraphWorkload_Direct\"");
+    INFO("Graph capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   // -------------------------------------------------------------------------
@@ -355,7 +501,14 @@ HRR_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   // Step 1: capture
   // -------------------------------------------------------------------------
   {
-    hrr_spawn_direct("Unit_HRR_StressApis_Direct", cap.path, "Stress capture");
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    {
+      set_proc_search_path(proc);
+    }
+    int ret = proc.run("\"Unit_HRR_StressApis_Direct\"");
+    INFO("Stress capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   // -------------------------------------------------------------------------
@@ -443,15 +596,16 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
  *     REQUIRE the D2H validates — i.e. the very first allocation was captured
  *     and translated.
  *
- *   This is the regression guard for first-call capture.  Capture shims used
- *   to be installed from hip_capture_init(), which runs inside hip::init() and
- *   so inside the in-flight first HIP API call, leaving that call unrecorded.
- *   With a hipMalloc first the allocation never reached the archive and replay
- *   aborted with "H2D dst ... not mapped", and the workaround was a warm-up
- *   allocation.  The shims now go in from UpdateDispatchTable(), before any
- *   caller can load a slot, so no warm-up is required and this case passes.
+ *   Hidden ([.]) because it reproduces the known dropped-first-hipMalloc
+ *   limitation: capture shims are installed from hip_capture_init() (run inside
+ *   hip::init()), which is the in-flight first HIP API call, so that first call
+ *   itself is not recorded.  When the first call is a hipMalloc the allocation
+ *   is missing and replay aborts with "H2D dst ... not mapped".  The accepted
+ *   workaround is a warm-up allocation before the real work.  Run explicitly by
+ *   name; this case PASSES once first-call capture is fixed (the warm-up is no
+ *   longer required), so it doubles as the regression guard for that fix.
  */
-TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[hrr-repro]") {
+TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
   hrr_run_roundtrip("Unit_HRR_FirstMalloc_Direct", cap.path);
 }
@@ -562,8 +716,12 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  *     loop and stops the replay (exit 2) BEFORE the faulting kernel runs, so the
  *     null + 0x20000 write never happens.  REQUIRE a clean exit 2 rather than a
  *     GPU memory fault.
+ *
+ *   Hidden ([.]) because a mistuned guard could let the raw GPU fault through,
+ *   which can destabilise a shared runner.  Run explicitly by name to validate
+ *   the guard converts the fault class into a clean exit.
  */
-TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[hrr-repro]") {
+TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
   hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
 
@@ -600,7 +758,7 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   HRR_HIP_CHECK(hipDeviceGetAttribute(&canUseStreamValue,
                                   hipDeviceAttributeCanUseStreamWaitValue, 0));
   if (!canUseStreamValue) {
-    HRR_SKIP_CASE("stream wait value unsupported");
+    HRR_SKIP("stream wait value unsupported");
   }
 
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwritevalue"};
@@ -857,8 +1015,12 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_manifest"};
 
   {
-    hrr_spawn_direct("Unit_HRR_DeviceInfo_Direct", cap.path,
-                     "Metadata capture");
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    INFO("Metadata capture subprocess exit code: " << ret);
+    REQUIRE(ret == 0);
   }
 
   fs::path archive_path = hrr_single_process_archive(cap.path);
@@ -925,7 +1087,11 @@ HRR_TEST_CASE(Unit_HRR_DrvMemcpyRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_occupancy"};
-  hrr_spawn_direct("Unit_HRR_Occupancy_Direct", cap.path);
+  { hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    { set_proc_search_path(proc); }
+    int ret = proc.run("\"Unit_HRR_Occupancy_Direct\"");
+    INFO("Capture exit: " << ret); REQUIRE(ret == 0); }
   fs::path archive_path = hrr_single_process_archive(cap.path);
   REQUIRE(fs::exists(archive_path / "events.bin"));
   REQUIRE(fs::exists(archive_path / "blobs"));
@@ -1050,9 +1216,9 @@ HRR_TEST_CASE(Unit_HRR_MemcpyPeerRoundtrip) {
   int ndev = 0;
   if (!hrr_find_peer_accessible_pair(src_dev, dst_dev, ndev)) {
     if (ndev < 2) {
-      HRR_SKIP_CASE("fewer than two GPUs");
+      HRR_SKIP("fewer than two GPUs");
     } else {
-      HRR_SKIP_CASE("peer access unavailable");
+      HRR_SKIP("peer access unavailable");
     }
   }
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpypeer"};
@@ -1101,7 +1267,7 @@ HRR_TEST_CASE(Unit_HRR_MiscAPIsRoundtrip) {
 // hrr_run_exact_roundtrip() is the correct oracle (see helper above).
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 #ifdef _WIN32
-  HRR_SKIP_CASE("driver memcpy 3D HRR roundtrip is disabled on Windows");
+  HRR_SKIP("driver memcpy 3D HRR roundtrip is disabled on Windows");
 #else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy3d"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy3D_Direct", cap.path);
@@ -1110,7 +1276,7 @@ HRR_TEST_CASE(Unit_HRR_DrvMemcpy3DRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_DrvMemcpy2DUnalignedRoundtrip) {
 #ifdef _WIN32
-  HRR_SKIP_CASE("driver memcpy 2D unaligned HRR roundtrip is disabled on Windows");
+  HRR_SKIP("driver memcpy 2D unaligned HRR roundtrip is disabled on Windows");
 #else
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_drvmemcpy2dunaligned"};
   hrr_run_exact_roundtrip("Unit_HRR_DrvMemcpy2DUnaligned_Direct", cap.path);
@@ -1142,6 +1308,54 @@ HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleapi"};
   hrr_run_roundtrip("Unit_HRR_ModuleAPI_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_ModuleLoadBundle_Direct, which loads one HIPRTC ELF with
+ *     hipModuleLoadData and, wrapped in an offload bundle file, with
+ *     hipModuleLoad, then launches rtc_fill from the bundle's module.
+ *   - REQUIRE that the hipModuleLoad event records the device ELF the runtime
+ *     loaded, not the bundle file: its code object is an ELF and has the same
+ *     hash as the hipModuleLoadData event of the bare ELF.
+ *   - REQUIRE that the launch from that module records the same code object as
+ *     its load event, then replay and validate the D2H.
+ */
+HRR_TEST_CASE(Unit_HRR_ModuleLoadBundleRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleloadbundle"};
+  hrr_run_roundtrip("Unit_HRR_ModuleLoadBundle_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  const hrr::Event* load_data = nullptr;
+  const hrr::Event* load_file = nullptr;
+  const hrr::Event* launch    = nullptr;
+  for (const auto& ev : arc.events) {
+    const uint16_t type = ev.header().event_type;
+    if (type == HRR_API_HIPMODULELOADDATA) load_data = &ev;
+    if (type == HRR_API_HIPMODULELOAD) load_file = &ev;
+    if (ev.kernel_launch &&
+        ev.kernel_launch->kernel_name.find("rtc_fill") != std::string::npos)
+      launch = &ev;
+  }
+  REQUIRE(load_data);
+  REQUIRE(load_file);
+  REQUIRE(launch);
+
+  const auto& file_ev = load_file->module_load_ev;
+  INFO("hipModuleLoad code object: " << hrr::hash_hex(file_ev.hash_lo, file_ev.hash_hi));
+  std::vector<uint8_t> file_co;
+  REQUIRE(hrr::read_code_object(arc, file_ev.hash_lo, file_ev.hash_hi, file_co));
+  INFO("hipModuleLoad code object size: " << file_co.size());
+  REQUIRE(file_co.size() >= 4);
+  REQUIRE(std::memcmp(file_co.data(), "\x7f" "ELF", 4) == 0);
+
+  const auto& data_ev = load_data->module_load_ev;
+  CHECK(file_ev.hash_lo == data_ev.hash_lo);
+  CHECK(file_ev.hash_hi == data_ev.hash_hi);
+  CHECK(launch->kernel_launch->co_hash_lo == file_ev.hash_lo);
+  CHECK(launch->kernel_launch->co_hash_hi == file_ev.hash_hi);
 }
 
 HRR_TEST_CASE(Unit_HRR_VMMRoundtrip) {
@@ -1183,18 +1397,13 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   // Step 1: capture with hip_raw_trace (multi-threaded workload)
   // -------------------------------------------------------------------------
   {
-    // Captured for the same reason as the hrr_spawn_direct children: this is a
-    // foreign binary with output of its own, wanted only if the step fails.
-    hrr::test::SpawnProc proc(raw_trace_exe, /*capture_stdout=*/true,
-                              /*capture_stderr=*/true);
+    hrr::test::SpawnProc proc(raw_trace_exe);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     {
       set_proc_search_path(proc);
     }
     int ret = proc.run("");
-    INFO("hip_raw_trace capture exit code: " << ret << "\n--- child output ---\n"
-                                             << proc.getOutput()
-                                             << "--- end child output ---");
+    INFO("hip_raw_trace capture exit code: " << ret);
     REQUIRE(ret == 0);
   }
 
@@ -1352,7 +1561,12 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   ScopedDir co_dir{fs::temp_directory_path() / "hrr_replace_co"};
 
   {
-    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    INFO("Capture exit: " << ret);
+    REQUIRE(ret == 0);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
@@ -1387,7 +1601,12 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_missing"};
 
   {
-    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    INFO("Capture exit: " << ret);
+    REQUIRE(ret == 0);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
@@ -1416,7 +1635,11 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_badspec"};
 
   {
-    hrr_spawn_direct("Unit_HRR_GpuWorkload_Direct", cap.path);
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
+    REQUIRE(ret == 0);
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
@@ -1425,6 +1648,301 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   INFO("Playback exit code: " << ret);
   REQUIRE(ret != 0);   // parser rejects malformed spec
   REQUIRE(ret < 128);  // ...with a clean error, not a crash
+}
+#endif  // !_WIN32
+
+#ifndef _WIN32
+/**
+ * Unit_HRR_CaptureCrashOnSmallStack
+ * ---------------------------------
+ *   - A recorded process that dies of SIGSEGV on a thread with a 64 KiB stack
+ *     must still leave a manifest marked "complete": false. The crash handler
+ *     runs on that stack, and the emergency manifest buffer is larger than it.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_small_stack"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashSmallStack_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 128 + SIGSEGV);
+  }
+
+  fs::path archive_path = hrr_single_process_archive(cap.path);
+  REQUIRE(fs::exists(archive_path / "manifest.json"));
+  const std::string manifest = read_text_file(archive_path / "manifest.json");
+  INFO("Process manifest:\n" << manifest);
+  REQUIRE(manifest.find("\"complete\": false") != std::string::npos);
+}
+
+/**
+ * Unit_HRR_ForkWhileRecording
+ * ---------------------------
+ *   - Forking while another thread records must not leave a child blocked on a
+ *     writer mutex it inherited locked. The workload fails on a child that
+ *     does not exit within its deadline.
+ *   - A child opens its own archive on its first record and not before, so
+ *     the capture holds one archive per child that recorded, besides the
+ *     parent's, and none for a child that exited straight away.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_recording"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileRecording_Direct\"", 600);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() ==
+        static_cast<size_t>(kHrrForkWhileRecordingArchives));
+}
+
+/**
+ * Unit_HRR_ForkWhileWriterHoldsLock
+ * ---------------------------------
+ *   - fork() keeps the capture writer's events mutex locked until it returns,
+ *     so no other thread can take it in between and leave the child a mutex
+ *     that only a missing thread could unlock. The workload forks at that
+ *     moment every time, and fails if a child does not exit within its
+ *     deadline.
+ *   - The child, which records once, has its own archive beside the parent's.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_writer_holds_lock"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileWriterHoldsLock_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 2);
+}
+
+/**
+ * Unit_HRR_CaptureCrashDuringFork
+ * -------------------------------
+ *   - A child forked while its parent's crash callback writes the manifest
+ *     writes its own manifest when it crashes in turn: it does not inherit the
+ *     emergency manifest buffer marked busy. Both processes leave a manifest
+ *     marked "complete": false.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_during_fork"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_CaptureCrashDuringFork_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 128 + SIGSEGV);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    CHECK(manifest.find("\"complete\": false") != std::string::npos);
+  }
+}
+
+/**
+ * Unit_HRR_ForkWhileNotingUnreplayable
+ * ------------------------------------
+ *   - fork() waits for a thread that is noting an API as unreplayable, so the
+ *     child does not inherit the mutex of that list locked. The child records
+ *     a call and exits normally, and its capture shutdown writes its manifest
+ *     under that mutex. The workload fails if the child does not exit within
+ *     its deadline.
+ *   - Both processes leave an archive. The parent's manifest lists the API.
+ *     The child's does not: its archive holds no event for it.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_noting_unreplayable"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkWhileNotingUnreplayable_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    // The child's manifest names the other process as its parent.
+    const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
+    const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
+    const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
+    CHECK((manifest.find("\"hipUserObjectCreate\"") != std::string::npos) == !child);
+  }
+}
+
+/**
+ * Unit_HRR_ForkedChildRecordsAfterShutdown
+ * ----------------------------------------
+ *   - A forked child that exits normally without recording leaves no archive,
+ *     even though it records after its capture shutdown, as a fat-binary
+ *     destructor does.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_records_after_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildRecordsAfterShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 1);
+}
+/**
+ * Unit_HRR_ForkAfterCaptureShutdown
+ * ---------------------------------
+ *   - A child forked after its parent's capture shutdown leaves no archive,
+ *     even though it records before it exits.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_after_capture_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkAfterCaptureShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  CHECK(hrr_process_archives(cap.path).size() == 1);
+}
+
+// The archive's events.bin ends in the clean-shutdown trailer, and the trailer
+// counts every event before it. load_archive() sets `complete` for a trailer
+// anywhere in the file, and goes on reading past it.
+static void check_ends_in_trailer(const fs::path& archive, const hrr::Archive& arc) {
+  const std::string bytes = read_text_file(archive / "events.bin");
+  REQUIRE(bytes.size() >= sizeof(hrr_file_header) + sizeof(hrr_eof_record));
+  hrr_eof_record eof;
+  memcpy(&eof, bytes.data() + bytes.size() - sizeof(eof), sizeof(eof));
+  CHECK(eof.hdr.event_type == HRR_EOF_MARKER);
+  CHECK(eof.hdr.payload_length == sizeof(hrr_eof_record));
+  CHECK(eof.eof_magic == HRR_EOF_MAGIC);
+  CHECK(eof.total_events == arc.events.size());
+}
+
+/**
+ * Unit_HRR_ShutdownWhileChildOpensArchive
+ * ---------------------------------------
+ *   - A forked child's capture shutdown waits while another of its threads
+ *     opens the child's archive, and then finalizes that archive. Both
+ *     processes leave a manifest marked "complete": true and an events.bin
+ *     that ends in the clean-shutdown trailer, with no record after it.
+ */
+HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_shutdown_while_child_opens_archive"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ShutdownWhileChildOpensArchive_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  for (const fs::path& archive : archives) {
+    INFO("Archive: " << archive.string());
+    REQUIRE(fs::exists(archive / "manifest.json"));
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    CHECK(manifest.find("\"complete\": true") != std::string::npos);
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(archive.string(), arc));
+    CHECK(arc.complete);
+    check_ends_in_trailer(archive, arc);
+  }
+}
+
+/**
+ * Unit_HRR_RecordAfterCaptureShutdown
+ * -----------------------------------
+ *   - A record made after the capture shutdown has written the trailer, and
+ *     before it closes events.bin, is dropped. The file still ends in the
+ *     trailer, which counts every event in it.
+ */
+HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_record_after_capture_shutdown"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_RecordAfterCaptureShutdown_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  const std::string manifest = read_text_file(archive / "manifest.json");
+  INFO("Process manifest:\n" << manifest);
+  CHECK(manifest.find("\"complete\": true") != std::string::npos);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  CHECK(arc.complete);
+  check_ends_in_trailer(archive, arc);
+}
+
+/**
+ * Unit_HRR_ForkBetweenCaptureFlushAndClose
+ * ----------------------------------------
+ *   - A child forked after the capture shutdown has written the trailer, and
+ *     before it closes events.bin, leaves no archive, even though it records
+ *     before it exits. The parent's archive is still complete.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_between_capture_flush_and_close"};
+
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+
+  REQUIRE(hrr_process_archives(cap.path).size() == 1);
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  CHECK(arc.complete);
+  check_ends_in_trailer(archive, arc);
 }
 #endif  // !_WIN32
 
@@ -1443,7 +1961,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
 HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_FailedMemcpy3D_Direct\"");
@@ -1474,7 +1992,7 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_long_kernel_name"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_LongKernelName_Direct\"");
@@ -1505,7 +2023,7 @@ HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_overflowing_memcpy3d"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_OverflowingMemcpy3D_Direct\"");
@@ -1542,7 +2060,7 @@ HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
 HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};
   {
-    hrr::test::SpawnProc proc(HRR_TEST_EXE);
+    hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"Unit_HRR_FailedShimCalls_Direct\"");

@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Resolve api_classes.json (derived) against api_matrix.yaml (authored).
 
 api_classes.json says what each HIP API's replay behaviour *is*, read out of
@@ -13,7 +15,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
@@ -49,27 +51,15 @@ VALID_CLASSES = (CLASS_REAL, CLASS_NOOP, CLASS_ERROR_STUB, CLASS_UNREPLAYABLE,
 
 TIER_ORDER = ["T0", "T1", "T2", "T3", "T4", "T5"]
 
-# Device capability an unreachable: group's measurement was taken under. Most
-# declarations hold on any part; the texture ones do not, because whether a
-# texture or array handle can exist at all is a property of the device.
-UNREACHABLE_ALWAYS = "always"
-UNREACHABLE_NO_IMAGE_SUPPORT = "no_image_support"
-VALID_UNREACHABLE_WHEN = (UNREACHABLE_ALWAYS, UNREACHABLE_NO_IMAGE_SUPPORT)
-
 
 @dataclass
 class ApiRow:
     api: str
-    table: str
-    capture_class: str
-    replay_class: str
-    derived_class: str          # observable class per the generator
     expect_class: str           # what the test asserts
     tier: str
     workloads: List[str]
     gpus: int
     payload_loss: bool
-    payload_loss_shapes: List[str] = field(default_factory=list)
     # False for APIs the workload does call but that never reach the archive
     # under their own name — HIP lowers them to another entry point first, or
     # HRR has no capture wrapper for them. Declaring it turns a permanent
@@ -82,45 +72,13 @@ class ApiRow:
     handler_error_in: List[str] = field(default_factory=list)
     skip: bool = False
     skip_reason: str = ""
-    skip_unless_multi_gpu: bool = False
     # Measured reason this API cannot be made to write an event on this stack,
     # from the unreachable: groups. Empty for every API that is expected to be
     # exercised, which is what makes an undeclared gap a reportable problem
     # rather than a silent one.
     unreachable_reason: str = ""
     unreachable_group: str = ""
-    # Device capability the group's measurement was taken under, from the
-    # group's when:. "always" for a declaration that holds anywhere; otherwise
-    # the reason only describes parts with that capability, and on any other
-    # part the API is unmeasured rather than unreachable.
-    unreachable_when: str = UNREACHABLE_ALWAYS
     note: str = ""
-    source: str = ""            # how the tier was decided, for the report
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "api": self.api,
-            "table": self.table,
-            "capture_class": self.capture_class,
-            "replay_class": self.replay_class,
-            "derived_class": self.derived_class,
-            "expect_class": self.expect_class,
-            "tier": self.tier,
-            "workloads": self.workloads,
-            "gpus": self.gpus,
-            "payload_loss": self.payload_loss,
-            "payload_loss_shapes": self.payload_loss_shapes,
-            "expect_captured": self.expect_captured,
-            "handler_error_in": self.handler_error_in,
-            "skip": self.skip,
-            "skip_reason": self.skip_reason,
-            "skip_unless_multi_gpu": self.skip_unless_multi_gpu,
-            "unreachable_reason": self.unreachable_reason,
-            "unreachable_group": self.unreachable_group,
-            "unreachable_when": self.unreachable_when,
-            "note": self.note,
-            "tier_source": self.source,
-        }
 
 
 class MatrixError(RuntimeError):
@@ -131,13 +89,23 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Dict[str, Any]:
     if not path.is_file():
         raise MatrixError(
             f"{path} not found — run ./derive_manifest.py first")
-    return json.loads(path.read_text())
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise MatrixError(f"{path} is not valid JSON: {exc}")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MatrixError(f"cannot read {path}: {exc}")
+    if not isinstance(manifest, dict) or not isinstance(
+            manifest.get("apis"), list):
+        raise MatrixError(f"{path} has no 'apis' list — re-run "
+                          "./derive_manifest.py")
+    return manifest
 
 
 class _StrictLoader(yaml.SafeLoader):
     """SafeLoader that refuses duplicate mapping keys.
 
-    The overrides block is one flat mapping of 551 possible API names, and
+    The overrides block is one flat mapping keyed by API name, and
     related entries for the same API naturally get written in different
     sections — the IPC truncation note next to the other payload-loss notes,
     the not-captured note next to the other capture findings. Plain YAML
@@ -165,10 +133,230 @@ _StrictLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys)
 
 
+# ---------------------------------------------------------------------------
+# Overlay schema
+#
+# Every key the overlay may carry is listed here, because a misspelt key is
+# otherwise silently ignored: `payload_los: true` would drop an expectation and
+# the matrix would go on passing. Each checker returns None when the value is
+# fine, or a description of what was expected.
+# ---------------------------------------------------------------------------
+
+_Check = Callable[[Any], Optional[str]]
+_EXPECT_VALUES = ("derived",) + VALID_CLASSES
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _string(value: Any) -> Optional[str]:
+    return None if isinstance(value, str) else "a string"
+
+
+def _name(value: Any) -> Optional[str]:
+    return None if isinstance(value, str) and value else "a non-empty string"
+
+
+def _boolean(value: Any) -> Optional[str]:
+    return None if isinstance(value, bool) else "a boolean"
+
+
+def _positive_int(value: Any) -> Optional[str]:
+    return None if _is_int(value) and value > 0 else "an integer > 0"
+
+
+def _version(value: Any) -> Optional[str]:
+    return None if _is_int(value) and value == 1 else "the supported version 1"
+
+
+def _tier(value: Any) -> Optional[str]:
+    return None if value in TIER_ORDER else f"one of {', '.join(TIER_ORDER)}"
+
+
+def _expect(value: Any) -> Optional[str]:
+    return (None if value in _EXPECT_VALUES
+            else f"one of {', '.join(_EXPECT_VALUES)}")
+
+
+def _names(value: Any) -> Optional[str]:
+    ok = isinstance(value, list) and all(isinstance(v, str) and v for v in value)
+    return None if ok else "a list of non-empty strings"
+
+
+def _nonempty_names(value: Any) -> Optional[str]:
+    return None if _names(value) is None and value else (
+        "a non-empty list of non-empty strings")
+
+
+def _tier_names(value: Any) -> Optional[str]:
+    ok = isinstance(value, list) and all(
+        isinstance(t, str) and t in TIER_ORDER for t in value)
+    return None if ok else f"a list of tiers from {', '.join(TIER_ORDER)}"
+
+
+def _checked_below(value: Any) -> Optional[str]:
+    """Section whose shape _validate_sections checks entry by entry."""
+    return None
+
+
+def _regex(value: Any) -> Optional[str]:
+    if _name(value) is not None:
+        return "a non-empty regular expression"
+    try:
+        re.compile(value)
+    except re.error as exc:
+        return f"a valid regular expression ({exc})"
+    return None
+
+
+_DEFAULTS_KEYS: Dict[str, _Check] = {
+    "tier": _tier, "expect": _expect, "workloads": _nonempty_names,
+}
+_TIER_KEYS: Dict[str, _Check] = {
+    "title": _string, "rationale": _string, "min_covered": _positive_int,
+    "gpus": _positive_int,
+    "workloads": _nonempty_names, "apis": _names,
+}
+_TIER_REQUIRED = ("min_covered", "workloads")
+_PATTERN_KEYS: Dict[str, _Check] = {
+    "match": _regex, "tier": _tier, "reason": _string,
+}
+_UNREACHABLE_KEYS: Dict[str, _Check] = {
+    "group": _name, "reason": _name, "apis": _names,
+}
+_OVERRIDE_KEYS: Dict[str, _Check] = {
+    "tier": _tier, "expect": _expect, "workloads": _nonempty_names,
+    "gpus": _positive_int, "payload_loss": _boolean, "captured": _boolean,
+    "handler_error_in": _tier_names, "skip": _boolean, "reason": _string,
+    "note": _string,
+}
+
+
+def _check_mapping(where: str, value: Any, keys: Dict[str, _Check],
+                   required: tuple, problems: List[str]) -> bool:
+    if not isinstance(value, dict):
+        problems.append(f"{where}: expected a mapping, "
+                        f"got {type(value).__name__}")
+        return False
+    for key, item in value.items():
+        if key not in keys:
+            problems.append(f"{where}: unknown key '{key}'")
+            continue
+        wanted = keys[key](item)
+        if wanted is not None:
+            problems.append(f"{where}.{key}: expected {wanted}, got {item!r}")
+    for key in required:
+        if key not in value:
+            problems.append(f"{where}: missing required key '{key}'")
+    return True
+
+
+def validate_overlay(overlay: Any) -> None:
+    """Reject an overlay that is not exactly the documented shape.
+
+    Raises MatrixError listing every problem found, so one run shows them all.
+    """
+    problems: List[str] = []
+    top_keys: Dict[str, _Check] = {
+        "version": _version, "defaults": _checked_below,
+        "tiers": _checked_below, "patterns": _checked_below,
+        "unreachable": _checked_below, "overrides": _checked_below,
+    }
+    if _check_mapping("overlay", overlay, top_keys, ("tiers",), problems):
+        _validate_sections(overlay, problems)
+    if problems:
+        raise MatrixError("api_matrix.yaml is malformed:\n  " +
+                          "\n  ".join(problems))
+
+
+def _validate_sections(overlay: Dict[str, Any], problems: List[str]) -> None:
+    tiers = overlay.get("tiers")
+    if not isinstance(tiers, dict) or not tiers:
+        problems.append("tiers: expected a non-empty mapping of tier name "
+                        "to its definition")
+        tiers = {}
+    explicit: Dict[str, str] = {}
+    for tier, meta in tiers.items():
+        if _tier(tier) is not None:
+            problems.append(f"tiers: '{tier}' is not one of "
+                            f"{', '.join(TIER_ORDER)}")
+        if (_check_mapping(f"tiers.{tier}", meta, _TIER_KEYS, _TIER_REQUIRED,
+                           problems) and _names(meta.get("apis", [])) is None):
+            for api in meta.get("apis", []):
+                explicit.setdefault(api, tier)
+
+    if "defaults" in overlay:
+        defaults = overlay["defaults"]
+        if _check_mapping("defaults", defaults, _DEFAULTS_KEYS, (), problems):
+            _check_tier_configured("defaults.tier", defaults.get("tier"),
+                                   tiers, problems)
+
+    if "patterns" in overlay:
+        patterns = overlay["patterns"]
+        if not isinstance(patterns, list):
+            problems.append("patterns: expected a list, "
+                            f"got {type(patterns).__name__}")
+        else:
+            for i, pat in enumerate(patterns):
+                where = f"patterns[{i}]"
+                if _check_mapping(where, pat, _PATTERN_KEYS,
+                                  ("match", "tier"), problems):
+                    _check_tier_configured(f"{where}.tier", pat.get("tier"),
+                                           tiers, problems)
+
+    if "unreachable" in overlay:
+        groups = overlay["unreachable"]
+        if not isinstance(groups, list):
+            problems.append("unreachable: expected a list, "
+                            f"got {type(groups).__name__}")
+        else:
+            for i, group in enumerate(groups):
+                _check_mapping(f"unreachable[{i}]", group, _UNREACHABLE_KEYS,
+                               tuple(_UNREACHABLE_KEYS), problems)
+
+    if "overrides" in overlay:
+        overrides = overlay["overrides"]
+        if not isinstance(overrides, dict):
+            problems.append("overrides: expected a mapping of API name to "
+                            f"its override, got {type(overrides).__name__}")
+        else:
+            for api, ov in overrides.items():
+                where = f"overrides.{api}"
+                if _name(api) is not None:
+                    problems.append(f"overrides: key {api!r} is not an API "
+                                    "name")
+                if not _check_mapping(where, ov, _OVERRIDE_KEYS, (),
+                                      problems):
+                    continue
+                if "tier" in ov:
+                    _check_tier_configured(f"{where}.tier", ov["tier"], tiers,
+                                           problems)
+                    if api in explicit and explicit[api] != ov["tier"]:
+                        problems.append(
+                            f"{where}.tier: {ov['tier']} conflicts with "
+                            f"{api} being listed under tiers.{explicit[api]}"
+                            ".apis; an API belongs to exactly one tier")
+
+
+def _check_tier_configured(where: str, tier: Any, tiers: Dict[str, Any],
+                           problems: List[str]) -> None:
+    # A tier outside TIER_ORDER is already reported by the key's own checker.
+    if tier is not None and _tier(tier) is None and tier not in tiers:
+        problems.append(f"{where}: {tier} has no entry under tiers:")
+
+
 def load_overlay(path: Path = DEFAULT_OVERLAY) -> Dict[str, Any]:
     if not path.is_file():
         raise MatrixError(f"{path} not found")
-    return yaml.load(path.read_text(), _StrictLoader)
+    try:
+        overlay = yaml.load(path.read_text(encoding="utf-8"), _StrictLoader)
+    except yaml.YAMLError as exc:
+        raise MatrixError(f"{path} is not valid YAML: {exc}")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise MatrixError(f"cannot read {path}: {exc}")
+    validate_overlay(overlay)
+    return overlay
 
 
 def _tier_meta(overlay: Dict[str, Any], tier: str) -> Dict[str, Any]:
@@ -181,7 +369,7 @@ def unreachable_index(overlay: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
     An API listed here has been called and measured not to reach the archive on
     this stack. Grouping is not cosmetic: the reason is the same measurement for
     every API in a group (imageSupport=0, absent from the SDK headers, behind a
-    crash), so writing it once keeps the 149 declarations honest and makes it
+    crash), so writing it once keeps the declarations honest and makes it
     obvious when a whole group becomes reachable again.
     """
     index: Dict[str, Dict[str, str]] = {}
@@ -191,17 +379,12 @@ def unreachable_index(overlay: Dict[str, Any]) -> Dict[str, Dict[str, str]]:
         if not name or not reason:
             raise MatrixError(
                 "every unreachable: entry needs a group and a reason")
-        when = group.get("when") or UNREACHABLE_ALWAYS
-        if when not in VALID_UNREACHABLE_WHEN:
-            raise MatrixError(
-                f"unreachable.{name}: when: '{when}' is not one of "
-                f"{', '.join(VALID_UNREACHABLE_WHEN)}")
         for api in group.get("apis") or []:
             if api in index:
                 raise MatrixError(
                     f"{api} is listed in unreachable groups "
                     f"{index[api]['group']} and {name}; one reason per API")
-            index[api] = {"group": name, "reason": reason, "when": when}
+            index[api] = {"group": name, "reason": reason}
     return index
 
 
@@ -238,14 +421,14 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
         ov = overrides.get(api) or {}
 
         if "tier" in ov:
-            tier, source = ov["tier"], "override"
+            tier = ov["tier"]
         elif api in explicit:
-            tier, source = explicit[api], "tier-list"
+            tier = explicit[api]
         else:
-            tier, source = defaults.get("tier", "T4"), "default"
+            tier = defaults.get("tier", "T4")
             for rx, pat in compiled:
                 if rx.search(api):
-                    tier, source = pat["tier"], f"pattern:{pat['match']}"
+                    tier = pat["tier"]
                     break
 
         meta = _tier_meta(overlay, tier)
@@ -261,7 +444,6 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
                 f"{api}: expect '{expect}' is not one of "
                 f"derived/{'/'.join(VALID_CLASSES)}")
 
-        shapes = sorted({p["shape"] for p in entry["payload_loss"]})
         # The overlay is authoritative on payload loss: the mechanical detector
         # is a superset (it flags every const-struct pointer regardless of
         # whether the loss is consequential) and it misses non-const shapes such
@@ -269,20 +451,15 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
         if "payload_loss" in ov:
             payload_loss = bool(ov["payload_loss"])
         else:
-            payload_loss = bool(shapes)
+            payload_loss = bool(entry["payload_loss"])
 
         rows.append(ApiRow(
             api=api,
-            table=entry["table"],
-            capture_class=entry["capture_class"],
-            replay_class=entry["replay_class"],
-            derived_class=derived,
             expect_class=expect_class,
             tier=tier,
             workloads=workloads,
             gpus=gpus,
             payload_loss=payload_loss,
-            payload_loss_shapes=shapes,
             # A passthrough-only capture shim writes no event at all, so the
             # API can never appear in an archive. That is derivable, so derive
             # it; the overlay only has to declare the cases where a shim does
@@ -290,20 +467,15 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
             expect_captured=bool(
                 ov.get("captured", entry["capture_class"] != "PASSTHROUGH_ONLY")),
             handler_error_in=list(ov.get("handler_error_in") or []),
-            # Only a per-API skip means "never assert this". A tier's
-            # skip_by_default means "do not run unless asked", which is already
-            # expressed by whether that tier produced observations — folding it
-            # in here would make --include-deprioritised run T5 and then report
-            # all 92 of its APIs as skipped.
+            # Only a per-API skip means "never assert this". A tier that is
+            # not run by default is already expressed by whether it produced
+            # observations — folding it in here would mark every API of a
+            # deprioritised tier as skipped even when that tier was run.
             skip=bool(ov.get("skip", False)),
             skip_reason=ov.get("reason", ""),
-            skip_unless_multi_gpu=bool(ov.get("skip_unless_multi_gpu", False)) or gpus > 1,
             unreachable_reason=unreachable.get(api, {}).get("reason", ""),
             unreachable_group=unreachable.get(api, {}).get("group", ""),
-            unreachable_when=unreachable.get(api, {}).get(
-                "when", UNREACHABLE_ALWAYS),
             note=ov.get("note", ""),
-            source=source,
         ))
     return rows
 

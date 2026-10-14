@@ -1387,9 +1387,9 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 
   if(wf_info.pe_group_logical_lane_id == 0) {
     // Only the leader lane updates the counter (Does it require atomics?)
-    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
-    //                                        __ATOMIC_RELAXED,
-    //                                        __HIP_MEMORY_SCOPE_AGENT);
+    // uint32_t local_qp_counter =
+    //     atomic::fetch_add<atomic::memory_scope::device,
+    //                       atomic::memory_order::relaxed>(&qp_counter[pe], 1);
     // local_qp_counter %= num_qps_per_pe;
     // qp_index = (local_qp_counter * num_pes) + pe;
     qp_index = (qp_counter[pe]++ % num_qps_per_pe) * constmem.num_pes + pe;
@@ -1597,7 +1597,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
   if (ndim == 2) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, true);
+        ndim, element_size);
     const size_t src_s0 = view.src_s0;
     const size_t src_s1 = view.src_s1;
     const size_t dst_s0 = view.dst_s0;
@@ -1661,7 +1661,7 @@ __device__ inline void GDAContext::tile_put_gda_workers(
   } else if (ndim == 1) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, true);
+        ndim, element_size);
     const size_t ext = view.ext0;
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
@@ -1692,7 +1692,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
   if (ndim == 2) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, false);
+        ndim, element_size);
     const size_t src_s0 = view.src_s0;
     const size_t src_s1 = view.src_s1;
     const size_t dst_s0 = view.dst_s0;
@@ -1756,7 +1756,7 @@ __device__ inline void GDAContext::tile_get_gda_workers(
   } else if (ndim == 1) {
     const TileView view = tile_make_view(
         dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
-        ndim, element_size, false);
+        ndim, element_size);
     const size_t ext = view.ext0;
     char *src_ptr = view.src_base;
     char *dst_ptr = view.dst_base;
@@ -1788,7 +1788,7 @@ __device__ inline int GDAContext::tile_put(void* dst_data, const void* src_data,
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
       dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
-      element_size, true);
+      element_size);
 
   if (view.ndim == 2) {
     switch (tile_classify(view)) {
@@ -1920,7 +1920,7 @@ __device__ inline int GDAContext::tile_get(void* dst_data, const void* src_data,
   int qp_index = get_qp_index(pe, wf_info);
   const TileView view = tile_make_view(
       dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
-      element_size, false);
+      element_size);
 
   if (view.ndim == 2) {
     switch (tile_classify(view)) {
@@ -2176,15 +2176,22 @@ __device__ inline int GDAContext::tile_broadcast(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a GET.
     int result = tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
                           boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Non-root PEs receive via tile_get above; the root must populate its own
+    // dst explicitly — the GET path does not write to the root's dst.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
-  // Note: Root PE's data is already in src, no need to copy to dst unless src != dst
 
   // Synchronize to ensure all PEs complete before root can modify buffer
   sync(team);
@@ -2207,13 +2214,19 @@ __device__ inline int GDAContext::tile_broadcast_wave(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET (wave-collective)
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a wave-collective GET.
     int result = tile_get_wave(dst_data, src_data, dst_strides, src_strides, start_coord,
                                 boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
 
   // Synchronize to ensure all PEs complete before root can modify buffer
@@ -2237,13 +2250,19 @@ __device__ inline int GDAContext::tile_broadcast_wg(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET (workgroup-collective)
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a workgroup-collective GET.
     int result = tile_get_wg(dst_data, src_data, dst_strides, src_strides, start_coord,
                               boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
 
   // Synchronize to ensure all PEs complete before root can modify buffer

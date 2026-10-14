@@ -6223,6 +6223,43 @@ pub fn amdsmi_get_link_topology_nearest(
     Ok(topology_nearest_info)
 }
 
+/// Retrieve the unified link topology information between two processors.
+///
+/// # Baremetal notes
+///
+/// - Self pair: `INTERNAL`/`ENABLED`, zero weight and hops, `fb_sharing=1`.
+/// - Current successful calls report `ENABLED`; `UNKNOWN` to `DISABLED` is defensive.
+/// - Status provides host API parity, not link health or P2P access.
+/// - `num_hops` counts abstracted steps, capped at 255, not physical links.
+/// - For peers, `fb_sharing=0` means no P2P access or a failed P2P query.
+/// - Fields are queried sequentially, not atomically.
+///
+/// # Arguments
+///
+/// * `processor_handle_src` - A handle to the source processor.
+/// * `processor_handle_dst` - A handle to the destination processor.
+///
+/// # Returns
+///
+/// [`AmdsmiLinkTopologyT`] with weight, status, type, hops, and framebuffer sharing.
+///
+/// # Errors
+///
+/// Returns [`AmdsmiStatusT`] if the native query fails.
+pub fn amdsmi_get_link_topology(
+    processor_handle_src: AmdsmiProcessorHandle,
+    processor_handle_dst: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiLinkTopologyT> {
+    let mut topology_info = MaybeUninit::<AmdsmiLinkTopologyT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_link_topology(
+        processor_handle_src,
+        processor_handle_dst,
+        topology_info.as_mut_ptr()
+    ));
+    let topology_info = unsafe { topology_info.assume_init() };
+    Ok(topology_info)
+}
+
 /// A macro to get all the GPU processor handles directly.
 ///
 /// This macro retrieves all the GPU processor handles by first getting the socket handles

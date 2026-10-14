@@ -19,8 +19,6 @@ using amd::smi::getRSMIStatusString;
 
 namespace amd::smi {
 
-namespace fs = std::filesystem;
-
 rsmi_status_t read_npm_file(const fs::path& path, std::string& out) {
   std::ifstream ifs(path);
   if (!ifs.is_open()) {
@@ -34,6 +32,17 @@ rsmi_status_t read_npm_file(const fs::path& path, std::string& out) {
   return RSMI_STATUS_SUCCESS;
 }
 
+// MI4xx exposes NPM files under board/npm/; MI350 exposes the same files
+// directly under board/. A single presence check on the npm/ subdirectory
+// picks the right layout with no ASIC-specific branching.
+fs::path resolve_npm_dir(const fs::path& board_path) {
+  fs::path npm_dir = board_path / "npm";
+  if (fs::exists(npm_dir) && fs::is_directory(npm_dir)) {
+    return npm_dir;
+  }
+  return board_path;
+}
+
 rsmi_status_t get_npm_board_status(const std::string& board_path, bool* enabled) {
   if (enabled == nullptr) return RSMI_STATUS_INVALID_ARGS;
   if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
@@ -42,7 +51,7 @@ rsmi_status_t get_npm_board_status(const std::string& board_path, bool* enabled)
   if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
 
   std::string s;
-  rsmi_status_t r = read_npm_file(bd / "npm_status", s);
+  rsmi_status_t r = read_npm_file(resolve_npm_dir(bd) / "npm_status", s);
   if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
 
   if (s == "enabled") {
@@ -56,6 +65,75 @@ rsmi_status_t get_npm_board_status(const std::string& board_path, bool* enabled)
   return RSMI_STATUS_UNEXPECTED_DATA;
 }
 
+rsmi_status_t get_npm_board_mode(const std::string& board_path, std::string* mode) {
+  if (mode == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = resolve_npm_dir(bd) / "mode";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  std::string s;
+  rsmi_status_t r = read_npm_file(p, s);
+  if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
+
+  if (s != "1" && s != "2") return RSMI_STATUS_UNEXPECTED_DATA;
+  *mode = s;
+  return RSMI_STATUS_SUCCESS;
+}
+
+rsmi_status_t set_npm_board_mode(const std::string& board_path, const std::string& mode) {
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+  if (mode != "1" && mode != "2") return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = resolve_npm_dir(bd) / "mode";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  int ret = WriteSysfsStr(p.string(), mode);
+  if (ret == ENOENT) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  return ErrnoToRsmiStatus(ret);
+}
+
+rsmi_status_t get_npm_supported_modes(const std::string& board_path, uint64_t* bitmask) {
+  if (bitmask == nullptr) return RSMI_STATUS_INVALID_ARGS;
+  if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
+
+  fs::path bd(board_path);
+  if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  fs::path p = resolve_npm_dir(bd) / "supported_mode";
+  if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
+
+  std::string s;
+  rsmi_status_t r = read_npm_file(p, s);
+  if (r != RSMI_STATUS_SUCCESS) return RSMI_STATUS_NOT_SUPPORTED;
+
+  // std::stoull() accepts a leading '-' (e.g. "-1" parses as UINT64_MAX);
+  // reject anything not starting with a digit before parsing.
+  if (s.empty() || !std::isdigit(static_cast<unsigned char>(s[0]))) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  try {
+    size_t idx = 0;
+    unsigned long long v = std::stoull(s, &idx, 16);
+    if (idx != s.size()) return RSMI_STATUS_UNEXPECTED_DATA;
+    *bitmask = static_cast<uint64_t>(v);
+    return RSMI_STATUS_SUCCESS;
+  } catch (const std::invalid_argument&) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  } catch (const std::out_of_range&) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+}
+
 static rsmi_status_t read_board_uint64(const std::string& board_path, const char* filename,
                                        uint64_t* value) {
   if (value == nullptr) return RSMI_STATUS_INVALID_ARGS;
@@ -64,7 +142,7 @@ static rsmi_status_t read_board_uint64(const std::string& board_path, const char
   fs::path bd(board_path);
   if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
 
-  fs::path p = bd / filename;
+  fs::path p = resolve_npm_dir(bd) / filename;
   if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
 
   std::string s;
@@ -111,7 +189,7 @@ rsmi_status_t set_npm_board_limit(const std::string& board_path, uint64_t limit)
   fs::path bd(board_path);
   if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
 
-  fs::path p = bd / "cur_node_power_limit";
+  fs::path p = resolve_npm_dir(bd) / "cur_node_power_limit";
   if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
 
   // Write the numeric limit value as text to the sysfs file. This mirrors the

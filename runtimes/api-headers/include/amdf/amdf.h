@@ -7,6 +7,7 @@
 #include "amdf/api.h"
 #include "amdf/base.h"
 #include "amdf/memory.h"
+#include "amdf/native_event.h"
 #include "amdf/queue.h"
 
 #endif  // AMDF_AMDF_H_

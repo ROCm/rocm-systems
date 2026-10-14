@@ -713,7 +713,9 @@ def _derive_sopc(name: str) -> InstructionSemantics | None:
             )
     if name == 'S_SET_GPR_IDX_ON':
         return InstructionSemantics(name, 'gpr_idx', operation='on')
-    # Unrecognized SOPC instructions (S_SETVSKIP, …) → nop
+    if name == 'S_SETVSKIP':
+        return InstructionSemantics(name, 'set_vskip')
+    # Unrecognized SOPC instructions → nop
     return InstructionSemantics(name, 'nop')
 
 
@@ -1809,7 +1811,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if upper == 'S_ATOMIC_DEC':
+        return InstructionSemantics(
+            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
+        )
+    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
         return InstructionSemantics(name, 'nop')
 
@@ -2525,8 +2531,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     }
     for suffix, (op, esz, dw) in _DS_ATOMIC_MAP.items():
         if suffix in upper:
+            dual = op == 'swap' and (
+                'WRXCHG2' in upper
+                or 'STOREXCHG2ADDR' in upper
+                or 'STOREXCHG_2ADDR' in upper
+            )
             return InstructionSemantics(
-                name, 'ds_atomic', operation=op, elem_size=esz, num_elems=dw
+                name,
+                'ds_atomic2' if dual else 'ds_atomic',
+                operation=op,
+                elem_size=esz,
+                num_elems=dw,
             )
     # ── Lane permutation / swizzle ──────────────────────────────────────
     if upper in ('DS_PERMUTE_B32', 'DS_BPERMUTE_B32', 'DS_BPERMUTE_FI_B32'):

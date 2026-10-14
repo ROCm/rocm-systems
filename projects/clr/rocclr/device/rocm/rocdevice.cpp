@@ -35,10 +35,8 @@
 #include "platform/interop_d3d11.hpp"
 #endif
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "device/rocm/rocurilocator.hpp"
-#endif
 #endif
 
 #if defined(__linux__)
@@ -125,7 +123,7 @@ bool NullDevice::create(const amd::Isa& isa) {
   std::stringstream ss;
   ss << AMD_BUILD_STRING " (HSA,LC) [Offline]";
   ::strncpy(info_.driverVersion_, ss.str().c_str(), sizeof(info_.driverVersion_) - 1);
-  info_.version_ = "OpenCL " OPENCL_VERSION_STR " ";
+  info_.version_ = "OpenCL " OPENCL_VERSION_STR " " AMD_PLATFORM_INFO;
   return true;
 }
 
@@ -1449,12 +1447,12 @@ bool Device::populateOCLDeviceConstants() {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "2.0"
-        " ";
+        " " AMD_PLATFORM_INFO;
   } else {
     info_.version_ =
         "OpenCL " /*OPENCL_VERSION_STR*/
         "1.2"
-        " ";
+        " " AMD_PLATFORM_INFO;
   }
 
   info_.builtInKernels_ = "";
@@ -2470,6 +2468,54 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
   }
 
   return hsa_vmem_handle.handle;
+}
+
+bool Device::getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationType* location_type,
+                             int* device_id, size_t* size) const {
+  if (location_type == nullptr || device_id == nullptr || size == nullptr) return false;
+
+  const uint64_t hsa_handle = amd_mem_obj.getUserData().hsa_handle;
+  if (hsa_handle == 0) return false;
+
+  // Enhancement entry point: an older ROCr does not export it. Report failure so
+  // the caller keeps its legacy device/size-zero behaviour.
+  if (!Hsa::vmem_get_vmem_info_available()) return false;
+
+  hsa_amd_vmem_alloc_handle_t handle{hsa_handle};
+  hsa_amd_vmem_handle_info_t info{};
+  info.size = sizeof(info);
+
+  // Fails for an import whose placement ROCr could not recover, which is the
+  // case the caller's fallback exists for.
+  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
+    return false;
+  }
+
+  // Ask the owning agent what it is. The allocation's pool is deliberately not
+  // consulted: for an imported handle it names a placement class, not the pool
+  // the exporter allocated from.
+  hsa_device_type_t dev_type{};
+  if (Hsa::agent_get_info(info.agent, HSA_AGENT_INFO_DEVICE, &dev_type) != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+
+  *size = info.alloc_size;
+  *location_type = (dev_type == HSA_DEVICE_TYPE_CPU) ? amd::Device::VmmLocationType::kHost
+                                                     : amd::Device::VmmLocationType::kDevice;
+
+  // Host memory is not device-indexed. For device memory report the owning GPU
+  // rather than whichever device the importing thread happens to have current.
+  *device_id = static_cast<int>(amd::InvalidDeviceId);
+  if (*location_type == amd::Device::VmmLocationType::kDevice) {
+    for (auto& device : devices()) {
+      if (static_cast<Device*>(device)->getBackendDevice().handle == info.agent.handle) {
+        *device_id = static_cast<int>(device->index());
+        break;
+      }
+    }
+    if (*device_id == static_cast<int>(amd::InvalidDeviceId)) return false;
+  }
+  return true;
 }
 
 void* Device::reserveMemory(size_t size, size_t alignment) const {
@@ -4531,10 +4577,8 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
 }
 
 // ================================================================================================
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 device::UriLocator* Device::createUriLocator() const { return new roc::UriLocator(); }
-#endif
 #endif
 
 // ================================================================================================

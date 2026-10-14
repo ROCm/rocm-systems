@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """
 derive_manifest.py — machine-derive the HRR API classification table.
 
@@ -30,19 +32,21 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
+import stat
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # ---------------------------------------------------------------------------
 # Baseline the matrix was authored against.
 #
-# From HRR-Use-Case-Priorities.md: "551 APIs: 542 runtime + 9 compiler; 273
-# classified faithfully replayed, 254 NOOP_PLAYBACK_APIS, 24
-# ERROR_STUB_PLAYBACK_APIS" at develop @ 2d68481fc8f.  The numbers below are
-# what the *current* tree actually produces; where they differ from the
-# document, the tree wins and the delta is worth reading before you refresh it.
+# api_classes_baseline.json records the counts the current tree produced when
+# api_matrix.yaml was last reviewed against it.  The tree is the source of
+# truth: when the counts drift, the delta is worth reading before you refresh
+# the baseline.
 # ---------------------------------------------------------------------------
 BASELINE_PATH_NAME = "api_classes_baseline.json"
 
@@ -99,6 +103,17 @@ _SCALAR_KEYWORDS = re.compile(
     r"\b(char|short|int|long|float|double|signed|unsigned|bool|enum|_Bool)\b")
 
 
+# What this script reads off the generator. Checked once on load so a rename
+# upstream stops the derivation with a message, rather than being papered over
+# by a default that would classify every API as if the feature did not exist.
+REQUIRED_GENERATOR_ATTRS = (
+    "UNREPLAYABLE_PLAYBACK_APIS", "ERROR_STUB_PLAYBACK_APIS",
+    "NOOP_PLAYBACK_APIS", "CUSTOM_PLAYBACK_BODIES", "MANUAL_PLAYBACK_APIS",
+    "MANUAL_CAPTURE_APIS", "PASSTHROUGH_ONLY", "playback_defaults_to_noop",
+    "deref_covered_params", "normalise_field_type", "parse_hip_api_trace",
+)
+
+
 def load_generator(tools_dir: Path):
     """Import gen_hrr_api_args.py as a module.
 
@@ -113,6 +128,10 @@ def load_generator(tools_dir: Path):
         sys.exit(f"error: cannot load {gen_path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    missing = [n for n in REQUIRED_GENERATOR_ATTRS if not hasattr(mod, n)]
+    if missing:
+        sys.exit(f"error: {gen_path} no longer defines {', '.join(missing)}; "
+                 "update derive_manifest.py to match the generator")
     return mod
 
 
@@ -135,7 +154,11 @@ def load_special_apis(hrr_dir: Path, api_names: List[str]) -> set:
     src = hrr_dir / "playback" / "hrr_playback.cpp"
     if not src.is_file():
         sys.exit(f"error: playback driver not found: {src}")
-    body = _IS_SPECIAL_RE.search(src.read_text())
+    try:
+        text = src.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        sys.exit(f"error: cannot read {src}: {exc}")
+    body = _IS_SPECIAL_RE.search(text)
     if body is None:
         sys.exit(f"error: could not find is_special() in {src}; the manifest "
                  "cannot tell which APIs bypass the dispatch table")
@@ -160,7 +183,7 @@ def classify_replay(gen, entry, specials: set) -> str:
     """Mirror generate_playback_shim()'s dispatch order exactly."""
     if entry.name in specials:
         return REPLAY_SPECIAL
-    if entry.name in getattr(gen, "UNREPLAYABLE_PLAYBACK_APIS", {}):
+    if entry.name in gen.UNREPLAYABLE_PLAYBACK_APIS:
         return REPLAY_UNREPLAYABLE
     if entry.name in gen.ERROR_STUB_PLAYBACK_APIS:
         return REPLAY_ERROR_STUB
@@ -172,6 +195,8 @@ def classify_replay(gen, entry, specials: set) -> str:
         return REPLAY_MANUAL
     if entry.table == "compiler":
         return REPLAY_COMPILER
+    if gen.playback_defaults_to_noop(entry):
+        return REPLAY_NOOP
     return REPLAY_GENERATED
 
 
@@ -191,7 +216,7 @@ def _pointee_base(raw_type: str) -> str:
 
 
 def detect_payload_loss(gen, entry, capture_class: str) -> List[Dict[str, str]]:
-    """Detect the two payload-loss shapes described in section 8.3.
+    """Detect the two payload-loss shapes.
 
     CONST_STRUCT_PTR_IN — a `const Struct*` input argument.  The generator
       lowers every pointer to a bare uint64_t, so what lands in the archive is
@@ -220,7 +245,7 @@ def detect_payload_loss(gen, entry, capture_class: str) -> List[Dict[str, str]]:
     if capture_class != CAPTURE_GENERATED:
         return []
 
-    carried = getattr(gen, "deref_covered_params", lambda _a: set())(entry.name)
+    carried = gen.deref_covered_params(entry.name)
 
     found: List[Dict[str, str]] = []
     for p in entry.params:
@@ -286,17 +311,15 @@ def summarise(rows: List[Dict[str, Any]]) -> Dict[str, int]:
     for shape in ("CONST_STRUCT_PTR_IN", "BIG_STRUCT_BY_VALUE"):
         counts[f"payload_loss.{shape}"] = sum(
             1 for r in rows if any(p["shape"] == shape for p in r["payload_loss"]))
-    # The decision-relevant number from section 8.3: APIs that count toward the
-    # "faithfully replayed" headline yet cannot actually be replayed.
+    # The decision-relevant number: APIs that count as faithfully replayed yet
+    # may not actually be replayable.
     counts["payload_loss.in_faithful"] = sum(
         1 for r in rows if r["payload_loss"] and r["observable_class"] == "REAL")
     return counts
 
 
 def compare_baseline(counts: Dict[str, int],
-                     baseline: Optional[Dict[str, int]]) -> List[str]:
-    if baseline is None:
-        return []
+                     baseline: Dict[str, int]) -> List[str]:
     problems = []
     for key in sorted(set(counts) | set(baseline)):
         want = baseline.get(key)
@@ -304,6 +327,87 @@ def compare_baseline(counts: Dict[str, int],
         if want != got:
             problems.append(f"  {key}: baseline={want} current={got}")
     return problems
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Replace `path` with `text` without ever exposing a partial file.
+
+    Creates missing parent directories. The target's existing mode is kept;
+    a new file gets what the process umask allows, not mkstemp's 0600.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+    try:
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except FileNotFoundError:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def read_baseline(path: Path) -> Dict[str, int]:
+    if not path.is_file():
+        sys.exit(f"error: baseline not found: {path}\n"
+                 "Without it nothing detects generator drift. Record one "
+                 "deliberately with --update-baseline.")
+    try:
+        baseline = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        sys.exit(f"error: baseline {path} is not valid JSON: {exc}")
+    except (OSError, UnicodeDecodeError) as exc:
+        sys.exit(f"error: cannot read baseline {path}: {exc}")
+    if not isinstance(baseline, dict):
+        sys.exit(f"error: baseline {path} is not a JSON object")
+    return baseline
+
+
+def publish(manifest: Dict[str, Any], out_path: Path, baseline_path: Path,
+            update_baseline: bool, quiet: bool) -> int:
+    """Validate against the baseline, then write the manifest.
+
+    The manifest is the input to everything downstream, so a derivation that
+    does not match the baseline must not leave one behind for the next step to
+    trust. --update-baseline is the deliberate way to accept a new
+    classification: the manifest is written first, so a failure there leaves
+    the committed baseline untouched.
+    """
+    counts = manifest["counts"]
+    if not update_baseline:
+        problems = compare_baseline(counts, read_baseline(baseline_path))
+        if problems:
+            print("ERROR: HRR API classification drifted from the recorded "
+                  "baseline.\n"
+                  "The matrix in api_matrix.yaml was authored against the "
+                  "baseline, so\n"
+                  "these APIs may now have an expected verdict that no longer "
+                  "matches\n"
+                  "reality. Review the delta, update api_matrix.yaml, then "
+                  "re-run with\n"
+                  "--update-baseline.\n", file=sys.stderr)
+            print("\n".join(problems), file=sys.stderr)
+            return 1
+
+    write_atomic(out_path, json.dumps(manifest, indent=2) + "\n")
+    if update_baseline:
+        write_atomic(baseline_path,
+                     json.dumps(counts, indent=2, sort_keys=True) + "\n")
+        print(f"baseline written: {baseline_path}")
+
+    if not quiet:
+        print(f"wrote {out_path}  ({counts['total']} APIs)")
+        for key in sorted(counts):
+            if key != "total":
+                print(f"  {key:44s} {counts[key]}")
+    return 0
 
 
 def main() -> int:
@@ -346,14 +450,6 @@ def main() -> int:
                 print(f"{pl['shape']:22s} {r['api']:48s} {pl['type']} {pl['param']}")
         return 0
 
-    if args.update_baseline:
-        baseline_path.write_text(json.dumps(counts, indent=2, sort_keys=True) + "\n")
-        print(f"baseline written: {baseline_path}")
-
-    baseline = None
-    if baseline_path.is_file():
-        baseline = json.loads(baseline_path.read_text())
-
     manifest = {
         "source": {
             "rocm_systems": str(args.rocm_systems),
@@ -363,27 +459,11 @@ def main() -> int:
         "counts": counts,
         "apis": rows,
     }
-    out_path.write_text(json.dumps(manifest, indent=2) + "\n")
-
-    if not args.quiet:
-        print(f"wrote {out_path}  ({counts['total']} APIs)")
-        for key in sorted(counts):
-            if key != "total":
-                print(f"  {key:44s} {counts[key]}")
-
-    problems = compare_baseline(counts, baseline)
-    if problems:
-        print("\nERROR: HRR API classification drifted from the recorded baseline.\n"
-              "The matrix in api_matrix.yaml was authored against the baseline, so\n"
-              "these APIs may now have an expected verdict that no longer matches\n"
-              "reality. Review the delta, update api_matrix.yaml, then re-run with\n"
-              "--update-baseline.\n", file=sys.stderr)
-        print("\n".join(problems), file=sys.stderr)
-        return 1
-
-    if baseline is None:
-        print("\nnote: no baseline recorded yet; run --update-baseline to pin these counts")
-    return 0
+    try:
+        return publish(manifest, out_path, baseline_path,
+                       args.update_baseline, args.quiet)
+    except OSError as exc:
+        sys.exit(f"error: cannot write output: {exc}")
 
 
 if __name__ == "__main__":

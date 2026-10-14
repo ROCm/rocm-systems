@@ -24,6 +24,11 @@ application that lets you view results from your preferred web browser.
 
    See the :doc:`/reference/faq` for more details on SSH tunneling.
 
+.. warning::
+
+   The standalone GUI analyzer (``--gui``) is deprecated and will be removed in
+   a future release. Use the :doc:`cli` instead.
+
 .. note::
 
    The standalone GUI analyzer is an experimental feature. You must include the
