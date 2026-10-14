@@ -276,7 +276,14 @@ Open the saved HTML file in a browser for the interactive roofline plot. See :re
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
    option. Pass all ids after one ``-b``, for example ``-b 2 5``; a repeated ``-b``
    keeps only the last list. Or, build your own configuration following
-   `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
+   `config_template <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_
+   and pass its directory with ``--config-dir``.
+
+   .. note::
+
+      ``--config-dir`` is deprecated and will be removed in a future release.
+      Custom panel configs will be replaced by user-defined metric sets and views.
+
    The following snippet shows how to generate a report containing only metric 2
    (:doc:`System Speed-of-Light </conceptual/cdna/system-speed-of-light>`).
 
