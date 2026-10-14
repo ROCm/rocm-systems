@@ -389,11 +389,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroRocmwrap -- src/misc/rocmwrap.cc. Its own binary: fakes/rocmwrap_fakes.cc
-  # and fakes/nccl_fakes.cc (linked by most other targets) define rocmLibraryInit,
-  # ncclCuMemEnable and ncclCuMemHandleType, which this target compiles for real. The test TU
-  # supplies ncclDebugLog, g_loadParam and the HSA entry points itself; kernel_config.cc and
-  # archinfo.cc are the real thing, not fakes.
+  # rccl-UnitTestsMicroRocmwrap -- src/misc/rocmwrap.cc. Own binary: fakes/rocmwrap_fakes.cc
+  # and fakes/nccl_fakes.cc define rocmLibraryInit, ncclCuMemEnable and ncclCuMemHandleType.
   set(TEST_MICRO_ROCMWRAP_SOURCE_FILES
     rocmwrap-test.cc
     fakes/hip_fakes.cc

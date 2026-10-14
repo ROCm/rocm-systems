@@ -4,25 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/misc/rocmwrap.cc: the kernel-version probe, the
-// cuMem VMM functional probe and capability gates, the NCCL_CUMEM_ENABLE /
-// cuMem-host decisions, and rocmLibraryInit's one-time ROCr + DMA-BUF setup.
-//
-// The real HIP entry points are the shared fakes/hip_fakes.cc hooks. Everything
-// else rocmwrap.cc reaches outside HIP goes through a seam scoped to its own
-// function bodies (see the #define block before ROCMWRAP_CC_PATH): uname, fopen
-// (/proc/kallsyms), hipDriverGetVersion and hipDeviceGet (fixed-value stubs in
-// hip_fakes.cc), the kernel-config reader, and the weakly linked
-// hsa_amd_portable_export_dmabuf entry. hsa_system_get_info and hsa_init are
-// defined here. kernel_config.cc and archinfo.cc are compiled for real, so the
-// option matching and the gfx-arch parsing are the production code.
-//
-// ncclCuMemEnable and ncclCuMemHostEnable each have an arm gated at compile
-// time on HIP_VERSION: ncclCuMemEnable's on the cuMem window (7.12.60540, or the
-// 7.0.2.x backport), ncclCuMemHostEnable's on 7.12.60540 only. ROCm 7.1/7.2
-// (local and CI) are outside both, so those tests pin the out-of-window arms;
-// the host arm also needs hipDeviceAttributeHostNumaId, which these headers do
-// not declare.
+// Host-only microtests for src/misc/rocmwrap.cc. Non-HIP calls are seamed inside rocmwrap.cc only
+// (see the #defines before ROCMWRAP_CC_PATH). On ROCm 7.1/7.2 the cuMem tests pin the
+// out-of-window arms of ncclCuMemEnable/ncclCuMemHostEnable.
 
 #include <gtest/gtest.h>
 
@@ -51,8 +35,7 @@
 #include "hsa/hsa.h"
 #include "bootstrap.h"
 
-// --- Logging and params: this binary links no shared nccl fakes. -------------
-
+// --- Logging and params: this binary links no shared nccl fakes.
 uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
 uint64_t ncclDebugMask = ~uint64_t(0);
 
@@ -82,8 +65,7 @@ std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, i
 
 #include "fakes/param_redirect.h"
 
-// --- HSA: the three ROCr entry points rocmwrap.cc calls. ----------------------
-
+// --- HSA: the three ROCr entry points rocmwrap.cc calls.
 namespace {
 std::function<hsa_status_t(hsa_system_info_t, void*)> g_hsaSystemGetInfo;
 int g_hsaInitCalls = 0;
@@ -97,7 +79,7 @@ extern "C" hsa_status_t hsa_init() {
   return HSA_STATUS_SUCCESS;
 }
 
-// --- Seams scoped to rocmwrap.cc's own function bodies. -----------------------
+// --- Seams scoped to rocmwrap.cc's own function bodies.
 // Every header rocmwrap.cc includes is pulled in above, so their include guards
 // keep the renames below from rewriting any declaration.
 
@@ -313,9 +295,7 @@ private:
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // ncclGetKernelVersionCode
-// ---------------------------------------------------------------------------
 
 TEST_F(RocmwrapMicrotest, KernelVersionCode_PacksMajorAndMinorFromTheRelease) {
   SetKernelRelease("6.11.4-45-generic");
@@ -334,9 +314,7 @@ TEST_F(RocmwrapMicrotest, KernelVersionCode_UnparseableReleaseIsZero) {
   EXPECT_EQ(ncclGetKernelVersionCode(), 0);
 }
 
-// ---------------------------------------------------------------------------
 // ncclCuMemFunctionalProbe
-// ---------------------------------------------------------------------------
 
 TEST_F(RocmwrapMicrotest, FunctionalProbe_AllStepsSucceed_ReturnsOneAndUndoesEveryStep) {
   VmmLog log;
@@ -409,9 +387,7 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_FailingCleanupIsReportedButDoesNotChan
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "HIP failure"));
 }
 
-// ---------------------------------------------------------------------------
 // ncclCuMemCapabilityCheck / ncclIsCuMemSupported
-// ---------------------------------------------------------------------------
 
 TEST_F(RocmwrapMicrotest, CapabilityCheck_AllGatesPassAndProbeSucceeds_ReturnsOne) {
   VmmLog log;
@@ -566,9 +542,7 @@ TEST_F(RocmwrapMicrotest, RuntimeSupported_SkipsTheArchGateAndRunsTheCheckOnce) 
     ::testing::ExitedWithCode(0), "");
 }
 
-// ---------------------------------------------------------------------------
 // ncclCuMemEnable / ncclCuMemHostEnable (out-of-window HIP_VERSION arm)
-// ---------------------------------------------------------------------------
 
 #if !NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)
 TEST_F(RocmwrapMicrotest, CuMemEnable_OutsideTheCompileTimeWindowIsAlwaysZero) {
@@ -597,9 +571,7 @@ TEST_F(RocmwrapMicrotest, CuMemHostEnable_ReturnsTheCachedValue) {
   EXPECT_EQ(ncclCuMemHostEnable(), 1);
 }
 
-// ---------------------------------------------------------------------------
 // initOnceFunc / rocmLibraryInit
-// ---------------------------------------------------------------------------
 
 // CUDA_LAUNCH_BLOCKING is on for any non-empty value other than exactly "0".
 TEST_F(RocmwrapMicrotest, Init_ParsesCudaLaunchBlocking) {

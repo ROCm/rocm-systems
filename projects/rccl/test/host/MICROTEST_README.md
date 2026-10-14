@@ -311,21 +311,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroRocmwrap`** — `src/misc/rocmwrap.cc` (via
-  `ROCMWRAP_CC_PATH`, from `rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`.
-  Covers the kernel-version probe, the cuMem VMM functional probe and its
-  cleanup, the capability gates behind `ncclIsCuMemSupported` /
-  `ncclCuMemRuntimeSupported`, and `rocmLibraryInit`'s ROCr version and
-  DMA-BUF setup. Its own binary because `fakes/rocmwrap_fakes.cc` and
-  `fakes/nccl_fakes.cc` define `rocmLibraryInit`, `ncclCuMemEnable` and
-  `ncclCuMemHandleType`. The test TU defines `ncclDebugLog`, `g_loadParam`,
-  `hsa_system_get_info` and `hsa_init`, and seams `uname`, `fopen`,
-  `hipDriverGetVersion`, `hipDeviceGet`, the kernel-config reader and the weak
-  `hsa_amd_portable_export_dmabuf` symbol inside `rocmwrap.cc` only;
-  `kernel_config.cc` and `archinfo.cc` are compiled for real. The in-window
-  arm of `ncclCuMemEnable` compiles only on ROCm 7.12+ or the 7.0.2.x backport
-  (`NCCL_CUMEM_VERSION_SUPPORTED`), and that of `ncclCuMemHostEnable` only on
-  7.12+ (`NCCL_CUMEM_HOST_VERSION_SUPPORTED`), so on 7.1/7.2 the tests pin the
-  out-of-window arms. See
+  `ROCMWRAP_CC_PATH`, from `rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`. Its
+  own binary because `fakes/rocmwrap_fakes.cc` and `fakes/nccl_fakes.cc` define
+  `rocmLibraryInit`, `ncclCuMemEnable` and `ncclCuMemHandleType`. See
   `test_categories_micro_rocmwrap.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
