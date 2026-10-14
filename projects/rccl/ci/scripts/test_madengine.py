@@ -652,6 +652,47 @@ def _needed_sonames(lib: Path) -> list[str]:
     return [s for s in sonames if s.startswith("libamd_smi.")]
 
 
+def _soname_bridge_discovered(sonames: str) -> str:
+    """Shell that bridges each missing soname beside every copy of that library.
+
+    _soname_bridge() links only inside the directories that received a librccl,
+    which is where the Primus image keeps both. It is the wrong set here, and
+    run 38480610532 showed why: the working copy,
+    ``_rocm_sdk_libraries/lib/librccl.so.1``, resolves its dependencies through
+    an RPATH that reaches ``_rocm_sdk_core/lib`` -- a directory that holds
+    ``libamd_smi.so.26`` and no librccl at all, so the bridge never touched it.
+    The artifact needs ``.27``, nothing in the image provided it, and
+    ``rocm_sdk.preload_libraries()`` died on the CDLL of librccl with
+
+        OSError: libamd_smi.so.27: cannot open shared object file
+
+    before a single step ran. The build gate could not see it: that copy's
+    ``ldd`` reported nothing either way.
+
+    So discover the directories from the library being bridged rather than from
+    librccl -- every directory that already holds some version of it, which is
+    exactly the set any RPATH or RUNPATH pointing at that library can reach.
+    """
+    if not sonames:
+        return ""
+    return (
+        f'    for so in {sonames}; do \\\n'
+        '      base=${so%%.so.*}.so; \\\n'
+        '      for d in $(find / -xdev -name "${base}.*" -printf "%h\\n" \\\n'
+        '                 2>/dev/null | sort -u); do \\\n'
+        '        [ -e "$d/$so" ] && continue; \\\n'
+        '        have=$(for f in "$d/$base".*; do \\\n'
+        '          [ -e "$f" ] && [ "$f" != "$d/$so" ] && echo "$f"; \\\n'
+        '        done | sort -V | tail -1); \\\n'
+        '        if [ -n "$have" ]; then \\\n'
+        '          ln -sfn "$(basename "$have")" "$d/$so"; \\\n'
+        '          echo "  bridged: $d/$so -> $(basename "$have")"; \\\n'
+        '        fi; \\\n'
+        '      done; \\\n'
+        '    done; \\\n'
+    )
+
+
 def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
     """A RUN layer installing /tmp/rccl_ci/librccl.so over every librccl on disk.
 
@@ -744,9 +785,13 @@ RUN set -e; \\
     done < /opt/RCCL_TARGETS.txt; \\
 {kpack_block}{bridge}    ldconfig || true; \\
     while IFS="$(printf '\\t')" read -r n t; do \\
-      ldd "$t" 2>/dev/null | awk '/not found/ {{print $1}}' | sort -u > "/tmp/rcclswap/post.$n"; \\
+      if ldd "$t" > /tmp/rcclswap/ldd.$n 2>/dev/null; then lddok=yes; else lddok=NO; fi; \\
+      awk '/not found/ {{print $1}}' /tmp/rcclswap/ldd.$n | sort -u > "/tmp/rcclswap/post.$n"; \\
       sed 's/\\.so\\..*/.so/' "/tmp/rcclswap/pre.$n" | sort -u > "/tmp/rcclswap/prefam.$n"; \\
-      echo "  unresolved sonames before=$(wc -l < "/tmp/rcclswap/pre.$n") after=$(wc -l < "/tmp/rcclswap/post.$n")  $t"; \\
+      echo "  unresolved sonames before=$(wc -l < "/tmp/rcclswap/pre.$n") after=$(wc -l < "/tmp/rcclswap/post.$n") ldd_ok=$lddok  $t"; \\
+      if [ "$lddok" = NO ]; then \\
+        echo "    NOTE: ldd could not read this copy, so the counts above prove nothing"; \\
+      fi; \\
       regressed=""; \\
       for s in $(comm -13 "/tmp/rcclswap/pre.$n" "/tmp/rcclswap/post.$n"); do \\
         fam="$(printf '%s' "$s" | sed 's/\\.so\\..*/.so/')"; \\
@@ -967,12 +1012,10 @@ def build_rccl_overlay_image(
                 f"maxtext overlay needs a Primus checkout with primus-cli; got {primus_dir!r}"
             )
         _stage_primus_context(ctx_dir, primus_dir)
-        # Bridge over whatever directories the sweep discovers, not a fixed pair.
+        # Bridge beside every copy of the library itself, not beside librccl --
+        # the directory an RPATH reaches for it is usually neither.
         swap = _librccl_swap_snippet(
-            bridge=_soname_bridge(
-                '$(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname | sort -u)',
-                rccl_needed,
-            ),
+            bridge=_soname_bridge_discovered(rccl_needed),
             kpack=has_kpack_files,
         )
         # The payload is byte-identical to the baseline's, so those layers come
