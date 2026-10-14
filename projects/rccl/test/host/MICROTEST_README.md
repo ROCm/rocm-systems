@@ -321,10 +321,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `hsa_system_get_info` and `hsa_init`, and seams `uname`, `fopen`,
   `hipDriverGetVersion`, `hipDeviceGet`, the kernel-config reader and the weak
   `hsa_amd_portable_export_dmabuf` symbol inside `rocmwrap.cc` only;
-  `kernel_config.cc` and `archinfo.cc` are compiled for real. The
-  `NCCL_CUMEM_VERSION_SUPPORTED(HIP_VERSION)` arms of `ncclCuMemEnable` and
-  `ncclCuMemHostEnable` compile only on ROCm 7.12+ (or the 7.0.2.x backport),
-  so on 7.1/7.2 the tests pin the out-of-window arm. See
+  `kernel_config.cc` and `archinfo.cc` are compiled for real. The in-window
+  arm of `ncclCuMemEnable` compiles only on ROCm 7.12+ or the 7.0.2.x backport
+  (`NCCL_CUMEM_VERSION_SUPPORTED`), and that of `ncclCuMemHostEnable` only on
+  7.12+ (`NCCL_CUMEM_HOST_VERSION_SUPPORTED`), so on 7.1/7.2 the tests pin the
+  out-of-window arms. See
   `test_categories_micro_rocmwrap.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`

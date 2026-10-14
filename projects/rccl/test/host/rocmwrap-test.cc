@@ -18,10 +18,11 @@
 // option matching and the gfx-arch parsing are the production code.
 //
 // ncclCuMemEnable and ncclCuMemHostEnable each have an arm gated at compile
-// time on HIP_VERSION reaching the cuMem window (7.12.60540, or the 7.0.2.x
-// backport). ROCm 7.1/7.2 (local and CI) are outside it, so those tests pin the
-// out-of-window arm; the in-window arms need hipDeviceAttributeHostNumaId,
-// which these headers do not declare.
+// time on HIP_VERSION: ncclCuMemEnable's on the cuMem window (7.12.60540, or the
+// 7.0.2.x backport), ncclCuMemHostEnable's on 7.12.60540 only. ROCm 7.1/7.2
+// (local and CI) are outside both, so those tests pin the out-of-window arms;
+// the host arm also needs hipDeviceAttributeHostNumaId, which these headers do
+// not declare.
 
 #include <gtest/gtest.h>
 
@@ -175,7 +176,10 @@ protected:
     unsetenv("CUDA_LAUNCH_BLOCKING");
 
     SetKernelRelease("6.8.0-generic");
-    g_fopen = [](const char*, const char*) -> FILE* { return nullptr; };
+    g_fopen = [this](const char* path, const char*) -> FILE* {
+      fopenPaths_.push_back(path);
+      return nullptr;
+    };
     g_driverGetVersion = [](int* v) {
       *v = kCuMemDriverVersion;
       return hipSuccess;
@@ -272,8 +276,9 @@ protected:
   }
 
   static bool Logged(ncclDebugLogLevel level, const char* needle) {
-    for (const auto& m : g_logged)
+    for (const auto& m : g_logged) {
       if (m.level == level && m.text.find(needle) != std::string::npos) return true;
+    }
     return false;
   }
 
@@ -339,7 +344,7 @@ TEST_F(RocmwrapMicrotest, FunctionalProbe_AllStepsSucceed_ReturnsOneAndUndoesEve
   EXPECT_EQ(ncclCuMemFunctionalProbe(/*dev=*/0, /*devOrdinal=*/3), 1);
   std::vector<std::string> expected = {"granularity", "create",       "reserve",     "map",        "setAccess",
                                        "addressRange", "pointerAttr", "unmap",       "addressFree", "release"};
-#if HIP_VERSION >= 71260540
+#if HIP_VERSION >= ROCM_VER_7_12_60540
   expected.insert(expected.begin() + 7, "pointerAttr");  // the legacy-IPC capability query
 #endif
   EXPECT_EQ(log.calls, expected);
@@ -444,6 +449,7 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_WithoutTheGfx1250Gate_AcceptsOtherArch
   g_hipGetDeviceProperties = [&archQueried](hipDeviceProp_t* prop, int) {
     archQueried = true;
     *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942:sramecc+:xnack-");
     return hipSuccess;
   };
   VmmLog log;
