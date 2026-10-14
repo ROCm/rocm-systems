@@ -40,6 +40,9 @@ common = [
     "projects/*/docs/*",
     "shared/*/docs/*",
 
+    # Standalone runtime host workflow edits do not affect TheRock builds.
+    ".github/workflows/runtimes-ci.yml",
+
     # Vendored API headers are not yet integrated into TheRock builds.
     "runtimes/api-headers/*",
 
