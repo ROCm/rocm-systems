@@ -3841,6 +3841,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   int ngpus = system->nodes[GPU].count;
   int nnets = system->nodes[NET].count;
 
+  if (str == NULL) {
+    WARN("No user-defined rings to parse");
+    return ncclInvalidArgument;
+  }
+
   if (rcclParamModelReversalDisable()) reverse = 0;
 
   do {

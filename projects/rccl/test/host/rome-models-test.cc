@@ -293,6 +293,13 @@ class RomeModelsParseGraphMicrotest : public ::testing::Test {
   std::unique_ptr<ncclTopoGraph> graph_;
 };
 
+TEST_F(RomeModelsParseGraphMicrotest, NullRingString_IsRejected) {
+  // search.cc only reaches parseGraph when NCCL_RINGS is set, so this is
+  // defensive rather than reachable from the environment -- but parseGraphLight
+  // already rejects a null string and the two parsers should not disagree.
+  EXPECT_EQ(parseGraph(nullptr, system(), graph(), nullptr, nullptr, 0), ncclInvalidArgument);
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, WellFormedRings_AreTranscribedToIntra) {
   ASSERT_EQ(parseGraph("0 1 2 3|3 2 1 0", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
 
