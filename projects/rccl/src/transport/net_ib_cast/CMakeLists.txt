@@ -6,7 +6,6 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/common_cast.h
     src/transport/net_ib_cast/connect_cast.h
     src/transport/net_ib_cast/gin_cast.h
-    src/transport/net_ib_cast/gin_multiseg_cast.h
     src/transport/net_ib_cast/p2p_cast.h
     src/transport/net_ib_cast/p2p_resiliency_cast.h
     src/transport/net_ib_cast/p2p_resiliency_recovery_cast.h
