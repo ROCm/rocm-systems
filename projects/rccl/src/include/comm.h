@@ -711,6 +711,10 @@ struct ncclComm {
   size_t ddaScratchBytes;
   void* ddaPeerPtrsDev;
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
+  // These fields distinguish normal collective destruction from abort,
+  // revoke, grow, and partial-init cleanup, where teardown must stay local.
+  bool ddaIpcInitStarted;
+  bool ddaIpcCollectiveTeardownReady;
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */
   int ddaFabricMaxBlocks;
   // True when ddaScratch is VMM (cuMem) backed (fabric path); selects the

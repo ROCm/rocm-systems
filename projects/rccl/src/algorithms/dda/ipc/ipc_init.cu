@@ -45,20 +45,17 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
          !comm->MNNVL && ddaArchSupported;
 }
 
-void rememberFirstError(ncclResult_t candidate, ncclResult_t* result) {
-  if (*result == ncclSuccess && candidate != ncclSuccess) {
-    *result = candidate;
-  }
-}
-
-bool ddaIpcCanCollectivelyTeardown(const ncclComm* comm) {
-  return ddaIpcCommEligible(comm) && comm->abortFlag != nullptr && !comm->revokedFlag &&
-         COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0;
-}
-
 } // namespace
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+  // Mark entry before any local eligibility or resource check. The caller
+  // invokes this function uniformly for every rank in an 8-rank, single-node
+  // communicator, so normal teardown participation cannot diverge if local
+  // architecture, environment, P2P, or allocation checks differ.
+  if (comm != nullptr) {
+    comm->ddaIpcInitStarted = true;
+  }
+
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -227,34 +224,37 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   // IPC importers must release both the barrier and scratch mappings before any
   // exporting rank frees its local allocation. Keep abort/revoke cleanup local:
   // those paths cannot require every rank to enter another collective.
-  ncclResult_t result = ncclSuccess;
   bool teardownCollectiveReady = false;
-  if (ddaIpcCanCollectivelyTeardown(comm)) {
+  if (comm->ddaIpcInitStarted && comm->ddaIpcCollectiveTeardownReady) {
     ncclResult_t barrierResult =
       bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniEnteredTag);
     if (barrierResult == ncclSuccess) {
       teardownCollectiveReady = true;
     } else {
-      WARN("ncclDdaIpcCommFini: entry barrier failed");
-      rememberFirstError(barrierResult, &result);
+      WARN("ncclDdaIpcCommFini: entry barrier failed (%d); continuing local cleanup", barrierResult);
     }
   }
 
   auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   if (barrierState != nullptr && barrierState->resources != nullptr &&
       barrierState->resources->ipcMemHandler != nullptr) {
-    rememberFirstError(barrierState->resources->ipcMemHandler->closePeerMappings(), &result);
+    ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommFini: barrier peer mapping close failed (%d); continuing cleanup", closeResult);
+    }
   }
   if (comm->ddaIpcMemHandler != nullptr) {
-    rememberFirstError(comm->ddaIpcMemHandler->closePeerMappings(), &result);
+    ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommFini: scratch peer mapping close failed (%d); continuing cleanup", closeResult);
+    }
   }
 
   if (teardownCollectiveReady) {
     ncclResult_t barrierResult =
       bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniClosedTag);
     if (barrierResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommFini: peer-close barrier failed");
-      rememberFirstError(barrierResult, &result);
+      WARN("ncclDdaIpcCommFini: peer-close barrier failed (%d); continuing local cleanup", barrierResult);
     }
   }
 
@@ -273,5 +273,7 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
-  return result;
+  comm->ddaIpcInitStarted = false;
+  comm->ddaIpcCollectiveTeardownReady = false;
+  return ncclSuccess;
 }
