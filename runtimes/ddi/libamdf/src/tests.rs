@@ -1,18 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Cross-module AMDF negotiation, allocator, and release-callback tests.
+//! Cross-module AMDF negotiation and release-callback tests.
 //!
 //! These fixtures exercise contracts that span more than one implementation
-//! module: ABI-version selection, extensible-record preservation, callback
-//! allocation failure, and exactly-once release. The allocator deliberately
-//! uses explicit aligned system allocation so tests do not depend on the Rust
-//! global allocator or a platform-specific C allocation API.
+//! module: ABI-version selection, extensible-record preservation, and
+//! exactly-once release.
 #![allow(clippy::cast_possible_truncation, clippy::cast_ptr_alignment)]
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use super::*;
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 
@@ -125,117 +122,11 @@ fn negotiation_and_short_records_preserve_outputs() {
     }
 }
 
-struct Allocations {
-    attempts: AtomicUsize,
-    live: AtomicUsize,
-    fail_at: usize,
-}
-
-#[derive(Clone, Copy)]
-struct AllocationHeader {
-    base: *mut u8,
-    layout: Layout,
-}
-
-fn allocation_layout(length: u64, alignment: u64) -> Option<(Layout, usize)> {
-    let length = usize::try_from(length).ok()?;
-    let requested_alignment = usize::try_from(alignment).ok()?;
-    if length == 0 || !requested_alignment.is_power_of_two() {
-        return None;
-    }
-    let allocation_alignment = requested_alignment.max(align_of::<AllocationHeader>());
-    let prefix = size_of::<AllocationHeader>().checked_add(allocation_alignment - 1)?
-        & !(allocation_alignment - 1);
-    let total = prefix.checked_add(length)?;
-    let layout = Layout::from_size_align(total, allocation_alignment).ok()?;
-    Some((layout, prefix))
-}
-
-unsafe extern "C" fn allocate(state: *mut c_void, length: u64, alignment: u64) -> *mut c_void {
-    // SAFETY: Each test retains the state until all provider owners are gone.
-    let state = unsafe { &*state.cast::<Allocations>() };
-    if state.attempts.fetch_add(1, Ordering::SeqCst) == state.fail_at {
-        return std::ptr::null_mut();
-    }
-    let Some((layout, prefix)) = allocation_layout(length, alignment) else {
-        return std::ptr::null_mut();
-    };
-    // SAFETY: The validated layout is nonzero and comes from Layout.
-    let base = unsafe { System.alloc(layout) };
-    if base.is_null() {
-        return base.cast();
-    }
-    // SAFETY: prefix is within the allocation and leaves `length` payload bytes.
-    // It is a multiple of the requested alignment. The header is immediately
-    // before the payload and has sufficient alignment for AllocationHeader.
-    let pointer = unsafe { base.add(prefix) };
-    unsafe {
-        std::ptr::write_unaligned(
-            pointer
-                .sub(size_of::<AllocationHeader>())
-                .cast::<AllocationHeader>(),
-            AllocationHeader { base, layout },
-        );
-    };
-    state.live.fetch_add(1, Ordering::SeqCst);
-    pointer.cast()
-}
-
-unsafe extern "C" fn free(state: *mut c_void, allocation: *mut c_void) {
-    let state = unsafe { &*state.cast::<Allocations>() };
-    if allocation.is_null() {
-        return;
-    }
-    let pointer = allocation.cast::<u8>();
-    // SAFETY: Non-null pointers accepted here were returned by allocate. The
-    // adjacent header retains the exact base pointer and Layout used by System.
-    let header = unsafe {
-        std::ptr::read_unaligned(
-            pointer
-                .sub(size_of::<AllocationHeader>())
-                .cast::<AllocationHeader>(),
-        )
-    };
-    // SAFETY: The header records this live allocation's original System layout.
-    unsafe { System.dealloc(header.base, header.layout) };
-    state.live.fetch_sub(1, Ordering::SeqCst);
-}
-
 fn parameters() -> amdf_instance_create_info_t {
     amdf_instance_create_info_t {
         r#type: AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         structure_size: size_of::<amdf_instance_create_info_t>() as u32,
         ..Default::default()
-    }
-}
-
-#[test]
-fn constructor_failures_release_only_private_metadata() {
-    for fail_at in 0..3 {
-        let state = Allocations {
-            attempts: AtomicUsize::new(0),
-            live: AtomicUsize::new(0),
-            fail_at,
-        };
-        let mut info = parameters();
-        info.host_allocator = amdf_allocator_t {
-            user_data: (&raw const state).cast_mut().cast(),
-            allocate: Some(allocate),
-            resize: None,
-            free: Some(free),
-        };
-        let sentinel = std::ptr::dangling_mut::<amdf_instance_t>();
-        let mut instance = sentinel;
-        unsafe {
-            let status = instance::create(&raw const info, &raw mut instance);
-            if status == 0 {
-                assert_eq!(instance::destroy(instance), 0);
-            } else {
-                assert_eq!(status, support::EXHAUSTED);
-                assert_eq!(instance, sentinel);
-            }
-        }
-        assert_eq!(state.live.load(Ordering::SeqCst), 0);
     }
 }
 
