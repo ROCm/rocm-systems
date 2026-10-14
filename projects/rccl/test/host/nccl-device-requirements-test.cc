@@ -4,18 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for the six device-resource requirement builders in
-// src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc.
-// They compute buffer sizes and GIN signal counts that device kernels index
-// into; an off-by-one here under-allocates scratch and surfaces as device
-// corruption. Five of the six (everything but ncclCftBarrierCreateRequirement)
-// already have GPU-binary coverage in test/DeviceResourceRequirementTests.cpp
-// (AICOMRCCL-2446); this file ports those same goldens host-only rather than
-// duplicating the reasoning, since the functions under test are pure host
-// computation with no HIP/device calls. Both copies are built from test/CMakeLists.txt; the GPU
-// copy runs from ci-precheckin.json and this one from test/host/run_host_tests.sh. They have
-// already drifted at a few lines; retiring the GPU-binary copy once this suite has run clean in CI for
-// a while is tracked separately in AICOMRCCL-2912, not done here.
+// Host-only microtests for the device-resource requirement builders in
+// src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc. Goldens are
+// ported from test/DeviceResourceRequirementTests.cpp.
 
 #include <gtest/gtest.h>
 
@@ -75,16 +66,14 @@ void ExpectNoGinSignalFields(const ncclDevResourceRequirements_t& req) {
   EXPECT_EQ(req.outGinCounterStart, nullptr);
 }
 
-// GIN-counter fields untouched by the signal-setting builders; ginSignalCount/outGinSignalStart
-// are set and checked separately by each test.
+// GIN-counter fields untouched by the signal-setting builders.
 void ExpectNoGinCounterFields(const ncclDevResourceRequirements_t& req) {
   EXPECT_EQ(req.next, nullptr);
   EXPECT_EQ(req.ginCounterCount, 0);
   EXPECT_EQ(req.outGinCounterStart, nullptr);
 }
 
-// gtest's default death-test style forks without re-exec, so clear this inside the death statement:
-// only the child is affected. ci-precheckin.json builds Debug with coverage on, so a dump is sizable.
+// Only the forked child is affected: skip its core dump.
 void DisableCoreDumpsForExpectedCrash() {
 #if defined(__linux__)
   if (prctl(PR_SET_DUMPABLE, 0) != 0) {
@@ -101,9 +90,7 @@ void DisableCoreDumpsForExpectedCrash() {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // ncclLLA2ACalcSlots / ncclLLA2ACreateRequirement (src/nccl_device/ll_a2a.cc)
-// ---------------------------------------------------------------------------
 
 // divUp rounding: maxEltSize of 1, 7, 8 all round up to one 8-byte slot; 9 and 16 need two.
 TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_DivUpRounding) {
@@ -121,13 +108,10 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_DivUpRounding) {
   }
 }
 
-// Scales linearly with maxElts against a known-correct literal, not ncclLLA2ACalcSlots's own
-// output: that would hold for any maxElts * g(maxEltSize) shape, including a wrong g.
+// Against literals, not ncclLLA2ACalcSlots's own output.
 TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_LinearInMaxElts) {
   EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/5, /*maxEltSize=*/8), 5);
-  // maxElts=2, maxEltSize=4: correct is maxElts * divUp(maxEltSize, 8) == 2 * 1 == 2; hoisting the
-  // divUp outside the multiply (divUp(maxElts * maxEltSize, 8) == divUp(8, 8)) would give 1 instead.
-  // The row above can't catch that: 5 * divUp(8,8) == divUp(5*8,8) == 5 either way.
+  // 2 * divUp(4, 8) == 2; hoisting the divUp, divUp(2 * 4, 8), would give 1.
   EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/2, /*maxEltSize=*/4), 2);
 }
 
@@ -136,8 +120,7 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACalcSlots_ZeroMaxEltsIsZero) {
   EXPECT_EQ(ncclLLA2ACalcSlots(/*maxElts=*/0, /*maxEltSize=*/8), 0);
 }
 
-// bufferSize == nBlocks * (1 + 2*nSlots) * 16; nSlots == 0 is the header-only case. Values stay
-// sane on purpose: the plain-int formula can overflow before promoting to size_t, and pinning UB is out of scope.
+// bufferSize == nBlocks * (1 + 2*nSlots) * 16; nSlots == 0 is the header-only case.
 TEST(NcclDeviceRequirementsMicrotest, LLA2ACreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;
@@ -158,14 +141,12 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACreateRequirement_BufferSizeFormula) 
     EXPECT_EQ(req.bufferAlign, 16u);
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     EXPECT_EQ(handle.nSlots, static_cast<uint32_t>(c.nSlots));
-    // Fields this function never sets must still read back zero: proves the memset prologue ran.
+    // Unset fields read back zero: the memset ran.
     ExpectNoGinSignalFields(req);
   }
 }
 
-// Realistic-usage row (mirrors src/sym_kernels.cc), not a contract. Expected bufferSize is a
-// literal rather than a formula built from nSlots, since nSlots is the function under test's own
-// output and would hold regardless of its value. ncclLLA2ACalcSlots(4, 16) == 8.
+// Realistic usage (mirrors src/sym_kernels.cc); ncclLLA2ACalcSlots(4, 16) == 8.
 TEST(NcclDeviceRequirementsMicrotest, LLA2ACreateRequirement_RoundTripWithCalcSlots) {
   const int nSlots = ncclLLA2ACalcSlots(/*maxElts=*/4, /*maxEltSize=*/16);
   const int nBlocks = 3;
@@ -176,9 +157,7 @@ TEST(NcclDeviceRequirementsMicrotest, LLA2ACreateRequirement_RoundTripWithCalcSl
   EXPECT_EQ(handle.nSlots, static_cast<uint32_t>(nSlots));
 }
 
-// ---------------------------------------------------------------------------
 // ncclGinOutboxCreateRequirement / ncclGinInboxA2ACreateRequirement (src/nccl_device/gin_scratch.cc)
-// ---------------------------------------------------------------------------
 
 // The 128-byte floor: size_log2 at or below 7 clamps to 7, and outHandle reads back the clamped value.
 TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_FloorClampsSizeLog2AtOrBelow7) {
@@ -201,8 +180,6 @@ TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_SizeLog2AboveFl
 }
 
 // bufferSize == nBlocks * (sizeof(state) + RequestBytes + alignUp(1<<size_log2, alignof(state))).
-// goldenBufferSize is a literal, not derived from RequestBytes/alignas(128): the formula below
-// would move with either if they changed, hiding a real device buffer size change from every row.
 TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;
@@ -233,21 +210,18 @@ TEST(NcclDeviceRequirementsMicrotest, GinOutboxCreateRequirement_BufferSizeFormu
   }
 }
 
-// Unlike the outbox, the inbox A2A applies no floor to size_log2: pinned as observed, not endorsed.
+// Unlike the outbox, the inbox A2A doesn't floor size_log2 (pinned as observed).
 TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_NoFloorOnSizeLog2) {
   ncclTeam_t peers{/*nRanks=*/2, /*rank=*/0, /*stride=*/1};
   ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
   ncclDevResourceRequirements_t req = poisonedRequirement();
   ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/0, &handle, &req), ncclSuccess);
   EXPECT_EQ(handle.size_log2, 0u) << "asymmetric with the outbox's 128-byte floor; no floor here today";
-  // The only case anywhere in this file where alignUpLocal's rounding actually fires: every other
-  // size_log2 used elsewhere is already >= 7, so 1<<size_log2 is already a multiple of 128.
+  // The only size_log2 below 7 here, so the only case where alignUpLocal rounds.
   EXPECT_EQ(req.bufferSize, size_t{256});  // 128-byte state + alignUp(1<<0, 128) rounding 1 up to 128
 }
 
-// bufferSize and ginSignalCount formulas over a small table of teams and block/size combinations.
-// Both goldens are literals, not derived from ncclGinInboxA2AState/ncclGinScratchMaxBufs_log2: the
-// formulas below would move with either of those if they changed, same reasoning as the outbox above.
+// bufferSize and ginSignalCount over a table of teams and block/size combinations.
 TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAndSignalCountFormula) {
   struct Case {
     const char* name;
@@ -282,8 +256,7 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
     EXPECT_EQ(req.ginSignalCount, c.goldenGinSignalCount);
     EXPECT_EQ(req.outGinSignalStart, &handle.signals);
     ExpectNoGinCounterFields(req);
-    // handle.nPeers_rcp32 feeds imodFast32 in device code (gin_scratch__types.h / __funcs.h); check
-    // the reciprocal contract, not just that some value got stored, so a wrong-operand builder fails.
+    // nPeers_rcp32 feeds imodFast32 in device code, so check the reciprocal contract.
     for (uint32_t x : {0u, 1u, 3u, 7u, 100u}) {
       EXPECT_EQ(imodFast32(x, static_cast<uint32_t>(nPeers), handle.nPeers_rcp32), x % static_cast<uint32_t>(nPeers))
         << "x=" << x;
@@ -291,27 +264,13 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
   }
 }
 
-// A 1-rank team makes nPeers = 0, and idivRcp32(0) (bitops.h) divides by zero at runtime: a real
-// defect, unreachable from any in-tree caller (src/sym_kernels.cc guards nRanks >= 2 via
-// computeLsaSize's GCD construction). This binary (rccl-UnitTestsMicroNcclDevice) is always built
-// with --offload-host-only (cmake/RcclTargetHelpers.cmake:78), so __linux__ is defined and
-// GTEST_HAS_DEATH_TEST is true here; pin the exact signal with EXPECT_EXIT, same idiom as
-// init-test.cc's P2pSchedule_ZeroGroupSizeParam_DiesOnDivideByZero.
-//
-// peers/handle/req are built from a volatile int so the divide stays real at -O2 too: with plain
-// automatic storage, inlining collapses ncclGinInboxA2ACreateRequirement's `idivRcp32(nPeers)` call
-// into a compile-time-zero divisor, which is undefined behaviour an optimising build is free to
-// fold away entirely rather than trap.
-//
-// x86_64-only: idivRcp32 is a runtime 64-bit divide, and only x86 raises #DE on divide-by-zero.
-// AArch64 UDIV is defined to return 0 without trapping, so the same call would return ncclSuccess
-// there, and this pin would misreport the still-present defect as fixed. Same guard idiom as
-// src/proxy.cc:887. No aarch64 target exists in tools/scripts/test_runner/configs/ today.
+// A 1-rank team makes nPeers = 0 and idivRcp32(0) divides by zero: a real defect, unreachable from
+// in-tree callers (sym_kernels.cc needs nRanks >= 2). The volatile keeps the divide from being
+// folded away at -O2. x86_64 only: AArch64 UDIV returns 0 instead of trapping.
 TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_SingleRankTeam_CrashesOnDivideByZero) {
 #if defined(__x86_64__)
   volatile int nRanksVolatile = 1;
-  // Field-by-field assignment, not a braced aggregate init: a braced-init-list's top-level commas
-  // are not protected by the macro's parens and split EXPECT_EXIT's own argument list instead.
+  // Assigned field by field: a braced init's commas would split EXPECT_EXIT's arguments.
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
@@ -321,7 +280,7 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_SingleRankTea
         peers.stride = 1;
         ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
         ncclDevResourceRequirements_t req = poisonedRequirement();
-        // Never expected to return: SIGFPE fires inside idivRcp32 before this line completes.
+        // Not reached: SIGFPE fires inside idivRcp32.
         ncclGinInboxA2ACreateRequirement(peers, /*nBlocks=*/1, /*size_log2=*/7, &handle, &req);
       },
       ::testing::KilledBySignal(SIGFPE), "");
@@ -330,13 +289,9 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_SingleRankTea
 #endif
 }
 
-// ---------------------------------------------------------------------------
 // ncclLsaBarrierCreateRequirement (src/nccl_device/lsa_barrier.cc)
-// ---------------------------------------------------------------------------
 
 // bufferSize == (3*nBarriers + nBarriers*team.nRanks) * sizeof(uint32_t); nBarriers == 0 gives 0.
-// Same out-of-scope-overflow reasoning as the LLA2A formula above applies to this plain-int formula.
-// goldenBufferSize hand-computes the same value independently of the formula below, same reasoning.
 TEST(NcclDeviceRequirementsMicrotest, LsaBarrierCreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;
@@ -366,12 +321,9 @@ TEST(NcclDeviceRequirementsMicrotest, LsaBarrierCreateRequirement_BufferSizeForm
   }
 }
 
-// ---------------------------------------------------------------------------
 // ncclGinBarrierCreateRequirement (src/nccl_device/gin_barrier.cc)
-// ---------------------------------------------------------------------------
 
-// comm is unused, so nullptr is the contract that makes this testable without a GPU. Mirrors the
-// LSA/CFT barriers: this one sets ginSignalCount but no buffer, those set a buffer but no signals.
+// comm is unused, so nullptr works. Sets ginSignalCount but no buffer, unlike the LSA/CFT barriers.
 TEST(NcclDeviceRequirementsMicrotest, GinBarrierCreateRequirement_NullCommAndSignalCountFormula) {
   struct Case {
     const char* name;
@@ -397,14 +349,10 @@ TEST(NcclDeviceRequirementsMicrotest, GinBarrierCreateRequirement_NullCommAndSig
   }
 }
 
-// ---------------------------------------------------------------------------
-// ncclCftBarrierCreateRequirement (src/nccl_device/cft_barrier.cc) -- not covered anywhere else
-// ---------------------------------------------------------------------------
+// ncclCftBarrierCreateRequirement (src/nccl_device/cft_barrier.cc)
 
-// bufferSize == (3*nBarriers + nBarriers*team.nRanks) * NCCL_CFT_BARRIER_GRAN. Same shape as the
-// LSA barrier above (both are buffer-only, no GIN signals), but a distinct granularity constant
-// (NCCL_CFT_BARRIER_GRAN == NCCL_CFT_BARRIER_ALIGN == 16, vs. the LSA barrier's sizeof(uint32_t) == 4):
-// swapping the two constants would still compile and this is the only place that would catch it.
+// bufferSize == (3*nBarriers + nBarriers*team.nRanks) * NCCL_CFT_BARRIER_GRAN (16, vs. the LSA
+// barrier's 4), so swapping the two constants fails here.
 TEST(NcclDeviceRequirementsMicrotest, CftBarrierCreateRequirement_BufferSizeFormula) {
   struct Case {
     const char* name;

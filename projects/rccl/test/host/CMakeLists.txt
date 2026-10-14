@@ -293,10 +293,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,
-  # lsa_barrier}.cc. Its own binary: fakes/dev_runtime_micro_fakes.cc (needed by dev-runtime-test.cc
-  # in rccl-UnitTestsMicro) fakes ncclLsaBarrierCreateRequirement/ncclGinBarrierCreateRequirement/
-  # ncclCftBarrierCreateRequirement, which this target compiles as the real thing under test.
+  # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
+  # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
   set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
     nccl-device-requirements-test.cc
     ../common/main_altrsmi.cpp
