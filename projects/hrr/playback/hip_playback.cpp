@@ -4883,10 +4883,13 @@ hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* pl)
 // Manual playback: IPC memory handles
 //
 // The handle is 64 opaque bytes naming an export in the process that made it.
-// Replay re-exports the live allocation and pairs the recorded bytes with the
-// live ones, so an import later in the same archive has something to open. An
-// import whose export is in another process (the cross-rank case) has no such
-// pairing and says so rather than opening a handle from a dead process.
+// Replay re-exports the live allocation. Capture now leaves the handle field
+// zero, and such an export is paired with nothing. Only a legacy archive, whose
+// field holds the handle bytes, has its recorded bytes paired with the live
+// ones, so an import later in the same archive has something to open. An
+// import with no paired export (always the case for a current archive, and
+// the cross-rank case for a legacy one) says so rather than opening a handle
+// from a dead process.
 // ---------------------------------------------------------------------------
 hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(pl);

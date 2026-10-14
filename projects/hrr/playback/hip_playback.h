@@ -369,7 +369,9 @@ struct PlaybackContext {
     }
 
     // IPC handles, recorded 64 bytes -> the 64 bytes this replay's exporter
-    // produced. An importer's handle names an export in the process that made
+    // produced. Filled only from legacy archives, whose handle field holds the
+    // handle bytes; capture now leaves it zero and such an export is not
+    // entered. An importer's handle names an export in the process that made
     // it, so replaying hipIpcOpenMemHandle with the recorded bytes opens
     // nothing; it has to be matched to the handle the replayed exporter
     // returned. Keyed by the recorded bytes because that is all the importing

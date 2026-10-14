@@ -348,8 +348,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # hipStreamBatchMemOp — the recorded op list needs a per-op device-pointer
     # rewrite, which depends on the op type stored in each entry.
     "hipStreamBatchMemOp",
-    # IPC handles — the live handle must be paired with the recorded one so a
-    # later import in the same archive resolves.
+    # IPC handles — in a legacy archive, whose handle field holds the handle
+    # bytes, the live handle is paired with the recorded one so a later import
+    # in the same archive resolves. Capture now leaves the field zero, which
+    # pairs with nothing.
     "hipIpcGetMemHandle",
     "hipIpcOpenMemHandle",
     # VMM (Virtual Memory Management) — output handles / VAs must be tracked
