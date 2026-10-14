@@ -5227,10 +5227,13 @@ hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* pl)
 // Manual playback: IPC memory handles
 //
 // The handle is 64 opaque bytes naming an export in the process that made it.
-// Replay re-exports the live allocation and pairs the recorded bytes with the
-// live ones, so an import later in the same archive has something to open. An
-// import whose export is in another process (the cross-rank case) has no such
-// pairing and says so rather than opening a handle from a dead process.
+// Replay re-exports the live allocation. Capture now leaves the handle field
+// zero, and such an export is paired with nothing. Only a legacy archive, whose
+// field holds the handle bytes, has its recorded bytes paired with the live
+// ones, so an import later in the same archive has something to open. An
+// import with no paired export (always the case for a current archive, and
+// the cross-rank case for a legacy one) says so rather than opening a handle
+// from a dead process.
 // ---------------------------------------------------------------------------
 hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(pl);
@@ -5245,7 +5248,12 @@ hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) 
     hipIpcMemHandle_t live{};
     hipError_t r = hipIpcGetMemHandle(&live, live_ptr);
     if (r != hipSuccess) return r;
-    if (a->handle_present)
+    // Capture no longer records the handle and leaves the field zero. Such an
+    // export pairs with nothing, so every import is reported as unmatched,
+    // which is what it was: a process cannot open its own handle.
+    const bool recorded = std::any_of(std::begin(a->handle_bytes), std::end(a->handle_bytes),
+                                      [](uint8_t b) { return b != 0; });
+    if (a->handle_present && recorded)
         ctx.record_ipc_handle(
             PlaybackContext::ipc_key(a->handle_bytes, sizeof(live)),
             PlaybackContext::ipc_key(&live, sizeof(live)));
