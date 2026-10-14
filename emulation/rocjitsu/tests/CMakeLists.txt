@@ -860,6 +860,21 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
+# GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
+# -Wstringop-overflow for an unreachable copy in the LDS backing boundary
+# test with _FORTIFY_SOURCE=3. Keep the warning visible without letting
+# -Werror reject this source, and retain the fortified reads.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
+)
+    set_property(
+        SOURCE lds_test.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS -Wno-error=stringop-overflow
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
         rocjitsu_tests
