@@ -39,6 +39,10 @@ namespace dda::common {
 // within the 10 GiB DDA fabric scratch on gfx1250.
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
+// Fixed-width peer staging for phase 1, same as the two-shot all-reduce.
+// A runtime-sized array, or a runtime index into one, is placed in scratch.
+// 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLRsPeerBatch = 8;
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).
@@ -77,15 +81,32 @@ __launch_bounds__(512)
   uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff);
 
   // Phase 1: scatter my chunk-for-peer (sendbuff[peer]) into peer's slot[self].
+  // Loads are gathered before the stores, matching the two-shot all-reduce.
+  // Interleaved, each store waits on the next load and the per-peer streams
+  // stop overlapping. The fixed trip count with the rank test as a predicate
+  // unrolls both loops and keeps d0/d1 in registers.
   for (size_t pk = gtid; pk < nPk; pk += stride) {
+    for (int base = 1; base < nRanks; base += kDdaLLRsPeerBatch) {
+      uint32_t d0[kDdaLLRsPeerBatch], d1[kDdaLLRsPeerBatch];
 #pragma unroll
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint32_t* inPeer = in + (size_t)peer * chunkWords;
-      const uint32_t d0 = inPeer[2 * pk];
-      const uint32_t d1 = inPeer[2 * pk + 1];
-      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
-      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
+      for (int i = 0; i < kDdaLLRsPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* inPeer = in + (size_t)peer * chunkWords;
+          d0[i] = inPeer[2 * pk];
+          d1[i] = inPeer[2 * pk + 1];
+        }
+      }
+#pragma unroll
+      for (int i = 0; i < kDdaLLRsPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
+          ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[i], flag, d1[i], flag);
+        }
+      }
     }
   }
 
