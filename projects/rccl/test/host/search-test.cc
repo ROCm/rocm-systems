@@ -258,4 +258,41 @@ TEST_F(SearchXmlChannelMicrotest,
   EXPECT_EQ(graph()->inter[1], 0xb);
 }
 
+// --- Rejection tests ------------------------------------------------------
+
+TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
+  // The caller indexes channels by XML sub position, bounded only by MAX_SUBS
+  // (512), against graph->inter[MAXCHANNELS*2] (256 channels). At c ==
+  // MAXCHANNELS the inter slice starts one element past the end of the array,
+  // and the next fields of the same ncclTopoGraph are what get written --
+  // so this is invisible to AddressSanitizer and must be asserted on the
+  // clobbered fields.
+  constexpr int kChannel = MAXCHANNELS;
+  graph()->nIntraChannels = 0;
+  graph()->intraNets[0] = 0;
+
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1122334455667788");
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(graph()->nIntraChannels, 0);
+  EXPECT_EQ(graph()->intraNets[0], 0);
+}
+
+TEST_F(SearchXmlChannelMicrotest, LastValidChannelIndex_IsStillAccepted) {
+  // The tightest accepted input: one below the limit. Tightening the bound by
+  // one has to break this, or the guard is free to creep inwards.
+  constexpr int kChannel = MAXCHANNELS - 1;
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1");
+  AddChild(channel, "gpu", "2");
+  AddChild(channel, "net", "3");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->inter[2 * kChannel], 1);
+  EXPECT_EQ(graph()->inter[2 * kChannel + 1], 3);
+  EXPECT_EQ(graph()->intra[kGpus * kChannel], SearchXmlScene::kRankBase + 2);
+}
+
 }  // namespace
