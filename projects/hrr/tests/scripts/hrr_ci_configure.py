@@ -20,7 +20,8 @@ capture label, nightly and on workflow_dispatch.
 It runs on every enabled family whose triggers include the event. A ci:gfx...
 label adds that family, the same label TheRock CI uses; the workflow_dispatch
 families input replaces the selection. Both can name a disabled family. The
-runner labels come from TheRock's family matrix unless ci.yaml overrides them.
+runner labels come from TheRock's family matrix unless ci.yaml overrides them;
+a family takes TheRock's multi-GPU runner only on its multi_gpu_triggers.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ class Family:
     enabled: bool = True
     triggers: tuple[str, ...] = EVENTS
     runner: str = ""
-    multi_gpu: bool = False
+    multi_gpu_triggers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -105,19 +106,28 @@ def _bool(where: str, value) -> bool:
     return value
 
 
-def _family(where: str, value) -> Family:
-    value = _mapping(where, value or {}, (), ("enabled", "triggers", "runner", "multi_gpu"))
-    triggers = _strings(f"{where}.triggers", value.get("triggers", list(EVENTS)))
+def _triggers(where: str, value) -> tuple[str, ...]:
+    triggers = _strings(where, value)
     for trigger in triggers:
         if trigger not in EVENTS:
             raise ConfigError(
-                f"{where}.triggers: unknown trigger {trigger!r} (expected {', '.join(EVENTS)})"
+                f"{where}: unknown trigger {trigger!r} (expected {', '.join(EVENTS)})"
             )
+    return triggers
+
+
+def _family(where: str, value) -> Family:
+    value = _mapping(
+        where, value or {}, (), ("enabled", "triggers", "runner", "multi_gpu_triggers")
+    )
     return Family(
         enabled=_bool(f"{where}.enabled", value.get("enabled", True)),
-        triggers=triggers,
+        triggers=_triggers(f"{where}.triggers", value.get("triggers", list(EVENTS))),
         runner=_string(f"{where}.runner", value["runner"]) if "runner" in value else "",
-        multi_gpu=_bool(f"{where}.multi_gpu", value.get("multi_gpu", False)),
+        multi_gpu_triggers=(
+            _triggers(f"{where}.multi_gpu_triggers", value["multi_gpu_triggers"])
+            if "multi_gpu_triggers" in value else ()
+        ),
     )
 
 
@@ -235,7 +245,8 @@ def select_families(
         if key not in chosen:
             continue
         linux = matrix.get(key, {}).get("linux", {})
-        runner = family.runner or runner_for(linux, pick_weighted, family.multi_gpu)
+        multi_gpu = event in family.multi_gpu_triggers
+        runner = family.runner or runner_for(linux, pick_weighted, multi_gpu)
         if not runner:
             no_runner.append(key)
             continue

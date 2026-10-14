@@ -62,8 +62,12 @@ capture_label: ci:hrr-capture
 #   triggers   Events that run this family: pull_request, push, schedule,
 #              workflow_dispatch. Default all four.
 #   runner     Runner label to use instead of TheRock's.
-#   multi_gpu  Use TheRock's multi-GPU runner; the T3 tier needs two devices.
-#              Default false.
+#   multi_gpu_triggers
+#              Events on which to take TheRock's multi-GPU runner instead of
+#              its single-GPU one. Default none. The cases that need two
+#              devices (the T3 tier) skip on a single GPU. TheRock's only
+#              multi-GPU pools are 8-GPU nodes, so name only events that must
+#              cover those cases.
 #
 # A family without a runner label is skipped. Every job queues on its own
 # runner pool and the summary waits for all of them, so to reduce GPU load or
@@ -71,8 +75,9 @@ capture_label: ci:hrr-capture
 families:
   gfx90a: {}
   gfx94x: {}
+  # Nightly on an 8-GPU node, so the multi-device cases run once a day.
   gfx950:
-    multi_gpu: true
+    multi_gpu_triggers: [schedule]
   gfx103x: {}
   gfx110x: {}
   gfx1150: {}

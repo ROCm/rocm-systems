@@ -146,7 +146,10 @@ applies (`scripts/hrr_ci_configure.py`):
   TheRock's family matrix names. By default each runs on every event (`pull_request`,
   `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
   explicit requests, `triggers` narrows the events, `runner` overrides the runner label
-  and `multi_gpu: true` takes TheRock's multi-GPU runner. A `ci:gfx...` label adds a
+  and `multi_gpu_triggers` names the events on which it takes TheRock's multi-GPU
+  runner instead of the single-GPU one. TheRock's multi-GPU pools are 8-GPU nodes, so
+  only gfx950 uses one, nightly; elsewhere the cases that need two devices skip and
+  show in the summary's Skip column. A `ci:gfx...` label adds a
   family; the `workflow_dispatch` input `families` replaces the selection. Both can
   name a disabled family.
 - `rocm_sdk_version`: the ROCm SDK the unit job installs.

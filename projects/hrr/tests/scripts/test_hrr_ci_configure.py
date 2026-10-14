@@ -77,7 +77,7 @@ REPO_CONFIG = yaml.safe_load(cfg.DEFAULT_CONFIG.read_text(encoding="utf-8"))
 FAMILIES = {
     "gfx90a": {},
     "gfx94x": None,
-    "gfx950": {"multi_gpu": True},
+    "gfx950": {"multi_gpu_triggers": ["schedule"]},
     "gfx110x": {"triggers": ["schedule", "workflow_dispatch"]},
     "gfx1150": {},
     "gfx125x": {"enabled": False},
@@ -115,8 +115,10 @@ class RepoConfigTest(unittest.TestCase):
             self.assertTrue(family.enabled, key)
             self.assertEqual(family.triggers, cfg.EVENTS, key)
 
-    def test_gfx950_takes_the_multi_gpu_runner(self):
-        self.assertTrue(REPO.families["gfx950"].multi_gpu)
+    def test_multi_gpu_runner_only_nightly(self):
+        for key, family in REPO.families.items():
+            self.assertIn(family.multi_gpu_triggers, ((), ("schedule",)), key)
+        self.assertEqual(REPO.families["gfx950"].multi_gpu_triggers, ("schedule",))
 
 
 class PathClassificationTest(unittest.TestCase):
@@ -176,6 +178,12 @@ class ConfigValidationTest(unittest.TestCase):
     def test_unknown_trigger(self):
         families = {"gfx94x": {"triggers": ["nightly"]}}
         self.assertRejected(config_data(families=families), "unknown trigger 'nightly'")
+
+    def test_unknown_multi_gpu_trigger(self):
+        families = {"gfx950": {"multi_gpu_triggers": ["nightly"]}}
+        self.assertRejected(
+            config_data(families=families), "families.gfx950.multi_gpu_triggers: unknown trigger"
+        )
 
     def test_enabled_must_be_a_bool(self):
         families = {"gfx94x": {"enabled": "no"}}
@@ -280,10 +288,11 @@ class DecideTest(unittest.TestCase):
         d = decide("schedule", [])
         self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950", "gfx110x"])
 
-    def test_multi_gpu_runner(self):
-        d = decide("schedule", [])
-        runners = {f["family"]: f["runner"] for f in d.families}
-        self.assertEqual(runners["gfx950"], "gpu-950-8")
+    def test_multi_gpu_runner_on_its_triggers_only(self):
+        nightly = {f["family"]: f["runner"] for f in decide("schedule", []).families}
+        self.assertEqual(nightly["gfx950"], "gpu-950-8")
+        pr = decide("pull_request", ["projects/hrr/playback/x.cpp"])
+        self.assertEqual({f["family"]: f["runner"] for f in pr.families}["gfx950"], "gpu-950-1")
 
     def test_runner_override(self):
         config = cfg.parse_config(config_data(families={"gfx94x": {"runner": "my-gpu"}}))
