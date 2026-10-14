@@ -368,3 +368,14 @@ if [[ "${test_rc}" -ne 0 ]]; then
   [[ -s "${logs_dir}/tests-failed" ]] \
     || echo "GIN tests failed (rc=${test_rc}); see the test log group." > "${logs_dir}/tests-failed"
 fi
+# gating_tests markers for rccl-ci.yml's gin-sdma-gate, which fails the nightly
+# unless gating-tests-passed exists. A runner that exits before reporting the
+# gating tests counts as a gating failure.
+if grep -q '^=== GATING FAILURES' "${test_out}" 2>/dev/null; then
+  sed -n '/^=== GATING FAILURES/,$p' "${test_out}" > "${logs_dir}/gating-tests-failed"
+elif grep -q '^==> gating tests passed' "${test_out}" 2>/dev/null; then
+  : > "${logs_dir}/gating-tests-passed"
+else
+  echo "GIN runner exited before reporting gating tests (rc=${test_rc}); see the test log group." \
+    > "${logs_dir}/gating-tests-failed"
+fi

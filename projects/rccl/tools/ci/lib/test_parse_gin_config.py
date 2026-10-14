@@ -97,6 +97,40 @@ class ParseGinConfigTest(unittest.TestCase):
         self.assertEqual(parts[2], "mpi-fixtures")
         self.assertEqual(parts[6], "2")
 
+    def test_gating_row_lists_gating_tests(self) -> None:
+        config = parse_config(
+            _write_json(
+                {
+                    "tests": [
+                        {"name": "sdma-d3", "kind": "rccl-tests", "bin": "alltoall_perf"},
+                        {"name": "gda-ut", "kind": "fixtures", "bin": "rccl-UnitTestsFixtures"},
+                    ],
+                    "gating_tests": ["sdma-d3"],
+                }
+            )
+        )
+        rows = format_rows(config)
+        self.assertIn("gating" + _FIELD_SEP + "sdma-d3", rows)
+
+    def test_gating_row_is_empty_without_gating_tests(self) -> None:
+        config = parse_config(
+            _write_json(
+                {"tests": [{"name": "sdma-d3", "kind": "rccl-tests", "bin": "alltoall_perf"}]}
+            )
+        )
+        self.assertIn("gating" + _FIELD_SEP, format_rows(config))
+
+    def test_unknown_gating_test_is_rejected(self) -> None:
+        """A renamed test must not silently drop out of the nightly gate."""
+        path = _write_json(
+            {
+                "tests": [{"name": "sdma-d3", "kind": "rccl-tests", "bin": "alltoall_perf"}],
+                "gating_tests": ["sdma-d3", "sdma-ag-d3"],
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "sdma-ag-d3"):
+            parse_config(path)
+
 
 def _write_json(data: dict) -> Path:
     handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
