@@ -3951,6 +3951,21 @@ end:
   return ncclSuccess;
 }
 
+/* Append one character to a treeBase row, refusing to overrun it. The bound
+ * lives here so the two call sites below cannot drift apart.
+ */
+static ncclResult_t appendTreeBaseChar(struct ncclTopoGraph* graph, int x, int* y, char c) {
+  // Longest segment transcription that still leaves room for the terminating 0.
+  const int maxTreeBaseLen = (int)sizeof(graph->treeBase[0]) - 1;
+  if (*y >= maxTreeBaseLen) {
+    WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
+    return ncclInvalidUsage;
+  }
+  graph->treeBase[x][*y] = c;
+  (*y)++;
+  return ncclSuccess;
+}
+
 /* Parse user defined treeBase for complicated trees. Format is like :
  * "(4(2(3)(1))(6(5)))"
  *
@@ -3974,8 +3989,6 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int status = 0; // 0 : between numbers, 1 : inside number
   int ngpus = system->nodes[GPU].count;
   int x = 0;
-  // Longest segment transcription that still leaves room for the terminating 0.
-  const int maxTreeBaseLen = (int)sizeof(graph->treeBase[0]) - 1;
   // Most trees that still leave a row for the terminating empty one.
   const int maxTrees = (int)(sizeof(graph->treeBase) / sizeof(graph->treeBase[0])) - 1;
   do {
@@ -4012,12 +4025,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         while (start_offset < offset) {
         // for (int r=0; r<gpu; r++) {
           if (str[start_offset] == '(' || str[start_offset] == ')') {
-            if (y >= maxTreeBaseLen) {
-              WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
-              return ncclInvalidUsage;
-            }
-            graph->treeBase[x][y] = str[start_offset];
-            y++;
+            NCCLCHECK(appendTreeBaseChar(graph, x, &y, str[start_offset]));
             start_offset++;
           } else {
             if (r >= gpu) {
@@ -4050,12 +4058,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               snprintf(number_str, sizeof(number_str), "%d", g);
               int k = 0;
               while (number_str[k] != 0) {
-                if (y >= maxTreeBaseLen) {
-                  WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
-                  return ncclInvalidUsage;
-                }
-                graph->treeBase[x][y] = number_str[k];
-                y++;
+                NCCLCHECK(appendTreeBaseChar(graph, x, &y, number_str[k]));
                 k++;
               }
             } else return ncclInternalError;
