@@ -490,17 +490,15 @@ in the following table.
     * - | ``RCCL_P2P_CE_CHANNELS_PER_PEER``
         | Caps P2P channels per peer on gfx1250 when
         | ``NCCL_P2P_USE_CUDA_MEMCPY=1`` selects the Copy Engine transport.
-        | Each channel owns a staging buffer and event ring, while gfx1250
-        | channels share the proxy thread's stream to serialize SDMA work.
-        | The cap avoids VMM resource exhaustion.
+        | Each channel owns a staging buffer and event ring; on gfx1250 the
+        | channels share one non-blocking stream per proxy thread, which
+        | serializes SDMA work. The cap avoids VMM resource exhaustion.
         | Other architectures and the default kernel P2P path are unchanged.
       - | Positive integer, rounded down to a power of two and bounded by the
         | P2P channel pool (default: ``16``).
         | ``0`` or a negative value disables the cap.
-        | The P2P CE transport supports send/recv-based operations. Kernel
-        | collectives reject this setting with ``ncclInvalidUsage`` instead of
-        | entering an unsupported progress path; use RCCL's native CE
-        | collective controls for those operations.
+        | The Copy Engine transport carries send/recv-based operations only;
+        | collectives keep the kernel P2P transport.
 
     * - | ``NCCL_P2P_CE_CHUNK_SIZE``
         | Sets the per-channel Copy Engine P2P step size on gfx1250 when
@@ -508,7 +506,7 @@ in the following table.
         | ``NCCL_STEPS`` steps of this size.
         | Other architectures and the default kernel P2P path are unchanged.
       - | Size in bytes (default: ``4194304``, or 4 MiB).
-        | ``0`` or a negative value keeps the standard P2P step size.
+        | Values at or below the standard P2P step size keep the standard step.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.

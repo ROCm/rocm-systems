@@ -138,7 +138,6 @@ ncclResult_t ncclTransportCheckP2pType(struct ncclComm* comm, bool* isAllDirectP
                                        bool* isAllCudaP2p);
 ncclResult_t ncclTransportIsAllDirectP2p(struct ncclComm* comm, int* isAllDirectP2p);
 bool ncclP2pUsesMemcpy();
-size_t ncclP2pCeStepSize(int cudaArch, size_t fallback);
 
 ncclResult_t ncclNvlsInit(struct ncclComm* comm);
 ncclResult_t ncclNvlsTuning(struct ncclComm* comm);

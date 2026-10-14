@@ -3836,7 +3836,7 @@ private:
 
 TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_KeepsSysAcquire)
 {
-    std::optional<ScopedUseMemcpy> ceMode(std::in_place, 1);
+    ScopedUseMemcpy ceMode(1);
     ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
     InstallTopo(/*read=*/0);
     InstallHappyProxy();
@@ -3851,8 +3851,47 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_KeepsSysAcquire)
     EXPECT_FALSE(recv.conn.flags & NCCL_GPU_PRODUCER);
     EXPECT_TRUE(ncclConnStepNeedsSysAcquire(recv.conn.flags));
 
-    ceMode.reset();  // setup never opened the CE shm segment, so recv free must skip its CE arm
     p2pTransport.recv.free(&comm_, &recv);
+}
+
+// NCCL_P2P_USE_CUDA_MEMCPY applies to send/recv connections only: a connection set up for a
+// collective graph keeps the kernel transport, so the GPU publishes the step itself.
+TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineModeCollectiveGraph_KeepsKernelP2p)
+{
+    ScopedUseMemcpy ceMode(1);
+    ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclTopoGraph graph{};
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, &graph, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    EXPECT_FALSE(static_cast<p2pResources*>(recv.transportResources)->useCe);
+    EXPECT_TRUE(recv.conn.flags & NCCL_GPU_PRODUCER);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, SendSetup_CopyEngineModeCollectiveGraph_KeepsKernelP2p)
+{
+    ScopedUseMemcpy ceMode(1);
+    ScopedHook cuMem(g_cuMemEnable, [] { return 0; });
+    InstallTopo(/*read=*/0);
+    InstallXgmiLink();
+    InstallHappyProxy();
+
+    ncclTopoGraph graph{};
+    ASSERT_EQ(p2pTransport.send.setup(&comm_, &graph, &myInfo_, &peer_,
+                                      &connect_info_, &send_, 0, 0),
+              ncclSuccess);
+
+    EXPECT_FALSE(static_cast<p2pResources*>(send_.transportResources)->useCe);
+    EXPECT_TRUE(send_.conn.flags & NCCL_GPU_PRODUCER);
+
+    p2pTransport.send.free(&comm_, &send_);
 }
 
 TEST_F(P2pSetupMicrotest, SendSetup_CopyEngineMode_KeepsSysAcquire)
@@ -7298,6 +7337,7 @@ TEST_F(P2pProxyCeMicrotestIsolated, SendProxyFree_MemcpyResources_TearsDownCeSta
         rcclShutdownFlag().store(true, std::memory_order_release);
 
         ncclProxyConnection conn{};
+        conn.needsProxyProgress = 1;   // set by the CE arm of send proxySetup
         ncclProxyState      state{};
         auto* info = static_cast<p2pShmProxyInfo*>(
             std::calloc(1, sizeof(p2pShmProxyInfo)));
@@ -7347,6 +7387,55 @@ TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_StreamCreateFails_Propagates)
         EXPECT_NE(r, ncclSuccess);
         EXPECT_EQ(conn.proxyAppendPtr, nullptr);   // append not armed
         std::free(info);
+    });
+}
+
+// On architectures that share the CE copy stream, every connection of a proxy uses one non-blocking
+// stream, created by the first connect and destroyed with the last connection.
+TEST_F(P2pProxyCeMicrotestIsolated, ProxyConnect_SharedStream_LivesUntilTheLastConnectionIsFreed)
+{
+    RUN_ISOLATED_TEST("P2p_ProxyConnect_SharedStream_LivesUntilTheLastConnectionIsFreed", []() {
+        ScopedHook loadParam(g_loadParam, ForceP2pUseCudaMemcpy());
+        ncclP2pUsesMemcpy();
+        ASSERT_NE(p2pTransport.send.proxyConnect, nullptr);
+        g_hipEventCreateResult = hipSuccess;
+        rcclShutdownFlag().store(true, std::memory_order_release);
+
+        const hipStream_t shared = reinterpret_cast<hipStream_t>(0x77);
+        int creates = 0, destroys = 0;
+        ScopedHook create(g_hipStreamCreateWithFlags, [&](hipStream_t* stream, unsigned flags) {
+            ++creates;
+            EXPECT_EQ(flags, unsigned(hipStreamNonBlocking));
+            *stream = shared;
+            return hipSuccess;
+        });
+        ScopedHook destroy(g_hipStreamDestroy, [&](hipStream_t stream) {
+            ++destroys;
+            EXPECT_EQ(stream, shared);
+            return hipSuccess;
+        });
+
+        ncclProxyState state{};
+        state.cudaArch = 1250;
+        ncclProxyConnection conns[2]{};
+        char fifoStorage = 0;
+        char* fifo = &fifoStorage;
+        for (auto& conn : conns) {
+            conn.needsProxyProgress = 1;
+            conn.transportResources = std::calloc(1, sizeof(p2pShmProxyInfo));
+            int done = 0;
+            ASSERT_EQ(p2pTransport.send.proxyConnect(&conn, &state, &fifo, sizeof(void*), nullptr, 0, &done),
+                      ncclSuccess);
+            EXPECT_EQ(static_cast<p2pShmProxyInfo*>(conn.transportResources)->stream, shared);
+        }
+        EXPECT_EQ(creates, 1);
+
+        ASSERT_EQ(p2pTransport.send.proxyFree(&conns[0], &state), ncclSuccess);
+        EXPECT_EQ(destroys, 0) << "another connection still uses the stream";
+        ASSERT_EQ(p2pTransport.send.proxyFree(&conns[1], &state), ncclSuccess);
+        EXPECT_EQ(destroys, 1);
+        EXPECT_EQ(state.p2pCeStream, nullptr);
+        rcclShutdownFlag().store(false, std::memory_order_release);
     });
 }
 

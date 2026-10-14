@@ -414,6 +414,11 @@ struct ncclProxyState {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+
+  // [RCCL] P2P Copy Engine policy input and the non-blocking stream shared by its connections
+  int cudaArch;
+  cudaStream_t p2pCeStream;
+  int p2pCeStreamRefs;
 };
 
 enum proxyConnectState {
