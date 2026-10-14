@@ -12,6 +12,7 @@ import pytest
 from utils import utils_analysis
 from utils.file_io import create_df_pmc_with_slot_ids, load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
+from utils.metrics.expression import build_eval_string, update_denominator_string
 from utils.metrics.pass_layout import PassLayout
 from utils.metrics.pass_provenance import (
     METRIC_ROW_PASS_ATTR,
@@ -21,6 +22,7 @@ from utils.metrics.pass_provenance import (
     build_pass_layout,
     choose_metric_pass,
     evaluate_pass_scoped_builtins,
+    expand_required_counters,
     extract_row_refs,
     natural_pass_sort_key,
     resolve_weight_counter_column,
@@ -28,6 +30,7 @@ from utils.metrics.pass_provenance import (
     select_pass_with_normalization_fallback,
 )
 from utils.utils_analysis import process_rocpd_csv
+from utils.utils_counter_defs import extract_counters_and_variables
 
 ROCPD_COUNTER_HEADER = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
@@ -476,6 +479,54 @@ def test_per_cycle_metric_is_unset_when_gui_active_sum_is_on_another_pass() -> N
         "GRBM_GUI_ACTIVE_sum",
         "GFX1250_SERIES",
     )
+
+
+def test_denom_choice_uses_only_the_counter_on_the_selected_pass(caplog) -> None:
+    """$denom is expanded before the pass is chosen.
+
+    Packing does not add SQ_WAVES or GRBM_GUI_ACTIVE for $denom. per_kernel
+    and per_second still use the pass that holds the metric counter. per_wave
+    and per_cycle stay unset when that counter is only on another pass.
+    """
+    formula = "SUM(TA_BUSY) / SUM($denom)"
+    packing_counters, _variables = extract_counters_and_variables(
+        formula, "MI300", include_supported_denom=False
+    )
+    assert packing_counters == {"TA_BUSY"}
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY"}),
+            "pmc_perf_1": frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset(),
+    )
+    expected_pass = {
+        "per_kernel": "pmc_perf_0",
+        "per_second": "pmc_perf_0",
+        "per_wave": None,
+        "per_cycle": None,
+    }
+    with caplog.at_level(logging.WARNING):
+        for unit, chosen_pass in expected_pass.items():
+            built = build_eval_string(update_denominator_string(formula, unit))
+            required = expand_required_counters(extract_row_refs([built]), "MI300")
+            frame = pd.DataFrame({"Avg": [built]})
+            bind_metric_tables_to_passes(
+                {1: frame},
+                {1: "metric_table"},
+                layout,
+                "MI300",
+                frozenset({"Avg"}),
+            )
+            assert choose_metric_pass(required, layout, "MI300", unit) == chosen_pass
+            if chosen_pass is None:
+                assert frame.at[0, "Avg"] == ""
+            else:
+                assert "raw_pmc_df['TA_BUSY']" in frame.at[0, "Avg"]
+    assert "SQ_WAVES" in caplog.text
+    assert "GRBM_GUI_ACTIVE" in caplog.text
 
 
 def test_formula_that_spans_passes_stays_unset_with_its_denominator() -> None:
