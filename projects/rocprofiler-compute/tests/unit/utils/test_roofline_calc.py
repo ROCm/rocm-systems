@@ -271,6 +271,12 @@ def test_sanitize_mem_level_all_list_falls_back_to_hierarchy() -> None:
     assert result == mi_gpu_specs.get_memory_levels("mi210")
 
 
+def test_sanitize_mem_level_all_with_other_levels_selects_all() -> None:
+    """ALL wins when listed together with specific levels."""
+    result = sanitize_mem_level(["ALL", "HBM"], "mi210")
+    assert result == mi_gpu_specs.get_memory_levels("mi210")
+
+
 def test_sanitize_mem_level_supported_string() -> None:
     """A supported single string level is returned as a single-item list."""
     result = sanitize_mem_level("HBM", "mi210")

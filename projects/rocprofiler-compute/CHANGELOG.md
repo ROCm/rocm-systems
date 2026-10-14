@@ -21,6 +21,14 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
 
+* The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
+
+* `-m/--mem-level` now accepts `ALL`, which is also its default.
+
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
+
+* Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -30,6 +38,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
 
 * Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
+
+* Removed the hidden profile option `--target`, which had no effect.
 
 ### Optimized
 
