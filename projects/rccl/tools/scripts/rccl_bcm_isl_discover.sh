@@ -413,7 +413,7 @@ if [ "${MODE}" = "populate" ]; then
     done
     echo ""
     echo "Change log written to: ${CHANGE_LOG}"
-    echo "  To undo: sudo $0 --clean --log-file ${CHANGE_LOG}"
+    echo "  To undo: sudo $0 --clean --sysfs-base ${SYSFS_BASE} --log-file ${CHANGE_LOG} --rccl-conf ${RCCL_CONF}"
 
     # Register RCCL_BCM_LINKS_PATH in rccl.conf so RCCL discovers the
     # links automatically without requiring an env var in mpirun/launcher.
