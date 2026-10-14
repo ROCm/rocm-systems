@@ -2447,15 +2447,16 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
     return 0;
   }
 
-  // numaNode < 0 (HostNumaCurrent) resolves to the calling thread's current node.
+  // Resolve the backing CPU agent.
+  //   -2 (Host)            -> default CPU agent.
+  //   -1 (HostNumaCurrent) -> current node, else default agent.
+  //   >= 0 (HostNuma)      -> that node, else default agent.
   int node = numaNode;
-  if (node < 0) {
+  if (numaNode == -1) {
     node = static_cast<int>(numa::getCurrentNumaNode());
   }
   if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", numaNode,
-                   cpu_agents_.size());
-    return 0;
+    node = 0;
   }
 
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.

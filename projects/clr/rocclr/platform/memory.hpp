@@ -36,8 +36,9 @@
 //! The low 32 bits hold the existing CL_MEM_*/ROCCLR_MEM_* flags; host-NUMA VMM
 //! allocations pack a marker plus the target NUMA node here so the node reaches
 //! roc::Memory::create without changing the svmAlloc/malloc signatures.
-//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 1); a stored
-//! value of 0 means "resolve current node" (HostNumaCurrent).
+//! Bit 32 set => host-NUMA VMM allocation. Bits 33..47 hold (node + 2); a stored
+//! value of 1 means "resolve current node" (HostNumaCurrent); 0 means use default 
+//! ROCr CPU agent (Host).
 #define ROCCLR_MEM_HOST_NUMA (1ull << 32)
 #define ROCCLR_MEM_HOST_NUMA_NODE_SHIFT 33
 #define ROCCLR_MEM_HOST_NUMA_NODE_MASK (0x7FFFull << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT)
