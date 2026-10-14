@@ -293,16 +293,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNcclDeviceCft -- src/nccl_device/core.cc + src/cft_dev_runtime.cc.
-  # Its own binary: rccl-UnitTestsMicro's fakes/dev_runtime_micro_fakes.cc, fakes/devcomm_fakes.cc,
-  # and gin-host-test.cc between them fake 6 of core.cc's 7 functions. core.cc is compiled for
-  # real here (not faked) because cft_dev_runtime.cc's ncclGet*DeviceLeInfo functions call
-  # ncclTeamCft/ncclTeamCftMultimem, and faking those would just re-derive core.cc's own
-  # already-tested logic. Links the lightweight fakes/dev_runtime_fakes.cc (hookable
-  # ncclDevrInitOnce) for core.cc's sake, and the new fakes/cft_dev_runtime_fakes.cc for
-  # cft_dev_runtime.cc's own dev_runtime.cc callees (computeLsaSize, symTeamObtain,
-  # findCommAndHostWindowFromDeviceWindow, ncclDevrWinRegEnabled) -- not the real
-  # dev_runtime.cc, which neither production file needs beyond those four symbols.
+  # rccl-UnitTestsMicroNcclDeviceCft -- src/cft_dev_runtime.cc + src/nccl_device/core.cc. Own
+  # binary: rccl-UnitTestsMicro fakes most of core.cc, which the LE-info queries call.
   set(TEST_MICRO_NCCL_DEVICE_CFT_SOURCE_FILES
     nccl-cft-dev-runtime-test.cc
     fakes/cft_dev_runtime_fakes.cc

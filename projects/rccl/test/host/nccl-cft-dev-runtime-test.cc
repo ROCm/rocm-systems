@@ -4,23 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/cft_dev_runtime.cc: the CFT (Compute Fabric
-// Transport) logical-endpoint support-probe, size-computation, and
-// bind/unbind helpers, plus the three public LE-info query functions. This
-// build's CUDA_VERSION is below 13030, so the real CUDA logical-endpoint
-// driver calls are compiled out everywhere in this file (no ROCm
-// equivalent exists); what remains compiled is exercised here: the
-// zero-everything-and-succeed body of ncclGpuCftSupport, the host-side
-// branch logic of computeCftSize/computeCftMcSize, the condition-evaluation
-// (but now-empty) bodies of symBindTeamLe/symUnbindTeamLe, the
-// trivial-failure stand-ins for symTeamObtainUcLe/symTeamObtainMcLe, and the
-// three unconditional ncclGet*DeviceLeInfo query functions.
-//
-// core.cc is compiled for real alongside cft_dev_runtime.cc (not faked):
-// ncclGetMultimemDeviceLeInfo/ncclGetCftDeviceLeInfo/ncclGetPeerDeviceLeInfo
-// call ncclTeamCftMultimem/ncclTeamCft, and faking those would just be
-// re-deriving core.cc's own already-tested logic (AICOMRCCL-2825 PR3) rather
-// than reusing it.
+// Host-only microtests for src/cft_dev_runtime.cc, with src/nccl_device/core.cc compiled for real.
+// CUDA_VERSION is below 13030 here, so the CUDA logical-endpoint calls are compiled out.
 
 #include <gtest/gtest.h>
 
@@ -35,10 +20,7 @@
 
 namespace {
 
-// Heap-allocates a ncclDevrTeam sized and populated for its flexible-array
-// worldRankList, same idiom dev_runtime.cc's own symTeamObtain uses. An
-// automatic (stack) ncclDevrTeam's worldRankList has zero elements; a fake
-// that hands one to code indexing it at team.nRanks-1 is out of bounds.
+// Heap-allocated so worldRankList has team.nRanks elements, like symTeamObtain's own teams.
 struct DevrTeamDeleter {
   void operator()(ncclDevrTeam* t) const { std::free(t); }
 };
@@ -62,11 +44,7 @@ protected:
   void SetUp() override {
     commStorage = std::make_unique<ncclComm>(); // value-initialised: POD members zeroed
     comm = commStorage.get();
-    // Load-bearing only for computeCftSize/computeCftMcSize, which check
-    // devrState.bigSize themselves: ncclDevrInitOnce in this binary is the
-    // always-succeeds fake seam at fakes/dev_runtime_fakes.cc, which never
-    // reads devrState, so bigSize is inert on the ncclTeamCft/
-    // ncclTeamCftMultimem path.
+    // Only computeCftSize/computeCftMcSize read bigSize; the ncclDevrInitOnce fake ignores it.
     comm->devrState.bigSize = 1;
   }
 
@@ -78,11 +56,7 @@ protected:
 
 } // namespace
 
-// ---------------------------------------------------------------------------
-// ncclGpuCftSupport: CUDA_VERSION < 13030 on this build, so the entire
-// capability-probe body is compiled out; only the zero-and-succeed prologue
-// remains.
-// ---------------------------------------------------------------------------
+// ncclGpuCftSupport: only the zero-and-succeed prologue is compiled on this build.
 
 TEST_F(NcclCftDevRuntimeMicrotest, GpuCftSupport_ZeroesAllThreeOutputsAndSucceeds) {
   int gpuCftSupport = 99;
@@ -93,9 +67,7 @@ TEST_F(NcclCftDevRuntimeMicrotest, GpuCftSupport_ZeroesAllThreeOutputsAndSucceed
   EXPECT_FALSE(gpuCftCountedSupport);
 }
 
-// ---------------------------------------------------------------------------
 // computeCftSize / computeCftMcSize
-// ---------------------------------------------------------------------------
 
 TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftSize_AlreadySized_ReturnsCftSizeWithoutCallingComputeLsaSize) {
   comm->devrState.bigSize = 7;
@@ -123,8 +95,7 @@ TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftSize_NotSizedWithGpuCftSupport_Dele
 }
 
 TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftSizeAndMcSize_GpuCftSupportJustBelow13030_ReturnsOne) {
-  // Every other probe uses 0 or exactly 13030, far from the `>= 13030` edge at
-  // cft_dev_runtime.cc:54 and 61; 13029 is the first value it must reject.
+  // 13029 is the first value the `>= 13030` check must reject.
   comm->devrState.bigSize = 0;
   comm->gpuCftSupport = 13029;
   bool called = false;
@@ -159,12 +130,8 @@ TEST_F(NcclCftDevRuntimeMicrotest, ComputeCftMcSize_NotSizedWithGpuCftSupport_De
   EXPECT_EQ(computeCftMcSize(comm), 6);
 }
 
-// ---------------------------------------------------------------------------
-// symBindTeamLe / symUnbindTeamLe: on this build the CUDA bind/unbind calls
-// inside the condition are compiled out, so the only externally observable
-// contract left is "always succeeds" and "always consults
-// ncclDevrWinRegEnabled with this memory's winFlags and ncclDevrRegisterCft".
-// ---------------------------------------------------------------------------
+// symBindTeamLe / symUnbindTeamLe: the CUDA calls are compiled out, so they always succeed and
+// only the ncclDevrWinRegEnabled query is observable.
 
 TEST_F(NcclCftDevRuntimeMicrotest, SymBindTeamLe_AlwaysSucceedsAndConsultsWinRegEnabledWithCftCapability) {
   auto mem = std::make_unique<ncclDevrMemory>();
@@ -234,10 +201,7 @@ TEST_F(NcclCftDevRuntimeMicrotest, SymUnbindTeamLe_GlobalHasSysmemSegment_StillS
   EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/3), ncclSuccess);
 }
 
-// ---------------------------------------------------------------------------
-// symTeamObtainUcLe / symTeamObtainMcLe: this build compiles the
-// CUDA_VERSION < 13030 stand-ins, which ignore every argument and fail.
-// ---------------------------------------------------------------------------
+// symTeamObtainUcLe / symTeamObtainMcLe: this build's stand-ins always fail.
 
 TEST_F(NcclCftDevRuntimeMicrotest, SymTeamObtainUcLe_UnsupportedOnThisPlatform_ReturnsInvalidUsage) {
   bool needBarrier = false;
@@ -251,11 +215,7 @@ TEST_F(NcclCftDevRuntimeMicrotest, SymTeamObtainMcLe_UnsupportedOnThisPlatform_R
             ncclInvalidUsage);
 }
 
-// Shared window/comm-resolution setup for all three ncclGet*DeviceLeInfo
-// query functions; BigOffset() keeps each derived suite's winHost.bigOffset
-// distinct, same reasoning as the handle.* field checks elsewhere in this
-// file: a test mixing up which window it is reading would get a visibly
-// wrong offset back instead of an accidental match.
+// Shared setup for the three ncclGet*DeviceLeInfo queries; BigOffset() is distinct per suite.
 class NcclGetDeviceLeInfoTestBase : public NcclCftDevRuntimeMicrotest {
 protected:
   ncclDevrWindow winHost{};
@@ -267,15 +227,13 @@ protected:
   bool winRegEnabled = true;
 
   virtual size_t BigOffset() const = 0;
-  // Calls this suite's query function with its own extra arguments held fixed,
-  // so the shared prologue checks below run against all three functions.
+  // Calls this suite's query with its other arguments fixed.
   virtual ncclResult_t Invoke(ncclWindow_t w, ncclCftLeId* leId, size_t* leOffset) = 0;
 
   void SetUp() override {
     NcclCftDevRuntimeMicrotest::SetUp();
     comm->gpuCftSupport = 13030;
-    // Non-degenerate flat CFT team: at cftSize 0 the peer query's range check rejects every
-    // peer first, so the shared prologue checks below would never reach the check they name.
+    // At cftSize 0 the peer query rejects every peer before reaching the checks below.
     comm->devrState.cftSize = 4;
     winHost.bigOffset = BigOffset();
     g_foundComm = comm;
@@ -288,8 +246,6 @@ protected:
     };
   }
 
-  // The prologue below is identical across the three query functions
-  // (cft_dev_runtime.cc:295-309 and its two twins).
   void ExpectNullArgsRejectedByPtrCheck() {
     ncclCftLeId leId;
     size_t leOffset;
@@ -299,8 +255,7 @@ protected:
   }
 
   void ExpectWindowNotCftRegisteredReturnsInvalidUsage() {
-    // Also pins what the registration check asks: this window's own flags,
-    // against the CFT capability rather than e.g. ncclDevrRegisterAll.
+    // Asked with this window's flags, against the CFT capability.
     winHost.winFlags = 0x5a;
     winRegEnabled = false;
     ncclCftLeId leId;
@@ -327,9 +282,7 @@ protected:
   }
 };
 
-// ---------------------------------------------------------------------------
 // ncclGetMultimemDeviceLeInfo
-// ---------------------------------------------------------------------------
 
 class NcclGetMultimemDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
@@ -361,20 +314,13 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SymTeamObtainFails_PropagatesErrorViaNcc
   EXPECT_EQ(ncclGetMultimemDeviceLeInfo(window, 0, &leId, &leOffset), ncclInvalidUsage);
 }
 
-// NOTE: the NCCLCHECK(bootstrapIntraNodeBarrier(...)) propagation branch (needBarrier
-// path) is not independently exercised here: fakes/bootstrap_stubs.cc's
-// bootstrapIntraNodeBarrier is a parameterless-result `{ return ncclSuccess; }` stub
-// shared by every other suite that links it, with no failure hook. Giving it one is out
-// of scope for this file's tests.
+// The bootstrapIntraNodeBarrier failure branch isn't covered: fakes/bootstrap_stubs.cc has no
+// failure hook.
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, SuccessPath_ReadsMcLeIdByCountedBitAndOffsetsByBigOffsetPlusOffset) {
   comm->devrState.cftMcSize = 4;
   comm->devrState.cftMcSelf = 1;
-  // NCCL_WIN_COLL_SYMMETRIC is ORed in alongside NCCL_WIN_CFT_COUNTED so this
-  // exercises `winFlags & NCCL_WIN_CFT_COUNTED` as a real bit test: every
-  // other winFlags value elsewhere in this file is exactly
-  // NCCL_WIN_CFT_COUNTED or exactly 0, which `winFlags == NCCL_WIN_CFT_COUNTED`
-  // would also satisfy.
+  // SYMMETRIC alongside CFT_COUNTED, so `== NCCL_WIN_CFT_COUNTED` would fail where `&` passes.
   winHost.winFlags = NCCL_WIN_CFT_COUNTED | NCCL_WIN_COLL_SYMMETRIC;
 
   DevrTeamPtr team = MakeDevrTeam(ncclTeam_t{4, 1, 1}, /*mcLeId0=*/111, /*mcLeId1=*/222); // counted==true selects mcLeId1
@@ -421,8 +367,7 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, UncountedWindow_ReadsMcLeIdZeroSlot) {
 }
 
 TEST_F(NcclGetMultimemDeviceLeInfoTest, SymmetricOnlyWindow_IsUncountedAndReadsMcLeIdZeroSlot) {
-  // NCCL_WIN_COLL_SYMMETRIC without NCCL_WIN_CFT_COUNTED: a counted-bit mask
-  // that tested the companion bit instead would read the counted slot here.
+  // SYMMETRIC without CFT_COUNTED: testing the wrong bit would read the counted slot.
   comm->devrState.cftMcSize = 4;
   comm->devrState.cftMcSelf = 0;
   winHost.winFlags = NCCL_WIN_COLL_SYMMETRIC;
@@ -443,9 +388,7 @@ TEST_F(NcclGetMultimemDeviceLeInfoTest, SymmetricOnlyWindow_IsUncountedAndReadsM
   EXPECT_EQ(leId, 77u);
 }
 
-// ---------------------------------------------------------------------------
 // ncclGetCftDeviceLeInfo
-// ---------------------------------------------------------------------------
 
 class NcclGetCftDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
@@ -477,9 +420,6 @@ TEST_F(NcclGetCftDeviceLeInfoTest, BaseLeIdNotYetCreated_ReturnsInvalidUsage) {
 }
 
 TEST_F(NcclGetCftDeviceLeInfoTest, SuccessPath_AddsFlatTeamRankAndPeerOffsetToBaseLeId) {
-  // ncclTeamCft(comm, FLAT) reads straight from devrState.cftSize/cftSelf; it never
-  // consults devrState.bigSize itself (that's load-bearing only for computeCftSize/
-  // computeCftMcSize -- see NcclCftDevRuntimeMicrotest::SetUp's comment).
   comm->devrState.cftSize = 8;
   comm->devrState.cftSelf = 3;
   comm->devrState.le[0].baseId = 1000;
@@ -509,9 +449,7 @@ TEST_F(NcclGetCftDeviceLeInfoTest, CountedWindow_UsesCountedBaseLeIdSlot) {
   EXPECT_EQ(leId, 500u); // 500 + flatTeam.rank(0) + (0 - 0) * 1
 }
 
-// ---------------------------------------------------------------------------
 // ncclGetPeerDeviceLeInfo
-// ---------------------------------------------------------------------------
 
 class NcclGetPeerDeviceLeInfoTest : public NcclGetDeviceLeInfoTestBase {
 protected:
@@ -535,13 +473,7 @@ TEST_F(NcclGetPeerDeviceLeInfoTest, FindCommAndHostWindowFails_PropagatesErrorVi
 }
 
 TEST_F(NcclGetPeerDeviceLeInfoTest, PeerOutsideFlatTeamBoundaries_ReturnsInvalidArgument) {
-  // flatStart = comm->rank - flatTeam.rank; valid range is [flatStart, flatStart + nRanks).
-  // The boundary check runs before baseLeId is ever read, so no valid baseId is needed for
-  // the two out-of-range probes below. 20 and 7 alone don't pin either exact edge though: a
-  // relaxed `>=` -> `>` survives because 12 (the first rejected value above the range) is
-  // never probed, and a relaxed `<` -> `<=` survives because 8 (the first accepted value) is
-  // never probed either. 12 closes the first; 8 (further down, where it can succeed) closes
-  // the second.
+  // Valid range is [flatStart, flatStart + nRanks) = [8, 12); 12 and 8 pin the two edges.
   comm->rank = 10;
   comm->devrState.cftSize = 4;
   comm->devrState.cftSelf = 2; // flatTeam.rank == 2 -> flatStart == 8, valid peers in [8, 12)
@@ -551,9 +483,7 @@ TEST_F(NcclGetPeerDeviceLeInfoTest, PeerOutsideFlatTeamBoundaries_ReturnsInvalid
   EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/7, &leId, &leOffset), ncclInvalidArgument);
   EXPECT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/12, &leId, &leOffset), ncclInvalidArgument);
 
-  // peerWorld=8 is the lower inclusive edge: it must succeed, not reject. This path proceeds
-  // past the boundary check into the baseLeId read, so (unlike the three probes above) it
-  // needs a valid baseId.
+  // 8 is the lower inclusive edge, so it must succeed.
   comm->devrState.le[0].baseId = 1;
   ASSERT_EQ(ncclGetPeerDeviceLeInfo(window, 0, /*peerWorld=*/8, &leId, &leOffset), ncclSuccess);
   EXPECT_EQ(leId, 1u); // baseLeId(1) + flatTeam.rank(2) + (peerWorld(8) - comm->rank(10)) == 1

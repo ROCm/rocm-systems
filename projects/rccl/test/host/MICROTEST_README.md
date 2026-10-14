@@ -248,32 +248,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
-- **`rccl-UnitTestsMicroNcclDeviceCft`**: `src/nccl_device/core.cc` (via
-  `CORE_CC_PATH`) + `src/cft_dev_runtime.cc` (via `CFT_DEV_RUNTIME_CC_PATH`,
-  from `nccl-cft-dev-runtime-test.cc`); suites `NcclCftDevRuntimeMicrotest.*`,
-  `NcclGetMultimemDeviceLeInfoTest.*`, `NcclGetCftDeviceLeInfoTest.*`,
-  `NcclGetPeerDeviceLeInfoTest.*` (all caught by the `Nccl*` pattern). Its own
-  binary because `rccl-UnitTestsMicro`'s `fakes/dev_runtime_micro_fakes.cc`,
-  `fakes/devcomm_fakes.cc`, and `gin-host-test.cc` between them fake 6 of
-  core.cc's 7 functions. core.cc is compiled for real here too (not faked)
-  because
-  `ncclGetMultimemDeviceLeInfo`/`ncclGetCftDeviceLeInfo`/`ncclGetPeerDeviceLeInfo`
-  call `ncclTeamCft`/`ncclTeamCftMultimem`. Links `fakes/dev_runtime_fakes.cc`
-  for core.cc's `ncclDevrInitOnce`, and the new `fakes/cft_dev_runtime_fakes.cc`
-  for `cft_dev_runtime.cc`'s own `dev_runtime.cc` callees (`computeLsaSize`,
-  `symTeamObtain`, `findCommAndHostWindowFromDeviceWindow`,
-  `ncclDevrWinRegEnabled`) -- not the real `dev_runtime.cc`, which neither
-  production file needs beyond those four symbols. This build's `CUDA_VERSION`
-  is below 13030, so the CUDA logical-endpoint driver calls throughout
-  `cft_dev_runtime.cc` are compiled out (no ROCm equivalent exists); the tests
-  cover what remains: the zero-and-succeed body of `ncclGpuCftSupport`, the
-  host-side branch logic of `computeCftSize`/`computeCftMcSize`, the
-  condition-evaluation (now-empty) bodies of `symBindTeamLe`/`symUnbindTeamLe`,
-  the trivial-failure stand-ins for `symTeamObtainUcLe`/`symTeamObtainMcLe`,
-  and the three unconditional `ncclGet*DeviceLeInfo` query functions. Lines are
-  100% covered; regions/branches have two residual, well-understood gaps
-  documented in AICOMRCCL-2825 PR4's description (`ncclParamCftEnable`, and
-  `NCCLCHECK`'s own macro-internal branches).
+- **`rccl-UnitTestsMicroNcclDeviceCft`**: `src/cft_dev_runtime.cc` and
+  `src/nccl_device/core.cc` (via `CFT_DEV_RUNTIME_CC_PATH` / `CORE_CC_PATH`,
+  from `nccl-cft-dev-runtime-test.cc`); suites `Nccl*`. Its own binary because
+  `rccl-UnitTestsMicro` fakes most of `core.cc`, which the LE-info queries call.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -460,10 +438,6 @@ had become before this map existed.
 dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
 so it fakes the file's own entry points). The two never define the same
 symbol.
-`src/dev_runtime.cc` has two rows for a narrower reason: `rccl-UnitTestsMicroNcclDeviceCft`
-needs only the four `dev_runtime.cc` symbols `cft_dev_runtime.cc` calls, kept in their own
-file so that target does not drag in the rest of `fakes/dev_runtime_fakes.cc`'s seams.
-The two never define the same symbol either.
 
 | Production TU | Fakes file |
 |---|---|
@@ -472,7 +446,7 @@ The two never define the same symbol either.
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
-| `src/dev_runtime.cc`'s callees from `src/cft_dev_runtime.cc` (`computeLsaSize`, `symTeamObtain`, `findCommAndHostWindowFromDeviceWindow`, `ncclDevrWinRegEnabled`; `rccl-UnitTestsMicroNcclDeviceCft`, which compiles the real `cft_dev_runtime.cc`) | `fakes/cft_dev_runtime_fakes.cc` |
+| `src/dev_runtime.cc` callees of `src/cft_dev_runtime.cc` (`rccl-UnitTestsMicroNcclDeviceCft`) | `fakes/cft_dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
