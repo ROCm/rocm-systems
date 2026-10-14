@@ -1411,6 +1411,9 @@
     var action = document.createElement("button");
     action.type = "button";
     action.className = "roofline-panel-action";
+    if (opts.title) {
+      action.setAttribute("aria-label", opts.title);
+    }
 
     var swatch = document.createElement("span");
     swatch.className = opts.swatchClass || "roofline-swatch";

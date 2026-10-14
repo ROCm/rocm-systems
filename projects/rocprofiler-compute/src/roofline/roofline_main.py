@@ -395,8 +395,8 @@ class Roofline:
         kernel_time = self.__ai_data.get("kernelTime", [])
         kernel_pct_runtime = self.__ai_data.get("kernelPctRuntime", [])
         total_app_time = self.__ai_data.get("totalAppTime")
+        total_dispatches = self.__ai_data.get("totalAppDispatches")
         time_unit = self.__ai_data.get("timeUnit", "")
-        total_dispatches = sum(count for count in counts if count is not None)
 
         for kernel_index, kernel_name in enumerate(kernel_names):
             points, level_ai, bandwidth_html = self._build_kernel_points(

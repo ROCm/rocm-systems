@@ -172,6 +172,7 @@ class PlotPoints:
     kernelTime: list[Optional[float]]
     kernelPctRuntime: list[Optional[float]]
     totalAppTime: Optional[float]
+    totalAppDispatches: Optional[float]
     timeUnit: str
 
     @classmethod
@@ -188,6 +189,7 @@ class PlotPoints:
             kernelTime=[],
             kernelPctRuntime=[],
             totalAppTime=None,
+            totalAppDispatches=None,
             timeUnit="",
         )
 
@@ -569,6 +571,8 @@ def calc_ai_analyze(
         if sum_column:
             plot_points.timeUnit = sum_column[len("Sum(") : -1]
             plot_points.totalAppTime = float(top_df[sum_column].sum())
+            if "Count" in top_df.columns:
+                plot_points.totalAppDispatches = float(top_df["Count"].sum())
 
     kernel_ids_to_process = _resolve_kernel_ids(workload)
     console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
