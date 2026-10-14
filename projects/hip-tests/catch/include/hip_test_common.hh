@@ -524,7 +524,8 @@ inline bool checkConcurrentKernels(int num_devices) {
   return true;
 }
 
-// Stall-only XNACK GPUs never report xnack+ in gcnArchName; ask for pageable access instead.
+// The runtime reports pageable memory access iff XNACK is on; stall-only XNACK GPUs never
+// report xnack+ in gcnArchName.
 inline bool isXnackOn() {
 #if HT_AMD
   int device = 0;
