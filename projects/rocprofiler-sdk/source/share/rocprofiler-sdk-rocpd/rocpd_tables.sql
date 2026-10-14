@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.4
+-- RocPD schema version 3.0.5
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -129,6 +129,14 @@ CREATE TABLE IF NOT EXISTS
         "is_constant" INTEGER,
         "is_derived" INTEGER,
         "spm_support" INTEGER,
+        -- SPM location. NULL on the base counter row. On a location row, xcc,
+        -- shader_engine, shader_array, and wgp are NULL when the counter does
+        -- not provide that dimension. instance is always set on a location row.
+        "xcc" INTEGER,
+        "shader_engine" INTEGER,
+        "shader_array" INTEGER,
+        "wgp" INTEGER,
+        "instance" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
@@ -230,9 +238,6 @@ CREATE TABLE IF NOT EXISTS
         "sample_id" INTEGER, -- NULL for PMC, non-NULL for SPM (timestamped streaming counters)
         "pmc_id" INTEGER NOT NULL,
         "value" REAL DEFAULT 0.0,
-        "xcc" INTEGER,              -- SPM only: XCC index
-        "shader_engine" INTEGER,    -- SPM only: shader engine index
-        "instance" INTEGER,         -- SPM only: counter instance index
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,

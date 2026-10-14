@@ -874,6 +874,10 @@ class TestCliBase(unittest.TestCase):
             if not cmd:
                 continue
             reason = self._lookup(self.SWEEP_EXCLUDED_ARGS, cmd)
+            if reason is None and self.common.cleaner_shader_resets_gpu():
+                reason = self._lookup(
+                    {"reset": {"--clean-local-data": "resets the GPU on gfx906"}}, cmd
+                )
             if reason is None:
                 continue
             # Name what went untested; a sweep that drops commands silently
