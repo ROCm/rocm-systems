@@ -21,9 +21,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
 
+* Renamed the roofline options so they all start with `--roofline`. The old names still work, but show a warning. The help lists each old name next to its new name.
+  * Profile mode:
+    * `--roof-only` is now `--roofline`
+    * `--bench-only` is now `--roofline-bench-only`
+    * `--device` is now `--roofline-device`
+  * Analyze mode:
+    * `--sort` is now `--roofline-sort`
+    * `--mem-level` is now `--roofline-mem-level` (`-m` still works)
+    * `--roofline-data-type` is now `--roofline-data-types` (`-R` still works)
+
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
-* `-m/--mem-level` now accepts `ALL`, which is also its default.
+* `-m/--roofline-mem-level` now accepts `ALL`, which is also its default.
 
 * `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
@@ -50,6 +60,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
 
 ### Upcoming changes
+
+* The old roofline option names (`--roof-only`, `--bench-only`, `--device`, `--sort`, `--mem-level`, and `--roofline-data-type`) will be removed in a future release. Use the new `--roofline-*` names instead.
 
 ### Known issues
 

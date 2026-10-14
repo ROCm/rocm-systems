@@ -182,8 +182,8 @@ generate interactive HTML roofline charts, run analyze mode on the output:
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
-    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-data-type FP32
+    $ rocprof-compute profile --name vcopy --roofline -- ./vcopy -n 1048576 -b 256
+    $ rocprof-compute analyze -p workloads/vcopy/MI200/ --roofline-data-types FP32
 
 
 Collect the counters to compute the metric for compute throughput utilization, skipping roofline

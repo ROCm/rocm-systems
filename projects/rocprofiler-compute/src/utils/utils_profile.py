@@ -401,10 +401,6 @@ def run_prof(
         # path needs; copy it and the marker trace to the workload dir.
         save_ml_api_trace_inputs(workload_dir, fbase, results_csv)
     if retain_rocpd_output:
-        console_warning(
-            "--retain-rocpd-output is deprecated and will be removed in "
-            "a future release. .db files will be retained automatically."
-        )
         for db_path in db_paths:
             pid = db_path.stem.split("_")[0]
             dest = Path(workload_dir) / f"{fbase}_{pid}.db"
