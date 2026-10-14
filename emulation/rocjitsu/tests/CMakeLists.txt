@@ -411,6 +411,55 @@ set_tests_properties(
     RocjitsuGlobalJsonPaths
     PROPERTIES PASS_REGULAR_EXPRESSION "\"runtime_dir\": \".*/paths-runtime\""
 )
+add_test(NAME RocjitsuEmulators COMMAND $<TARGET_FILE:rocjitsu_bin> emulators)
+set_tests_properties(
+    RocjitsuEmulators
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "rocjitsu\\*[ ]+yes[ ]+yes[ ]+ROCm just-in-time GPU emulator"
+)
+add_test(
+    NAME RocjitsuEmulatorsLong
+    COMMAND $<TARGET_FILE:rocjitsu_bin> emulators --long
+)
+set_tests_properties(
+    RocjitsuEmulatorsLong
+    PROPERTIES PASS_REGULAR_EXPRESSION "rocjitsu \\(default\\)"
+)
+add_test(
+    NAME RocjitsuEmulatorsShortLong
+    COMMAND $<TARGET_FILE:rocjitsu_bin> emulators -l
+)
+set_tests_properties(
+    RocjitsuEmulatorsShortLong
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "options:[ ]+async_helper_threads, cpu_dispatch_threads, cpu_thread_budget, exec_mode, gpus_per_node, num_threads, wait_checking"
+)
+add_test(
+    NAME RocjitsuEmulatorsJson
+    COMMAND $<TARGET_FILE:rocjitsu_bin> emulators --json
+)
+set_tests_properties(
+    RocjitsuEmulatorsJson
+    PROPERTIES PASS_REGULAR_EXPRESSION "\"name\": \"rocjitsu\""
+)
+add_test(
+    NAME RocjitsuGlobalJsonEmulators
+    COMMAND $<TARGET_FILE:rocjitsu_bin> --json emulators
+)
+set_tests_properties(
+    RocjitsuGlobalJsonEmulators
+    PROPERTIES PASS_REGULAR_EXPRESSION "\"default\": true"
+)
+add_test(
+    NAME RocjitsuEmulatorsRejectsUnknown
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=emulators;--bogus"
+        "-DTEST_REGEX=unknown emulators option: --bogus" -P
+        ${_rj_cli_failure_script}
+)
 add_test(
     NAME RocjitsuGlobalJsonHelp
     COMMAND $<TARGET_FILE:rocjitsu_bin> --json --help
@@ -453,6 +502,9 @@ add_test(
 # come from the flag -- once per accepted spelling, since wrappers forwarding a
 # single opaque token cannot split a flag from its value.
 set(_rj_cdna3_config "${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json")
+set(_rj_dbt_sim_config
+    "${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json"
+)
 add_test(
     NAME RocjitsuCpuThreadBudget
     COMMAND
@@ -629,6 +681,70 @@ add_test(
         "-DTEST_REGEX=--plugin cannot be combined with --attach" -P
         ${_rj_cli_failure_script}
 )
+add_test(
+    NAME RocjitsuExecModeRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--exec-mode;clocked;--;/usr/bin/true"
+        "-DTEST_REGEX=--exec-mode cannot be combined with a dbt_guest simulator_config; set exec_mode in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuGpusPerNodeRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--gpus-per-node;2;--;/usr/bin/true"
+        "-DTEST_REGEX=--gpus-per-node cannot be combined with a dbt_guest simulator_config; set vm.gpu.num_gpus in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuPluginRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--plugin;race;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin cannot be combined with a dbt_guest simulator_config; set plugins in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuCpuThreadBudgetRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--cpu-thread-budget;1;--;/usr/bin/true"
+        "-DTEST_REGEX=--cpu-thread-budget cannot be combined with a dbt_guest simulator_config; set cpu_thread_budget in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuWaitCheckingRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--wait-checking;off;--;/usr/bin/true"
+        "-DTEST_REGEX=--wait-checking cannot be combined with a dbt_guest simulator_config; set wait_checking in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionNumThreadsRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--option;num_threads=2;--;/usr/bin/true"
+        "-DTEST_REGEX=--option num_threads cannot be combined with a dbt_guest simulator_config; set num_threads in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionCpuDispatchThreadsRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--option;cpu_dispatch_threads=2;--;/usr/bin/true"
+        "-DTEST_REGEX=--option cpu_dispatch_threads cannot be combined with a dbt_guest simulator_config; set cpu_dispatch_threads in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionAsyncHelperThreadsRejectsDbtSimulatorConfig
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_sim_config};--option;async_helper_threads=0;--;/usr/bin/true"
+        "-DTEST_REGEX=--option async_helper_threads cannot be combined with a dbt_guest simulator_config; set async_helper_threads in gfx942_cdna3_kmd.json instead"
+        -P ${_rj_cli_failure_script}
+)
 
 add_test(
     NAME RocjitsuInProcessLaunch
@@ -691,11 +807,22 @@ add_test(
         $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option wait_checking=off
         --thread-budget-table
 )
+add_test(
+    NAME RocjitsuOptionThreadFields
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option num_threads=2
+        --option=cpu_dispatch_threads=3 -oasync_helper_threads=0
+        --thread-budget-table
+)
 set_tests_properties(
     RocjitsuOptionCpuThreadBudget
     RocjitsuOptionShortCpuThreadBudget
     RocjitsuOptionDedicatedCpuThreadBudgetWins
     PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
+)
+set_tests_properties(
+    RocjitsuOptionThreadFields
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 2 \\| 3 \\| 0 \\| 4"
 )
 add_test(
     NAME RocjitsuOptionRejectsInvalid
@@ -719,6 +846,22 @@ add_test(
         "-DTEST_ARGS=--profile;mi350x;--option;wait_checking=maybe;--thread-budget-table"
         "-DTEST_REGEX=--option wait_checking requires on, off, or all" -P
         ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalidNumThreads
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;num_threads=two;--thread-budget-table"
+        "-DTEST_REGEX=--option num_threads requires an unsigned integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalidAsyncHelperThreads
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;async_helper_threads=-2;--thread-budget-table"
+        "-DTEST_REGEX=--option async_helper_threads requires -1 or a nonnegative integer up to 128"
+        -P ${_rj_cli_failure_script}
 )
 
 add_test(
@@ -1158,6 +1301,31 @@ set_tests_properties(
     PROPERTIES
         PASS_REGULAR_EXPRESSION
             "--cpu-thread-budget cannot be combined with --attach"
+)
+
+add_test(
+    NAME RocjitsuOptionNumThreadsRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;num_threads=2;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--option num_threads cannot be combined with --attach" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionCpuDispatchThreadsRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;cpu_dispatch_threads=2;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--option cpu_dispatch_threads cannot be combined with --attach"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionAsyncHelperThreadsRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;async_helper_threads=0;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--option async_helper_threads cannot be combined with --attach"
+        -P ${_rj_cli_failure_script}
 )
 
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
