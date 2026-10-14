@@ -146,8 +146,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Install into a virtualenv under RUNNER_TEMP, which is removed when the
+      # job ends. A bare "python -m pip install" writes into setup-python's
+      # interpreter under _work/_tool on the runner's host, which the next job
+      # on the same machine reuses. Later steps pick the venv up from PATH.
       - name: Install Python requirements
-        run: python -m pip install --no-cache-dir -r therock/requirements.txt
+        run: |
+          python -m venv "${RUNNER_TEMP}/hrr-venv"
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir -r therock/requirements.txt
+          echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
 
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
