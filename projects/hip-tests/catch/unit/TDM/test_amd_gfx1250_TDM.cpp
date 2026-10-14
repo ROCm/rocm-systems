@@ -149,7 +149,7 @@ __global__ void TDM_gather_load_tester(const int* data, int* result) {
 
     v8u v8u_zeros{0, 0, 0, 0, 0, 0, 0, 0};
     __builtin_amdgcn_tensor_load_to_lds(group0.m_bitfield, group1.m_bitfield, group2.m_bitfield,
-                                        group3.m_bitfield, v8i_zeros, 0);
+                                        group3.m_bitfield, v8u_zeros, 0);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     __syncthreads();
 
