@@ -48,6 +48,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
 
+- `rdcd` no longer crashes when the watches due in one update read more than 8,192 GPU-field pairs from AMD SMI, for example two `rdci dmon` sessions of 128 fields on 64 GPUs each.
+
+- `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
