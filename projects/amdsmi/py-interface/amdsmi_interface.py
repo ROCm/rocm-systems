@@ -694,6 +694,13 @@ class AmdSmiLinkType(IntEnum):
     AMDSMI_LINK_TYPE_UNKNOWN = amdsmi_wrapper.AMDSMI_LINK_TYPE_UNKNOWN
 
 
+class AmdSmiLinkStatus(IntEnum):
+    AMDSMI_LINK_STATUS_ENABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_ENABLED
+    AMDSMI_LINK_STATUS_DISABLED = amdsmi_wrapper.AMDSMI_LINK_STATUS_DISABLED
+    AMDSMI_LINK_STATUS_INACTIVE = amdsmi_wrapper.AMDSMI_LINK_STATUS_INACTIVE
+    AMDSMI_LINK_STATUS_ERROR = amdsmi_wrapper.AMDSMI_LINK_STATUS_ERROR
+
+
 class AmdSmiUtilizationCounterType(IntEnum):
     COARSE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_GFX_ACTIVITY
     COARSE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
@@ -3713,12 +3720,15 @@ def amdsmi_get_fabric_cper_entries(
     return entries, cur.value, cper_data, ret
 
 
-def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
+def amdsmi_get_afids_from_cper(
+    cper_afid_data: Union[bytes, List[Dict[str, Any]]],
+) -> Tuple[List[int], int]:
     """
     Extract AFIDs from a CPER blob.
 
     Args:
-        cper_afid_data: raw bytes of a single CPER record.
+        cper_afid_data: raw bytes of a single CPER record, or a list of records,
+            each a dict with "bytes" (list of byte values) and "size" keys.
 
     Returns:
         Tuple[List[int], int]: A tuple containing:
@@ -3729,10 +3739,10 @@ def amdsmi_get_afids_from_cper(cper_afid_data: bytes) -> Tuple[List[int], int]:
     # Normalize single blob into a list of records
     if isinstance(cper_afid_data, bytes):
         cper_records = [{"bytes": list(cper_afid_data), "size": len(cper_afid_data)}]
-    elif isinstance(cper_afid_data, List[Dict[str, Any]]):
+    elif isinstance(cper_afid_data, list):
         cper_records = cper_afid_data
     else:
-        raise AmdSmiParameterException(cper_afid_data, bytes)
+        raise AmdSmiParameterException(cper_afid_data, (bytes, list))
 
     all_afids: List[int] = []
 
@@ -4467,6 +4477,49 @@ def amdsmi_topo_get_link_type(
     )
 
     return {"hops": hops_64.value, "type": type_32.value}
+
+
+def amdsmi_get_link_topology(
+    processor_handle_src: processor_handle_t, processor_handle_dst: processor_handle_t
+):
+    """Return GPU link topology using the host API's fields.
+
+    Returns:
+        dict: ``{"weight": int, "link_status": int, "link_type": int,
+        "num_hops": int, "fb_sharing": int}``.
+        Interpret status/type with :class:`AmdSmiLinkStatus`/:class:`AmdSmiLinkType`.
+
+    Note:
+        Baremetal behavior:
+
+        - Self pair: INTERNAL/ENABLED, zero weight and hops, ``fb_sharing=1``.
+        - Current successful calls report ENABLED; UNKNOWN-to-DISABLED is defensive.
+        - Status is not link health or the topology CLI's P2P access check.
+        - ``num_hops`` counts abstracted steps, capped at 255, not physical links.
+        - ``fb_sharing=0`` means no P2P access or a failed P2P query.
+        - Fields are queried sequentially, not atomically.
+    """
+    if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle)
+
+    topology_info = amdsmi_wrapper.amdsmi_link_topology_t()
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_link_topology(
+            processor_handle_src, processor_handle_dst, ctypes.byref(topology_info)
+        )
+    )
+
+    return {
+        "weight": topology_info.weight,
+        "link_status": topology_info.link_status,
+        "link_type": topology_info.link_type,
+        "num_hops": topology_info.num_hops,
+        "fb_sharing": topology_info.fb_sharing,
+    }
 
 
 def amdsmi_topo_get_p2p_status(
@@ -7423,11 +7476,24 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
 
     The C API may return AMDSMI_STATUS_NO_DATA when no sysfs files produced usable
     lines; the struct is still populated with BDF and sentinel/default fabric fields.
+    An unconfigured accelerator returns AMDSMI_STATUS_SUCCESS and reports itself
+    through the accelerator_state key.
+
+    A library predating the nested (version 2) layout never echoes back
+    AMDSMI_FABRIC_INFO_VERSION_2 and instead fills the flat version 1 member; this
+    degrades gracefully to that flat layout (mirroring amd_smi_fabric_example.cc)
+    rather than raising. The returned dict always carries the same keys; the
+    station-only fields (station_flags, num_stations, lane_en_bitmap, the
+    ppod/vpod/station masks, and local_accelerator_count) have no version 1
+    equivalent and are None on that path, "version" reports which layout was
+    actually filled.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     fabric_info = amdsmi_wrapper.amdsmi_fabric_info_t()
+    # Selects the nested layout; the flat v1 layout carries no station data
+    fabric_info.fabric_version = amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2
     ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(fabric_info))
     if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
         raise AmdSmiRetryException()
@@ -7436,23 +7502,265 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    v1 = fabric_info.fabric_info.v1
+    if fabric_info.fabric_version != amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2:
+        # A library predating the nested layout filled the flat v1 member instead; read
+        # it directly rather than erroring, so callers linked against an older
+        # libamd_smi.so keep working the way they did before the v2 layout existed
+        v1 = fabric_info.fabric_info.v1
+        return {
+            "bdf": _format_bdf(fabric_info.bdf),
+            "version": 1,
+            "accelerator_id": v1.accelerator_id,
+            "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
+            "bandwidth": v1.bandwidth,
+            "latency": v1.latency,
+            "ppod_id": list(v1.ppod_id),
+            "ppod_size": v1.ppod_size,
+            "vpod_id": v1.vpod_id,
+            "vpod_size": v1.vpod_size,
+            "local_accelerators": list(v1.local_accelerators),
+            "local_accelerator_count": None,
+            "vpod_active_accelerators": list(v1.vpod_active_accelerators),
+            "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
+            "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+            # Station data has no version 1 equivalent
+            "station_flags": None,
+            "num_stations": None,
+            "lane_en_bitmap": None,
+            # No per-field read mask exists in version 1
+            "ppod_mask": None,
+            "vpod_mask": None,
+            "station_mask": None,
+        }
+
+    v2 = fabric_info.fabric_info.v2
+    ppod = v2.ppod
+    vpod = v2.vpod
+    station = v2.station
     return {
         "bdf": _format_bdf(fabric_info.bdf),
-        "version": fabric_info.fabric_version,
-        "accelerator_id": v1.accelerator_id,
-        "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
-        "bandwidth": v1.bandwidth,
-        "latency": v1.latency,
-        "ppod_id": list(v1.ppod_id),
-        "ppod_size": v1.ppod_size,
-        "vpod_id": v1.vpod_id,
-        "vpod_size": v1.vpod_size,
-        "local_accelerators": list(v1.local_accelerators),
-        "vpod_active_accelerators": list(v1.vpod_active_accelerators),
-        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
-        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
+        "version": 2,
+        "accelerator_id": ppod.accelerator_id,
+        "fabric_type": _FABRIC_TYPE_NAMES.get(v2.fabric_type, "UNKNOWN"),
+        "bandwidth": ppod.bandwidth,
+        "latency": ppod.latency,
+        "ppod_id": list(ppod.ppod_id),
+        "ppod_size": ppod.ppod_size,
+        "vpod_id": vpod.vpod_id,
+        "vpod_size": vpod.vpod_size,
+        "local_accelerators": list(ppod.local_accelerators),
+        "local_accelerator_count": ppod.local_accelerator_count,
+        "vpod_active_accelerators": list(vpod.vpod_active_accelerators),
+        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(vpod.addr_mode, "UNKNOWN"),
+        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v2.accel_state, "UNKNOWN"),
+        "station_flags": station.station_flags,
+        "num_stations": station.num_stations,
+        "lane_en_bitmap": list(station.lane_en_bitmap),
+        # Which fields above were actually read; a clear bit means the field holds its sentinel
+        "ppod_mask": v2.ppod_mask,
+        "vpod_mask": v2.vpod_mask,
+        "station_mask": v2.station_mask,
     }
+
+
+# Field name -> AMDSMI_FABRIC_*_FIELD_* mask bit, one map per config struct's `data`
+# member. Keys are exactly the ctypes field names on that struct.
+_FABRIC_PPOD_CONFIG_FIELD_MASKS = {
+    "accelerator_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID,
+    "ppod_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID,
+    "ppod_size": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE,
+    "local_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS,
+    "bandwidth": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH,
+    "latency": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LATENCY,
+}
+
+_FABRIC_VPOD_CONFIG_FIELD_MASKS = {
+    "vpod_id": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID,
+    "vpod_size": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE,
+    "vpod_active_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS,
+    "addr_mode": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE,
+}
+
+_FABRIC_STATION_CONFIG_FIELD_MASKS = {
+    "station_flags": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS,
+    "lane_en_bitmap": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP,
+    "num_stations": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS,
+}
+
+
+def _populate_fabric_config_data(config, data: Dict[str, Any], field_masks: Dict[str, int]) -> int:
+    """
+    Write `data` into a fabric ppod/vpod/station config struct's `.data` member and
+    return the OR of the mask bits for the fields written.
+
+    Only the keys present in `data` are written (and included in the mask), matching
+    the C API contract: an unmasked field is not read by the driver, so it is left at
+    whatever the zero-initialized struct already holds.
+
+    Args:
+        config: a freshly constructed amdsmi_fabric_{ppod,vpod,station}_config_t;
+            its `.data` member is written in place
+        data: mapping of `.data` field name to value to write
+        field_masks: the AMDSMI_FABRIC_*_FIELD_* mask bit for each valid field name
+            on this config struct
+
+    Returns:
+        int: OR of the mask bits for every field named in `data`
+
+    Raises:
+        AmdSmiParameterException: `data` names a field that is not in `field_masks`,
+            or a field's value has the wrong type or length
+    """
+    for field_name in data:
+        if field_name not in field_masks:
+            raise AmdSmiParameterException(field_name, list(field_masks.keys()))
+
+    mask = 0
+    for field_name, value in data.items():
+        mask |= field_masks[field_name]
+        target = getattr(config.data, field_name)
+        try:
+            if isinstance(target, ctypes.Array):
+                target[:] = value
+            else:
+                setattr(config.data, field_name, value)
+        except (TypeError, ValueError) as e:
+            raise AmdSmiParameterException(value, type(target), str(e)) from e
+    return mask
+
+
+def amdsmi_set_gpu_fabric_ppod_config(
+    processor_handle: processor_handle_t, ppod_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply physical PoD (PPOD) fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `ppod_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        ppod_data: mapping of fields to write. Valid keys: "accelerator_id" (int),
+            "ppod_id" (16-byte iterable), "ppod_size" (int),
+            "local_accelerators" (16-entry iterable of accelerator IDs; fill unused
+            slots with UINT32_MAX), "bandwidth" (int), "latency" (int). Only the
+            supplied fields are written; `ppod_data` must select at least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            ppod_data is not a dict, commit is not a bool, or ppod_data names an
+            unrecognized field or supplies a malformed value
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(ppod_data, dict):
+        raise AmdSmiParameterException(ppod_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_ppod_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_PPOD_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(config, ppod_data, _FABRIC_PPOD_CONFIG_FIELD_MASKS)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_ppod_config(processor_handle, ctypes.byref(config))
+    )
+
+
+def amdsmi_set_gpu_fabric_vpod_config(
+    processor_handle: processor_handle_t, vpod_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply virtual PoD (VPOD) fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `vpod_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        vpod_data: mapping of fields to write. Valid keys: "vpod_id" (int,
+            nonzero), "vpod_size" (int), "vpod_active_accelerators" (32-entry
+            iterable; fill unused slots with UINT32_MAX, 0 is a valid accelerator
+            ID), "addr_mode" (int, an amdsmi_fabric_npa_address_mode_t value).
+            Only the supplied fields are written; `vpod_data` must select at
+            least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            vpod_data is not a dict, commit is not a bool, or vpod_data names an
+            unrecognized field or supplies a malformed value
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(vpod_data, dict):
+        raise AmdSmiParameterException(vpod_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_vpod_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_VPOD_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(config, vpod_data, _FABRIC_VPOD_CONFIG_FIELD_MASKS)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_vpod_config(processor_handle, ctypes.byref(config))
+    )
+
+
+def amdsmi_set_gpu_fabric_station_config(
+    processor_handle: processor_handle_t, station_data: Dict[str, Any], commit: bool = True
+) -> None:
+    """
+    Apply DF/station fabric configuration.
+
+    When `commit` is True, the masked fields (derived from the keys present in
+    `station_data`) are written and then committed. When False, the request is
+    validated and nothing is written: the driver ignores the staging files unless
+    a commit follows.
+
+    Args:
+        processor_handle: GPU processor handle
+        station_data: mapping of fields to write. Valid keys: "station_flags"
+            (int), "lane_en_bitmap" (64-byte iterable), "num_stations" (int, 0 to
+            255). Only the supplied fields are written; `station_data` must
+            select at least one field
+        commit: when True (default), write the masked fields then commit; when
+            False, validate only and write nothing
+
+    Raises:
+        AmdSmiParameterException: processor_handle is not a processor_handle_t,
+            station_data is not a dict, commit is not a bool, or station_data
+            names an unrecognized field or supplies a malformed value
+        AmdSmiException: the underlying call failed
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(station_data, dict):
+        raise AmdSmiParameterException(station_data, dict)
+    if not isinstance(commit, bool):
+        raise AmdSmiParameterException(commit, bool)
+
+    config = amdsmi_wrapper.amdsmi_fabric_station_config_t()
+    config.version = amdsmi_wrapper.AMDSMI_FABRIC_STATION_CONFIG_V1
+    config.commit = commit
+    config.mask = _populate_fabric_config_data(
+        config, station_data, _FABRIC_STATION_CONFIG_FIELD_MASKS
+    )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_gpu_fabric_station_config(processor_handle, ctypes.byref(config))
+    )
 
 
 def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
@@ -7539,6 +7847,219 @@ def amdsmi_set_gpu_uma_carveout(processor_handle: processor_handle_t, option_ind
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     _check_res(amdsmi_wrapper.amdsmi_set_gpu_uma_carveout(processor_handle, option_index))
+
+
+# AMPP (amdsmi power profile) functions
+# Note: This is a kernel UAPI sysfs feature (app_modes/), not libdrm, and is
+# unrelated to the legacy amdsmi_get_gpu_power_profile_presets/
+# amdsmi_set_gpu_power_profile preset-mask API. Profile names, field names,
+# and units are all opaque strings enumerated at runtime -- never mapped to
+# an AMDSMI-defined enum here.
+
+
+def _ampp_profile_to_dict(profile) -> Dict[str, Any]:
+    name = profile.name.decode("utf-8") if isinstance(profile.name, bytes) else profile.name
+    return {
+        "name": name,
+        "index": profile.index,
+        "is_active": bool(profile.is_active),
+        "is_writable": bool(profile.is_writable),
+        "is_configured": bool(profile.is_configured),
+    }
+
+
+def _ampp_field_to_dict(field) -> Dict[str, Any]:
+    name = field.name.decode("utf-8") if isinstance(field.name, bytes) else field.name
+    unit = field.unit.decode("utf-8") if isinstance(field.unit, bytes) else field.unit
+    return {
+        "name": name,
+        "unit": unit,
+        "value": field.value,
+        "limit_min": field.limit_min,
+        "limit_max": field.limit_max,
+        "has_limits": bool(field.has_limits),
+    }
+
+
+def amdsmi_get_ampp_profiles(
+    processor_handle: processor_handle_t,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Get the list of AMPP power profiles published by the driver.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        Tuple[str, List[dict]]: (version, profiles).
+        version is the app_modes/profile_abi string (e.g. "1.0"); this is a
+        single tree-wide value, not a per-profile one.
+        profiles is one dict per published profile_N, each with 'name',
+        'index', 'is_active', 'is_writable', 'is_configured'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NOT_SUPPORTED if the
+            device has no app_modes/ sysfs tree)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_profiles = ctypes.c_uint32(0)
+    version_buf = ctypes.create_string_buffer(AMDSMI_MAX_STRING_LENGTH)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_profile_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, ctypes.byref(num_profiles), nullptr
+        )
+    )
+
+    profiles = (amdsmi_wrapper.amdsmi_ampp_profile_t * num_profiles.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_profiles(
+            processor_handle, version_buf, ctypes.byref(num_profiles), profiles
+        )
+    )
+
+    version = version_buf.value.decode("utf-8")
+    return version, [_ampp_profile_to_dict(profiles[i]) for i in range(num_profiles.value)]
+
+
+def amdsmi_get_ampp_fields(
+    processor_handle: processor_handle_t, profile_name: str
+) -> List[Dict[str, Any]]:
+    """
+    Get the fields of a single AMPP power profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to query (e.g. "profile_2"), as
+            returned by amdsmi_get_ampp_profiles
+
+    Returns:
+        List[dict]: One dict per published field, each with 'name', 'unit',
+        'value', 'limit_min', 'limit_max', 'has_limits'.
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_DATA if the profile
+            is a writable but unconfigured custom slot, INVAL if
+            profile_name is not currently published)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    profile_name_bytes = (
+        profile_name.encode("utf-8") if isinstance(profile_name, str) else profile_name
+    )
+
+    num_fields = ctypes.c_uint32(0)
+    nullptr = POINTER(amdsmi_wrapper.amdsmi_ampp_field_t)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), nullptr
+        )
+    )
+
+    fields = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_ampp_fields(
+            processor_handle, profile_name_bytes, ctypes.byref(num_fields), fields
+        )
+    )
+
+    return [_ampp_field_to_dict(fields[i]) for i in range(num_fields.value)]
+
+
+def amdsmi_activate_ampp_profile(processor_handle: processor_handle_t, profile_name: str):
+    """
+    Activate an AMPP profile.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to activate (e.g. "profile_2"),
+            as returned by amdsmi_get_ampp_profiles
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, INVAL for an unpublished profile_name)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_activate_ampp_profile(processor_handle, profile_name.encode("utf-8"))
+    )
+
+
+def amdsmi_configure_ampp_profile(
+    processor_handle: processor_handle_t, profile_name: str, fields: List[Dict[str, Any]]
+):
+    """
+    Configure a custom AMPP profile slot.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm. Requires root/
+    CAP_SYS_ADMIN.
+
+    Args:
+        processor_handle: GPU processor handle
+        profile_name: Name of the profile to configure (e.g. "profile_5"),
+            as returned by amdsmi_get_ampp_profiles
+        fields: List of dicts with 'name' and 'value' to stage (partial
+            staging of a subset of fields is allowed, but at least one
+            field is required -- the driver rejects a commit with nothing
+            ever staged)
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid, a field
+            name isn't a str or doesn't fit in AMDSMI_MAX_STRING_LENGTH
+            bytes, or a field value isn't representable as an int64
+        AmdSmiException: If the function fails (e.g. NO_PERM if the caller
+            lacks root/CAP_SYS_ADMIN, NOT_SUPPORTED if the profile is not
+            writable, INVAL for an unpublished profile_name, unrecognized
+            field name, or an empty `fields` list)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+    if not isinstance(profile_name, str):
+        raise AmdSmiParameterException(profile_name, str)
+    if not isinstance(fields, list):
+        raise AmdSmiParameterException(fields, list)
+
+    num_fields = len(fields)
+    field_array = (amdsmi_wrapper.amdsmi_ampp_field_t * num_fields)()
+    for i, field in enumerate(fields):
+        if not isinstance(field, dict) or "name" not in field or "value" not in field:
+            raise AmdSmiParameterException(field, "dict with keys 'name' and 'value'")
+        field_name = field["name"]
+        if not isinstance(field_name, str):
+            raise AmdSmiParameterException(field_name, str)
+        encoded_name = field_name.encode("utf-8")
+        if len(encoded_name) >= AMDSMI_MAX_STRING_LENGTH:
+            raise AmdSmiParameterException(field_name, str)
+        field_array[i].name = encoded_name
+        field_value = field["value"]
+        if not isinstance(field_value, int) or isinstance(field_value, bool):
+            raise AmdSmiParameterException(field_value, int)
+        if not -(2**63) <= field_value < 2**63:
+            raise AmdSmiParameterException(field_value, int)
+        field_array[i].value = field_value
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_configure_ampp_profile(
+            processor_handle, profile_name.encode("utf-8"), field_array, num_fields
+        )
+    )
 
 
 def amdsmi_get_ttm_info():

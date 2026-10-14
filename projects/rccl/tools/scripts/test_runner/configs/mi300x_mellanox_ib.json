@@ -930,6 +930,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "TopoNicFusionTests",
           "description": "NIC fusion input validation in the topology layer",
           "test_filter": "TopoNicFusionTests.*"
@@ -1093,6 +1098,21 @@
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
       ]
     },
+
+    "gin_connect_leak": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
+      "tests": [
+        {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}
+      ]
+    },
+
     "rma_external_plugin_put_signal": {
       "extends": "default",
       "is_gtest": true,
@@ -1856,6 +1876,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -4373,6 +4398,28 @@
         }
       ]
     },
+    "gin_allgather_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_AllGather_Symmetric",
+          "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        }
+      ]
+    },
     "gin_negative": {
       "extends": "default",
       "is_gtest": true,
@@ -4411,6 +4458,29 @@
           "env_variables": {
             "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
           }
+        }
+      ]
+    },
+    "gin_devcomm_requirements": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DevComm_GroupedCreateKeepsGinRequirements",
+          "description": "Grouped ncclDevCommCreate keeps GIN signal/counter requests from caller-built requirement nodes on the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.DevComm_GroupedCreateKeepsGinRequirements"
         }
       ]
     },
@@ -4511,8 +4581,13 @@
         },
         {
           "name": "Symk_AllGatherStoreCrossover",
-          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
-          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
+          "description": "AllGather switches from LL to the store kernel at 1 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom1MB"
+        },
+        {
+          "name": "Symk_AllGatherStoreData",
+          "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
         }
       ]
     }
@@ -5306,9 +5381,21 @@
       "enabled": true
     },
     {
+      "name": "GIN AllGather - Symmetric",
+      "description": "Symmetric-memory AllGather (RailRing_LsaST) with 2 ranks/node across 2 nodes",
+      "config": "gin_allgather_sym",
+      "enabled": true
+    },
+    {
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "GIN DevComm Requirements - Proxy",
+      "description": "Grouped ncclDevCommCreate with caller-built GIN signal/counter requirement nodes on the GIN proxy over IB across two nodes",
+      "config": "gin_devcomm_requirements",
       "enabled": true
     },
     {
@@ -5386,6 +5473,12 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Connect Leak",
+      "description": "Resource release when GIN connection setup fails",
+      "config": "gin_connect_leak",
       "enabled": true
     }
   ]

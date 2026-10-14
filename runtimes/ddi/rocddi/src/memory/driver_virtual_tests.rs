@@ -4,10 +4,11 @@
 //! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{CachedInfo, Driver};
-use crate::host_storage::Allocator;
+use crate::driver::{AddressSpaceInfo, CachedInfo, Driver, VirtualMemoryOperations};
+use crate::memory::storage::{Owned, Shared};
 use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
+use crate::{Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -76,10 +77,6 @@ struct Mapping {
 impl Driver for FakeDriver {
     type DeviceState = State;
 
-    fn allocator(&self) -> Allocator {
-        Allocator::system()
-    }
-
     fn driver_instance(&self) -> u64 {
         1
     }
@@ -127,17 +124,14 @@ impl VirtualMemoryOperations for FakeDriver {
         address: u64,
     ) -> Result<Owned<Address>, Error> {
         let address = if address == 0 { bounds.0 } else { address };
-        Ok(Owned::new(
-            Address {
-                info: VirtualAddressInfo {
-                    address,
-                    size,
-                    mapping_granularity: alignment,
-                },
-                drops: self.drops.clone(),
+        Ok(Owned::new(Address {
+            info: VirtualAddressInfo {
+                address,
+                size,
+                mapping_granularity: alignment,
             },
-            Allocator::system(),
-        )?)
+            drops: self.drops.clone(),
+        })?)
     }
 
     fn free_virtual_address(_address: &mut Address) -> Result<(), Error> {
@@ -147,22 +141,19 @@ impl VirtualMemoryOperations for FakeDriver {
     fn create_virtual_memory(
         &self,
         _device: &State,
-        _kind: OwnedMemoryKind,
+        _kind: MemoryKind,
         size: u64,
         _pinned: bool,
         _uncached: bool,
     ) -> Result<Owned<Backing>, Error> {
-        Ok(Owned::new(
-            Backing {
-                info: VirtualMemoryInfo {
-                    size,
-                    mapping_granularity: 0x1000,
-                    physical_backing_id: [1, 2],
-                },
-                drops: self.drops.clone(),
+        Ok(Owned::new(Backing {
+            info: VirtualMemoryInfo {
+                size,
+                mapping_granularity: 0x1000,
+                physical_backing_id: [1, 2],
             },
-            Allocator::system(),
-        )?)
+            drops: self.drops.clone(),
+        })?)
     }
 
     fn free_virtual_memory(_memory: &mut Backing) -> Result<(), Error> {
@@ -178,10 +169,7 @@ impl VirtualMemoryOperations for FakeDriver {
         _size: u64,
         _permissions: DeviceAccess,
     ) -> Result<Owned<Mapping>, Error> {
-        Ok(Owned::new(
-            Mapping { fail_once: false },
-            Allocator::system(),
-        )?)
+        Ok(Owned::new(Mapping { fail_once: false })?)
     }
 
     fn free_virtual_device_mapping(_mapping: &mut Mapping) -> Result<(), Error> {
@@ -195,9 +183,8 @@ impl VirtualMemoryOperations for FakeDriver {
         _offset: u64,
         _size: u64,
         _permissions: DeviceAccess,
-        allocator: Allocator,
     ) -> Result<Owned<Mapping>, Error> {
-        Ok(Owned::new(Mapping { fail_once: true }, allocator)?)
+        Ok(Owned::new(Mapping { fail_once: true })?)
     }
 
     fn free_virtual_host_mapping(mapping: &mut Mapping) -> Result<(), Error> {
@@ -221,22 +208,16 @@ fn owners(
     ),
     Error,
 > {
-    let allocator = Allocator::system();
     let reservation = driver.reserve_virtual_address((0x1000, u64::MAX), 0x4000, 0x1000, 0)?;
     let address = DriverVirtualAddress::new(
         driver.clone(),
-        Shared::new(reservation, allocator)?,
-        Shared::new(HostIntervals::new(allocator), allocator)?,
-        Shared::new(DeviceIntervals::new(allocator), allocator)?,
+        Shared::new(reservation)?,
+        Shared::new(HostIntervals::new())?,
+        Shared::new(DeviceIntervals::new())?,
     );
-    let backing = driver.create_virtual_memory(
-        &State(1),
-        OwnedMemoryKind::try_from(MemoryKind::System)?,
-        0x4000,
-        false,
-        false,
-    )?;
-    let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing, allocator)?);
+    let backing =
+        driver.create_virtual_memory(&State(1), MemoryKind::System, 0x4000, false, false)?;
+    let memory = DriverVirtualMemory::new(driver.clone(), Shared::new(backing)?);
     Ok((address, memory))
 }
 
@@ -247,19 +228,13 @@ fn owners(
 )]
 fn fake_driver_preserves_mapping_occupancy_and_cleanup_order() -> Result<(), Error> {
     let drops = Arc::new(Mutex::new(Vec::new()));
-    let driver = Shared::new(
-        FakeDriver {
-            drops: drops.clone(),
-        },
-        Allocator::system(),
-    )?;
+    let driver = Shared::new(FakeDriver {
+        drops: drops.clone(),
+    })?;
     let (mut address, mut memory) = owners(&driver)?;
-    let other_driver = Shared::new(
-        FakeDriver {
-            drops: Arc::new(Mutex::new(Vec::new())),
-        },
-        Allocator::system(),
-    )?;
+    let other_driver = Shared::new(FakeDriver {
+        drops: Arc::new(Mutex::new(Vec::new())),
+    })?;
     let (_, foreign_memory) = owners(&other_driver)?;
     let base = address.info().address;
     assert_eq!(
