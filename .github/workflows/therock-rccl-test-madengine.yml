@@ -177,8 +177,7 @@ jobs:
             --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
             --rccl
 
-      # The step now covers a baseline run and a candidate run inside one
-      # allocation, plus however long that allocation waits in the queue.
+      # Both A/B phases in one allocation, plus its queue wait.
       - name: Run MADEngine workload
         timeout-minutes: 360
         env:
