@@ -1491,4 +1491,8 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   return amdExtTable->hsa_amd_queue_intercept_register_fn(queue, callback, user_data);
 }
 
+hsa_status_t hsa_amd_enable_high_precision_timestamps() {
+  return amdExtTable->hsa_amd_enable_high_precision_timestamps_fn();
+}
+
 }  // namespace rocr
