@@ -1980,6 +1980,135 @@ amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t amdsmi_get_ampp_profiles(amdsmi_processor_handle processor_handle,
+                                         char version[AMDSMI_MAX_STRING_LENGTH],
+                                         uint32_t* num_profiles, amdsmi_ampp_profile_t* profiles) {
+  AMDSMI_CHECK_INIT();
+
+  if (num_profiles == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(AMDSMI_MAX_STRING_LENGTH == RSMI_AMPP_MAX_STRING_LENGTH,
+                "AMDSMI and RSMI AMPP string lengths must match");
+  static_assert(sizeof(amdsmi_ampp_profile_t) == sizeof(rsmi_ampp_profile_t),
+                "AMDSMI and RSMI AMPP profile structs must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, name) == offsetof(rsmi_ampp_profile_t, name),
+                "AMDSMI and RSMI AMPP profile name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, index) == offsetof(rsmi_ampp_profile_t, index),
+                "AMDSMI and RSMI AMPP profile index offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_active) == offsetof(rsmi_ampp_profile_t, is_active),
+      "AMDSMI and RSMI AMPP profile active offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, is_writable) == offsetof(rsmi_ampp_profile_t, is_writable),
+      "AMDSMI and RSMI AMPP profile writable offsets must match");
+  static_assert(offsetof(amdsmi_ampp_profile_t, is_configured) ==
+                    offsetof(rsmi_ampp_profile_t, is_configured),
+                "AMDSMI and RSMI AMPP profile configured offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_profile_t, reserved) == offsetof(rsmi_ampp_profile_t, reserved),
+      "AMDSMI and RSMI AMPP profile reserved offsets must match");
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_profiles_get, processor_handle, 0, version, num_profiles,
+                   reinterpret_cast<rsmi_ampp_profile_t*>(profiles));
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_ampp_fields(amdsmi_processor_handle processor_handle,
+                                       const char* profile_name, uint32_t* num_fields,
+                                       amdsmi_ampp_field_t* fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr || num_fields == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "AMDSMI and RSMI AMPP field structs must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, name) == offsetof(rsmi_ampp_field_t, name),
+                "AMDSMI and RSMI AMPP field name offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, unit) == offsetof(rsmi_ampp_field_t, unit),
+                "AMDSMI and RSMI AMPP field unit offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, value) == offsetof(rsmi_ampp_field_t, value),
+                "AMDSMI and RSMI AMPP field value offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_min) == offsetof(rsmi_ampp_field_t, limit_min),
+                "AMDSMI and RSMI AMPP field minimum offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, limit_max) == offsetof(rsmi_ampp_field_t, limit_max),
+                "AMDSMI and RSMI AMPP field maximum offsets must match");
+  static_assert(
+      offsetof(amdsmi_ampp_field_t, has_limits) == offsetof(rsmi_ampp_field_t, has_limits),
+      "AMDSMI and RSMI AMPP field limit flag offsets must match");
+  static_assert(offsetof(amdsmi_ampp_field_t, reserved) == offsetof(rsmi_ampp_field_t, reserved),
+                "AMDSMI and RSMI AMPP field reserved offsets must match");
+
+  amdsmi_status_t amdsmi_status =
+      rsmi_wrapper(rsmi_dev_ampp_fields_get, processor_handle, 0, profile_name, num_fields,
+                   reinterpret_cast<rsmi_ampp_field_t*>(fields));
+  if (amdsmi_status != AMDSMI_STATUS_SUCCESS) {
+    return amdsmi_status;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_handle,
+                                             const char* profile_name) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_activate, processor_handle, 0, profile_name);
+}
+
+amdsmi_status_t amdsmi_configure_ampp_profile(amdsmi_processor_handle processor_handle,
+                                              const char* profile_name,
+                                              const amdsmi_ampp_field_t* fields,
+                                              uint32_t num_fields) {
+  AMDSMI_CHECK_INIT();
+
+  if (profile_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  if (amd::smi::WSLGPUBackend::IsActive()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+
+  static_assert(sizeof(amdsmi_ampp_field_t) == sizeof(rsmi_ampp_field_t),
+                "amdsmi_ampp_field_t and rsmi_ampp_field_t must remain layout-compatible");
+
+  return rsmi_wrapper(rsmi_dev_ampp_profile_configure, processor_handle, 0, profile_name,
+                      reinterpret_cast<const rsmi_ampp_field_t*>(fields), num_fields);
+}
+
 amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle,
                                           amdsmi_vram_usage_t* vram_info) {
   AMDSMI_CHECK_INIT();
@@ -3494,6 +3623,96 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
                                           reinterpret_cast<RSMI_IO_LINK_TYPE*>(type),
                                           reinterpret_cast<rsmi_p2p_capability_t*>(cap));
   return amd::smi::rsmi_to_amdsmi_status(rstatus);
+}
+
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info) {
+  AMDSMI_CHECK_INIT();
+
+  if (topology_info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  // Keep defaults intact if a later query fails.
+  *topology_info = {};
+  topology_info->link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+  topology_info->link_status = AMDSMI_LINK_STATUS_DISABLED;
+
+  amd::smi::AMDSmiGPUDevice* src_device = nullptr;
+  amd::smi::AMDSmiGPUDevice* dst_device = nullptr;
+  amdsmi_status_t r = get_gpu_device_from_handle(processor_handle_src, &src_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+  r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
+  if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+  uint32_t src_id = src_device->get_gpu_id();
+  uint32_t dst_id = dst_device->get_gpu_id();
+
+#ifdef ENABLE_WSL_BACKEND
+  // WSL has no native sysfs topology; match amdsmi_topo_get_link_type.
+  if (src_device->backend() || dst_device->backend()) {
+    if (src_device == dst_device) {
+      topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+      topology_info->fb_sharing = 1;
+    } else {
+      topology_info->link_type = AMDSMI_LINK_TYPE_PCIE;
+      topology_info->num_hops = 1;
+    }
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+#endif
+
+  // Self pairs need no inter-device queries.
+  if (src_id == dst_id) {
+    topology_info->link_type = AMDSMI_LINK_TYPE_INTERNAL;
+    topology_info->link_status = AMDSMI_LINK_STATUS_ENABLED;
+    topology_info->fb_sharing = 1;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  uint64_t hops = 0;
+  RSMI_IO_LINK_TYPE rsmi_type = RSMI_IOLINK_TYPE_UNDEFINED;
+  amdsmi_status_t status =
+      amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_type(src_id, dst_id, &hops, &rsmi_type));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // Only PCIe and xGMI share enum values across the two APIs.
+  amdsmi_link_type_t link_type;
+  switch (rsmi_type) {
+    case RSMI_IOLINK_TYPE_PCIEXPRESS:
+      link_type = AMDSMI_LINK_TYPE_PCIE;
+      break;
+    case RSMI_IOLINK_TYPE_XGMI:
+      link_type = AMDSMI_LINK_TYPE_XGMI;
+      break;
+    default:
+      link_type = AMDSMI_LINK_TYPE_UNKNOWN;
+      break;
+  }
+
+  uint64_t weight = 0;
+  status = amd::smi::rsmi_to_amdsmi_status(rsmi_topo_get_link_weight(src_id, dst_id, &weight));
+  if (status != AMDSMI_STATUS_SUCCESS) return status;
+
+  // A failed P2P query leaves fb_sharing at 0.
+  uint8_t fb_sharing = 0;
+  bool accessible = false;
+  if (amd::smi::rsmi_to_amdsmi_status(rsmi_is_P2P_accessible(src_id, dst_id, &accessible)) ==
+      AMDSMI_STATUS_SUCCESS) {
+    fb_sharing = accessible ? 1 : 0;
+  }
+
+  topology_info->link_type = link_type;
+  topology_info->num_hops = hops > 255 ? 255 : static_cast<uint8_t>(hops);  // clamp to uint8_t
+  topology_info->weight = weight;
+  // Host API parity, not link health or P2P access.
+  topology_info->link_status = (link_type == AMDSMI_LINK_TYPE_UNKNOWN) ? AMDSMI_LINK_STATUS_DISABLED
+                                                                       : AMDSMI_LINK_STATUS_ENABLED;
+  topology_info->fb_sharing = fb_sharing;
+
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 // Compute Partition functions
@@ -6006,7 +6225,6 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   }
 
   // Get the driver date
-  std::string driver_date;
   auto version = drm_get_version(drm_fd);
   if (version == nullptr) {
     libdrm.unload();
@@ -6016,12 +6234,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     return AMDSMI_STATUS_DRM_ERROR;
   }
 
-  driver_date = version->date;
-  // Reformat the driver date from 20150101 to 2015/01/01 00:00
-  if (driver_date.length() == 8) {
-    driver_date = driver_date.substr(0, 4) + "/" + driver_date.substr(4, 2) + "/" +
-                  driver_date.substr(6, 2) + " 00:00";
-  }
+  const auto driver_date = smi_amdgpu_format_driver_date(version->date);
   snprintf(info->driver_date, AMDSMI_MAX_STRING_LENGTH, "%s", driver_date.c_str());
 
   // Get the driver name

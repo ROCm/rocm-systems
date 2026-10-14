@@ -715,6 +715,14 @@ std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
   return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
 }
 
+/**
+ * @brief Get the full sysfs path to the AMPP (amdsmi power profile)
+ * app_modes/ root directory
+ * @return Full path to the app_modes/ directory (e.g.,
+ * /sys/class/drm/card0/device/app_modes/)
+ */
+std::string Device::get_ampp_root_path(void) const { return path_ + "/device/app_modes/"; }
+
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
   std::string debugfs_path;
