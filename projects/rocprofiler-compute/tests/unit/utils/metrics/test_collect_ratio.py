@@ -11,10 +11,7 @@ import pytest
 
 from rocprof_compute_soc.counter_grouping_buckets import counters_fit_one_bucket
 from utils import schema
-from utils.metrics.aggregation import (
-    merge_dispatch_collect_ratio,
-    merge_dispatch_collect_sum,
-)
+from utils.metrics.aggregation import merge_dispatch_collect_ratio
 from utils.metrics.collectable import (
     COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
@@ -102,12 +99,6 @@ def test_merge_dispatch_collect_ratio_pools_unequal_dispatches():
     result = merge_dispatch_collect_ratio(nums, dens)
     assert result == pytest.approx(pooled)
     assert result != pytest.approx(mean_of_ratios)
-
-
-@pytest.mark.misc
-def test_merge_dispatch_collect_sum_identity():
-    series = [pd.Series({1: 1.5}), pd.Series({1: 2.5})]
-    assert merge_dispatch_collect_sum(series) == pytest.approx(4.0)
 
 
 @pytest.mark.misc

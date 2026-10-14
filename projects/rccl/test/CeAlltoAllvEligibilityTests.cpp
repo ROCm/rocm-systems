@@ -490,4 +490,201 @@ TEST_F(CeAlltoAllEligibilityTest, UnsupportedWindowRegistrationRejected)
                                         /*capturing=*/false));
 }
 
+// ncclHierCeAlltoAllvEligible: multi-node AlltoAllv over RMA rail + intra-node CE.
+// Same hier gates as AlltoAll (ncclHierCeAvailable), plus the AlltoAllv call-site gates.
+class CeHierAlltoAllvEligibilityTest : public ::testing::Test
+{
+protected:
+    CeAlltoAllvMockComm mockComm_;
+
+    void SetUp() override { mockComm_.configureHierEligible(); }
+
+    bool hierEligible(ncclSymRegType_t winRegType = ncclSymSendRegRecvReg,
+                      bool hasSysmemSegment = false, bool capturing = false)
+    {
+        return ncclHierCeAlltoAllvEligible(mockComm_.get(),
+                                           ncclFloat32,
+                                           winRegType,
+                                           /*sendWin=*/nullptr,
+                                           /*recvWin=*/nullptr,
+                                           hasSysmemSegment,
+                                           capturing);
+    }
+};
+
+TEST_F(CeHierAlltoAllvEligibilityTest, MultiNodeHierAvailable_SingleNodeCeRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(),
+                                    ncclFuncAlltoAllv,
+                                    ncclDevSum,
+                                    ncclFloat32,
+                                    ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_TRUE(hierEligible());
+    // The single-node CE entry must not also claim the multi-node comm, or
+    // ncclLaunchCeColl would be the only thing keeping it off the LSA-only path.
+    EXPECT_FALSE(ncclCeAvailable(mockComm_.get(),
+                                 ncclFuncAlltoAllv,
+                                 ncclDevSum,
+                                 ncclFloat32,
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_FALSE(ncclCeAlltoAllvEligible(mockComm_.get(),
+                                         ncclFloat32,
+                                         ncclSymSendRegRecvReg,
+                                         /*hasSysmemSegment=*/false,
+                                         /*capturing=*/false));
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, SingleNodeRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.reset();
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAllv,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_FALSE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, LsaSpansCommRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    EXPECT_FALSE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, RequiresZeroCtaPolicy)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+    EXPECT_FALSE(hierEligible());
+
+    mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+    EXPECT_TRUE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, RejectsSysmemSegmentOrCapture)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(hierEligible(ncclSymSendRegRecvReg, /*hasSysmemSegment=*/true, /*capturing=*/false));
+    EXPECT_FALSE(hierEligible(ncclSymSendRegRecvReg, /*hasSysmemSegment=*/false, /*capturing=*/true));
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, RejectsNestedGroup)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    const int savedGroupDepth = ncclGroupDepth;
+    ncclGroupDepth = 1;
+    EXPECT_FALSE(hierEligible());
+    ncclGroupDepth = savedGroupDepth;
+}
+
+// Inter-node puts read the send window, so unlike single-node CE AlltoAllv a
+// non-registered send buffer is not enough.
+TEST_F(CeHierAlltoAllvEligibilityTest, RequiresBothWindowsRegistered)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(hierEligible(ncclSymSendNonregRecvReg));
+    EXPECT_FALSE(hierEligible(ncclSymSendRegRecvNonreg));
+    EXPECT_FALSE(hierEligible(ncclSymSendNonregRecvNonreg));
+    EXPECT_TRUE(hierEligible(ncclSymSendRegRecvReg));
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, UnequalRanksPerNode_HierUnavailable)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.configureHierEligible(/*nNodes=*/2, /*localRanks=*/4);
+    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaSize + 1;
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAllv,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg,
+                                     /*sendWin=*/nullptr,
+                                     /*recvWin=*/nullptr));
+    EXPECT_FALSE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, WantInternalCtxRequiresProxyEnabled)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    ASSERT_TRUE(ncclRmaWantInternalCtx(mockComm_.get()))
+        << "prerequisite: a hier-eligible comm must want internal RMA contexts";
+
+    mockComm_.comm.config.numRmaCtx = 0;
+    EXPECT_FALSE(ncclRmaWantInternalCtx(mockComm_.get()));
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAllv,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg,
+                                     /*sendWin=*/nullptr,
+                                     /*recvWin=*/nullptr));
+    EXPECT_FALSE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, NoHostRmaSupportRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.hostRmaSupport = false;
+    EXPECT_FALSE(hierEligible());
+}
+
+TEST_F(CeHierAlltoAllvEligibilityTest, NoSymmetricSupportRejected)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.symmetricSupport = false;
+    EXPECT_FALSE(hierEligible());
+}
+
+// Sparse AlltoAllv (some peers send zero bytes) must still pass the gathered
+// matrix check the hierarchical launch runs before building any RMA op.
+TEST_F(CeHierAlltoAllvEligibilityTest, SparseSizeMatrixValidates)
+{
+    constexpr int nRanks = 8;
+    std::vector<size_t> g(4 * nRanks * nRanks, 0);
+    // Asymmetric in (src, dst), including the zero pattern, so a transposed
+    // index in ncclAlltoAllvValidateSizeMatrix cannot pass by accident.
+    auto bytes = [](int src, int dst) -> size_t {
+        if ((src + 2 * dst) % 3 == 1 && src != dst) return 0;
+        return static_cast<size_t>(1024 * (src + 1) * (dst + 2));
+    };
+    for (int r = 0; r < nRanks; ++r)
+    {
+        size_t* s = ncclAlltoAllvSendSizes(g.data(), r, nRanks);
+        size_t* rv = ncclAlltoAllvRecvSizes(g.data(), r, nRanks);
+        for (int peer = 0; peer < nRanks; ++peer)
+        {
+            s[peer] = bytes(r, peer);
+            rv[peer] = bytes(peer, r);
+        }
+    }
+    EXPECT_EQ(ncclAlltoAllvValidateSizeMatrix(g.data(), nRanks), ncclSuccess);
+    ncclAlltoAllvRecvSizes(g.data(), 5, nRanks)[1] += 1;
+    EXPECT_EQ(ncclAlltoAllvValidateSizeMatrix(g.data(), nRanks), ncclInvalidUsage);
+}
+
 } // namespace RcclUnitTesting

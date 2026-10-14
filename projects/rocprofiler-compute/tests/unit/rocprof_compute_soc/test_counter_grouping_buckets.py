@@ -48,6 +48,19 @@ def test_counters_fit_one_bucket_accum_costs_two():
 
 
 @pytest.mark.misc
+def test_sp_valu_and_sq_vmem_do_not_fit_one_pass():
+    """gfx1250: both families charge SQ, and SP FLOP counters return zero together."""
+    sq_budget = {"SQ": 8}
+    sp_only = frozenset({"SP_VALU_FLOPS_FP32", "SQ_INSTS_VALU"})
+    vmem_only = frozenset({"SQ_VMEM_REQ", "SQ_INSTS_VMEM"})
+    mixed = frozenset({"SP_VALU_FLOPS_FP32", "SQ_VMEM_REQ"})
+    assert counters_fit_one_bucket(sp_only, sq_budget)
+    assert counters_fit_one_bucket(vmem_only, sq_budget)
+    assert not counters_fit_one_bucket(mixed, sq_budget)
+    assert rebuild_counter_file("0", sq_budget, set(mixed)) is None
+
+
+@pytest.mark.misc
 def test_rebuild_counter_file_round_trip():
     counters = {"GRBM_GUI_ACTIVE", "GRBM_SPI_BUSY"}
     rebuilt = rebuild_counter_file("0", PERFMON_CONFIG, counters)
