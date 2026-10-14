@@ -483,6 +483,22 @@ class TestGradeJudged:
         with pytest.raises(evals.JudgeError, match="overloaded"):
             self.judge(evals, monkeypatch, error)
 
+    def test_judge_timeout_is_a_judge_error(self, evals, monkeypatch):
+        def hang(command, **_kwargs):
+            raise subprocess.TimeoutExpired(command, 300)
+
+        monkeypatch.setattr(subprocess, "run", hang)
+        with pytest.raises(evals.JudgeError, match="timed out after 300s"):
+            evals.grade_judged("c", "t", True, self.OPTIONS)
+
+    def test_failure_to_start_the_judge_is_a_judge_error(self, evals, monkeypatch):
+        def missing(_command, **_kwargs):
+            raise FileNotFoundError("claude")
+
+        monkeypatch.setattr(subprocess, "run", missing)
+        with pytest.raises(evals.JudgeError, match="could not run claude"):
+            evals.grade_judged("c", "t", True, self.OPTIONS)
+
     def test_command(self, evals, monkeypatch):
         _, fake = self.judge(
             evals, monkeypatch, '{"occurred": true, "reason": ""}', claim="my claim"
@@ -841,6 +857,82 @@ class TestRunCase:
         )
         assert outcome == evals.Outcome("demo", "c", ["timed out"], set())
 
+    def test_a_failing_workspace_build_fails_the_case(self, evals, tmp_path, patched):
+        def broken(_root):
+            raise subprocess.CalledProcessError(1, "install-skills.sh")
+
+        patched.setattr(evals, "build_workspace", broken)
+        outcome = evals.run_case(
+            "demo", case("c", True), tmp_path, evals.Options(None, True, False)
+        )
+        assert len(outcome.failures) == 1
+        assert outcome.failures[0].startswith(
+            "could not run the case: CalledProcessError"
+        )
+
+    def test_an_unexpected_error_while_grading_fails_the_case(
+        self, evals, tmp_path, patched
+    ):
+        patched.setattr(evals, "run_agent", lambda *a: ("t", ["demo"], set(), "m"))
+
+        def broken(*_args):
+            raise ValueError("boom")
+
+        patched.setattr(evals, "grade", broken)
+        outcome = evals.run_case(
+            "demo", case("c", True), tmp_path, evals.Options(None, True, False)
+        )
+        assert outcome.failures == ["could not run the case: ValueError: boom"]
+
+    def test_a_transcript_that_cannot_be_written_fails_the_case(
+        self, evals, tmp_path, patched
+    ):
+        patched.setattr(evals, "run_agent", lambda *a: ("t", ["demo"], set(), "m"))
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("x")
+        options = evals.Options(None, True, False, transcripts=blocker / "sub")
+        outcome = evals.run_case("demo", case("c", True), tmp_path, options)
+        assert outcome.failures[0].startswith("could not run the case: ")
+
+    def test_a_judge_timeout_fails_that_claim_not_the_run(self, evals, tmp_path, patched):
+        patched.setattr(evals, "run_agent", lambda *a: ("t", ["demo"], set(), "m"))
+
+        def hang(command, **_kwargs):
+            raise subprocess.TimeoutExpired(command, 300)
+
+        patched.setattr(subprocess, "run", hang)
+        judged = case("c", True, expected_behavior=["says x"])
+        outcome = evals.run_case(
+            "demo", judged, tmp_path, evals.Options(None, True, True)
+        )
+        assert outcome.failures == [
+            "judge failed for 'says x': judge timed out after 300s"
+        ]
+
+    def test_ctrl_c_still_stops_the_run(self, evals, tmp_path, patched):
+        def interrupted(*_args):
+            raise KeyboardInterrupt
+
+        patched.setattr(evals, "run_agent", interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            evals.run_case(
+                "demo", case("c", True), tmp_path, evals.Options(None, True, False)
+            )
+
+    def test_an_unwritable_transcript_does_not_hide_the_agent_failure(
+        self, evals, tmp_path, patched
+    ):
+        def broken(*_args):
+            raise evals.AgentError("claude failed (exit 1): API Error", "partial")
+
+        patched.setattr(evals, "run_agent", broken)
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("x")
+        options = evals.Options(None, True, False, transcripts=blocker / "sub")
+        outcome = evals.run_case("demo", case("c", False), tmp_path, options)
+        assert outcome.failures[0] == "claude failed (exit 1): API Error"
+        assert outcome.failures[1].startswith("could not save the transcript")
+
     def test_a_failed_agent_fails_a_negative_case_instead_of_passing_it(
         self, evals, tmp_path, patched
     ):
@@ -917,6 +1009,26 @@ class TestMain:
             return code, capsys.readouterr().out, calls
 
         return run
+
+    def test_one_case_that_cannot_run_does_not_stop_the_others(
+        self, evals, tree, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(evals, "build_workspace", lambda _root: tmp_path)
+
+        def agent(prompt, _workspace, _options):
+            if prompt == "prompt alpha-p1":
+                raise OSError("claude vanished")
+            skill = prompt.split()[1].split("-")[0]
+            return "t", ([skill] if "-p" in prompt else []), set(), "m"
+
+        monkeypatch.setattr(evals, "run_agent", agent)
+        monkeypatch.setattr(sys, "argv", ["run_evals.py", "--jobs", "1"])
+        code = evals.main()
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "FAIL alpha-p1" in out
+        assert "could not run the case: OSError: claude vanished" in out
+        assert "9/10 passed" in out
 
     def test_list_validates_without_the_cli(self, evals, run_main, monkeypatch):
         def forbidden(_name):

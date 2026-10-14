@@ -108,6 +108,9 @@ How a case is graded:
 - If the `claude` CLI itself fails (a bad `--model`, an authentication problem or a rate
   limit), the case is reported as a failure with the error text and is not graded.
   Otherwise every negative case would pass, because nothing loaded.
+- A case that cannot run or be graded for any other reason (the install script fails,
+  a judge call times out, the transcript cannot be written) is also reported as a
+  failure, and the other cases still run. Ctrl-C stops the whole run.
 - The agent is a language model, so a result can differ between runs. Re-run a failing
   case before changing a skill or its dataset, and use `--save-transcripts` to see what
   the agent actually did.

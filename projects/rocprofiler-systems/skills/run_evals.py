@@ -325,23 +325,28 @@ def grade_judged(
         "not, and give a one-sentence reason. Answer only with the JSON object.\n\n"
         f"Transcript:\n{transcript[:200000]}"
     )
-    result = subprocess.run(
-        [
-            "claude",
-            "-p",
-            question,
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(JUDGE_SCHEMA),
-            *claude_flags(options),
-        ],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "claude",
+                "-p",
+                question,
+                "--output-format",
+                "json",
+                "--json-schema",
+                json.dumps(JUDGE_SCHEMA),
+                *claude_flags(options),
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise JudgeError("judge timed out after 300s") from None
+    except OSError as err:
+        raise JudgeError(f"could not run claude: {err}") from None
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -417,21 +422,32 @@ def save_transcript(options: Options, name: str, case_id: str, transcript: str) 
 
 
 def run_case(name: str, case: dict[str, Any], tmp: Path, options: Options) -> Outcome:
-    """Run and grade one case."""
+    """Run and grade one case.
+
+    A case that cannot run or be graded becomes a failed Outcome, so one bad case
+    never aborts the others. Only Exception is caught: Ctrl-C still stops the run.
+    """
     # The agent sees its working directory, so the folder name must not give away
     # the skill under test or the case: an opaque, unique name avoids that.
     folder = hashlib.sha1(f"{name}/{case['id']}".encode()).hexdigest()[:10]
-    workspace = build_workspace(tmp / folder)
     try:
+        workspace = build_workspace(tmp / folder)
         transcript, loaded, visible, model = run_agent(case["prompt"], workspace, options)
+        save_transcript(options, name, case["id"], transcript)
+        failures = grade(case, name, transcript, loaded, workspace, options)
+        return Outcome(name, case["id"], failures, visible, model)
     except subprocess.TimeoutExpired:
         return Outcome(name, case["id"], ["timed out"], set())
     except AgentError as err:
-        save_transcript(options, name, case["id"], err.transcript)
-        return Outcome(name, case["id"], [str(err)], set())
-    save_transcript(options, name, case["id"], transcript)
-    failures = grade(case, name, transcript, loaded, workspace, options)
-    return Outcome(name, case["id"], failures, visible, model)
+        failures = [str(err)]
+        try:
+            save_transcript(options, name, case["id"], err.transcript)
+        except OSError as save_err:
+            failures.append(f"could not save the transcript: {save_err}")
+        return Outcome(name, case["id"], failures, set())
+    except Exception as err:
+        message = f"could not run the case: {type(err).__name__}: {err}"
+        return Outcome(name, case["id"], [message], set())
 
 
 def main() -> int:
