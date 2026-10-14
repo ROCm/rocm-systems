@@ -54,7 +54,8 @@ capture_label: ci:hrr-capture
 
 # The GPU families the suite runs on, as TheRock family keys
 # (build_tools/github_actions/amdgpu_family_matrix.py). The integration binary
-# is built for targets.arch in integration.yaml, which must cover them.
+# is built for targets.arch in integration.yaml; the configure job fails unless
+# that covers every GPU target TheRock lists for each family here.
 #
 # Per family, all optional:
 #   enabled    false: run only when requested by a ci:gfx... label or the

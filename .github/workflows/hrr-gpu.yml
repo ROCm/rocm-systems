@@ -13,7 +13,7 @@ on:
   workflow_call:
     inputs:
       families:
-        description: JSON list of {family, runner, gfx_targets} from hrr_ci_configure.py
+        description: JSON list of {family, runner} from hrr_ci_configure.py
         type: string
         required: true
       ignore_test_config:

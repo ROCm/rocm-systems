@@ -7,8 +7,7 @@ Writes these GitHub Actions outputs:
 
   run_cpu           "true" when the generated-source, script and unit jobs run.
   run_gpu           "true" when the capture-enabled build and the GPU suite run.
-  families          JSON list of {"family", "runner", "gfx_targets"} for the
-                    GPU suite.
+  families          JSON list of {"family", "runner"} for the GPU suite.
   reason            One line explaining the decision, shown in the summary.
   rocm_sdk_version  The ROCm SDK the unit job installs.
 
@@ -29,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -38,6 +38,8 @@ from typing import Callable, Iterable
 import yaml
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "config" / "ci.yaml"
+# Its targets.arch is what the GPU suite is built for.
+INTEGRATION_CONFIG = DEFAULT_CONFIG.with_name("integration.yaml")
 
 EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
 
@@ -154,6 +156,14 @@ def parse_config(data) -> Config:
     )
 
 
+def load_archs(path: Path) -> list[str]:
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        return list(_strings("targets.arch", data["targets"]["arch"]))
+    except (ConfigError, KeyError, TypeError) as e:
+        raise ConfigError(f"{path}: no targets.arch list ({e})") from None
+
+
 def load_config(path: Path) -> Config:
     try:
         return parse_config(yaml.safe_load(path.read_text(encoding="utf-8")))
@@ -167,6 +177,38 @@ def check_families(config: Config, matrix: dict) -> None:
         raise ConfigError(
             f"families: {', '.join(unknown)} not in TheRock's family matrix"
             f" (known: {', '.join(sorted(matrix))})"
+        )
+
+
+def family_targets(linux: dict) -> list[str]:
+    """The GPU targets of a family's test machines, without feature suffixes.
+
+    TheRock lists them as fetch-gfx-targets; a family that names a single
+    target (gfx1150) may leave that list empty.
+    """
+    targets = [t.split(":")[0] for t in linux.get("fetch-gfx-targets", [])]
+    family = str(linux.get("family", ""))
+    if not targets and re.fullmatch(r"gfx[0-9a-f]+", family):
+        targets = [family]
+    return list(dict.fromkeys(targets))
+
+
+def check_targets(config: Config, matrix: dict, archs: Iterable[str]) -> None:
+    """The suite must be built for every target of every family ci.yaml lists,
+    enabled or not, since a label can request any of them."""
+    archs = set(archs)
+    problems = []
+    for key in config.families:
+        targets = family_targets(matrix[key].get("linux", {}))
+        missing = [t for t in targets if t not in archs]
+        if not targets:
+            problems.append(f"TheRock lists no GPU targets for {key}")
+        elif missing:
+            problems.append(f"{key} needs {', '.join(missing)}")
+    if problems:
+        raise ConfigError(
+            f"targets.arch of {INTEGRATION_CONFIG.name} does not cover the families: "
+            + "; ".join(problems)
         )
 
 
@@ -257,13 +299,7 @@ def select_families(
         if not runner:
             no_runner.append(key)
             continue
-        families.append(
-            {
-                "family": key,
-                "runner": runner,
-                "gfx_targets": ",".join(linux.get("fetch-gfx-targets", [])),
-            }
-        )
+        families.append({"family": key, "runner": runner})
     return families, no_runner
 
 
@@ -389,6 +425,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--therock-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--integration-config", type=Path, default=INTEGRATION_CONFIG)
     return parser.parse_args(argv)
 
 
@@ -401,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(args.config)
         matrix, pick_weighted = load_matrix(args.therock_dir)
         check_families(config, matrix)
+        check_targets(config, matrix, load_archs(args.integration_config))
 
         paths: list[str] | None = []
         if args.event == "pull_request" and args.pr_number:

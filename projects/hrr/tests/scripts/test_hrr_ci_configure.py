@@ -205,6 +205,33 @@ class ConfigValidationTest(unittest.TestCase):
             cfg.check_families(config, MATRIX)
         self.assertIn("gfx999 not in TheRock's family matrix", str(caught.exception))
 
+    def test_family_targets(self):
+        self.assertEqual(cfg.family_targets(MATRIX["gfx110x"]["linux"]), ["gfx1100", "gfx1101"])
+        # gfx1150 lists no fetch targets; its family name is the target.
+        self.assertEqual(cfg.family_targets(MATRIX["gfx1150"]["linux"]), ["gfx1150"])
+        self.assertEqual(
+            cfg.family_targets({"fetch-gfx-targets": ["gfx942", "gfx942:xnack+"]}), ["gfx942"]
+        )
+        self.assertEqual(cfg.family_targets({"family": "gfx101X-dgpu"}), [])
+
+    def test_targets_cover_every_family(self):
+        archs = ["gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101", "gfx1150", "gfx1250"]
+        cfg.check_targets(CONFIG, MATRIX, archs)
+        with self.assertRaises(cfg.ConfigError) as caught:
+            cfg.check_targets(CONFIG, MATRIX, [a for a in archs if a not in ("gfx1101", "gfx1250")])
+        # gfx125x is disabled, but a label can still request it.
+        self.assertIn("gfx110x needs gfx1101; gfx125x needs gfx1250", str(caught.exception))
+
+    def test_family_without_targets_is_an_error(self):
+        config = cfg.parse_config(config_data(families={"gfx94x": {}}))
+        matrix = {"gfx94x": {"linux": {"family": "gfx94X-dcgpu"}}}
+        with self.assertRaises(cfg.ConfigError) as caught:
+            cfg.check_targets(config, matrix, ["gfx942"])
+        self.assertIn("no GPU targets for gfx94x", str(caught.exception))
+
+    def test_repo_integration_config_lists_archs(self):
+        self.assertIn("gfx1103", cfg.load_archs(cfg.INTEGRATION_CONFIG))
+
     def test_load_error_names_the_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ci.yaml"
@@ -244,8 +271,7 @@ class DecideTest(unittest.TestCase):
         # gfx110x is not triggered by pull requests, gfx125x is disabled and
         # gfx1150 has no runner.
         self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
-        self.assertEqual(d.families[1]["runner"], "gpu-94x-a")
-        self.assertEqual(d.families[1]["gfx_targets"], "gfx942")
+        self.assertEqual(d.families[1], {"family": "gfx94x", "runner": "gpu-94x-a"})
         self.assertIn("no runner for gfx1150", d.reason)
 
     def test_rename_out_of_capture_counts(self):
@@ -300,7 +326,6 @@ class DecideTest(unittest.TestCase):
         config = cfg.parse_config(config_data(families={"gfx94x": {"runner": "my-gpu"}}))
         d = decide("schedule", [], config=config)
         self.assertEqual(d.families[0]["runner"], "my-gpu")
-        self.assertEqual(d.families[0]["gfx_targets"], "gfx942")
 
     def test_dispatch_families_replace_the_selection(self):
         d = decide("workflow_dispatch", [], requested=["gfx125x", "gfx1150"])
@@ -388,14 +413,14 @@ class ForkTest(unittest.TestCase):
 
 class OutputTest(unittest.TestCase):
     def test_write_outputs(self):
-        d = cfg.Decision(True, True, "why", [{"family": "gfx94x", "runner": "r", "gfx_targets": "gfx942"}])
+        d = cfg.Decision(True, True, "why", [{"family": "gfx94x", "runner": "r"}])
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out"
             with redirect_stdout(io.StringIO()):
                 cfg.write_outputs(d, "1.2.3", str(out))
             text = out.read_text()
         self.assertIn("run_cpu=true\n", text)
-        self.assertIn('families=[{"family":"gfx94x","runner":"r","gfx_targets":"gfx942"}]\n', text)
+        self.assertIn('families=[{"family":"gfx94x","runner":"r"}]\n', text)
         self.assertIn("reason=why\n", text)
         self.assertIn("rocm_sdk_version=1.2.3\n", text)
 

@@ -15,7 +15,7 @@ binary: hrr-unit-tests
 select: "*"
 targets:
   os: [linux, windows]
-  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
+  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
 cases:
   Unit_HRR_AllocKind_FreeDispatch: {}
   Unit_HRR_Format_BadMagic: {}

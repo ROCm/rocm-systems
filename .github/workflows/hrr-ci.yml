@@ -66,6 +66,7 @@ jobs:
           sparse-checkout: |
             projects/hrr/tests/scripts/hrr_ci_configure.py
             projects/hrr/tests/config/ci.yaml
+            projects/hrr/tests/config/integration.yaml
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock family matrix

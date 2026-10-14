@@ -155,7 +155,9 @@ applies (`scripts/hrr_ci_configure.py`):
   name a disabled family.
 - `rocm_sdk_version`: the ROCm SDK the unit job installs.
 
-An unknown key, trigger or family fails the configure job. To take load off the GPU
+An unknown key, trigger or family fails the configure job, and so does a family whose
+GPU targets in TheRock's family matrix are not all in `targets.arch` of
+`config/integration.yaml`. To take load off the GPU
 pools, disable families or narrow their triggers here.
 
 ## Configuring where a case runs
