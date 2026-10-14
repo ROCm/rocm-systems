@@ -8457,6 +8457,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
@@ -8464,7 +8465,11 @@ class CodeGenerator:
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'flat_load')
         if sem.sign_extend:
@@ -8492,6 +8497,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -8500,6 +8507,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         data_field = self.isa_spec.profile.flat_store_src_field
@@ -8508,12 +8516,42 @@ class CodeGenerator:
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, sem, 'flat_store')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
+            L.append(f'  uint32_t data_base = {data_base};')
+            L.append(
+                '  constexpr uint32_t block_bytes = amdgpu::kBlockDwordCount * sizeof(uint32_t);'
+            )
+            L.append('  d->store_data.resize(wf.wf_size() * block_bytes);')
+            L.append('  const amdgpu::RegisterAccess registers(wf);')
+            L.append('  for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {')
+            L.append('    if (!d->block_dword_enabled(i)) continue;')
+            L.append(
+                '    const auto source = registers.block_store_source_vgpr(data_base + i);'
+            )
+            L.append(
+                '    auto data = registers.read_vgpr_region(source, 1, d->lane_mask);'
+            )
+            L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('      if (!(d->lane_mask & (uint64_t{1} << lane))) continue;')
+            L.append('      const uint32_t value = data.lane(0, lane);')
+            L.append(
+                '      std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));'
+            )
+            L.append('    }')
+            L.append('  }')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
         data_regs = ne if esz == 4 else 1
@@ -10826,6 +10864,12 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if inst.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
+                            access_conditions.append('modifiers.block_data = &vdst;')
+                        elif inst.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
+                            access_conditions.append(
+                                f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
+                            )
                         if is_smem and inst.name.startswith(
                             ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
                         ):
@@ -12362,6 +12406,7 @@ class CodeGenerator:
                             'global_load_addtid',
                         )
                         and 'FORMAT' not in inst.name
+                        and inst.name not in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
                         and not inst.name.startswith('FLAT_')
                         and not (_mem_sem.d16_hi or _mem_sem.d16_lo)
                     ):
