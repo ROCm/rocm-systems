@@ -1518,20 +1518,25 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           // -D != 0 launches the test's own device kernel (e.g. GIN-SDMA) and
           // never calls the host collective, so the getCollImplInfo/
           // getAlgoProtoChannels reporters below describe a dispatch that did
-          // not run. Report the selected device impl, and -- when the collective
-          // wires getDeviceImplInfo -- the actual tier the env-resolved thresholds
-          // select for this message size (FLAT/SAG/RING/LSA/LL/...).
+          // not run. Report the selected device impl in the algo column, and --
+          // when the collective wires getDeviceImplInfo -- the actual data path
+          // the env-resolved thresholds select for this message size in the proto
+          // column (GIN-DIRECT/GIN-SAG/RING-LSA/LSA/LL/...). The neutral "DEV"
+          // default stands for collectives whose device kernels are not GIN.
           char devAlgo[16];
           snprintf(devAlgo, sizeof(devAlgo), "DEV-D%d", deviceImpl);
           char devProto[16];
-          snprintf(devProto, sizeof(devProto), "GIN");
+          snprintf(devProto, sizeof(devProto), "DEV");
           if (args->collTest->getDeviceImplInfo) {
-            const int nRanks = args->totalProcs * args->nGpus * args->nThreads;
-            const int lsaSize = (int)(args->devComms ? args->devComms[0].lsaSize : nRanks);
+            const int nRanks = args->nProcs * args->nThreads * args->nGpus;
+            int lsaSize = nRanks;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+            if (args->devComms) lsaSize = (int)args->devComms[0].lsaSize;
+#endif
             TESTCHECK(args->collTest->getDeviceImplInfo(deviceImpl, args->nbytes / wordSize(type), type,
-                                                        nRanks, lsaSize, devAlgo, devProto));
+                                                        nRanks, lsaSize, devProto));
           }
-          PRINT("%8s  %8s  %10s", devAlgo, devProto, "N/A");
+          PRINT("%8s  %10s  %10s", devAlgo, devProto, "N/A");
         } else if(args->collTest->getAlgoProtoChannels) {
           int algo, proto, nchannels;
           const char* algoName = NULL;
@@ -1564,12 +1569,12 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
             NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
             NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
-            PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+            PRINT("%8s  %10s  %10d", algoName, protoName, nchannels);
           } else {
-            PRINT("%8s  %8s  %10s", "N/A", "N/A", "N/A");
+            PRINT("%8s  %10s  %10s", "N/A", "N/A", "N/A");
           }
         } else {
-          PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
+          PRINT("%8s  %10s  %10s","N/A", "N/A", "N/A");
         }
       }
       writeBenchmarkLineTerminator(iters, "");

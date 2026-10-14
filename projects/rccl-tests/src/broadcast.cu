@@ -1352,14 +1352,14 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Tier report for -D 3. Mirrors the BroadcastRunColl dispatch exactly, reusing the
-// same env-resolved thresholds (the static locals are already initialized by the
-// timed RunColl path) so the reported tier is the one that actually launches:
+// Tier report for -D 3. Re-resolves the SAME env thresholds BroadcastRunColl uses
+// (the shared statics there are function-local to RunColl, so they are re-derived
+// here; both read the same env/defaults, so the report tracks the dispatch) and
+// mirrors its precedence:
 //   large tier first -- RING (direct LSA stores) / SAG (gin.put scatter+allgather),
-//   else the hybrid kernel's own LL / LSA-direct / FLAT-GIN choice.
-testResult_t BroadcastGetDeviceImplInfo(int deviceImpl, size_t count, ncclDataType_t type,
-    int nRanks, int lsaSize, char* algoOut, char* protoOut) {
-  snprintf(algoOut, 16, "D%d-GIN", deviceImpl);
+//   else the hybrid kernel's own LL / LSA-direct / GIN-DIRECT choice.
+testResult_t BroadcastGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int nRanks, int lsaSize, char* protoOut) {
   static const size_t bcastThr = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
   static const size_t bcastSagMin = []() {
     size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
@@ -1386,9 +1386,8 @@ testResult_t BroadcastGetDeviceImplInfo(int deviceImpl, size_t count, ncclDataTy
   return testSuccess;
 }
 #else
-testResult_t BroadcastGetDeviceImplInfo(int deviceImpl, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
-  snprintf(algoOut, 16, "D%d-GIN", deviceImpl);
-  snprintf(protoOut, 16, "GIN");
+testResult_t BroadcastGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* protoOut) {
+  snprintf(protoOut, 16, "%s", "GIN");
   return testSuccess;
 }
 #endif

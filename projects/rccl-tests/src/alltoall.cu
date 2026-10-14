@@ -592,13 +592,20 @@ testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType
   return testSuccess;
 }
 
-// Tier report for -D runs. AllToAll has no size-based crossover: -D 3 is pure GIN
-// (every peer via gin.put), -D 4 is the fixed hybrid (CTA 0 GIN, CTAs 1..N LSA).
-// Neither depends on count/thresholds, so the report is a constant per deviceImpl.
+// Tier report for -D runs. AllToAll has no size-based crossover; the data path is
+// fixed per deviceImpl (see AlltoAllRunColl):
+//   -D 1/2 -> NvlAlltoAllKernel[Optimized]: intra-node LSA stores, no GIN.
+//   -D 3   -> GinAlltoAllKernel:            every peer via gin.put (GIN-DIRECT).
+//   -D 4   -> HybridAlltoAllKernel:         CTA 0 GIN, CTAs 1..N LSA.
 testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
-    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
-  snprintf(algoOut, 16, "D%d-GIN", deviceImpl);
-  snprintf(protoOut, 16, "%s", (deviceImpl == 4) ? "GIN+LSA" : "GIN-DIRECT");
+    int /*nRanks*/, int /*lsaSize*/, char* protoOut) {
+  const char* proto;
+  switch (deviceImpl) {
+    case 1: case 2: proto = "LSA";        break;
+    case 4:         proto = "GIN+LSA";    break;
+    default:        proto = "GIN-DIRECT"; break;  // -D 3
+  }
+  snprintf(protoOut, 16, "%s", proto);
   return testSuccess;
 }
 
