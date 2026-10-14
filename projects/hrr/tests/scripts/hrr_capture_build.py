@@ -36,6 +36,8 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
+import hrr_test_config
+
 Runner = Callable[[Sequence[str]], None]
 
 BASE_REPO = "ROCm/rocm-systems"
@@ -76,6 +78,9 @@ ROCR_INSTALLED = (
     "lib/pkgconfig/libhsakmt.pc",
     "lib/libhsa-runtime64.so*",
 )
+
+# Its targets.arch is the architecture list the GPU suite is built for.
+INTEGRATION_CONFIG = Path("projects/hrr/tests/config/integration.yaml")
 
 # What the GPU suite runs. The host unit suite is built and run by hrr-ci.yml.
 HRR_TARGETS = ("hrr-playback", "hrr-integration-tests", "hrr-test-dispatch-tool")
@@ -347,12 +352,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--build", type=Path, default=Path("build"))
     parser.add_argument("--runtime-lib", type=Path, default=Path("build/runtime-lib"))
     parser.add_argument("--base-json", type=Path, default=Path("build/base.json"))
-    parser.add_argument("--archs", default=os.environ.get("HRR_ARCHS", ""))
+    parser.add_argument(
+        "--archs", default="",
+        help=f"Semicolon-separated GPU targets; default targets.arch of {INTEGRATION_CONFIG}",
+    )
     args = parser.parse_args(argv)
     for name in ("therock", "src", "dist", "build", "runtime_lib", "base_json"):
         setattr(args, name, getattr(args, name).resolve())
     if args.command in ("build", "verify") and not args.archs:
-        parser.error("--archs (or HRR_ARCHS) is required")
+        config = hrr_test_config.load(args.src / INTEGRATION_CONFIG)
+        args.archs = ";".join(config["targets"]["arch"])
     return args
 
 

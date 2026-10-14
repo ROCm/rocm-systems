@@ -25,11 +25,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Every architecture the integration binary is built for. Must match
-  # targets.arch in projects/hrr/tests/config/*.yaml (hrr_test_config.py lint).
-  HRR_ARCHS: "gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1153;gfx1200;gfx1201;gfx1250"
-
 jobs:
   build:
     name: Build capture-enabled HIP and HRR

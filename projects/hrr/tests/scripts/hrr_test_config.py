@@ -15,7 +15,7 @@ a list under a key is ORed; a missing key matches anything. Glob patterns
 ``kind: unsupported`` is permanent and needs only a reason.
 
 Usage:
-    hrr_test_config.py lint CONFIG [CONFIG ...] [--workflow hrr-ci.yml]
+    hrr_test_config.py lint CONFIG [CONFIG ...]
     hrr_test_config.py check --binary EXE --config CONFIG [--update]
 """
 
@@ -208,12 +208,8 @@ def _check_rule(errors: list[str], where: str, rule, targets: dict) -> None:
         _error(errors, where, "'issue' must be an https:// URL")
 
 
-def lint(config: dict, cases: list[dict] | None = None,
-         workflow_archs: list[str] | None = None) -> list[str]:
-    """Schema and vocabulary errors. ``cases`` enables the workload-rule check.
-
-    ``workflow_archs``, when given, must be the same set as ``targets.arch``.
-    """
+def lint(config: dict, cases: list[dict] | None = None) -> list[str]:
+    """Schema and vocabulary errors. ``cases`` enables the workload-rule check."""
     errors: list[str] = []
     unknown = set(config) - TOP_KEYS
     if unknown:
@@ -234,14 +230,6 @@ def lint(config: dict, cases: list[dict] | None = None,
                     isinstance(item, str) and item for item in values):
                 _error(errors, "targets", f"'{key}' must be a non-empty list of strings")
                 targets[key] = []
-    if workflow_archs is not None and targets.get("arch") is not None:
-        got = set(targets["arch"])
-        want = set(workflow_archs)
-        if got != want:
-            missing = ", ".join(sorted(want - got)) or "-"
-            extra = ", ".join(sorted(got - want)) or "-"
-            _error(errors, "targets.arch",
-                   f"does not match HRR_ARCHS (missing: {missing}; extra: {extra})")
     suite_skip = config.get("skip", [])
     if not isinstance(suite_skip, list):
         _error(errors, "skip", "must be a list")
@@ -382,18 +370,6 @@ def apply_listing(config: dict, names: list[str]) -> tuple[list[str], list[str]]
     return added, removed
 
 
-def workflow_archs(path: str | Path) -> list[str]:
-    """The ``HRR_ARCHS`` list from the HRR CI workflow."""
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"cannot read {path}: {exc}") from exc
-    match = re.search(r'^ {2}HRR_ARCHS:\s*"([^"]+)"\s*$', text, re.MULTILINE)
-    if not match:
-        raise ConfigError(f"no HRR_ARCHS list in {path}")
-    return [arch for arch in match.group(1).split(";") if arch]
-
-
 def detect_os() -> str:
     return "windows" if os.name == "nt" else "linux"
 
@@ -447,7 +423,6 @@ def _print_errors(path: str, errors: list[str]) -> None:
 
 
 def _cmd_lint(args: argparse.Namespace) -> int:
-    archs = workflow_archs(args.workflow) if args.workflow else None
     failed = False
     for path in args.configs:
         try:
@@ -456,7 +431,7 @@ def _cmd_lint(args: argparse.Namespace) -> int:
             print(f"FAIL: {exc}", file=sys.stderr)
             failed = True
             continue
-        errors = lint(config, workflow_archs=archs)
+        errors = lint(config)
         if errors:
             _print_errors(path, errors)
             failed = True
@@ -514,7 +489,6 @@ def main(argv: list[str] | None = None) -> int:
 
     lint_cmd = commands.add_parser("lint", help="validate config files")
     lint_cmd.add_argument("configs", nargs="+")
-    lint_cmd.add_argument("--workflow", help="HRR workflow whose HRR_ARCHS must match targets.arch")
     lint_cmd.set_defaults(func=_cmd_lint)
 
     check_cmd = commands.add_parser("check", help="compare a binary's cases to a config")

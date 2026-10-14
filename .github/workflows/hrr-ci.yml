@@ -151,7 +151,6 @@ jobs:
           # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
           # which gen_hrr_api_args.py reads on import.
           sparse-checkout: |
-            .github/workflows/hrr-gpu.yml
             projects/hrr
             projects/clr/hipamd/src/hrr
 
@@ -167,7 +166,6 @@ jobs:
           python projects/hrr/tests/scripts/hrr_test_config.py lint
           projects/hrr/tests/config/unit.yaml
           projects/hrr/tests/config/integration.yaml
-          --workflow .github/workflows/hrr-gpu.yml
 
       - name: Run tests
         run: python -m pytest projects/hrr/tests/scripts

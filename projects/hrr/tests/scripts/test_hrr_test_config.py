@@ -155,11 +155,6 @@ class LintTest(unittest.TestCase):
         self.assertTrue(any("workload" in error for error in errors))
         self.assertEqual(cfg.lint(suite({"Unit_HRR_Foo_Direct": {}}), cases=listed), [])
 
-    def test_workflow_archs_must_match(self):
-        errors = cfg.lint(suite({"Runs": {}}), workflow_archs=["gfx90a"])
-        self.assertTrue(any("HRR_ARCHS" in error for error in errors))
-        self.assertEqual(cfg.lint(suite({"Runs": {}}), workflow_archs=list(ARCHS)), [])
-
 
 class ListingTest(unittest.TestCase):
     def test_json_listing_keeps_tags_and_passes_the_selector(self):
@@ -257,15 +252,6 @@ class DetectTest(unittest.TestCase):
 
     def test_nothing_visible_is_an_empty_list(self):
         self.assertEqual(cfg.detect_archs(lambda argv: None), [])
-
-
-class WorkflowTest(unittest.TestCase):
-    def test_reads_hrr_archs(self):
-        tmp = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
-        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
-        tmp.write('env:\n  HRR_ARCHS: "gfx90a;gfx942"\n')
-        tmp.close()
-        self.assertEqual(cfg.workflow_archs(tmp.name), ["gfx90a", "gfx942"])
 
 
 class LintCommandTest(unittest.TestCase):

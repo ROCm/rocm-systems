@@ -217,6 +217,19 @@ class BuildTest(unittest.TestCase):
             )
 
 
+class ArchsTest(unittest.TestCase):
+    SRC = Path(__file__).resolve().parents[4]
+
+    def test_default_is_the_integration_config(self):
+        config = cb.hrr_test_config.load(self.SRC / cb.INTEGRATION_CONFIG)
+        args = cb.parse_args(["build", "--src", str(self.SRC)])
+        self.assertEqual(args.archs, ";".join(config["targets"]["arch"]))
+
+    def test_override(self):
+        args = cb.parse_args(["verify", "--src", str(self.SRC), "--archs", "gfx942;gfx1152"])
+        self.assertEqual(args.archs, "gfx942;gfx1152")
+
+
 class ExecutableBitsTest(unittest.TestCase):
     def test_restores_bits(self):
         with tempfile.TemporaryDirectory() as tmp:

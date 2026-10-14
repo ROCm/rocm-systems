@@ -156,7 +156,8 @@ pools, disable families or narrow their triggers here.
 
 ## Configuring where a case runs
 
-The build is one fat binary for every architecture in `HRR_ARCHS`. Nothing about a
+The build is one fat binary for every architecture in `targets.arch` of
+`config/integration.yaml`. Nothing about a
 GPU is decided at build time. CI decides at run time, from
 [`config/integration.yaml`](config/integration.yaml) (and
 [`config/unit.yaml`](config/unit.yaml) for the CPU suite).
@@ -190,8 +191,9 @@ skip:
 ```
 
 Direct workloads (`[hrr-direct]`, `[direct]`) are spawned by a driver and must not
-carry rules. `targets.arch` is the same list as `HRR_ARCHS` in
-`.github/workflows/hrr-ci.yml`; `hrr_test_config.py lint --workflow` checks that.
+carry rules. The GPU build compiles the integration binary for exactly the
+`targets.arch` of `config/integration.yaml`, so adding an architecture there is
+what builds it.
 
 CI compares each binary's registered cases against its YAML, in both directions,
 because a case behind an `#if` or a missing define disappears without any failure.
