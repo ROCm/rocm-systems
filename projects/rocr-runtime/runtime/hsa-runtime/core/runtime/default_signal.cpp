@@ -100,15 +100,20 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
   // BusyWaitSignal) can go unsatisfied for tens of seconds under host-memory
   // pressure (ROCm/TheRock#7832): the core spins at 100% the entire time while
   // the GPU is idle and the process barely responds.  clr's WaitForSignal()
-  // re-arms this every 4s with HSA_WAIT_STATE_ACTIVE, so the active hint cannot
-  // be taken here to mean "spin without bound".
+  // re-arms this in a loop with HSA_WAIT_STATE_ACTIVE, so the active hint
+  // cannot be taken here to mean "spin without bound".
   //
-  // Use the same polling-fallback shape as AsyncEventsLoop's no-interrupt path
-  // (core/util/poll_backoff.h): spin hot for a short window so a wait that
-  // completes quickly keeps its latency, then nap between scans, doubling
-  // kPollNapFloorUs -> kPollNapCeilingUs, so a long wait costs almost no CPU.
-  // The signal value is still checked every iteration.  An explicit
-  // HSA_WAIT_STATE_ACTIVE hint widens the hot-spin window but still backs off.
+  // With HSA_ENABLE_YIELDING_POLL=1, use the same polling-fallback shape as
+  // AsyncEventsLoop's no-interrupt path (core/util/poll_backoff.h): spin hot for
+  // a short window so a wait that completes quickly keeps its latency, then nap
+  // between scans, doubling kPollNapFloorUs -> kPollNapCeilingUs, so a long wait
+  // costs almost no CPU.  The signal value is still checked every iteration.
+  // An explicit HSA_WAIT_STATE_ACTIVE hint widens the hot-spin window but still
+  // backs off.  Opt-in because earlier sleep/yield attempts here regressed
+  // latency-sensitive workloads; by default the loop spins as before.  The
+  // nap is only reached if the caller's wait outlasts the hot window: clr's
+  // kTimeout4Secs re-arms every 4 ms instead of the intended 4 s until
+  // ROCm/rocm-systems#13513.
   const timer::fast_clock::duration kHotPoll =
       std::chrono::microseconds(HotPollUs(wait_hint == HSA_WAIT_STATE_ACTIVE));
   unsigned int poll_nap_us = kPollNapFloorUs;
@@ -129,7 +134,7 @@ hsa_signal_value_t BusyWaitSignal::WaitRelaxed(hsa_signal_condition_t condition,
 
     timer::CheckAbortTimeout(start_time, signal_abort_timeout);
 
-    if (now - start_time < kHotPoll) {
+    if (!g_use_yielding_poll || now - start_time < kHotPoll) {
       if (g_use_mwaitx) {
         // Use timer-enabled mwaitx for busy waiting
         timer::DoMwaitx(const_cast<int64_t*>(&signal_.value), value, 60000, true);

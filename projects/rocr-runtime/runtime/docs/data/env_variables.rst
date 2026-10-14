@@ -81,6 +81,12 @@
       - | 0: Disable
         | 1: Enable
 
+    * - | ``HSA_ENABLE_YIELDING_POLL``
+        | When enabled, waits on signals that have no interrupt event (for example the completion signal of a host-device copy) spin for a short window and then sleep between polls with an increasing interval, instead of spinning for the whole wait. Lowers CPU use for long waits; a wait that completes within the window keeps its latency.
+      - ``0``
+      - | 0: Disable
+        | 1: Enable
+
     * - | ``HSA_OVERRIDE_CPU_AFFINITY_DEBUG``
         | Controls whether ROCm helper threads inherit the parent process's CPU affinity mask.
       - ``1``
