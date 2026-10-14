@@ -21,7 +21,9 @@ ncclResult_t ncclSocketInit(ncclSocket*, ncclSocketAddress const*, unsigned long
                             ncclSocketType, unsigned int volatile*, int, int) { return ncclSuccess; }
 ncclResult_t ncclSocketListen(ncclSocket*) { return ncclSuccess; }
 ncclResult_t ncclSocketConnect(ncclSocket*) { return ncclSuccess; }
-ncclResult_t ncclSocketAccept(ncclSocket*, ncclSocket*, bool) { return ncclSuccess; }
+// Must mirror socket.h exactly, including the deadlineNs parameter: default arguments are not part of a
+// function's type, so a three-parameter definition here leaves bootstrap.cc's calls unresolved at link time.
+ncclResult_t ncclSocketAccept(ncclSocket*, ncclSocket*, bool, int64_t) { return ncclSuccess; }
 ncclResult_t ncclSocketSend(ncclSocket*, void*, int) { return ncclSuccess; }
 ncclResult_t ncclSocketRecv(ncclSocket*, void*, int) { return ncclSuccess; }
 ncclResult_t ncclSocketSendRecv(ncclSocket*, void*, int, ncclSocket*, void*, int) { return ncclSuccess; }
