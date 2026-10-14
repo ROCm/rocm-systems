@@ -372,7 +372,8 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
 }
 
 // OFF SWITCH: with NCCL_MULTI_SEGMENT_REGISTER=0 neither side advertises the CTS side table,
-// so a multi-segment registration is declined and the caller falls back to staging.
+// so the receiver declines a multi-segment registration and the caller falls back to staging.
+// The sender only splits locally onto the receiver's single rkey, so it still registers.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                             false, kMinGpusPerNode, kNoNodeLimit);
@@ -392,9 +393,15 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     void* mh = nullptr;
     ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
-    EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 still registered a multi-segment buffer";
-    EXPECT_EQ(mh, nullptr);
-    if (mh != nullptr) (void)net_->deregMr(comm, mh);
+    if (rank == 0) {
+        EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 receiver still registered a multi-segment buffer";
+        EXPECT_EQ(mh, nullptr);
+        if (mh != nullptr) (void)net_->deregMr(comm, mh);
+    } else {
+        EXPECT_EQ(r, ncclSuccess) << "sender multi-segment registration must not depend on the peer cap";
+        EXPECT_NE(mh, nullptr);
+        if (mh != nullptr) EXPECT_EQ(ncclSuccess, net_->deregMr(comm, mh));
+    }
 #else
     (void)r;
     GTEST_SKIP() << "dma-buf export API unavailable at build time";
