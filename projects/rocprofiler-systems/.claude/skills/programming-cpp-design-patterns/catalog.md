@@ -6,7 +6,7 @@ Search this file, then open **only** the matching example and implement the sect
 rg -n -i "symptom or pattern" catalog.md
 ```
 
-Ids: `factory-method` `abstract-factory` `builder` `prototype` `singleton` `adapter` `bridge` `composite` `decorator` `facade` `flyweight` `proxy` `chain` `command` `iterator` `mediator` `memento` `observer` `state` `strategy` `template-method` `visitor` `type-erasure`
+Ids: `factory-method` `abstract-factory` `builder` `prototype` `singleton` `adapter` `bridge` `composite` `decorator` `facade` `flyweight` `proxy` `chain` `command` `iterator` `mediator` `memento` `observer` `state` `strategy` `template-method` `visitor`
 
 | id | search | symptom | first choice | pattern only if | example |
 | --- | --- | --- | --- | --- | --- |
@@ -32,4 +32,3 @@ Ids: `factory-method` `abstract-factory` `builder` `prototype` `singleton` `adap
 | strategy | strategy, algorithm, policy, interchangeable | One of several algorithms is selected | Closed set: `switch` or a function argument. Compile-time swap: `programming-cpp-policy-based-di` | The choice is runtime and carries state the caller should not see | [example](catalog/strategy.md) |
 | template-method | template method, skeleton, steps, hook | The steps are fixed and some steps vary | A function that takes the varying steps as callables | The skeleton must be inherited and steps overridden | [example](catalog/template-method.md) |
 | visitor | visitor, double dispatch, operations, closed set | An operation runs over a set of types | Closed set: `std::visit` | The element hierarchy is already open and new operations arrive more often than new elements | [example](catalog/visitor.md) |
-| type-erasure | type erasure, any, duck typing, unrelated, no base, variant, std::function | Unrelated types share an operation and have no base | Closed set: `std::variant`. One callback: `std::function` | The set is open. Own the value, or store a non-owning view when the caller keeps the object | [example](catalog/type-erasure.md) |
