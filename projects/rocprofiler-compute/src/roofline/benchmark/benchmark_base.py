@@ -120,6 +120,7 @@ class Bench_base(ABC):
         self.matrix_bf16_src: str
         self.matrix_f32_src: str
         self.matrix_f64_src: str
+        self.matrix_i4_src: str
         self.matrix_i8_src: str
         self.set_kernel_source()
         self.set_cache_kernel_selector()
@@ -710,6 +711,8 @@ class Bench_base(ABC):
             src = self.matrix_bf16_src
         elif type == "F64":
             src = self.matrix_f64_src
+        elif type == "I4":
+            src = self.matrix_i4_src
         elif type == "I8":
             src = self.matrix_i8_src
         else:
@@ -763,6 +766,9 @@ class Bench_base(ABC):
 
     def matrix_f8_bench(self, device: int) -> PerfMetrics:
         return self.matrix_bench(device, "F8", "FLOP", "GFLOPS")
+
+    def matrix_i4_bench(self, device: int) -> PerfMetrics:
+        return self.matrix_bench(device, "I4", "IOP", "GOPS")
 
     def matrix_i8_bench(self, device: int) -> PerfMetrics:
         return self.matrix_bench(device, "I8", "IOP", "GOPS")

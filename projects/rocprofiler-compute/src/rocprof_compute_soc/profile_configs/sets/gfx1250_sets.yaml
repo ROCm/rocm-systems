@@ -18,6 +18,7 @@ sets:
   - 2.1.13: WMMA FLOPs (FP6)
   - 2.1.14: WMMA FLOPs (FP4)
   - 2.1.15: WMMA IOPs (Int8)
+  - 2.1.16: WMMA IOPs (Int4)
 - title: Memory Throughput
   set_option: mem_thruput
   description: Placeholder

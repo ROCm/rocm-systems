@@ -34,6 +34,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-BF16",
             "WMMA-F32",
             "WMMA-F64",
+            "WMMA-I4",
             "WMMA-I8",
         ]
 
@@ -63,6 +64,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-BF16": super().matrix_bf16_bench,
             "WMMA-F32": super().matrix_f32_bench,
             "WMMA-F64": super().matrix_f64_bench,
+            "WMMA-I4": super().matrix_i4_bench,
             "WMMA-I8": super().matrix_i8_bench,
         }
 
@@ -89,6 +91,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
             "WMMA-BF16": "WMMABF16Flops",
             "WMMA-F32": "WMMAF32Flops",
             "WMMA-F64": "WMMAF64Flops",
+            "WMMA-I4": "WMMAI4Ops",
             "WMMA-I8": "WMMAI8Ops",
         }
 
@@ -155,6 +158,7 @@ class Bench_gfx11(benchmark_base.Bench_base):
         self.matrix_f32_src = """"""
         self.matrix_f16_src = """"""
         self.matrix_bf16_src = """"""
+        self.matrix_i4_src = """"""
         self.matrix_i8_src = """"""
         self.matrix_f8_src = """"""
         self.matrix_f8f6f4_src = """"""

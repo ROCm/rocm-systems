@@ -914,6 +914,7 @@ Examples:
             "BF16",
             "FP32",
             "FP64",
+            "I4",
             "I8",
             "I32",
             "I64",
@@ -932,6 +933,7 @@ Examples:
             "\t\t   BF16\n"
             "\t\t   FP32\n"
             "\t\t   FP64\n"
+            "\t\t   I4\n"
             "\t\t   I8\n"
             "\t\t   I32\n"
             "\t\t   I64\n"

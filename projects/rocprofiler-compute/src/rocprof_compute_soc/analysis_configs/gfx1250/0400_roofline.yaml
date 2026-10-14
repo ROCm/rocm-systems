@@ -93,10 +93,10 @@ Panel Config:
           value: 4096 * SUM(SQ_VALU_WMMA_FLOP_I8_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GIOP/s
           peak: $WMMAI8Ops_empirical_peak
-        # WMMA IOPs (Int4):
-        #   value: SUM((((SQ_VALU_WMMA_FLOP_I4_sum * 8192)) / ((End_Timestamp - Start_Timestamp) / 1e9))) / SUM(1e9)
-        #   unit: GIOP/s
-        #   peak: $WMMAI4Ops_empirical_peak
+        WMMA IOPs (Int4):
+          value: 8192 * SUM(SQ_VALU_WMMA_FLOP_I4_sum) / SUM(End_Timestamp - Start_Timestamp)
+          unit: GIOP/s
+          peak: $WMMAI4Ops_empirical_peak
 
         # =====================================================================
         # Memory Bandwidth - Sections 3.4, 3.7, 3.8, 3.9
@@ -194,8 +194,8 @@ Panel Config:
     WMMA IOPs (Int8): >-
       Achieved Int8 WMMA throughput.
 
-    # WMMA IOPs (Int4): >-
-    #   Achieved Int4 WMMA throughput.
+    WMMA IOPs (Int4): >-
+      Achieved Int4 WMMA throughput.
 
     HBM Bandwidth: >-
       Total HBM bandwidth. The peak empirically measured bandwidth reflects

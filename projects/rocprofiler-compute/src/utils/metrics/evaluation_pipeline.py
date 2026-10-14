@@ -63,6 +63,7 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "WMMABF16Flops",
             "WMMAMXF8Flops",
             "WMMAF8Flops",
+            "WMMAI4Ops",
             "WMMAI8Ops",
             "HBMBw",
             "MALLBw",

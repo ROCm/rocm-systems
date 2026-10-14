@@ -35,6 +35,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "BF16": "wmma_bf16",
             "F32": "wmma_f32",
             "F64": "wmma_f64",
+            "I4": "wmma_i4",
             "I8": "wmma_i8",
         }
 
@@ -60,6 +61,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-BF16": super().matrix_bf16_bench,
             "WMMA-F32": super().matrix_f32_bench,
             "WMMA-F64": super().matrix_f64_bench,
+            "WMMA-I4": super().matrix_i4_bench,
             "WMMA-I8": super().matrix_i8_bench,
         }
 
@@ -85,6 +87,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-BF16": "WMMABF16Flops",
             "WMMA-F32": "WMMAF32Flops",
             "WMMA-F64": "WMMAF64Flops",
+            "WMMA-I4": "WMMAI4Ops",
             "WMMA-I8": "WMMAI8Ops",
         }
 
@@ -224,6 +227,41 @@ class Bench_gfx12(benchmark_base.Bench_base):
                 {
                     result = __builtin_amdgcn_wmma_bf16_16x16x32_bf16 (A_mod, a, A_mod,\
                           a, result_mod, result, A_reuse, A_reuse);
+                }
+
+                if (result[0] != 2*result[0])
+                {
+                    dummy[0] = result[0];
+                }
+            }
+            """
+        )
+
+        self.matrix_i4_src = (
+            self.vector_types_src
+            + """
+            extern "C" __global__ void wmma_i4(int iter, float *dummy)
+            {
+                // Input: 2 i32 registers (8 x i4 packed)
+                vec2<int> a;
+                a[0] = a[1] = threadIdx.x;
+
+                // Input: negate 'bool' (const int) per matrix
+                // 0 -- none, 1 -- neg
+                const int A_mod = 0;
+
+                // Input: clamp 'bool' (const int)
+                // 0 -- wrap on overflow, 1 -- saturate
+                const int clamp = 0;
+
+                // Output: 8 i32 registers
+                vec8<int> result = {0};
+
+                // gfx1250: V_WMMA_I32_16X16X32_IU4_w32 ops: 16x16x32x2 = 16384
+                for(int i = 0; i < iter; ++i)
+                {
+                    result = __builtin_amdgcn_wmma_i32_16x16x32_iu4_w32_gfx12 (\
+                          A_mod, a, A_mod, a, result, clamp);
                 }
 
                 if (result[0] != 2*result[0])

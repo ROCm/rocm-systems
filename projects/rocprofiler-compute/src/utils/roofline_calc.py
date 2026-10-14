@@ -133,6 +133,7 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
         "BF16": OpsSupport.MATRIX,
         "FP32": OpsSupport.VALU | OpsSupport.MATRIX,
         "FP64": OpsSupport.VALU,
+        "I4": OpsSupport.MATRIX,
         "I8": OpsSupport.VALU | OpsSupport.MATRIX,
         "I32": OpsSupport.VALU,
         "I64": OpsSupport.VALU,

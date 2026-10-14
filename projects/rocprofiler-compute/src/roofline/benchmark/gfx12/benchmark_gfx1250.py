@@ -30,6 +30,7 @@ class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
             "F32": 2048,
             "F64": 0,  # Unsupported
             "BF16": 16384,
+            "I4": 16384,
             "I8": 32768,
         }
 
