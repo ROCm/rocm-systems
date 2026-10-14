@@ -87,16 +87,6 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
-void ncclLoadParam(char const* /*env*/,
-                   int64_t     /*deftVal*/,
-                   int64_t     /*uninitialized*/,
-                   int64_t*    /*cache*/)
-{
-    // No-op: leaves cache untouched so NCCL_PARAM callers in non-shimmed
-    // TUs see the default. The NCCL_PARAM bodies that p2p-test.cc
-    // redirects through g_loadParam bypass this entirely.
-}
-
 // Default returns deftVal verbatim -- preserves the pre-hook contract that
 // every param sits at its compile-time default.
 static int64_t DefaultLoadParam(const char* /*env*/, int64_t deftVal)

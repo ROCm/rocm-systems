@@ -158,13 +158,9 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Param loader.
+// Param loader: see fakes/env_fakes.cc, which owns ncclLoadParam because it owns
+// the ncclGetEnv the real loader reads through.
 // ---------------------------------------------------------------------------
-int64_t ncclLoadParam(char const*, int64_t deftVal, int64_t, int64_t* cache, int8_t* noCache) {
-  if (cache) *cache = deftVal;
-  if (noCache) *noCache = 0;
-  return deftVal;
-}
 
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
