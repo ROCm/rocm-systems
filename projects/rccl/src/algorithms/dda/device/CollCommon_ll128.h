@@ -167,9 +167,12 @@ __device__ __forceinline__ void ddaLL128LoadAtomic16B(const uint64_t* src, uint6
 #endif
 }
 
-// load of slice's payload from `src` into registers
+// Issue the loads of a slice's payload from `src` into registers. The flag-lane
+// shuffle is left to ddaLL128LoadRegsFinish: the loads sit behind per-lane
+// branches, so a shuffle placed between two slices' loads would wait on the
+// first slice before the second is issued (prims_ll128 loadRegsBegin/Finish).
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRegs(
+__device__ __forceinline__ void ddaLL128LoadRegsBegin(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
@@ -181,9 +184,20 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
                         regs[2 * g], regs[2 * g + 1]);
     }
   }
+}
+
+__device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
     if (flag) regs[2 * g] = regs[2 * g - 1];
+}
+
+// load of slice's payload from `src` into registers
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRegs(
+    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+  ddaLL128LoadRegsBegin<T>(regs, src, eltN, wid, flag);
+  ddaLL128LoadRegsFinish(regs, flag);
 }
 
 // Store one slice to the wire with the flag word embedded on the flag lane
@@ -210,6 +224,44 @@ __device__ __forceinline__ void ddaLL128PollWire(
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+}
+
+// Batched ddaLL128PollWire over the first n (<= N) slices of `wire`: every
+// slice's loads are issued before any flag is checked, so their reads are in
+// flight together.
+template <int N>
+__device__ __forceinline__ void ddaLL128PollWireN(const uint64_t* const (&wire)[N], int n,
+                                                  uint64_t (&vr)[N][kDdaLL128WordsPerThread], uint64_t flag,
+                                                  int wid) {
+  const bool flagLane = ddaLL128IsFlagLane(wid);
+  bool needReload;
+  do {
+    needReload = false;
+#pragma unroll
+    for (int k = 0; k < N; ++k) {
+      if (k < n) {
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+          ddaLL128LoadAtomic16B(wire[k] + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
+      }
+    }
+#pragma unroll
+    for (int k = 0; k < N; ++k) {
+      if (k < n) {
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+          needReload |= flagLane && (vr[k][u + 1] != flag);
+      }
+    }
+  } while (__any(needReload));
+#pragma unroll
+  for (int k = 0; k < N; ++k) {
+    if (k < n) {
+#pragma unroll
+      for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+        ddaLL128LoadAtomic16B(wire[k] + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
+    }
+  }
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`

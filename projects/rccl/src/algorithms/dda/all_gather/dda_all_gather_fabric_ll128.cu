@@ -21,10 +21,28 @@
 #include <cstdint>
 #include <utility>
 
-// Tuned block size, and the fallback when the env override is out of range.
-constexpr unsigned kDdaLL128AGDefaultThreads = 512;
+// Tuned block sizes by total message size: 512 threads up to
+// kDdaLL128AGWideAboveBytes, 1024 above it. A valid RCCL_DDA_LL128_AG_THREADS
+// overrides both.
+constexpr unsigned kDdaLL128AGThreads = 512;
+constexpr unsigned kDdaLL128AGWideThreads = 1024;
+constexpr size_t kDdaLL128AGWideAboveBytes = (size_t)4 * 1024 * 1024;
+// Slices each warp keeps in flight; the kernel is only instantiated for 1, 2 and 4.
+constexpr int kDdaLL128AGDefaultUnroll = 4;
+// Grid budget for this tier, applied under RCCL_DDA_FABRIC_MAXBLOCKS to messages
+// above the size below; 0 or less leaves only the fabric-wide cap.
+constexpr int kDdaLL128AGDefaultMaxBlocks = 64;
+// Total message size above which the budget applies. Smaller messages leave each
+// warp a slice or two, and the extra slice the budget adds costs more time than
+// the CUs it saves; across hosts that holds up to a larger size.
+constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)4 * 1024 * 1024;
+constexpr size_t kDdaLL128AGMaxBlocksAboveBytesMultiHost = (size_t)8 * 1024 * 1024;
 
-RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
+RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
+RCCL_PARAM(DdaLL128AGUnroll, "DDA_LL128_AG_UNROLL", kDdaLL128AGDefaultUnroll);
+RCCL_PARAM(DdaLL128AGMaxBlocks, "DDA_LL128_AG_MAXBLOCKS", kDdaLL128AGDefaultMaxBlocks);
+// -1 picks the size above by whether the ranks span hosts.
+RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES", -1);
 
 namespace {
 
@@ -53,6 +71,32 @@ unsigned ddaLL128AGThreads(unsigned blockSize) {
   return blockSize;
 }
 
+int ddaLL128AGUnroll() {
+  const int64_t UserInput = rcclParamDdaLL128AGUnroll();
+  if (UserInput == 1 || UserInput == 2 || UserInput == 4) {
+    return (int)UserInput;
+  }
+  return kDdaLL128AGDefaultUnroll;
+}
+
+// MNNVL folds a multi-host gfx1250 clique into one node (comm->nNodes == 1), so
+// hosts are told apart by host hash.
+bool ddaLL128AGSpansHosts(const ncclComm* comm) {
+  const uint64_t selfHost = comm->peerInfo[comm->rank].hostHash;
+  for (int r = 0; r < comm->nRanks; ++r) {
+    if (comm->peerInfo[r].hostHash != selfHost) return true;
+  }
+  return false;
+}
+
+size_t ddaLL128AGMaxBlocksAboveBytes(const ncclComm* comm) {
+  const int64_t UserInput = rcclParamDdaLL128AGMaxBlocksAboveBytes();
+  if (UserInput >= 0) {
+    return (size_t)UserInput;
+  }
+  return ddaLL128AGSpansHosts(comm) ? kDdaLL128AGMaxBlocksAboveBytesMultiHost : kDdaLL128AGMaxBlocksAboveBytes;
+}
+
 // Blocks in one peer column: a warp per slice, capped by the column's share of
 // the grid budget.
 unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
@@ -65,17 +109,36 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
 }
 
 // Single source of the launch geometry: grid.x = one column per remote peer,
-// grid.y = the per-peer slice split.
+// grid.y = the per-peer slice split, capped by the tier's grid budget.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
-  const unsigned threads = ddaLL128AGThreads(kDdaLL128AGDefaultThreads);
+  const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
+  const unsigned threads =
+    ddaLL128AGThreads(totalBytes > kDdaLL128AGWideAboveBytes ? kDdaLL128AGWideThreads : kDdaLL128AGThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
+  const int64_t agMaxBlocks = rcclParamDdaLL128AGMaxBlocks();
+  if (totalBytes > ddaLL128AGMaxBlocksAboveBytes(comm) && agMaxBlocks > 0 && agMaxBlocks < nBlocksMax) {
+    nBlocksMax = (int)agMaxBlocks;
+  }
   if (nBlocksMax < 1) nBlocksMax = 1;
   if (nBlocksMax < nPeers) nBlocksMax = nPeers;
   const unsigned blocksPerPeer =
     ddaLL128AGBlocksPerPeer(ddaLL128Slices(perRankBytes), warps, nPeers, (size_t)nBlocksMax);
   return std::make_pair(dim3((unsigned)nPeers, blocksPerPeer), dim3(threads));
+}
+
+template <typename T, int UNROLL>
+static void ddaAllGatherFabricLL128Launch(ncclComm* comm, dim3 grid, dim3 block, cudaStream_t stream,
+                                          hipEvent_t stopEvent, T* recvbuff, const T* sendbuff, size_t perRankBytes,
+                                          size_t slices, size_t bankSize) {
+  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
+  // Always the runtime rank count: nothing in the kernel loops over ranks, and the
+  // 4/8-rank variants need more registers than a 1024-thread block allows, so they
+  // spill at UNROLL 4.
+  hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0, UNROLL>), grid, block, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, recvbuff, sendbuff, perRankBytes,
+                        comm->rank, comm->nRanks, comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize);
 }
 
 template <typename T>
@@ -91,35 +154,26 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   auto gridBlock = ddaAllGatherFabricLL128Geom(comm, perRankBytes);
   const dim3 grid = gridBlock.first;
   const dim3 block = gridBlock.second;
-  const unsigned blocksPerPeer = grid.y;
-
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
-  uint32_t* epochDev = comm->ddaLLEpochDev;
-  const int epochLen = comm->ddaLLEpochLen;
+  const int unroll = ddaLL128AGUnroll();
 
   INFO(NCCL_COLL,
        "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
+       "(warp-per-slice, bpp=%u, unroll=%d, slotWords=%zu)",
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, grid.y, unroll,
        ddaLL128AgSlotWords(bankSize, nRanks));
 
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
-  switch (nRanks) {
+  T* dst = static_cast<T*>(recvbuff);
+  const T* src = static_cast<const T*>(sendbuff);
+  switch (unroll) {
   case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+    ddaAllGatherFabricLL128Launch<T, 4>(comm, grid, block, stream, stopEvent, dst, src, perRankBytes, slices, bankSize);
     break;
-  case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+  case 2:
+    ddaAllGatherFabricLL128Launch<T, 2>(comm, grid, block, stream, stopEvent, dst, src, perRankBytes, slices, bankSize);
     break;
   default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+    ddaAllGatherFabricLL128Launch<T, 1>(comm, grid, block, stream, stopEvent, dst, src, perRankBytes, slices, bankSize);
     break;
   }
 

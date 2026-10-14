@@ -34,10 +34,11 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
 }
 
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
-// peer; grid.y splits that peer's slices across blocks, one
-// warp per slice. Each column packs this rank's payload into its peer's slot,
-// then polls its own slot for that peer's payload and unpacks it.
-template <typename T, int NRANKS_CT>
+// peer; grid.y splits that peer's slices across blocks, and a warp takes UNROLL
+// of its slices per pass so that many are in flight at once. Each column packs
+// this rank's payload into its peer's slot, then polls its own slot for that
+// peer's payload and unpacks it.
+template <typename T, int NRANKS_CT, int UNROLL>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
@@ -72,9 +73,11 @@ __launch_bounds__(1024)
   // tier sharing this scratch and epoch counter banks at the same byte offsets.
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
-  // Slices stride by warp within this peer's column only.
+  // Slices stride by warp within this peer's column only. A pass takes the
+  // warp's next UNROLL slices, so that many are in flight per warp at once.
   const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
   const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
+  const size_t pstride = (size_t)UNROLL * wstride;
 
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
   uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
@@ -84,15 +87,28 @@ __launch_bounds__(1024)
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
   // Phase 1: pack and push this column's slices to the one peer it owns.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128LoadRegs<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
-    ddaLL128StoreWire(
-      scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    uint64_t regs[UNROLL][kDdaLL128WordsPerThread];
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < slicesTotal) {
+        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t rem = perRankBytes - dataByte;
+        const int eltInSlice =
+          rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+        ddaLL128LoadRegsBegin<int8_t>(regs[u], srcBytes + dataByte, eltInSlice, lane, flagLane);
+      }
+    }
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < slicesTotal) {
+        ddaLL128LoadRegsFinish(regs[u], flagLane);
+        ddaLL128StoreWire(
+          scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs[u], flag, flagLane);
+      }
+    }
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
@@ -102,20 +118,46 @@ __launch_bounds__(1024)
     const size_t nVec = perRankBytes >> 4; // 16B chunks
     const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
     const size_t stride = (size_t)total * (size_t)nthreads;
-    for (size_t i = gtid; i < nVec; i += stride) {
-      d4[i] = s4[i];
+    for (size_t i0 = gtid; i0 < nVec; i0 += (size_t)UNROLL * stride) {
+      v4u v[UNROLL];
+#pragma unroll
+      for (int u = 0; u < UNROLL; ++u) {
+        const size_t i = i0 + (size_t)u * stride;
+        if (i < nVec) v[u] = s4[i];
+      }
+#pragma unroll
+      for (int u = 0; u < UNROLL; ++u) {
+        const size_t i = i0 + (size_t)u * stride;
+        if (i < nVec) d4[i] = v[u];
+      }
     }
   }
 
   // Phase 2: poll the same slices in that peer's slot and unpack.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    uint64_t vr[kDdaLL128WordsPerThread];
-    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
+    const uint64_t* wire[UNROLL] = {};
+    int live = 0;
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < slicesTotal) {
+        wire[u] = gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+        live = u + 1;
+      }
+    }
+    uint64_t vr[UNROLL][kDdaLL128WordsPerThread];
+    ddaLL128PollWireN<UNROLL>(wire, live, vr, flag, lane);
+#pragma unroll
+    for (int u = 0; u < UNROLL; ++u) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < slicesTotal) {
+        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t rem = perRankBytes - dataByte;
+        const int eltInSlice =
+          rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+        ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr[u], eltInSlice, lane, flagLane);
+      }
+    }
   }
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
