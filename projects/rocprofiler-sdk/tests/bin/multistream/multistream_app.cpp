@@ -37,22 +37,29 @@ __device__ int counter = 0;
 __global__ void
 add(int n, float* x, float* y)
 {
-    if(__hip_atomic_load(&counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0)
+    if(__scoped_atomic_load_n(&counter, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) != 0)
     {
         abort();
     }
-    __hip_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 
     int index  = blockIdx.x * blockDim.x + threadIdx.x;
     int stride = blockDim.x * gridDim.x;
     for(int i = index; i < n; i += stride)
         y[i] = x[i] + y[i];
-    __hip_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __scoped_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
+    __syncthreads();
+    if(__scoped_atomic_load_n(&counter, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE) != 0)
+    {
+        abort();
+    }
 }
 
 void
 LaunchMultiStreamKernels()
 {
+    constexpr int num_iterations = 100;
+
     int    N = 1 << 4;
     float* x = new float[N];
     float* y = new float[N];
@@ -82,7 +89,7 @@ LaunchMultiStreamKernels()
     int blockSize = 64;
     // This Kernel will always be launched with one wave
     int numBlocks = 1;
-    for(int i = 0; i < 100; i++)
+    for(int i = 0; i < num_iterations; i++)
     {
         for(auto& hip_stream : hip_streams)
         {
@@ -95,6 +102,21 @@ LaunchMultiStreamKernels()
 
     HIP_ASSERT(hipMemcpy(x, d_x, N * sizeof(float), hipMemcpyDeviceToHost));
     HIP_ASSERT(hipMemcpy(y, d_y, N * sizeof(float), hipMemcpyDeviceToHost));
+
+    const float expected_y = 2.0f + static_cast<float>(num_iterations * hip_streams.size());
+    for(int index = 0; index < N; ++index)
+    {
+        if(x[index] != 1.0f || y[index] != expected_y)
+        {
+            fprintf(stderr,
+                    "Unexpected vector result at index %d: x=%g, y=%g (expected 1, %g)\n",
+                    index,
+                    x[index],
+                    y[index],
+                    expected_y);
+            abort();
+        }
+    }
 
     //   Free memory
     HIP_ASSERT(hipFree(d_x));

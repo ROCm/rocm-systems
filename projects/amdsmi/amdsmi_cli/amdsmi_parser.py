@@ -231,7 +231,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add all subparsers
         if sys_argv is not None:
-            if any(arg in sys_argv for arg in ["--help", "-h"]):
+            if os.getenv("_ARGCOMPLETE") or any(arg in sys_argv for arg in ["--help", "-h"]):
                 self._add_version_parser(self.subparsers, version)
                 self._add_list_parser(self.subparsers, list)
                 self._add_static_parser(self.subparsers, static)
@@ -1525,7 +1525,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Options arguments help text for Hypervisors and Baremetal
         # Might be able to remove Sudo requirement in ROCm 7.0
         ras_help = "Displays RAS features information;\n\tSudo may be required for some features"
-        numa_help = "All numa node information"  # Linux Baremetal only
+        numa_help = "All numa node information"  # Linux only
         partition_help = (
             "Partition information:\n\t"
             "No longer available in default output.\n\tArgument is required to display."
@@ -1629,7 +1629,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-o", "--profile", action="store_true", required=False, help=profile_help
                 )
 
-            if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+            if self.helpers.is_linux():
                 static_parser.add_argument(
                     "-u", "--numa", action="store_true", required=False, help=numa_help
                 )
