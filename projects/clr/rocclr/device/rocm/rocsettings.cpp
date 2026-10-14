@@ -159,7 +159,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     sdma_swap_alignment_ = (gfxipMajor == 12) ? 32 : 64;
   }
 
-  setKernelArgImpl(isa, isXgmi, isAPU);
+  setKernelArgImpl(isa, isXgmi);
 
   if (gfxipMajor >= 10) {
      enableWave32Mode_ = true;
@@ -257,7 +257,7 @@ void Settings::override() {
 }
 
 // ================================================================================================
-void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool isAPU) {
+void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi) {
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
@@ -281,12 +281,10 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool isAPU) {
 
   // Enable device kernel args by default on gfx94x/gfx125x. Device-memory AQL
   // ring buffers are controlled separately via DEBUG_CLR_AQL_DEV_QUEUE below.
-  // ROCr rejects device-memory rings on integrated agents (LargeBarEnabled is
-  // false for APUs such as MI300A), so keep system-memory rings there.
   if (isGfx94x || isGfx125x) {
     kernel_arg_impl_ = kernelArgImpl;
     kernel_arg_opt_ = true;
-    aql_device_ring_buf_ = (DEBUG_CLR_AQL_DEV_QUEUE > 0) && !isAPU;
+    aql_device_ring_buf_ = DEBUG_CLR_AQL_DEV_QUEUE > 0;
   }
 
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {

@@ -3561,13 +3561,11 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Build the queue creation descriptor with priority, CU mask, and flags.
   // settings().aql_device_ring_buf_ controls queue ring buffer placement (enabled
-  // by default on discrete gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
+  // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
-  // largeBar_ requires a CPU interconnect link and a discrete agent. An APU
-  // shares memory with the CPU, so ROCr rejects a device-memory ring there.
-  bool device_mem_ring_buf = settings().aql_device_ring_buf_ && info_.largeBar_ && !isAPU_ &&
-                             Hsa::amd_queue_create_available();
+  const bool device_mem_ring_buf =
+      settings().aql_device_ring_buf_ && info_.largeBar_ && Hsa::amd_queue_create_available();
   hsa_amd_queue_create_desc_t desc = {};
   desc.version = HSA_AMD_QUEUE_CREATE_DESC_VERSION;
   desc.engine_type = HSA_AMD_QUEUE_ENGINE_COMPUTE;
@@ -3586,25 +3584,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     desc.engine.compute.cu_mask = final_mask.data();
   }
 
-  bool tried_system_mem_fallback = false;
-  hsa_status_t queue_status = HSA_STATUS_SUCCESS;
-  while ((queue_status = Hsa::amd_queue_create(bkendDevice_, &desc, 1)) != HSA_STATUS_SUCCESS) {
-    // ROCr returns INVALID_QUEUE_CREATION when a device-memory ring is
-    // requested on an agent without large BAR. Other failures, such as
-    // resource limits, keep shrinking the device-memory ring.
-    if (device_mem_ring_buf && !tried_system_mem_fallback &&
-        queue_status == HSA_STATUS_ERROR_INVALID_QUEUE_CREATION) {
-      tried_system_mem_fallback = true;
-      device_mem_ring_buf = false;
-      desc.flags = static_cast<hsa_amd_queue_create_flag_t>(
-          static_cast<uint32_t>(desc.flags) &
-          ~static_cast<uint32_t>(HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF));
-      ClPrint(amd::LOG_WARNING, amd::LOG_QUEUE,
-              "Device::acquireQueue: device-memory AQL ring rejected (status 0x%x, "
-              "queue size %u); falling back to system-memory ring",
-              queue_status, queue_size);
-      continue;
-    }
+  while (Hsa::amd_queue_create(bkendDevice_, &desc, 1) != HSA_STATUS_SUCCESS) {
     queue_size >>= 1;
     desc.queue_size_bytes = queue_size * sizeof(hsa_kernel_dispatch_packet_t);
     if (queue_size < 64) {
