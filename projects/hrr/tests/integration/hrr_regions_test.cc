@@ -588,7 +588,10 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[.][hrr]") {
   }
 
   SECTION("--guard-blocks makes the overrun fault") {
-    auto [rc, out] = hrr_playback_merged(archive, "--guard-blocks");
+    // The overrun is meant to fault; keep the driver from writing a GPU core
+    // dump for it. The variable is set on the spawned hrr-playback only.
+    auto [rc, out] = hrr_playback_merged(
+        archive, "--guard-blocks", {{"HSA_DISABLE_COREDUMP_ON_EXCEPTION", "1"}});
     INFO("Guarded replay:\n" << out);
     if (rc == 0) {
       // The only acceptable clean run is one where nothing was guarded — no VMM
