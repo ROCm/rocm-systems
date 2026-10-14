@@ -22,6 +22,8 @@
 #include "gin/gin_anvil_sdma_factory.h"
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -156,10 +158,12 @@ static ncclResult_t ginAnvilDevices(int* ndev) {
   return ncclSuccess;
 }
 
-// v14 GIN plugins expose GIN capability flags via getGinProperties. The Anvil
-// SDMA backend uses intra-node LSA (flat) signals, which behave as both strong
-// and VA-addressable signals; report both as supported (matches the behavior
-// previously injected by the v13->v14 shim for internal plugins).
+// v14 GIN plugins expose GIN capability flags via getGinProperties.
+// Strong signals are honoured per Put/PutValue by draining every SDMA queue
+// to the peer before the signal (quietPeerQueues in gin_anvil_sdma.h).
+// supportsVASignals stays true because ncclDevCommRequirements defaults
+// ginVaSignalsRequired, and a false flag would reject this backend. The device
+// path implements indexed signals only; a VA descriptor is not signalled.
 static ncclResult_t ginAnvilGetGinProperties(ncclGinProperties_t* ginProps) {
   ginProps->supportsStrongSignals = true;
   ginProps->supportsVASignals = true;
@@ -202,10 +206,14 @@ static int ginAnvilEnvInt(const char* name, int defaultVal) {
 // values above UINT32_MAX saturate rather than wrapping.
 static size_t ginAnvilSdmaThresholdFromEnv() {
   const char* e = getenv("NCCL_GIN_ANVIL_SDMA_THRESHOLD");
-  if (e && e[0] && *e != '-') {
+  // strtoull skips leading whitespace before it sees a sign, so " -1" would
+  // pass a bare *e != '-' check and come back as ULLONG_MAX. An overflowing
+  // value does the same when errno is ignored. Both fall back to the default.
+  if (e && e[0] && !std::isspace(static_cast<unsigned char>(e[0])) && *e != '-') {
+    errno = 0;
     char* end = nullptr;
     unsigned long long v = strtoull(e, &end, 10);
-    if (end != e && *end == '\0') return (size_t)v;
+    if (end != e && *end == '\0' && errno != ERANGE) return (size_t)v;
   }
   return (size_t)NCCL_GIN_ANVIL_SDMA_THRESHOLD_DEFAULT;
 }
