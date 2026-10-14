@@ -9300,3 +9300,154 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
         ExpectInfoCallSiteLogs(log, /*seedDirectDisabled=*/false);
       });
 }
+
+// ===========================================================================
+// rcclSelectAlltoAll on gfx1250 -- the AllToAll fabric selection table
+// (rcclSelectAlltoAllFabric) and its check-mode skip. The arch table
+// is a hand-built copy of the gfx1250 A2A windows (the micro build fakes
+// rcclGetArchThresholds to nullptr); the DDA eligibility fakes encode the real
+// predicates' contracts: every path needs P % 16 == 0, LL128
+// also 16-byte aligned buffers.
+// ===========================================================================
+namespace {
+
+rcclArchThresholds Gfx1250A2aTable() {
+  rcclArchThresholds t;
+  std::memset(&t, 0, sizeof(t));
+  t.ddaLLMax[ncclFuncAlltoAll] = 64u << 10;
+  t.ddaLL128Max[ncclFuncAlltoAll] = 16u << 20;
+  t.ddaLLMaxPerRank[ncclFuncAlltoAll] = 8u << 10;
+  t.rankScaledMinRanks = 8;
+  t.rankScaledMaxBytes = 256u << 20;
+  return t;
+}
+
+bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
+bool A2aPtrs16(const void* s, const void* r) { return (((uintptr_t)s | (uintptr_t)r) % 16) == 0; }
+
+void InstallA2aFabricFakes() {
+  g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
+  };
+  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void* s, void* r, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t) && A2aPtrs16(s, r);
+  };
+}
+
+const void* const kA2aSend = reinterpret_cast<const void*>(0x10000000);
+void* const kA2aRecv = reinterpret_cast<void*>(0x20000000);
+
+// Decision for nRanks ranks, totalBytes = nRanks * perPeer (int8 count == per-peer bytes).
+ncclResult_t SelectA2aGfx1250(ncclComm* comm, size_t perPeer, const void* send, void* recv, bool query,
+                              rcclCollDecision* out) {
+  *out = rcclCollDecision{};
+  return rcclSelectAlltoAll(comm, send, recv, perPeer, ncclInt8, /*stream=*/nullptr, query,
+                            /*graphCapturingHint=*/false, out);
+}
+
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableOutOfPlace) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250FabricTableOutOfPlace",
+      []() {
+        InstallA2aFabricFakes();
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        struct Case {
+          int n;
+          size_t perPeer;
+          int algo;
+        } cases[] = {
+            {8, 512, RCCL_DDA_FABRIC_LL},                  // T = 4 KiB
+            {8, 8u << 10, RCCL_DDA_FABRIC_LL},             // T = 64 KiB (total rule)
+            {16, 8u << 10, RCCL_DDA_FABRIC_LL},            // T = 128 KiB, P = 8 KiB (per-peer rule)
+            {8, 16u << 10, RCCL_DDA_FABRIC_LL128},         // T = 128 KiB, P = 16 KiB
+            {8, 1u << 20, RCCL_DDA_FABRIC_LL128},          // T = 8 MiB
+            {8, 2u << 20, RCCL_DDA_FABRIC_LL128},          // T = 16 MiB == ddaLL128Max
+            {16, 1u << 20, RCCL_DDA_FABRIC_LL128},         // T = 16 MiB
+            {16, 3u << 19, RCCL_DIRECT_ALLTOALL},          // T = 24 MiB > ddaLL128Max: p2p
+            {4, 2u << 20, RCCL_DDA_FABRIC_LL128},          // T = 8 MiB
+            {8, 256u << 20, RCCL_DIRECT_ALLTOALL},         // T = 2 GiB: p2p
+            {32, 1u << 20, RCCL_DIRECT_ALLTOALL},          // T = 32 MiB: p2p
+        };
+        for (const Case& c : cases) {
+          comm->nRanks = c.n;
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+          }
+        }
+        // Block counts come from the chosen path's own geometry function.
+        rcclCollDecision d{};
+        comm->nRanks = 8;
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 20, kA2aSend, kA2aRecv, true, &d));
+        EXPECT_EQ(144u, d.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableInPlace) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250FabricTableInPlace",
+      []() {
+        InstallA2aFabricFakes();
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        struct Case {
+          int n;
+          size_t perPeer;
+          int algo;
+        } cases[] = {
+            {8, 512, RCCL_DDA_FABRIC_LL},
+            {8, 1u << 20, RCCL_DDA_FABRIC_LL128},
+            {8, 2u << 20, RCCL_DDA_FABRIC_LL128},        // T = 16 MiB
+            {16, 1u << 20, RCCL_DDA_FABRIC_LL128},
+        };
+        for (const Case& c : cases) {
+          comm->nRanks = c.n;
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aRecv, kA2aRecv, query, &d));
+            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+          }
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Check mode diverts every collective to ncclEnqueueCheck, which cannot run the fabric paths: the
+// selector must not pick them (or probe their eligibility). The call takes develop's next arm (p2p
+// here), in place as well.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250CheckModeSkipsFabricPaths) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250CheckModeSkipsFabricPaths",
+      []() {
+        InstallA2aFabricFakes();
+        int ll128Calls = 0;
+        g_allToAllDdaFabricLL128Eligible = [&ll128Calls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++ll128Calls;
+          return true;
+        };
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 20, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+        EXPECT_EQ(1, ll128Calls);
+        comm->checkMode = ncclCheckModeDebugLocal;
+        for (size_t perPeer : {size_t(512), size_t(1u << 20), size_t(4u << 20)}) {
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer;
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << perPeer;
+        }
+        EXPECT_EQ(1, ll128Calls);
+        DeleteCommWithArch(comm);
+      });
+}
