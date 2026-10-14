@@ -24,7 +24,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS simple-transpose
     TIMEOUT 90
     LABELS "integration-tests;application-replay"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection)
 
 foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
@@ -63,7 +63,7 @@ foreach(_GROUP "single" "multiple")
         DEPENDS transpose
         TIMEOUT 45
         WSL_TIMEOUT_SCALE
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
 
     set(_TEST_OUTPUT_PREFIX

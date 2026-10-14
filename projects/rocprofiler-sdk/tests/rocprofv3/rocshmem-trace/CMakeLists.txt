@@ -85,7 +85,7 @@ if(TARGET rocshmem-demo)
         DEPENDS rocshmem-demo
         TIMEOUT 60
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${PRELOAD_ENV}"
         FIXTURES_SETUP rocprofv3-test-rocshmem-tracing
         DISABLED "${IS_DISABLED}")
 

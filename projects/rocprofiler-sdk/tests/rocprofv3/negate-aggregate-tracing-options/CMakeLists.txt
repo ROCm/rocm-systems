@@ -62,7 +62,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     WILL_FAIL)
 
 ##########################################################################################
@@ -80,7 +80,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     WILL_FAIL)
 
 rocprofiler_add_integration_execute_test(
@@ -90,7 +90,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "direct rocprofv3 output format.*deprecated: CSV, PFTrace \\(Perfetto\\), OTF2.*hipFILE, rocSHMEM, and HIP event"
     )
@@ -104,7 +104,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "direct rocprofv3 output format.*deprecated: CSV.*hipFILE, rocSHMEM, and HIP event"
     )

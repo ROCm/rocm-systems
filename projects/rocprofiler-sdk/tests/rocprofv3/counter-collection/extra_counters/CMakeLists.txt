@@ -30,7 +30,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-counter-collection-txt-pmc1-extra-counters)
 
 rocprofiler_add_integration_validate_test(
@@ -54,7 +54,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS vector-ops
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     PASS_REGULAR_EXPRESSION
         "Counter 'TEST_YAML_LOAD'.*duplicates an identical definition; ignoring duplicate"
     FIXTURES_SETUP rocprofv3-test-extra-counters-identical-duplicate)
@@ -83,7 +83,7 @@ function(rocprofiler_add_invalid_yaml_test NAME ERROR_REGEX)
         DEPENDS vector-ops
         TIMEOUT 20
         LABELS "integration-tests"
-        PRELOAD "${PRELOAD_ENV}")
+        ENVIRONMENT "${PRELOAD_ENV}")
 endfunction()
 
 rocprofiler_add_invalid_yaml_test(malformed "Failed to parse extra counters YAML")

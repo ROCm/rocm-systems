@@ -41,7 +41,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hip-events
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-event-trace)
 
 # Direct otf2 output from rocprofv3 goes through the deprecated C++ generator; the
@@ -88,7 +88,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS hip-events
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-hip-event-trace-no-hip-api)
 
 rocprofiler_add_integration_validate_test(

@@ -42,7 +42,7 @@ rocprofiler_add_integration_execute_test(
     DEPENDS rocdecode-demo
     TIMEOUT 45
     LABELS "integration-tests"
-    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${PRELOAD_ENV}"
     FIXTURES_SETUP rocprofv3-test-rocdecode-tracing
     DISABLED "${IS_DISABLED}")
 
