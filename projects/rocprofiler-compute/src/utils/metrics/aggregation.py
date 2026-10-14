@@ -238,41 +238,6 @@ def merge_dispatch_weighted_avg(
     return weighted_total / weight_total
 
 
-def merge_dispatch_collect_sum(ratio_series_list: list[pd.Series]) -> float:
-    """Sum absolute fragment values across dispatches.
-
-    Do not average per-dispatch rates. Shared-denominator rates belong in
-    COLLECT_RATIO, which pools numerator and denominator totals.
-    """
-    if not ratio_series_list:
-        return np.nan
-
-    dispatch_ids = _sorted_dispatch_ids(ratio_series_list)
-    if not dispatch_ids:
-        return np.nan
-
-    total = 0.0
-    used = 0
-    for dispatch_id in dispatch_ids:
-        dispatch_total = 0.0
-        skip_dispatch = False
-        for ratio_series in ratio_series_list:
-            value = _fragment_value(ratio_series, dispatch_id)
-            if value is None:
-                skip_dispatch = True
-                break
-            dispatch_total += value
-        if skip_dispatch:
-            continue
-        total += dispatch_total
-        used += 1
-
-    _warn_skipped_dispatches("COLLECT_SUM", used, len(dispatch_ids))
-    if used == 0:
-        return np.nan
-    return total
-
-
 def merge_dispatch_collect_ratio(
     numerator_series_list: list[pd.Series],
     denominator_series_list: list[pd.Series],
