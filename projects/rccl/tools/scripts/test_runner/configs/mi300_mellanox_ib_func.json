@@ -3970,6 +3970,12 @@
       "enabled": true
     },
     {
+      "name": "CE AllReduce Spanning LSA (forced unregistered, single node)",
+      "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+      "config": "ce_allreduce_spanning_lsa",
+      "enabled": true
+    },
+    {
       "name": "CE AllReduce LSA Guard (multi-node)",
       "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
       "config": "ce_allreduce_lsa_guard_multinode",
