@@ -830,11 +830,43 @@ def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
         raise RuntimeError(f"failed to stage Primus from {primus_dir}")
 
 
+def resolve_base_digest(base_image: str) -> str:
+    """Pull *base_image* once and return it pinned by digest.
+
+    Both A/B images must come from the same base, and a tag cannot promise
+    that: the baseline and the candidate are separate `docker build`
+    invocations, and `rocm/jax-training:maxtext-v26.6` is mutable. Adding
+    `--pull` to both would only narrow the window, not close it -- a push
+    between the two builds still splits the pair. A digest is immutable, so
+    resolving it once and writing it into both Dockerfiles closes it.
+
+    Falls back to the tag when the image has no RepoDigest, which is the case
+    for a locally built base; there is nothing to pin to and nothing remote
+    that could move underneath us either.
+    """
+    subprocess.run(["docker", "pull", base_image], check=True)
+    result = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", base_image],
+        capture_output=True, text=True,
+    )
+    digest = result.stdout.strip()
+    if result.returncode != 0 or "@sha256:" not in digest:
+        log.warning(
+            "No RepoDigest for %s; both A/B images will use the tag. They are "
+            "built minutes apart, so a push in between would split the pair.",
+            base_image,
+        )
+        return base_image
+    log.info("Base pinned for both A/B images: %s", digest)
+    return digest
+
+
 def build_maxtext_baseline_image(
     base_image: str,
     work_dir: Path,
     primus_dir: Path,
     run_token: str,
+    from_ref: str,
 ) -> str:
     """Build the A/B baseline for the MaxText family: Primus, stock RCCL.
 
@@ -853,7 +885,7 @@ def build_maxtext_baseline_image(
     _stage_primus_context(ctx_dir, primus_dir)
 
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
-    dockerfile.write_text(f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
+    dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
     # Tagged per A/B run, with the same token the candidate uses, and built
     # unconditionally.
@@ -871,8 +903,9 @@ def build_maxtext_baseline_image(
     # cached measured 2 seconds on ruby.
     tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}"
     log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
+    # No --pull: from_ref is already a digest, resolved once for both images.
     subprocess.run(
-        ["docker", "build", "--pull", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
+        ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
         check=True,
     )
     log.info("MaxText baseline image built: %s", tag)
@@ -887,6 +920,7 @@ def build_rccl_overlay_image(
     registry: str = "",
     family: str = "megatron",
     primus_dir: Path | None = None,
+    from_ref: str = "",
 ) -> str:
     """Build a Docker overlay image with the CI-built RCCL and push to registry.
 
@@ -973,8 +1007,11 @@ def build_rccl_overlay_image(
         # straight out of the cache and only the swap actually builds here.
         # Staged AFTER it so anything those layers drop on disk -- a wheel
         # vendoring its own librccl, say -- is caught by the sweep too.
+        # The same pinned digest the baseline used. A tag here would let the
+        # two images build from different versions of a mutable base and the
+        # ratio would then be measuring more than RCCL.
         dockerfile.write_text(
-            f"FROM {base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
+            f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
             f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
@@ -1973,6 +2010,12 @@ def main() -> None:
 
     primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
+    # Resolved once and written into both A/B Dockerfiles, so the pair cannot
+    # straddle a push to the mutable base tag between the two builds.
+    base_ref = ""
+    if family == "maxtext" and not args.skip_overlay_build:
+        base_ref = resolve_base_digest(workload_config["base_image"])
+
     # Step 3: Build overlay image (or use pre-built)
     if args.skip_overlay_build:
         if not args.overlay_image:
@@ -1988,6 +2031,7 @@ def main() -> None:
             registry=args.registry,
             family=family,
             primus_dir=primus_dir,
+            from_ref=base_ref,
         )
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
@@ -1998,8 +2042,9 @@ def main() -> None:
         baseline_image = build_maxtext_baseline_image(
             workload_config["base_image"], work_dir, primus_dir,
             # Same token the candidate tag carries, so the pair is unambiguously
-            # from one run.
+            # from one run, and the same pinned base digest.
             run_token=rccl_commit,
+            from_ref=base_ref or workload_config["base_image"],
         )
         baseline_pull_only = False
     else:
