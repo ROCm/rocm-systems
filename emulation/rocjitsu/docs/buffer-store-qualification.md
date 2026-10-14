@@ -32,6 +32,22 @@ Other numeric formats and older families inherit the same channel-routing rule;
 they were not independently measured. General store routing remains unqualified.
 
 Cross-family formatted loads and stores require semantic expansion in DBT when
-format encoding or the missing-channel policy differs. RDNA1 and RDNA2 have
+format encoding differs, or (for stores only) the missing-channel policy differs. RDNA1 and RDNA2 have
 distinct format tables. Until expansion exists, translation rejects these
 accesses instead of silently re-encoding an inequivalent descriptor or opcode.
+
+RDNA3/4 untyped formatted loads wrap selectors naming absent channels modulo
+the memory channel count. Typed loads instead zero absent channels. Additional
+native probes covered UINT formats with one, two, three and four channels, a
+three-channel packed float format, ordinary/D16 destinations and typed/untyped
+instructions on gfx1100/gfx1201. The interpreter resolves the untyped selectors
+at instruction setup, including constants and swizzles, before conversion and
+writeback. RDNA3.5 shares this Gfx11 policy without an independent measurement;
+older RDNA and CDNA behavior is unchanged. Compatible Gfx11 loads continue to
+translate between RDNA3/3.5 and RDNA4; store fill differences do not block them.
+
+Those native D16 probes also establish saturation when narrowing UINT32/SINT32
+to packed 16-bit destinations: unsigned overflow becomes 0xffff, signed positive
+overflow becomes 0x7fff, and signed negative overflow becomes 0x8000. Both typed
+and untyped Gfx11-format loads now apply this conversion. Older encoding
+families are unchanged because they were not measured.

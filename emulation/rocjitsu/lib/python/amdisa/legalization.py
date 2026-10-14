@@ -736,7 +736,6 @@ _BUFFER_FORMAT_FAMILIES = {
     'rdna3': ('Gfx11', 'Zero'),
     'rdna3_5': ('Gfx11', 'Zero'),
     'rdna4': ('Gfx11', 'ReplicateFirst'),
-    'cdna5': ('NoFormattedBuffer', 'Zero'),
 }
 
 
@@ -745,6 +744,8 @@ def _apply_domain_rules(
     src_isa: str,
     dst_isa: str,
 ) -> None:
+    src_format, src_fill = _BUFFER_FORMAT_FAMILIES.get(src_isa, (src_isa, None))
+    dst_format, dst_fill = _BUFFER_FORMAT_FAMILIES.get(dst_isa, (dst_isa, None))
     src_wc = _WAITCNT_MODELS.get(src_isa)
     dst_wc = _WAITCNT_MODELS.get(dst_isa)
     dst_has_split_barrier = dst_isa in _SPLIT_BARRIER_ISAS
@@ -767,8 +768,13 @@ def _apply_domain_rules(
                 ('BUFFER_LOAD_', 'BUFFER_STORE_', 'TBUFFER_LOAD_', 'TBUFFER_STORE_')
             )
             and 'FORMAT' in name
-            and _BUFFER_FORMAT_FAMILIES.get(src_isa, src_isa)
-            != _BUFFER_FORMAT_FAMILIES.get(dst_isa, dst_isa)
+            and (
+                src_format != dst_format
+                or (
+                    name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+                    and src_fill != dst_fill
+                )
+            )
         ):
             entry.action = LegalizationAction.expand(ExpansionKind.BUFFER_FORMAT_POLICY)
 

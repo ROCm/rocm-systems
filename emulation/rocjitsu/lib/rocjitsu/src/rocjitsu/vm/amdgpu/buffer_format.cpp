@@ -254,7 +254,7 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
     if (!width)
       continue;
     // Stores invert the descriptor's load mapping: an A8 view maps shader
-    // W to physical R. Only qualified selector patterns reach this helper.
+    // W to physical R. Inputs use qualified untyped DST_SEL or typed identity.
     uint32_t component = 0;
     for (uint32_t shader = 0; shader < 4; ++shader) {
       if (((selectors >> (3 * shader)) & 7) == i + 4) {
@@ -327,6 +327,24 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (decoded.failed())
     return util::Result::failure();
   d.decoded_buffer_format = decoded.value();
+  if (d.is_load && format < 0 && d.buffer_format_encoding == BufferFormatEncoding::Gfx11) {
+    // RDNA3/4 untyped loads wrap channel selectors to the memory format's
+    // channel count, for both ordinary and D16 destinations. Typed loads
+    // instead zero absent channels. RDNA3.5 shares the Gfx11 format policy.
+    const uint32_t channels =
+        std::count_if(d.decoded_buffer_format.widths.begin(), d.decoded_buffer_format.widths.end(),
+                      [](uint32_t width) { return width != 0; });
+    if (channels) {
+      uint32_t resolved = 0;
+      for (uint32_t i = 0; i < 4; ++i) {
+        uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
+        if (selector >= 4)
+          selector = 4 + (selector - 4) % channels;
+        resolved |= selector << (3 * i);
+      }
+      d.buffer_selectors = resolved;
+    }
+  }
   if (!d.is_load && format < 0 &&
       !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
     return util::Result::failure();
@@ -403,6 +421,13 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
       for (uint32_t i = reg * 2; i < std::min(reg * 2 + 2, d.buffer_components); ++i) {
         const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
         uint16_t half = static_cast<uint16_t>(values[i]);
+        if (d.buffer_format_encoding == BufferFormatEncoding::Gfx11 && integer(format.number)) {
+          // Native RDNA3/4 typed and untyped D16 conversions saturate integers.
+          half = format.number == Number::Uint
+                     ? static_cast<uint16_t>(std::min(values[i], 0xffffu))
+                     : static_cast<uint16_t>(
+                           std::clamp(static_cast<int32_t>(values[i]), -32768, 32767));
+        }
         if (!integer(format.number)) {
           const float value = std::bit_cast<float>(values[i]);
           // Only FLOAT32 -> D16 truncates. Other conversions round to nearest even.

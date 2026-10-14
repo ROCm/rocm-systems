@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from amdisa.isa_profile import Rdna1Profile, Rdna2Profile
+from amdisa.isa_profile import (
+    Rdna1Profile,
+    Rdna2Profile,
+    Rdna3Profile,
+    Rdna3_5Profile,
+    Rdna4Profile,
+)
 from amdisa.legalization import ExpansionKind, LegalizationGenerator
 from amdisa.parser import Parser
 
@@ -35,4 +41,37 @@ def test_distinct_gfx10_format_tables_require_semantic_expansion(source, target)
     assert len(formatted) >= 32
     for entry in formatted:
         assert entry.action.kind == 'expand', entry.src_mnemonic
+        assert entry.action.expansion_kind == ExpansionKind.BUFFER_FORMAT_POLICY
+
+
+@pytest.mark.parametrize(
+    ('source', 'profile'), [('rdna3', Rdna3Profile()), ('rdna3_5', Rdna3_5Profile())]
+)
+def test_compatible_loads_do_not_inherit_store_fill_expansion(source, profile):
+    isa_dir = Path(__file__).resolve().parents[6] / 'shared/machine-readable-isa/isa'
+    specs = [
+        (name, Parser(str(isa_dir / f'amdgpu_isa_{name}.xml'), p).parse(), None)
+        for name, p in [(source, profile), ('rdna4', Rdna4Profile())]
+    ]
+    entries = LegalizationGenerator(specs).classify(source, 'rdna4')
+    loads = [
+        entry
+        for entry in entries
+        if entry.src_mnemonic.startswith(('BUFFER_LOAD_', 'TBUFFER_LOAD_'))
+        and 'FORMAT' in entry.src_mnemonic
+    ]
+    stores = [
+        entry
+        for entry in entries
+        if entry.src_mnemonic.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+        and 'FORMAT' in entry.src_mnemonic
+    ]
+    assert len(loads) >= 16 and len(stores) >= 16
+    for entry in loads:
+        assert entry.action.kind in (
+            'identity',
+            'substitute',
+            'lower',
+        ), entry.src_mnemonic
+    for entry in stores:
         assert entry.action.expansion_kind == ExpansionKind.BUFFER_FORMAT_POLICY
