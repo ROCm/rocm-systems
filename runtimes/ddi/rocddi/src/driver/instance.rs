@@ -173,11 +173,16 @@ impl DeviceDriverState {
         }
     }
 
-    pub(crate) fn is_gpu(&self) -> bool {
+    /// Projects the activated state into its GPU capability, when present.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "non-GPU driver variants return no GPU projection"
+    )]
+    pub(crate) fn gpu_driver(&self) -> Option<GpuDriverRef<'_>> {
         match self {
-            Self::LinuxKfd { .. } => true,
+            Self::LinuxKfd { driver, state } => Some(GpuDriverRef::LinuxKfd { driver, state }),
             #[cfg(test)]
-            Self::Test { .. } => false,
+            Self::Test { .. } => None,
         }
     }
     /// Subscribes to the activated driver's retained system notifications.
@@ -289,54 +294,45 @@ pub(crate) fn new_driver_instance() -> u64 {
         .unwrap_or_else(|_| std::process::abort())
 }
 
-#[cfg(test)]
-fn unsupported<T>() -> Result<T, Error> {
-    Err(Error::Operation {
-        kind: ErrorKind::Unsupported,
-        detail: "activated driver has no GPU capability",
-    })
+/// Borrowed GPU-only driver state established from an activated device.
+/// Non-GPU drivers cannot enter this operation surface.
+#[derive(Clone, Copy)]
+pub(crate) enum GpuDriverRef<'a> {
+    LinuxKfd {
+        driver: &'a Shared<KfdDriver>,
+        state: &'a KfdDeviceState,
+    },
 }
 
-/// Routes GPU-only operations through the driver that activated this device.
-/// Other device-family variants report `Unsupported` without acquiring GPU state.
-impl DeviceDriverState {
+/// Routes GPU-only operations through a checked GPU driver projection.
+impl GpuDriverRef<'_> {
     pub(crate) fn supports_expert_scheduling(&self) -> Result<bool, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.supports_expert_scheduling(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn set_persisting_l2_cache_size(&self, size: u32) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.set_persisting_l2_cache_size(state, size),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn available_memory(&self) -> Result<u64, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_memory(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn available_sdma_engines(&self) -> Result<u32, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.available_sdma_engines(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn clock_counters(&self) -> Result<ClockCounters, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.clock_counters(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
@@ -354,24 +350,18 @@ impl DeviceDriverState {
             Self::LinuxKfd { driver, state } => unsafe {
                 driver.set_trap_handler(state, handler_address, memory_address)
             },
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn spm_acquire(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_acquire(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
     pub(crate) fn spm_release(&self) -> Result<(), Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.spm_release(state),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 
@@ -399,8 +389,6 @@ impl DeviceDriverState {
                     data_loss,
                 )
             },
-            #[cfg(test)]
-            Self::Test { .. } => unsupported(),
         }
     }
 }

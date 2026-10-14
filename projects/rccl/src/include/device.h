@@ -763,6 +763,28 @@ inline __host__ __device__ int countOneBits(struct channelMasks const& x) {
   return n;
 }
 
+// Channel of the channelOrdinal-th set bit of mask, or -1; needs 0 <= lane < WARP_SIZE.
+// Lane checks bits lane and WARP_SIZE + lane (wave32) per word.
+__device__ __forceinline__ int ncclChannelMaskNthChannelId(struct channelMasks const& mask, int channelOrdinal,
+                                                           int lane) {
+  int total = 0;
+  for (int i = 0; i < (int)(MAXCHANNELS / CHANNELS_PER_MASK_WORD); i++) {
+    const uint64_t word = mask.masks[i];
+    int bit = lane;
+    if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+      return bit + i * CHANNELS_PER_MASK_WORD;
+    }
+    if (WARP_SIZE < 64) {
+      bit = WARP_SIZE + lane;
+      if ((word & (1ull << bit)) && total + __popcll(word & ((1ull << bit) - 1)) == channelOrdinal) {
+        return bit + i * CHANNELS_PER_MASK_WORD;
+      }
+    }
+    total += __popcll(word);
+  }
+  return -1;
+}
+
 struct alignas(16) ncclDevKernelArgs {
   struct ncclKernelComm* comm;
 #ifdef ENABLE_WARP_SPEED

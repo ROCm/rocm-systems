@@ -11,8 +11,8 @@
 #[cfg(test)]
 use super::test_driver::{TestAllocation, TestDriver};
 use super::{
-    AllocationOperations, DeviceDriverState, GpuDriver, KfdAllocation, KfdDriver, KfdKernelQueue,
-    KfdQueue, VirtualMemoryOperations,
+    AllocationOperations, DeviceDriverState, GpuDriver, GpuDriverRef, KfdAllocation, KfdDriver,
+    KfdKernelQueue, KfdQueue, VirtualMemoryOperations,
 };
 use crate::Error;
 #[cfg(test)]
@@ -176,13 +176,13 @@ pub(crate) enum AllocationState {
 }
 
 impl AllocationState {
-    pub(crate) fn from_linux_kfd(inner: Owned<KfdAllocation>) -> Self {
-        Self::LinuxKfd(DriverAllocation::new(inner))
+    pub(crate) fn from_linux_kfd(driver: &Shared<KfdDriver>, inner: Owned<KfdAllocation>) -> Self {
+        Self::LinuxKfd(DriverAllocation::new(driver.clone(), inner))
     }
 
     #[cfg(test)]
-    pub(crate) fn from_test(inner: Owned<TestAllocation>) -> Self {
-        Self::Test(DriverAllocation::new(inner))
+    pub(crate) fn from_test(driver: &Shared<TestDriver>, inner: Owned<TestAllocation>) -> Self {
+        Self::Test(DriverAllocation::new(driver.clone(), inner))
     }
 
     #[allow(
@@ -309,14 +309,10 @@ impl DeviceDriverState {
     ) -> Result<Allocation, Error> {
         match self {
             Self::LinuxKfd { driver, state } => Ok(Allocation::new(
-                AllocationState::from_linux_kfd(driver.allocate_owned(
-                    state,
-                    &[],
-                    kind,
-                    size,
-                    alignment,
-                    permissions,
-                )?),
+                AllocationState::from_linux_kfd(
+                    driver,
+                    driver.allocate_owned(state, &[], kind, size, alignment, permissions)?,
+                ),
                 driver_instance,
             )),
             #[cfg(test)]
@@ -337,7 +333,7 @@ impl DeviceDriverState {
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, &[], request)? };
                 Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(inner),
+                    AllocationState::from_linux_kfd(driver, inner),
                     driver_instance,
                 ))
             }
@@ -346,36 +342,10 @@ impl DeviceDriverState {
                 // SAFETY: The caller preserves the complete page cover.
                 let inner = unsafe { driver.register_host(state, &[], request)? };
                 Ok(Allocation::new(
-                    AllocationState::from_test(inner),
+                    AllocationState::from_test(driver, inner),
                     driver_instance,
                 ))
             }
-        }
-    }
-
-    pub(crate) fn allocate_queue_scratch(
-        &self,
-        driver_instance: u64,
-        size: u64,
-    ) -> Result<Allocation, Error> {
-        match self {
-            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
-                AllocationState::from_linux_kfd(driver.allocate_queue_scratch(state, size)?),
-                driver_instance,
-            )),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported_memory(),
-        }
-    }
-
-    pub(crate) fn map_mmio_remap(&self, driver_instance: u64) -> Result<Allocation, Error> {
-        match self {
-            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
-                AllocationState::from_linux_kfd(driver.map_mmio_remap(state)?),
-                driver_instance,
-            )),
-            #[cfg(test)]
-            Self::Test { .. } => unsupported_memory(),
         }
     }
 
@@ -451,7 +421,7 @@ impl DeviceDriverState {
                     permissions,
                 )?;
                 Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(inner),
+                    AllocationState::from_linux_kfd(driver, inner),
                     origin.endpoint.driver_instance,
                 ))
             }
@@ -477,7 +447,7 @@ impl DeviceDriverState {
                 // SAFETY: The caller preserves the page cover across native use.
                 let inner = unsafe { driver.register_host(state, states.as_slice(), request)? };
                 Ok(Allocation::new(
-                    AllocationState::from_linux_kfd(inner),
+                    AllocationState::from_linux_kfd(driver, inner),
                     origin.endpoint.driver_instance,
                 ))
             }
@@ -489,10 +459,37 @@ impl DeviceDriverState {
                 // SAFETY: The caller preserves the complete page cover.
                 let inner = unsafe { driver.register_host(state, states.as_slice(), request)? };
                 Ok(Allocation::new(
-                    AllocationState::from_test(inner),
+                    AllocationState::from_test(driver, inner),
                     origin.endpoint.driver_instance,
                 ))
             }
+        }
+    }
+}
+
+impl GpuDriverRef<'_> {
+    pub(crate) fn allocate_queue_scratch(
+        &self,
+        driver_instance: u64,
+        size: u64,
+    ) -> Result<Allocation, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
+                AllocationState::from_linux_kfd(
+                    driver,
+                    driver.allocate_queue_scratch(state, size)?,
+                ),
+                driver_instance,
+            )),
+        }
+    }
+
+    pub(crate) fn map_mmio_remap(&self, driver_instance: u64) -> Result<Allocation, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => Ok(Allocation::new(
+                AllocationState::from_linux_kfd(driver, driver.map_mmio_remap(state)?),
+                driver_instance,
+            )),
         }
     }
 }
@@ -621,7 +618,7 @@ impl KernelQueueState {
     }
 }
 
-impl DeviceDriverState {
+impl GpuDriverRef<'_> {
     /// # Safety
     /// Every GPU address in the request remains backed through queue teardown.
     #[allow(unsafe_code)]
@@ -631,15 +628,10 @@ impl DeviceDriverState {
                 // SAFETY: The caller preserves every request address.
                 let inner = unsafe { driver.create_user_queue(state, desc) }?;
                 Ok(QueueState::LinuxKfd(DriverQueue::new(
-                    driver.clone(),
+                    (*driver).clone(),
                     inner,
                 )))
             }
-            #[cfg(test)]
-            Self::Test { .. } => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "activated driver has no GPU queue capability",
-            }),
         }
     }
 
@@ -651,15 +643,10 @@ impl DeviceDriverState {
             Self::LinuxKfd { driver, state } => {
                 let inner = driver.create_kernel_queue(state, format)?;
                 Ok(KernelQueueState::LinuxKfd(DriverKernelQueue::new(
-                    driver.clone(),
+                    (*driver).clone(),
                     inner,
                 )))
             }
-            #[cfg(test)]
-            Self::Test { .. } => Err(Error::Operation {
-                kind: ErrorKind::Unsupported,
-                detail: "activated driver has no GPU kernel queue capability",
-            }),
         }
     }
 }
