@@ -42,8 +42,6 @@ A **bucket** is one perfmon pass. This chart is the general placement flow: larg
 
 Overlap-first keeps the new counters in a pass that already has the rest of the set, so another pass does not replay them unless two PMC sets cannot share a bucket. The per-block check is why a mixed GRBM and SQ set is still one pass: a full SQ budget skips that bucket even when GRBM still has room. None of the 16 SPU metrics on gfx942 include GRBM.
 
-**How an SPU parent is recognized.** Metrics with no profile PMCs are dropped first (`iter_metric_groups`), so they are not SPU parents. A metric is SPP when its PMC set fits one empty pass (`collect_unique_packable_unions`, `counters_fit_one_bucket`). Every other metric with profile PMCs is SPU (`collect_unique_slot_limit_unions`). The YAML does not mark which is which. Names in the chart are the functions that implement those rules.
-
 ```mermaid
 flowchart TD
   A[Profile PMC set] --> DROP[Drop metrics with<br/>no profile PMCs]
