@@ -3875,6 +3875,15 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpus[gpu] = gpus[gpu] * 10 + digit;
           break;
         case 2:
+          // The per-channel limit below is the runtime ngpus * 2 and uses >, which
+          // at the widest GPU count leaves net_offset sitting exactly on the end
+          // of nets[]. Bound the write by the array itself. case 3 only ever
+          // follows this case at the same offset, so it is covered by this check.
+          if (net_offset >= NCCL_TOPO_MAX_NODES * 2) {
+            WARN("Too many NETs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES * 2);
+            return ncclInvalidUsage;
+          }
           nets[net_offset] = digit + 'N';
           status = 3;
           break;

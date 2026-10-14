@@ -483,6 +483,48 @@ TEST_F(RomeModelsParseGraphMicrotest, NetSlotsTheRingDidNotName_AreNotCarriedOve
   }
 }
 
+// A channel naming every GPU the array can hold, so the NET slot index derived
+// from the GPU count (2 * gpu - 1) sits at the very end of nets[].
+std::string WidestChannelThenNets(const char* trailingNets) {
+  return ChannelWithGpuCount(NCCL_TOPO_MAX_NODES) + trailingNets;
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, MoreNetsInOneChannelThanNetsArrayHolds_IsRejected) {
+  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
+  wide.system()->totalBw = kTotalBw;
+  wide.system()->nodes[NET].count = 2;
+  ncclTopoGraph graph;
+  std::memset(&graph, 0, sizeof(graph));
+
+  // The existing per-channel limit is the runtime ngpus * 2, not the size of
+  // nets[], and it used > where the array needs >=. At the widest GPU count the
+  // two coincide, so the second NET here wrote nets[288] -- one int past the end,
+  // which ASan reports at offset 1888. This is the smallest input that reaches it.
+  const std::string tooManyNets = WidestChannelThenNets(" N5 N6");
+
+  EXPECT_EQ(parseGraph(tooManyNets.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+            ncclInvalidUsage);
+
+  ResetNcclFakes();
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, NetInTheLastSlotOfTheNetsArray_IsAccepted) {
+  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
+  wide.system()->totalBw = kTotalBw;
+  wide.system()->nodes[NET].count = 2;
+  ncclTopoGraph graph;
+  std::memset(&graph, 0, sizeof(graph));
+
+  // Writes nets[287], the last slot that exists, so a bound tightened by one
+  // breaks here.
+  const std::string exactlyFull = WidestChannelThenNets(" N5");
+
+  EXPECT_EQ(parseGraph(exactlyFull.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+            ncclSuccess);
+
+  ResetNcclFakes();
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
   // Callers test graph->nChannels after calling, so a ring list that matches
   // nothing is not an error -- but it must not leave a bandwidth behind either.
@@ -631,6 +673,7 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetRingBase_IsAccepted) {
 //   ExactlyMaxChannels_IsAccepted
 //   EveryPresetRingBase_IsAccepted
 // ---------------------------------------------------------------------------
+
 
 
 
