@@ -19,13 +19,6 @@ namespace rocjitsu {
 class Operand;
 namespace amdgpu {
 
-/// Scalar MOVREL indexes in operand-sized words; the split form uses bytes of M0.
-constexpr uint32_t relative_scalar_selector(uint32_t selector, uint32_t width, uint32_t m0,
-                                            bool destination, bool split) {
-  const auto offset = (m0 >> (split && destination ? 8 : 0)) & 0xffu;
-  return selector + offset * (split ? 1 : width);
-}
-
 /// Add an M0-relative VGPR offset after resolving the encoded register bank.
 inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset,
                                                    uint32_t width, uint32_t allocation_size) {

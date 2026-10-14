@@ -1273,6 +1273,7 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
+    'screen_partition_4se': 'amdgpu::screen_partition_4se({0})',
     'rcp': 'amdgpu::transcendental::rcp_f32({0})',
     'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
     'rsq': 'amdgpu::transcendental::rsq_f32({0})',
@@ -1666,9 +1667,8 @@ _INLINE_BINARY_OPS: dict[str, str | InlineBinaryOp] = {
     ' if (width < 64 && (extracted & (1ULL << (width - 1))))'
     '   extracted |= ~mask;'
     ' return static_cast<int64_t>(extracted); }}()',
-    'ABSDIFF': '[&]() {{ auto a = static_cast<int64_t>(static_cast<int32_t>({0}));'
-    ' auto b = static_cast<int64_t>(static_cast<int32_t>({1}));'
-    ' return static_cast<uint32_t>(a > b ? a - b : b - a); }}()',
+    'ABSDIFF': '[&]() {{ uint32_t difference = static_cast<uint32_t>({0}) - static_cast<uint32_t>({1});'
+    ' return difference & 0x80000000u ? 0u - difference : difference; }}()',
     'pack_b32_f16': '(({0} & 0xFFFFu) | (({1} & 0xFFFFu) << 16))',
     'v_readlane': '{0}',
 }
