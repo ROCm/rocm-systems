@@ -1248,7 +1248,6 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
             __func__, req, req->base, req->id, devIndex, wc->qp_num);
       req->events[devIndex]--;
     } else if (wc->opcode == IBV_WC_RDMA_WRITE) {
-      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
       req->events[devIndex]--;
       req->ctsEvents[devIndex]--;
       // This is a CTS completion
@@ -1262,6 +1261,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              be32toh(wc->imm_data));
         return ncclSuccess;
       }
+      IbCastTelemetryWqeComplete(commBase, wc, devIndex, 0);
     } else {
       WARN("NET/IB: %s: Unknown completion (req=%p, comm=%p, id=%ld, devIndex=%d, req->type=%s, wc.wr_id=0x%lx, "
            "wc.opcode=%s(%d), wc.qp_num=%u, wc.imm_data=0x%x)",
