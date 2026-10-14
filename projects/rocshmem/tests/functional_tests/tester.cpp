@@ -427,9 +427,6 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
       break;
     case TeamBroadcastTestType: {
       test_name = "Team Broadcast Test";
-      // Full mode: push all 13 compiled types via the full list.
-      // Minimal mode: push the original 7-type subset.
-      // Custom mode: push any requested type from the full compiled set.
       #define PUSH_BCAST(T, name) \
         if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
           PUSH_TESTER(TeamBroadcastTester<T>(args));
