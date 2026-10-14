@@ -190,6 +190,23 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
+# analyze --specs-correction
+# =============================================================================
+
+
+def test_analyze_specs_correction_takes_space_separated_pairs():
+    args = build_args(["analyze", "--specs-correction", "num_xcd:4", "cu_per_gpu:64"])
+    assert args.specs_correction == ["num_xcd:4", "cu_per_gpu:64"]
+
+
+def test_analyze_specs_correction_rejects_commas(capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(["analyze", "--specs-correction", "num_xcd:4,cu_per_gpu:64"])
+    assert exc.value.code == 2
+    assert "separate name:value pairs with spaces" in capsys.readouterr().err
+
+
+# =============================================================================
 # analyze --verify-deps
 # =============================================================================
 
