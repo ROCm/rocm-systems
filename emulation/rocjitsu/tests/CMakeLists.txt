@@ -373,6 +373,15 @@ endfunction()
 set(_rj_cli_failure_script
     "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_failure.cmake"
 )
+set(_rj_process_grid_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_test.cmake"
+)
+set(_rj_process_grid_failure_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_failure_test.cmake"
+)
+set(_rj_process_grid_signal_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_signal_test.cmake"
+)
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
     RocjitsuVersion
@@ -638,12 +647,94 @@ set_tests_properties(
 )
 
 add_test(
+    NAME RocjitsuProcessGrid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGrid"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGrid"
+        "-DTEST_NPROC_FLAG=--nproc-per-node" -P ${_rj_process_grid_script}
+)
+add_test(
+    NAME RocjitsuProcessGridUnderscoreAlias
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridUnderscoreAlias"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridUnderscoreAlias"
+        "-DTEST_NPROC_FLAG=--nproc_per_node" -P ${_rj_process_grid_script}
+)
+
+add_test(
+    NAME RocjitsuProcessGridTerminatesPeersOnFailure
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridTerminatesPeersOnFailure"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridTerminatesPeersOnFailure"
+        -P ${_rj_process_grid_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridTerminatesRanksOnSignal
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridTerminatesRanksOnSignal"
+        "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridTerminatesRanksOnSignal"
+        -P ${_rj_process_grid_signal_script}
+)
+
+add_test(
     NAME RocjitsuGpusPerNodeRejectsZero
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=--gpus-per-node;0;--thread-budget-table"
         "-DTEST_REGEX=--gpus-per-node requires a positive integer" -P
         ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuNumNodesRejectsZero
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;0;--;/usr/bin/true"
+        "-DTEST_REGEX=--num-nodes requires a positive integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuNprocPerNodeRejectsNonNumeric
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--nproc_per_node;two;--;/usr/bin/true"
+        "-DTEST_REGEX=--nproc-per-node requires a positive integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsTooLarge
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;4097;--nproc-per-node;1;--;/usr/bin/true"
+        "-DTEST_REGEX=would launch 4097 processes; maximum is 4096" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;2;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=process grid options require local in-process mode" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsGdb
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;2;--gdb;--;/usr/bin/true"
+        "-DTEST_REGEX=rocgdb options require a single-process launch" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRejectsThreadBudgetTable
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--num-nodes;2;--thread-budget-table"
+        "-DTEST_REGEX=--thread-budget-table cannot be combined with launch-only options"
+        -P ${_rj_cli_failure_script}
 )
 add_test(
     NAME RocjitsuGpusPerNodeRejectsAttach
