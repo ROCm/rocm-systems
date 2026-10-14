@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "nccl.h"
@@ -50,13 +51,32 @@ namespace {
 
 constexpr int kPairs = 256 * 256; // the entire binary input domain
 
-// Reduce nPacks packs of BYTES bytes. BYTES/sizeof(T) fixes the EltPerPack that
-// Apply_Reduce dispatches on, which is the dimension under test.
-template<typename T, typename Fn, int BYTES>
+// rccl_float8 / rccl_bfloat8 name different types in the host and device passes (OCP on
+// host, FNUZ in the gfx942 device pass, rccl_float8.h:48-53), so a kernel templated on
+// them mangles differently in each pass and fails to launch with "Cannot find Symbol".
+// These kernels are templated on tags instead and name the type inside the body.
+// DeviceDataOps.hpp:110 documents the same hazard.
+template<bool IsE5m2>
+struct Fp8Type {
+  using type = typename std::conditional<IsE5m2, rccl_bfloat8, rccl_float8>::type;
+};
+
+enum : int { kOpSum = 0, kOpProd = 1, kOpMinMax = 2 };
+
+template<int OpKind, typename T> struct Fp8Op;
+template<typename T> struct Fp8Op<kOpSum, T>    { using type = FuncSum<T>; };
+template<typename T> struct Fp8Op<kOpProd, T>   { using type = FuncProd<T>; };
+template<typename T> struct Fp8Op<kOpMinMax, T> { using type = FuncMinMax<T>; };
+
+// Reduce nPacks packs of BYTES bytes. These types are 1 byte wide, so BYTES is the
+// EltPerPack that Apply_Reduce dispatches on, which is the dimension under test.
+template<bool IsE5m2, int OpKind, int BYTES>
 __global__ void kernelReducePacks(const uint8_t* __restrict__ a,
                                   const uint8_t* __restrict__ b,
                                   uint8_t* __restrict__ out,
                                   int nPacks, uint64_t opArg) {
+  using T = typename Fp8Type<IsE5m2>::type;
+  using Fn = typename Fp8Op<OpKind, T>::type;
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= nPacks) return;
   BytePack<BYTES> pa, pb;
@@ -70,8 +90,9 @@ __global__ void kernelReducePacks(const uint8_t* __restrict__ a,
 
 // Decode fp8 bytes to float using the device's own conversion, so the decode
 // matches whatever encoding this architecture compiled in.
-template<typename T>
+template<bool IsE5m2>
 __global__ void kernelDecode(const uint8_t* __restrict__ in, float* __restrict__ out, int n) {
+  using T = typename Fp8Type<IsE5m2>::type;
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
   BytePack<1> p;
@@ -100,7 +121,7 @@ bool deviceIsFnuz() {
     DeviceBuffer<uint8_t> d(1);
     DeviceBuffer<float> f(1);
     d.copyFrom(&probe, 1);
-    kernelDecode<rccl_float8><<<1, 1>>>(d.ptr, f.ptr, 1);
+    kernelDecode<false><<<1, 1>>>(d.ptr, f.ptr, 1);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     cached = std::isnan(f.copyTo()[0]) ? 1 : 0;
   }
@@ -111,18 +132,6 @@ bool isGfx1250(int device) {
   hipDeviceProp_t prop{};
   if (hipGetDeviceProperties(&prop, device) != hipSuccess) return false;
   return std::string(prop.gcnArchName).rfind("gfx1250", 0) == 0;
-}
-
-// Host compilation always sees the OCP typedefs (rccl_float8.h), so producing a
-// byte in the encoding the device uses has to name that encoding explicitly.
-// Mirror of rcclFp8ToFloat.
-uint8_t rcclFloatToFp8(float v, bool isE5m2, bool fnuz) {
-  if (isE5m2) {
-    if (fnuz) return __hip_fp8_e5m2_fnuz(v).__x;
-    return __hip_fp8_e5m2(v).__x;
-  }
-  if (fnuz) return __hip_fp8_e4m3_fnuz(v).__x;
-  return __hip_fp8_e4m3(v).__x;
 }
 
 // e4m3 tops out at 240.0 under FNUZ and 448.0 under OCP; e5m2 is 57344.0 in both.
@@ -145,7 +154,7 @@ protected:
     }
   }
 
-  template<typename T, typename Fn, int BYTES>
+  template<bool IsE5m2, int OpKind, int BYTES>
   std::vector<uint8_t> reduceAll(const std::vector<uint8_t>& ha,
                                  const std::vector<uint8_t>& hb,
                                  uint64_t opArg) {
@@ -153,19 +162,19 @@ protected:
     DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
     da.copyFrom(ha);
     db.copyFrom(hb);
-    kernelReducePacks<T, Fn, BYTES>
+    kernelReducePacks<IsE5m2, OpKind, BYTES>
       <<<gridFor(nPacks), kDefaultBlockSize>>>(da.ptr, db.ptr, dout.ptr, nPacks, opArg);
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     return dout.copyTo();
   }
 
-  template<typename T>
+  template<bool IsE5m2>
   std::vector<float> decodeAll(const std::vector<uint8_t>& bytes) {
     DeviceBuffer<uint8_t> d(kPairs);
     DeviceBuffer<float> f(kPairs);
     d.copyFrom(bytes);
-    kernelDecode<T><<<gridFor(kPairs), kDefaultBlockSize>>>(d.ptr, f.ptr, kPairs);
+    kernelDecode<IsE5m2><<<gridFor(kPairs), kDefaultBlockSize>>>(d.ptr, f.ptr, kPairs);
     EXPECT_EQ(hipGetLastError(), hipSuccess);
     EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
     return f.copyTo();
@@ -174,15 +183,15 @@ protected:
   // Every pack width must match the scalar path exactly, for every pair, in every
   // lane position. Reported as a count plus one decoded example, since a bare
   // "65536 mismatches" says nothing about which input broke.
-  template<typename T, typename Fn>
+  template<bool IsE5m2, int OpKind>
   void ExpectWidthsAgree(const char* opName, uint64_t opArg = 0) {
     for (int rot = 0; rot < 8; rot++) {
       std::vector<uint8_t> ha, hb;
       buildPairs(rot, ha, hb);
-      auto scalar = reduceAll<T, Fn, 1>(ha, hb, opArg);
-      auto w2 = reduceAll<T, Fn, 2>(ha, hb, opArg);
-      auto w8 = reduceAll<T, Fn, 8>(ha, hb, opArg);
-      auto w16 = reduceAll<T, Fn, 16>(ha, hb, opArg);
+      auto scalar = reduceAll<IsE5m2, OpKind, 1>(ha, hb, opArg);
+      auto w2 = reduceAll<IsE5m2, OpKind, 2>(ha, hb, opArg);
+      auto w8 = reduceAll<IsE5m2, OpKind, 8>(ha, hb, opArg);
+      auto w16 = reduceAll<IsE5m2, OpKind, 16>(ha, hb, opArg);
       const std::vector<uint8_t>* wide[3] = {&w2, &w8, &w16};
       const int widths[3] = {2, 8, 16};
       for (int w = 0; w < 3; w++) {
@@ -194,9 +203,9 @@ protected:
           }
         }
         if (bad == 0) continue;
-        auto decScalar = decodeAll<T>(scalar);
-        auto decWide = decodeAll<T>(*wide[w]);
-        ADD_FAILURE() << opName << ": EltPerPack=" << (widths[w] / (int)sizeof(T))
+        auto decScalar = decodeAll<IsE5m2>(scalar);
+        auto decWide = decodeAll<IsE5m2>(*wide[w]);
+        ADD_FAILURE() << opName << ": EltPerPack=" << widths[w]
                       << " (BytePack<" << widths[w] << ">) disagrees with the scalar path on "
                       << bad << "/" << kPairs << " pairs at lane rotation " << rot
                       << ". First: a=0x" << std::hex << (int)ha[first]
@@ -209,8 +218,9 @@ protected:
   }
 
   // Exhaustive over every pair whose exact sum stays in range.
-  template<typename T>
-  void ExpectMatchesHostModel(bool isE5m2, const char* name) {
+  template<bool IsE5m2>
+  void ExpectMatchesHostModel(const char* name) {
+    constexpr bool isE5m2 = IsE5m2;
     const bool fnuz = deviceIsFnuz();
     const float maxFinite = fp8MaxFinite(isE5m2, fnuz);
 
@@ -223,7 +233,7 @@ protected:
     DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
     da.copyFrom(ha);
     db.copyFrom(hb);
-    kernelReducePacks<T, FuncSum<T>, 1>
+    kernelReducePacks<IsE5m2, kOpSum, 1>
       <<<gridFor(kPairs), kDefaultBlockSize>>>(da.ptr, db.ptr, dout.ptr, kPairs, 0);
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -266,8 +276,9 @@ protected:
   }
 
   // Exact small-integer sums, which pin the conversion scale.
-  template<typename T>
-  void ExpectExactSmallSums(bool isE5m2, const char* name) {
+  template<bool IsE5m2>
+  void ExpectExactSmallSums(const char* name) {
+    constexpr bool isE5m2 = IsE5m2;
     const bool fnuz = deviceIsFnuz();
     // Values exactly representable in both e4m3 and e5m2, whose sums are too.
     const float lhs[] = {1.0f, 2.0f, 4.0f, 0.5f, -1.0f, 8.0f, 0.25f, 16.0f};
@@ -284,7 +295,7 @@ protected:
     db.copyFrom(hb);
     // Width 8 so the pk8 path is the one under test where it exists.
     const int nPacks = kPairs / 8;
-    kernelReducePacks<T, FuncSum<T>, 8>
+    kernelReducePacks<IsE5m2, kOpSum, 8>
       <<<gridFor(nPacks), kDefaultBlockSize>>>(da.ptr, db.ptr, dout.ptr, nPacks, 0);
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -300,8 +311,9 @@ protected:
     }
   }
 
-  template<typename T>
-  void ExpectOverflowConsistent(bool isE5m2, const char* name) {
+  template<bool IsE5m2>
+  void ExpectOverflowConsistent(const char* name) {
+    constexpr bool isE5m2 = IsE5m2;
     const bool fnuz = deviceIsFnuz();
     const float maxFinite = fp8MaxFinite(isE5m2, fnuz);
 
@@ -315,9 +327,9 @@ protected:
     da.copyFrom(ha);
     db.copyFrom(hb);
     const int nPacks8 = kPairs / 8;
-    kernelReducePacks<T, FuncSum<T>, 1>
+    kernelReducePacks<IsE5m2, kOpSum, 1>
       <<<gridFor(kPairs), kDefaultBlockSize>>>(da.ptr, db.ptr, d1.ptr, kPairs, 0);
-    kernelReducePacks<T, FuncSum<T>, 8>
+    kernelReducePacks<IsE5m2, kOpSum, 8>
       <<<gridFor(nPacks8), kDefaultBlockSize>>>(da.ptr, db.ptr, d8.ptr, nPacks8, 0);
     ASSERT_EQ(hipGetLastError(), hipSuccess);
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
@@ -342,31 +354,31 @@ protected:
 // ---------------------------------------------------------------------------
 
 TEST_F(Fp8ReduceTest, PackWidthsAgreeSumE4m3) {
-  ExpectWidthsAgree<rccl_float8, FuncSum<rccl_float8>>("e4m3 Sum");
+  ExpectWidthsAgree<false, kOpSum>("e4m3 Sum");
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeSumE5m2) {
-  ExpectWidthsAgree<rccl_bfloat8, FuncSum<rccl_bfloat8>>("e5m2 Sum");
+  ExpectWidthsAgree<true, kOpSum>("e5m2 Sum");
 }
 
 // Prod/MinMax have no wide specialization today, so these currently assert that
 // the recursion stays faithful. They are the guard if one is ever added.
 TEST_F(Fp8ReduceTest, PackWidthsAgreeProdE4m3) {
-  ExpectWidthsAgree<rccl_float8, FuncProd<rccl_float8>>("e4m3 Prod");
+  ExpectWidthsAgree<false, kOpProd>("e4m3 Prod");
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeProdE5m2) {
-  ExpectWidthsAgree<rccl_bfloat8, FuncProd<rccl_bfloat8>>("e5m2 Prod");
+  ExpectWidthsAgree<true, kOpProd>("e5m2 Prod");
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeMinE4m3) {
-  ExpectWidthsAgree<rccl_float8, FuncMinMax<rccl_float8>>("e4m3 Min", /*opArg=*/0);
+  ExpectWidthsAgree<false, kOpMinMax>("e4m3 Min", /*opArg=*/0);
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeMaxE4m3) {
-  ExpectWidthsAgree<rccl_float8, FuncMinMax<rccl_float8>>("e4m3 Max", /*opArg=*/1);
+  ExpectWidthsAgree<false, kOpMinMax>("e4m3 Max", /*opArg=*/1);
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeMinE5m2) {
-  ExpectWidthsAgree<rccl_bfloat8, FuncMinMax<rccl_bfloat8>>("e5m2 Min", /*opArg=*/0);
+  ExpectWidthsAgree<true, kOpMinMax>("e5m2 Min", /*opArg=*/0);
 }
 TEST_F(Fp8ReduceTest, PackWidthsAgreeMaxE5m2) {
-  ExpectWidthsAgree<rccl_bfloat8, FuncMinMax<rccl_bfloat8>>("e5m2 Max", /*opArg=*/1);
+  ExpectWidthsAgree<true, kOpMinMax>("e5m2 Max", /*opArg=*/1);
 }
 
 // ---------------------------------------------------------------------------
@@ -381,10 +393,10 @@ TEST_F(Fp8ReduceTest, PackWidthsAgreeMaxE5m2) {
 // ---------------------------------------------------------------------------
 
 TEST_F(Fp8ReduceTest, MatchesHostModelE4m3) {
-  ExpectMatchesHostModel<rccl_float8>(/*isE5m2=*/false, "e4m3");
+  ExpectMatchesHostModel<false>("e4m3");
 }
 TEST_F(Fp8ReduceTest, MatchesHostModelE5m2) {
-  ExpectMatchesHostModel<rccl_bfloat8>(/*isE5m2=*/true, "e5m2");
+  ExpectMatchesHostModel<true>("e5m2");
 }
 
 // ---------------------------------------------------------------------------
@@ -397,10 +409,10 @@ TEST_F(Fp8ReduceTest, MatchesHostModelE5m2) {
 // ---------------------------------------------------------------------------
 
 TEST_F(Fp8ReduceTest, ExactSmallSumsE4m3) {
-  ExpectExactSmallSums<rccl_float8>(/*isE5m2=*/false, "e4m3");
+  ExpectExactSmallSums<false>("e4m3");
 }
 TEST_F(Fp8ReduceTest, ExactSmallSumsE5m2) {
-  ExpectExactSmallSums<rccl_bfloat8>(/*isE5m2=*/true, "e5m2");
+  ExpectExactSmallSums<true>("e5m2");
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +426,10 @@ TEST_F(Fp8ReduceTest, ExactSmallSumsE5m2) {
 // ---------------------------------------------------------------------------
 
 TEST_F(Fp8ReduceTest, OverflowConsistentE4m3) {
-  ExpectOverflowConsistent<rccl_float8>(/*isE5m2=*/false, "e4m3");
+  ExpectOverflowConsistent<false>("e4m3");
 }
 TEST_F(Fp8ReduceTest, OverflowConsistentE5m2) {
-  ExpectOverflowConsistent<rccl_bfloat8>(/*isE5m2=*/true, "e5m2");
+  ExpectOverflowConsistent<true>("e5m2");
 }
 
 // ---------------------------------------------------------------------------

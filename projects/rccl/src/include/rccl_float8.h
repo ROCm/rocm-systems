@@ -76,6 +76,16 @@ inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool fnuz) {
   return float(v);
 }
 
+// Mirror of rcclFp8ToFloat for the encode direction.
+inline uint8_t rcclFloatToFp8(float v, bool isE5m2, bool fnuz) {
+  if (isE5m2) {
+    if (fnuz) return __hip_fp8_e5m2_fnuz(v).__x;
+    return __hip_fp8_e5m2(v).__x;
+  }
+  if (fnuz) return __hip_fp8_e4m3_fnuz(v).__x;
+  return __hip_fp8_e4m3(v).__x;
+}
+
 typedef _Float16 half_t;
 typedef _Float16 half2_t __attribute__((ext_vector_type(2)));
 
@@ -1084,6 +1094,11 @@ inline float rcclFp8ToFloat(uint8_t bits, bool isE5m2, bool /*fnuz*/) {
   rccl_float8 v;
   v.data = bits;
   return float(v);
+}
+
+inline uint8_t rcclFloatToFp8(float v, bool isE5m2, bool /*fnuz*/) {
+  if (isE5m2) return rccl_bfloat8(v).data;
+  return rccl_float8(v).data;
 }
 
 #endif
