@@ -1861,6 +1861,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -4419,6 +4424,29 @@
         }
       ]
     },
+    "gin_devcomm_requirements": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DevComm_GroupedCreateKeepsGinRequirements",
+          "description": "Grouped ncclDevCommCreate keeps GIN signal/counter requests from caller-built requirement nodes on the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.DevComm_GroupedCreateKeepsGinRequirements"
+        }
+      ]
+    },
     
     "device_api_mpi_lsa": {
       "extends": "default",
@@ -5314,6 +5342,12 @@
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "GIN DevComm Requirements - Proxy",
+      "description": "Grouped ncclDevCommCreate with caller-built GIN signal/counter requirement nodes on the GIN proxy over IB across two nodes",
+      "config": "gin_devcomm_requirements",
       "enabled": true
     },
     {
