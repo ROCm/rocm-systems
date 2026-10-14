@@ -18,14 +18,18 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
+#include "fakes/topo_net_stubs.h"
+#include "fakes/topo_stubs.h"
 #include "fakes/transport_p2p_fakes.h"
 
 // Routes every NCCL_PARAM / RCCL_PARAM in net.cc through g_loadParam on each call.
@@ -152,6 +156,7 @@ class NetMicrotestBase : public ::testing::Test {
     ResetRocmWrapFakes();
     ResetNcclFakes();
     ResetHipFakes();
+    ResetTopoStubs();
     ResetTransportP2pFakes();
     ResetEnvFakes();
   }
@@ -1023,6 +1028,409 @@ TEST_F(NetProxySetupMicrotest, Setup_NoGdr_NeverUsesDmaBuf) {
   ScopedHook param(g_loadParam, ParamOverride({{"RCCL_FORCE_ENABLE_DMABUF", 1}}));
   EXPECT_EQ(UseDmaBuf(true), 0);
   EXPECT_EQ(UseDmaBuf(false), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Client-side setup (sendSetup, recvSetup)
+// ---------------------------------------------------------------------------
+
+class NetClientMicrotestBase : public NetMicrotestBase {
+ protected:
+  static constexpr int kRanks = 4;
+  static constexpr int kMyRank = 1;
+  static constexpr int kPeerRank = 3;
+
+  std::unique_ptr<ncclTopoSystem> topo_ = std::make_unique<ncclTopoSystem>();
+  ncclComm comm_{};
+  ncclPeerInfo peerInfo_[kRanks]{};
+  int topParentRanks_[kRanks] = {10, 11, 12, 13};
+  int topParentLocalRanks_[kRanks] = {20, 21, 22, 23};
+  ncclConnector conn_{};
+  ncclConnect connectInfo_{};
+
+  void SetUp() override {
+    NetMicrotestBase::SetUp();
+    strcpy(topo_->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+    comm_.topo = topo_.get();
+    comm_.ncclNet = &vtable_;
+    comm_.nRanks = kRanks;
+    comm_.rank = kMyRank;
+    comm_.localRank = 2;
+    comm_.cudaDev = 0;
+    comm_.useGdr = true;
+    comm_.peerInfo = peerInfo_;
+    comm_.topParentRanks = topParentRanks_;
+    comm_.topParentLocalRanks = topParentLocalRanks_;
+    for (int r = 0; r < kRanks; r++) {
+      peerInfo_[r].rank = r;
+      peerInfo_[r].cudaDev = r;
+    }
+    peerInfo_[kMyRank].cudaDev = comm_.cudaDev;
+  }
+
+  int ConnectInfoInt(size_t offset) {
+    int v;
+    memcpy(&v, reinterpret_cast<uint8_t*>(&connectInfo_) + offset, sizeof(v));
+    return v;
+  }
+};
+
+class NetSetupMicrotest : public NetClientMicrotestBase {
+ protected:
+  ncclTopoGraph graph_{};
+  ncclTopoGdrMode gdr_ = ncclTopoGdrModeDefault;
+  int netDev_ = 1;
+  int proxyRank_ = kMyRank;  // what ncclTopoGetNetDev reports
+  int intraNetDev_ = -1;     // what ncclTopoGetIntraNetDev reports
+
+  int getNetDevCalls_ = 0, getNetDevPeer_ = -1;
+  int intraCalls_ = 0, intraType_ = -1;
+  int checkGdrRead_ = -1;
+  int connectSend_ = -1, connectProxyRank_ = -1, connectTransport_ = -1;
+  int callType_ = -1, callRespSize_ = -1;
+  void* callResp_ = nullptr;
+  setupReq req_{};
+
+  void SetUp() override {
+    NetClientMicrotestBase::SetUp();
+    g_ncclTopoGetNetDev = [this](ncclComm*, int, ncclTopoGraph*, int, int peerRank, int64_t* id, int* dev,
+                                 int* proxyRank) {
+      ++getNetDevCalls_;
+      getNetDevPeer_ = peerRank;
+      *id = 0x77;
+      *dev = netDev_;
+      *proxyRank = proxyRank_;
+      return ncclSuccess;
+    };
+    g_ncclTopoGetIntraNetDev = [this](ncclTopoSystem*, int, ncclTopoGraph*, int, int type, int64_t* id, int* dev) {
+      ++intraCalls_;
+      intraType_ = type;
+      *id = 0x66;
+      *dev = intraNetDev_;
+      return ncclSuccess;
+    };
+    g_ncclTopoCheckGdr = [this](ncclTopoSystem*, int, int64_t, int read, ncclTopoGdrMode* mode) {
+      checkGdrRead_ = read;
+      *mode = gdr_;
+      return ncclSuccess;
+    };
+    g_ncclTopoNeedFlush = [](ncclComm*, int64_t, int, int, bool, ncclTopoFlushType* flush) {
+      *flush = ncclTopoFlushNone;
+      return ncclSuccess;
+    };
+    g_hipDeviceGetAttributeResult = hipSuccess;
+    g_proxyConnect = [this](ncclComm*, int transport, int send, int proxyRank, ncclProxyConnector*) {
+      connectTransport_ = transport;
+      connectSend_ = send;
+      connectProxyRank_ = proxyRank;
+      return ncclSuccess;
+    };
+    g_proxyCallBlocking = [this](ncclComm*, ncclProxyConnector*, int type, void* reqBuff, int reqSize, void* resp,
+                                 int respSize) {
+      callType_ = type;
+      callResp_ = resp;
+      callRespSize_ = respSize;
+      EXPECT_EQ(reqSize, (int)sizeof(setupReq));
+      memcpy(&req_, reqBuff, sizeof(req_));
+      if (resp) memset(resp, 0x5A, respSize);
+      return ncclSuccess;
+    };
+  }
+
+  ncclResult_t SendSetup(ncclTopoGraph* graph, int connIndex, int channelId = 2) {
+    return sendSetup(&comm_, graph, &peerInfo_[kMyRank], &peerInfo_[kPeerRank], &connectInfo_, &conn_, channelId,
+                     connIndex);
+  }
+  ncclResult_t RecvSetup(ncclTopoGraph* graph, int connIndex, int channelId = 2) {
+    return recvSetup(&comm_, graph, &peerInfo_[kMyRank], &peerInfo_[kPeerRank], &connectInfo_, &conn_, channelId,
+                     connIndex);
+  }
+};
+
+TEST_F(NetSetupMicrotest, SendSetup_RingConnection_SetsUpDedicatedBuffersOnOwnProxy) {
+  ASSERT_EQ(SendSetup(&graph_, /*connIndex=*/0), ncclSuccess);
+
+  EXPECT_EQ(connectTransport_, TRANSPORT_NET);
+  EXPECT_EQ(connectSend_, 1);
+  EXPECT_EQ(connectProxyRank_, kMyRank);
+  EXPECT_EQ(callType_, ncclProxyMsgSetup);
+  EXPECT_EQ(callResp_, nullptr);
+  EXPECT_EQ(conn_.conn.shared, 0);
+  EXPECT_EQ(req_.shared, 0);
+  EXPECT_EQ(req_.isP2p, 0);
+  EXPECT_EQ(req_.netDev, 1);
+  EXPECT_EQ(req_.useGdr, ncclTopoGdrModeDefault);
+  EXPECT_EQ(req_.channelId, 2);
+  EXPECT_EQ(req_.connIndex, 0);
+  EXPECT_EQ(req_.tpLocalRank, topParentLocalRanks_[comm_.localRank]);
+  EXPECT_EQ(req_.tpRank, topParentRanks_[kMyRank]);
+  EXPECT_EQ(req_.tpRemoteRank, topParentRanks_[kPeerRank]);
+  EXPECT_EQ(req_.sameDevice, 1);
+  EXPECT_EQ(checkGdrRead_, 1);
+  EXPECT_EQ(intraCalls_, 0);
+  EXPECT_EQ(getNetDevPeer_, kPeerRank);
+  EXPECT_EQ(ConnectInfoInt(0), topParentRanks_[kMyRank]);
+  EXPECT_EQ(ConnectInfoInt(sizeof(ncclNetHandle_t)), (int)ncclTopoGdrModeDefault);
+}
+
+TEST_F(NetSetupMicrotest, Setup_P2pConnection_SharesBuffersByDefault) {
+  ASSERT_EQ(SendSetup(nullptr, /*connIndex=*/1), ncclSuccess);
+  EXPECT_EQ(conn_.conn.shared, 1);
+  EXPECT_EQ(req_.shared, 1);
+  EXPECT_EQ(req_.isP2p, 1);
+
+  conn_ = {};
+  ASSERT_EQ(RecvSetup(nullptr, 1), ncclSuccess);
+  EXPECT_EQ(conn_.conn.shared, 1);
+  EXPECT_EQ(req_.shared, 1);
+}
+
+TEST_F(NetSetupMicrotest, Setup_GraphOrFirstConnection_KeepsDedicatedBuffers) {
+  ASSERT_EQ(SendSetup(&graph_, /*connIndex=*/1), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+  ASSERT_EQ(RecvSetup(&graph_, 1), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+
+  ASSERT_EQ(SendSetup(nullptr, /*connIndex=*/0), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+  ASSERT_EQ(RecvSetup(nullptr, 0), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+}
+
+TEST_F(NetSetupMicrotest, Setup_NetSharedBuffersParam_OverridesP2pDefault) {
+  ScopedHook param(g_loadParam, ParamOverride({{"NET_SHARED_BUFFERS", 0}}));
+
+  ASSERT_EQ(SendSetup(nullptr, 1), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+  ASSERT_EQ(RecvSetup(nullptr, 1), ncclSuccess);
+  EXPECT_EQ(req_.shared, 0);
+}
+
+TEST_F(NetSetupMicrotest, Setup_P2pNetConnection_PrefersIntraNodeNic) {
+  intraNetDev_ = 3;
+
+  ASSERT_EQ(SendSetup(nullptr, NCCL_CONN_IDX_P2P_NET), ncclSuccess);
+  EXPECT_EQ(intraType_, 1);
+  EXPECT_EQ(getNetDevCalls_, 0);
+  EXPECT_EQ(req_.netDev, 3);
+
+  ASSERT_EQ(RecvSetup(nullptr, NCCL_CONN_IDX_P2P_NET), ncclSuccess);
+  EXPECT_EQ(intraType_, 0);
+  EXPECT_EQ(getNetDevCalls_, 0);
+  EXPECT_EQ(req_.netDev, 3);
+}
+
+TEST_F(NetSetupMicrotest, Setup_P2pNetConnectionWithoutIntraNodeNic_FallsBackToTopology) {
+  ASSERT_EQ(SendSetup(nullptr, NCCL_CONN_IDX_P2P_NET), ncclSuccess);
+  EXPECT_EQ(intraCalls_, 1);
+  EXPECT_EQ(getNetDevCalls_, 1);
+  EXPECT_EQ(req_.netDev, 1);
+}
+
+TEST_F(NetSetupMicrotest, SendSetup_PxnProxy_ConnectsThroughProxyRank) {
+  proxyRank_ = 2;
+
+  ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(connectProxyRank_, 2);
+  EXPECT_TRUE(comm_.useNetPXN);
+  EXPECT_EQ(req_.sameDevice, 0);  // peerInfo[2] is on another device
+  EXPECT_EQ(ConnectInfoInt(0), topParentRanks_[2]);
+}
+
+TEST_F(NetSetupMicrotest, SendSetup_PxnOnNonRingConnection_LeavesCommPxnFlag) {
+  proxyRank_ = 2;
+
+  ASSERT_EQ(SendSetup(nullptr, 1), ncclSuccess);
+
+  EXPECT_FALSE(comm_.useNetPXN);
+}
+
+TEST_F(NetSetupMicrotest, Setup_Gdr_MarksDirectNic) {
+  ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+  EXPECT_TRUE(conn_.conn.flags & NCCL_DIRECT_NIC);
+  EXPECT_TRUE(comm_.useGdr);
+
+  conn_ = {};
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+  EXPECT_TRUE(conn_.conn.flags & NCCL_DIRECT_NIC);
+}
+
+TEST_F(NetSetupMicrotest, Setup_NoGdrOnRing_ClearsCommGdr) {
+  gdr_ = ncclTopoGdrModeDisable;
+
+  ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+  EXPECT_FALSE(conn_.conn.flags & NCCL_DIRECT_NIC);
+  EXPECT_FALSE(comm_.useGdr);
+
+  comm_.useGdr = true;
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+  EXPECT_FALSE(conn_.conn.flags & NCCL_DIRECT_NIC);
+  EXPECT_FALSE(comm_.useGdr);
+}
+
+TEST_F(NetSetupMicrotest, Setup_NoGdrOnOtherConnection_LeavesCommGdr) {
+  gdr_ = ncclTopoGdrModeDisable;
+
+  ASSERT_EQ(SendSetup(nullptr, 1), ncclSuccess);
+  ASSERT_EQ(RecvSetup(nullptr, 1), ncclSuccess);
+
+  EXPECT_TRUE(comm_.useGdr);
+}
+
+TEST_F(NetSetupMicrotest, SendSetup_GdrOnArchWithoutCoherentHdp_RecordsHdpFlushRegister) {
+  strcpy(topo_->nodes[GPU].nodes[0].gpu.gcn, "gfx1100");
+  int queriedDev = -1;
+  ScopedHook attr(g_hipDeviceGetAttribute, [&](int* v, hipDeviceAttribute_t a, int dev) {
+    EXPECT_EQ(a, hipDeviceAttributeHdpMemFlushCntl);
+    queriedDev = dev;
+    *v = 0x1234;
+    return hipSuccess;
+  });
+  peerInfo_[kMyRank].cudaDev = 5;
+
+  ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(queriedDev, 5);
+  EXPECT_EQ(conn_.conn.curr_hdp_reg, reinterpret_cast<uint32_t*>(0x1234));
+  EXPECT_EQ(req_.curr_hdp_reg, reinterpret_cast<uint32_t*>(0x1234));
+}
+
+TEST_F(NetSetupMicrotest, SendSetup_GdrOnCoherentArch_SkipsHdpRegister) {
+  for (const char* arch : {"gfx90a", "gfx942", "gfx950"}) {
+    SCOPED_TRACE(arch);
+    strcpy(topo_->nodes[GPU].nodes[0].gpu.gcn, arch);
+    ScopedHook attr(g_hipDeviceGetAttribute, [](int*, hipDeviceAttribute_t, int) { return hipErrorInvalidValue; });
+
+    ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+
+    EXPECT_EQ(attr.calls, 0);
+    EXPECT_EQ(req_.curr_hdp_reg, nullptr);
+  }
+}
+
+TEST_F(NetSetupMicrotest, SendSetup_NoGdr_SkipsHdpRegister) {
+  strcpy(topo_->nodes[GPU].nodes[0].gpu.gcn, "gfx1100");
+  gdr_ = ncclTopoGdrModeDisable;
+  ScopedHook attr(g_hipDeviceGetAttribute, [](int*, hipDeviceAttribute_t, int) { return hipErrorInvalidValue; });
+
+  ASSERT_EQ(SendSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(attr.calls, 0);
+}
+
+TEST_F(NetSetupMicrotest, RecvSetup_RingConnection_ListensOnOwnNicAndReturnsHandle) {
+  gdr_ = ncclTopoGdrModePci;
+
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(connectTransport_, TRANSPORT_NET);
+  EXPECT_EQ(connectSend_, 0);
+  EXPECT_EQ(connectProxyRank_, kMyRank);
+  EXPECT_EQ(getNetDevPeer_, kMyRank);
+  EXPECT_EQ(checkGdrRead_, 0);
+  EXPECT_EQ(callType_, ncclProxyMsgSetup);
+  EXPECT_EQ(callResp_, &connectInfo_);
+  EXPECT_EQ(callRespSize_, (int)sizeof(ncclNetHandle_t));
+  EXPECT_EQ(req_.netDev, 1);
+  EXPECT_EQ(req_.channelId, 2);
+  EXPECT_EQ(req_.tpLocalRank, topParentLocalRanks_[comm_.localRank]);
+  EXPECT_EQ(req_.tpRank, topParentRanks_[kMyRank]);
+  EXPECT_EQ(req_.tpRemoteRank, topParentRanks_[kPeerRank]);
+  EXPECT_EQ(req_.sameDevice, 1);
+  EXPECT_EQ(ConnectInfoInt(0), 0x5A5A5A5A);  // the proxy's listen handle
+  EXPECT_EQ(ConnectInfoInt(sizeof(ncclNetHandle_t)), (int)ncclTopoGdrModePci);
+}
+
+TEST_F(NetSetupMicrotest, RecvSetup_Gdr_AsksTopologyWhetherToFlush) {
+  g_hipDirectManagedMemAccess = 0;
+  bool managedSeen = true;
+  int flushNetDev = -1;
+  ScopedHook flush(g_ncclTopoNeedFlush, [&](ncclComm*, int64_t netId, int netDev, int rank, bool managed,
+                                            ncclTopoFlushType* f) {
+    EXPECT_EQ(netId, 0x77);
+    EXPECT_EQ(rank, kMyRank);
+    flushNetDev = netDev;
+    managedSeen = managed;
+    *f = ncclTopoFlushAlways;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(flush.calls, 1);
+  EXPECT_EQ(flushNetDev, 1);
+  EXPECT_FALSE(managedSeen);
+  EXPECT_EQ(req_.needFlush, ncclTopoFlushAlways);
+
+  g_hipDirectManagedMemAccess = 1;
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+  EXPECT_TRUE(managedSeen);
+}
+
+TEST_F(NetSetupMicrotest, RecvSetup_Gdr_RecordsHdpFlushRegister) {
+  int hdpDev = -1;
+  ScopedHook attr(g_hipDeviceGetAttribute, [&](int* v, hipDeviceAttribute_t a, int dev) {
+    if (a == hipDeviceAttributeHdpMemFlushCntl) {
+      hdpDev = dev;
+      *v = 0x4321;
+    } else {
+      *v = 0;
+    }
+    return hipSuccess;
+  });
+  peerInfo_[kMyRank].cudaDev = 6;
+
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(hdpDev, 6);
+  EXPECT_EQ(conn_.conn.curr_hdp_reg, reinterpret_cast<uint32_t*>(0x4321));
+  EXPECT_EQ(req_.curr_hdp_reg, reinterpret_cast<uint32_t*>(0x4321));
+}
+
+TEST_F(NetSetupMicrotest, RecvSetup_NoGdr_SkipsFlushQuery) {
+  gdr_ = ncclTopoGdrModeDisable;
+  ScopedHook flush(g_ncclTopoNeedFlush, [](ncclComm*, int64_t, int, int, bool, ncclTopoFlushType*) {
+    return ncclInternalError;
+  });
+
+  ASSERT_EQ(RecvSetup(&graph_, 0), ncclSuccess);
+
+  EXPECT_EQ(flush.calls, 0);
+  EXPECT_EQ(req_.needFlush, ncclTopoFlushNone);
+}
+
+TEST_F(NetSetupMicrotest, Setup_DependencyFails_ReturnsError) {
+  auto fails = [](auto...) { return ncclInternalError; };
+  {
+    ScopedHook hook(g_ncclTopoGetNetDev, fails);
+    EXPECT_EQ(SendSetup(&graph_, 0), ncclInternalError);
+    EXPECT_EQ(RecvSetup(&graph_, 0), ncclInternalError);
+  }
+  {
+    ScopedHook hook(g_ncclTopoGetIntraNetDev, fails);
+    EXPECT_EQ(SendSetup(nullptr, NCCL_CONN_IDX_P2P_NET), ncclInternalError);
+    EXPECT_EQ(RecvSetup(nullptr, NCCL_CONN_IDX_P2P_NET), ncclInternalError);
+  }
+  {
+    ScopedHook hook(g_ncclTopoCheckGdr, fails);
+    EXPECT_EQ(SendSetup(&graph_, 0), ncclInternalError);
+    EXPECT_EQ(RecvSetup(&graph_, 0), ncclInternalError);
+  }
+  {
+    ScopedHook hook(g_ncclTopoNeedFlush, fails);
+    EXPECT_EQ(RecvSetup(&graph_, 0), ncclInternalError);
+  }
+  {
+    ScopedHook hook(g_proxyConnect, fails);
+    EXPECT_EQ(SendSetup(&graph_, 0), ncclInternalError);
+    EXPECT_EQ(RecvSetup(&graph_, 0), ncclInternalError);
+  }
+  {
+    ScopedHook hook(g_proxyCallBlocking, fails);
+    EXPECT_EQ(SendSetup(&graph_, 0), ncclInternalError);
+    EXPECT_EQ(RecvSetup(&graph_, 0), ncclInternalError);
+  }
 }
 
 }  // namespace
