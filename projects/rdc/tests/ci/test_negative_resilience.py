@@ -97,6 +97,34 @@ class TestUnsupportedFields:
 
 
 # ---------------------------------------------------------------------------
+# GPU groups and field groups that do not exist (requires daemon + GPU)
+# ---------------------------------------------------------------------------
+# Values of rdc_status_t in include/rdc/rdc.h.
+RDC_ST_GROUP_NOT_FOUND = 17
+RDC_ST_FLDGROUP_NOT_FOUND = 18
+MISSING_ID = "4242"
+
+
+class TestMissingGroups:
+    """Verify rdci names the GPU group or field group it cannot find."""
+
+    def test_dmon_missing_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "dmon", "-g", MISSING_ID, "-f", MISSING_ID, "-c", "1")
+        assert r.returncode == RDC_ST_GROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the group {MISSING_ID}" in r.stdout
+
+    def test_dmon_missing_field_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "dmon", "-i", "0", "-f", MISSING_ID, "-c", "1")
+        assert r.returncode == RDC_ST_FLDGROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the field group {MISSING_ID}" in r.stdout
+
+    def test_health_set_missing_group(self, rdci_path, rdcd_server):
+        r = run_rdci(rdci_path, "health", "-g", MISSING_ID, "-s", "pm")
+        assert r.returncode == RDC_ST_GROUP_NOT_FOUND, r.stdout
+        assert f"Cannot find the group {MISSING_ID}" in r.stdout
+
+
+# ---------------------------------------------------------------------------
 # Daemon restart resilience (requires GPU)
 # ---------------------------------------------------------------------------
 class TestDaemonResilience:
