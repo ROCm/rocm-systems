@@ -130,7 +130,7 @@ build_pack_from_array(parameter_pack&                             pack,
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
-    if(pack.exec_mask_trace && agent->gfx_target_version / 10000 != 12)
+    if(pack.exec_mask_trace && agent->gfx_target_version / 10000 < 12)
         return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
     if(pack.exec_mask_trace && pack.no_detail_simd)
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;

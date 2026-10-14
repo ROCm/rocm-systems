@@ -91,7 +91,7 @@ The configuration parameters are described here:
 
 - ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE: Controls when the profiler allocates thread trace queues, signals, and memory for each configured GPU. See `Resource initialization modes`_ below.
 
-- ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE: Enables instruction-level EXEC mask population count tracking on gfx12 when nonzero (default: zero, disabled). Enabling it on other architectures returns ``ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED``. It requires instruction tracing; combining it with nonzero ``ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL`` returns ``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``.
+- ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE: Enables instruction-level EXEC mask population count tracking on gfx12 and later when nonzero (default: zero, disabled). Enabling it on architectures older than gfx12 returns ``ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED``. It requires instruction tracing; combining it with nonzero ``ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL`` returns ``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``.
 
 With EXEC tracking enabled, decoded wave records contain ``execmask_size`` entries in ``execmask``. Each entry gives the writing instruction's index in ``instructions_array``, its timestamp, and the number of active lanes in the new mask. These fields require a recent decoder library. Before accessing either field, check at runtime that ``wave.size >= offsetof(rocprofiler_thread_trace_decoder_wave_t, execmask_size) + sizeof(wave.execmask_size)``; an older decoder's wave record is smaller.
 

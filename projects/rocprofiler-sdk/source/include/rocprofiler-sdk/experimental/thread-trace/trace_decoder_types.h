@@ -186,10 +186,10 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
     int64_t begin_time;  ///< Wave begin time. Should match occupancy event wave start.
     int64_t end_time;    ///< Wave end time. Should match occupancy event wave end.
 
-    uint64_t                                       timeline_size;      ///< timeline_array size
-    uint64_t                                       instructions_size;  ///< instructions_array size
-    rocprofiler_thread_trace_decoder_wave_state_t* timeline_array;     ///< wave state change events
-    rocprofiler_thread_trace_decoder_inst_t*       instructions_array;  ///< Instructions executed
+    uint64_t                                        timeline_size;      ///< timeline_array size
+    uint64_t                                        instructions_size;  ///< instructions_array size
+    rocprofiler_thread_trace_decoder_wave_state_t*  timeline_array;  ///< wave state change events
+    rocprofiler_thread_trace_decoder_inst_t*        instructions_array;  ///< Instructions executed
     rocprofiler_thread_trace_decoder_exec_popcnt_t* execmask;            ///< Exec mask changes
     uint64_t                                        execmask_size;  ///< Number execmask entries
 } rocprofiler_thread_trace_decoder_wave_t;

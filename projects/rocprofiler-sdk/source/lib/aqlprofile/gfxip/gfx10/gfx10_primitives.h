@@ -629,7 +629,7 @@ public:
 
     // Indicate the different TT messages/tokens that should be enabled/logged
     // Indicate the different TT tokens that specify register operations to be logged
-    static uint32_t sqtt_token_mask_on_value(bool,bool)
+    static uint32_t sqtt_token_mask_on_value(bool, bool)
     {
 #if SQTT_PRIM_ENABLED
         uint32_t token_mask{0};
