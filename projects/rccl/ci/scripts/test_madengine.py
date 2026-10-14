@@ -633,7 +633,11 @@ def generate_manifest(
         if "," in ifname:
             nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
 
-    socket_ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
+    # Last over everything below, socket interfaces included.
+    workload_env = workload_config.get("env_vars", {})
+    socket_ifname = workload_env.get(
+        "NCCL_SOCKET_IFNAME", nccl_env.get("NCCL_SOCKET_IFNAME", "")
+    )
 
     # HF_TOKEN is passed via MAD_SECRETS_HFTOKEN in the process environment
     # (set in the workflow). Do NOT write it into the manifest — the manifest
@@ -654,9 +658,9 @@ def generate_manifest(
         "NCCL_IB_DISABLE": "0",
         "NCCL_TIMEOUT": "900",
         "IBV_SHOW_WARNINGS": "1",
-        **workload_config.get("env_vars", {}),
+        **workload_env,
     }
-    if socket_ifname:
+    if socket_ifname and "GLOO_SOCKET_IFNAME" not in workload_env:
         docker_env_vars["GLOO_SOCKET_IFNAME"] = socket_ifname
 
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
