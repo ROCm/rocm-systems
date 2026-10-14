@@ -380,6 +380,17 @@ add_test(
 
 add_test(
   NAME
+    jpeg-decode-caps
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeCaps"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeCaps"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodecaps"
+)
+
+add_test(
+  NAME
     jpeg-negative-api-tests
   COMMAND
     "${CMAKE_CTEST_COMMAND}"

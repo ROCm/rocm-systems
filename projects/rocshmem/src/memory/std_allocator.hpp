@@ -77,7 +77,7 @@ namespace rocshmem {
   bool operator!=(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
     return false;
   }
-  
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_MEMORY_STD_ALLOCATOR_HPP_

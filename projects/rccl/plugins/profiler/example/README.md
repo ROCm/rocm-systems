@@ -20,8 +20,8 @@ To build the example plugin shipped as part of NCCL, just type `make`.
 1. Add the directory of this profiler plugin to your `LD_LIBRARY_PATH` or set the `NCCL_PROFILER_PLUGIN`,
    as documented in `plugins/profiler/README.md`.
 
-2. Set `NCCL_PROFILE_EVENT_MASK` bitmask to specify the NCCL events you want to instrument. By
-   default, all collectives and send/recv operations will be traced. For more details about the event
+2. Set `NCCL_PROFILE_EVENT_MASK` bitmask to specify the RCCL events you want to instrument. The mask
+   defaults to `0`, so no events are traced until it is set. For more details about the event
    representation used by the profiler refer to `plugins/profiler/README.md`.
 
    As an example, setting:
@@ -33,13 +33,30 @@ To build the example plugin shipped as part of NCCL, just type `make`.
    in NCCL all the events above (in the event hierarchy) the one requested are also captured. The advantage
    is that the profiler can easily correlate events that belong to the same NCCL operation and present
    them accordingly. Setting `NCCL_PROFILE_EVENT_MASK` to 4095 enables all events supported by the v5 profiler.
+   The v6 CE events (`ncclProfileCeColl`, `ncclProfileCeSync`, `ncclProfileCeBatch`) and
+   `ncclProfileProxyDiag` extend that, so use 65535 to enable every reportable event.
 
-3. Set `NCCL_PROFILE_DUMP_FILE` to the name of the dump file for the collected traces. A file named
-   ${NCCL_PROFILE_DUMP_FILE}-hostname-tid.txt is created. Profiler traces are saved using the chrome
-   event format (more precisely, using asynchronous events).
+3. Set `NCCL_PROFILE_DUMP_FILE` to the name of the dump file for the collected traces. One file per rank
+   named ${NCCL_PROFILE_DUMP_FILE}_${commHash}_${rank}.json is created. Profiler traces are saved using
+   the chrome event format (more precisely, using asynchronous events).
 
 4. If you set the dump file variable, type chrome://tracing on your chromium browser search bar and
    open the created dump file to visualize the traces.
+
+# Collectives using RCCL DDA are not traced
+
+RCCL direct device access (DDA) path launches its own kernels and bypasses the proxy and plan
+machinery the profiler is instrumented against, so a collective that selects RCCL DDA path produces no
+`COLL`, `GROUP` or `GPU` events at all.
+
+Set `RCCL_DDA_ENABLE=0` to route the collectives through the instrumented path while profiling. The
+same applies to the inspector plugin.
+
+# NET_IB and NET_SOCK events are opt-in at build time
+
+The `ncclProfileNetPlugin` events emitted by the IB and socket transports sit behind
+`NCCL_ENABLE_NET_PROFILING`, which is off by default because the instrumentation is in the network
+data path. Configure the build with `-DENABLE_NET_PROFILING=ON` to compile them in.
 
 # Changing the profiler memory pool sizes
 
@@ -120,6 +137,8 @@ The example profiler generates traces using the json format. An example of trace
 {"name": "AllReduce", "cat": "COLL", "ph": "e", "id": 17, "pid": 225798, "tid": 1, "ts": 170633.535980},
 {"name": "AllReduce", "cat": "COLL_API", "ph": "e", "id": 17, "pid": 225798, "tid": 1, "ts": 170582.923981},
 {"name": "Group API", "cat": "GROUP_API", "ph": "e", "id": 17, "pid": 225798, "tid": 1, "ts": 170637.582001},
+{"name": "Group", "cat": "GROUP", "ph": "b", "id": 0, "pid": 225798, "tid": 1, "ts": 111991.558990, "args": {"groupId": 0}},
+{"name": "Group", "cat": "GROUP", "ph": "e", "id": 0, "pid": 225798, "tid": 1, "ts": 170637.582001},
 {}]
 ```
 
@@ -127,7 +146,9 @@ Details about the fields used in the trace can be found at this link:
 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview?tab=t.0#heading=h.yr4qxyxotyw
 
 The trace above is obtained by running a `ncclAllReduce` operation on 2 GPUs, communicating with each other through
-the network interface. The `Group` event encloses all traces that are related to the single `ncclAllReduce` call.
+the network interface. The `Group` event spans all traces that are related to the single `ncclAllReduce` call; it is
+written as a standalone span at the end of the dump, since the task events it covers are already emitted under the
+group API entry.
 (Note that for single collective invocations, where there are no explicit group calls, NCCL creates a group with only
 one collective and this is what is presented in the traces above).
 

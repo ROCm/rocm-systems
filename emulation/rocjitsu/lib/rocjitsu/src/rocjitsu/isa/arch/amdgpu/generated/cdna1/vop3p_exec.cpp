@@ -142,8 +142,8 @@ void VAccvgprReadVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 
@@ -152,8 +152,8 @@ void VAccvgprWriteVop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<false>(*this, wf, vdst, lane,
-                                    amdgpu::RegisterAccess(wf).read_lane(src0, lane));
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
   }
 }
 

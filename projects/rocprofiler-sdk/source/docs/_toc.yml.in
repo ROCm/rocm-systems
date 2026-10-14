@@ -6,6 +6,9 @@ defaults:
 
 root: index
 subtrees:
+  - entries:
+    - file: what-is-rocprofiler-sdk
+      title: What is ROCprofiler-SDK?
   - caption: Install
     entries:
     - file: install/install
@@ -14,8 +17,6 @@ subtrees:
       title: Build from source
   - caption: Quick Reference
     entries:
-    - file: quick-reference/rocprofiler-sdk-at-a-glance
-      title: ROCprofiler-SDK at a glance
     - file: quick-reference/quick_guide
       title: Quick reference guide
     - file: quick-reference/rocprofv3-cli-options
@@ -34,6 +35,7 @@ subtrees:
     - file: how-to/using-pc-sampling
     - file: how-to/cdna3-cdna4-pc-sampling
     - file: how-to/using-thread-trace
+    - file: how-to/using-rocprofv3-on-wsl
     - file: how-to/using-spm
     - file: how-to/using-kernel-replay
     - file: how-to/samples

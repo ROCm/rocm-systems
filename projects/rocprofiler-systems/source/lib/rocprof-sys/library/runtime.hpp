@@ -20,7 +20,6 @@
 #include <cstdint>
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/macros/language.hpp>
 
 #include <memory>
 #include <set>
@@ -62,28 +61,28 @@ std::unique_ptr<preinit_bundle_t>&
 get_preinit_bundle();
 
 std::atomic<std::uint64_t>&
-get_cpu_cid() TIMEMORY_HOT;
+get_cpu_cid() ROCPROFSYS_HOT;
 
 unique_ptr_t<std::vector<std::uint64_t>>&
 get_cpu_cid_stack(std::int64_t _tid    = threading::get_id(),
-                  std::int64_t _parent = 0) TIMEMORY_HOT;
+                  std::int64_t _parent = 0) ROCPROFSYS_HOT;
 
 using cpu_cid_data_t       = std::tuple<std::uint64_t, std::uint64_t, std::uint32_t>;
 using cpu_cid_pair_t       = std::tuple<std::uint64_t, std::uint32_t>;
 using cpu_cid_parent_map_t = std::unordered_map<std::uint64_t, cpu_cid_pair_t>;
 
 unique_ptr_t<cpu_cid_parent_map_t>&
-get_cpu_cid_parents(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_parents(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
 
 cpu_cid_data_t
-create_cpu_cid_entry(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+create_cpu_cid_entry(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
 
 cpu_cid_pair_t
 get_cpu_cid_entry(std::uint64_t _cid,
-                  std::int64_t  _tid = threading::get_id()) TIMEMORY_HOT;
+                  std::int64_t  _tid = threading::get_id()) ROCPROFSYS_HOT;
 
 tim::mutex_t&
-get_cpu_cid_stack_lock(std::int64_t _tid = threading::get_id()) TIMEMORY_HOT;
+get_cpu_cid_stack_lock(std::int64_t _tid = threading::get_id()) ROCPROFSYS_HOT;
 
 // query current value
 bool

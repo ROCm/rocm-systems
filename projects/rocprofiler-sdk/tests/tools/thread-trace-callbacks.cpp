@@ -73,6 +73,9 @@ void
 shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                      rocprofiler_user_data_t /* userdata */)
 {
+    assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
+    assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
+
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
@@ -103,8 +106,8 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 void
 init()
 {
-    // const char* decoder_lib = std::getenv("ROCPROF_TRACE_DECODER_PATH");
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+    if(rocprofiler_thread_trace_decoder_create(&decoder, "") != ROCPROFILER_STATUS_SUCCESS)
+        DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
 }
 
 void

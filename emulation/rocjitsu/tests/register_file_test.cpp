@@ -36,6 +36,39 @@ concept HasContiguousData = requires(File &file) { file.data(); };
 using SoftwareLazyUint32File = SoftwareLazyTestFile<uint32_t>;
 static_assert(!HasContiguousData<SoftwareLazyUint32File>);
 
+template <typename File> class RegisterBlockCountTest : public ::testing::Test {};
+using RegisterBlockCountTypes =
+    ::testing::Types<RegisterFile<uint32_t>, SoftwareLazyUint32File,
+                     RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>>;
+TYPED_TEST_SUITE(RegisterBlockCountTest, RegisterBlockCountTypes);
+
+TYPED_TEST(RegisterBlockCountTest, CountsAvailableBlocksAcrossExhaustionAndReuse) {
+  TypeParam file("registers");
+  EXPECT_EQ(file.free_block_count(), 0u);
+  file.init(/*total_regs=*/35, /*regs_per_block=*/8);
+  EXPECT_EQ(file.free_block_count(), 4u);
+  EXPECT_EQ(file.allocate(0), -1);
+  EXPECT_EQ(file.free_block_count(), 4u);
+  for (uint32_t block = 0; block < 4; ++block) {
+    ASSERT_EQ(file.allocate(8), static_cast<int32_t>(block * 8));
+    EXPECT_EQ(file.free_block_count(), 3 - block);
+  }
+  EXPECT_EQ(file.allocate(1), -1);
+  file.free(3); // Misaligned and out-of-range frees leave allocation unchanged.
+  file.free(40);
+  EXPECT_EQ(file.free_block_count(), 0u);
+  file.free(8);
+  file.free(24);
+  EXPECT_EQ(file.free_block_count(), 2u);
+  EXPECT_EQ(file.allocate(1), 8);
+  EXPECT_EQ(file.free_block_count(), 1u);
+  EXPECT_EQ(file.allocate(8), 24);
+  EXPECT_EQ(file.free_block_count(), 0u);
+  for (uint32_t block = 0; block < 4; ++block)
+    file.free(block * 8);
+  EXPECT_EQ(file.free_block_count(), 4u);
+}
+
 TEST(RegisterFileTest, ContiguousStorageClearsReusedBlock) {
   RegisterFile<uint32_t> file("contiguous");
   file.init(/*total_regs=*/16, /*regs_per_block=*/8);
@@ -82,6 +115,41 @@ TEST(RegisterFileTest, SoftwareLazyStorageMaterializesOnlyMutableChunks) {
   EXPECT_EQ(const_storage[regs_per_chunk][0], 0u);
 }
 
+TEST(RegisterFileTest, SoftwareLazyRecycledChunksAreZeroBeforeEveryMaterializationPath) {
+  using Storage = SoftwareLazyTestStorage<uint32_t>;
+  constexpr uint32_t count = Storage::registers_per_chunk();
+  Storage storage;
+  storage.init(count);
+  const auto &read_only = storage;
+  for (unsigned path = 0; path < 4; ++path) {
+    SCOPED_TRACE(path);
+    storage.for_each(0, count, [](uint32_t &value) { value = 0xfeed1234; });
+    storage.reset(0, count);
+    EXPECT_EQ(storage.materialized_chunk_count(), 0u);
+    EXPECT_EQ(read_only[0], 0u);
+    EXPECT_EQ(read_only[count - 1], 0u);
+    constexpr uint32_t value = 42;
+    const auto bytes = std::as_bytes(std::span(&value, 1));
+    switch (path) {
+    case 0:
+      storage[0] = value;
+      break;
+    case 1:
+      storage.for_each(0, 1, [](uint32_t &reg) { reg = value; });
+      break;
+    case 2:
+      storage.copy_from(0, bytes);
+      break;
+    case 3:
+      storage.copy_nonzero_from(0, bytes);
+      break;
+    }
+    EXPECT_EQ(read_only[0], value);
+    for (uint32_t index = 1; index < count; ++index)
+      EXPECT_EQ(read_only[index], 0u) << index;
+  }
+}
+
 TEST(RegisterFileTest, SoftwareLazyStorageSupportsFixedCapacityBoundary) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;
   using Storage = simdojo::detail::SoftwareLazyRegisterStorage<Vgpr, 32>;
@@ -95,6 +163,50 @@ TEST(RegisterFileTest, SoftwareLazyStorageSupportsFixedCapacityBoundary) {
   EXPECT_EQ(const_storage[31][63], 0xA5A5A5A5u);
   EXPECT_EQ(storage.materialized_chunk_count(), 1u);
 }
+
+class LazyScalarRegisterFileTest : public ::testing::TestWithParam<uint32_t> {};
+
+TEST_P(LazyScalarRegisterFileTest, SharedChunksPreserveNeighborsAndClearReusedBlocks) {
+  using File = RegisterFile<uint32_t, RegisterFileStorage::SOFTWARE_LAZY>;
+  static_assert(!HasContiguousData<File>);
+  const uint32_t block_size = GetParam();
+  constexpr uint32_t block_count = 20;
+  File file("sgpr");
+  file.init(block_count * block_size, block_size);
+  const File &const_file = file;
+  for (uint32_t block = 0; block < block_count; ++block)
+    ASSERT_EQ(file.allocate(block_size), static_cast<int32_t>(block * block_size));
+
+  std::vector<uint32_t> copied(block_size, 0xFFFFFFFFu);
+  const uint32_t reused_base = 9 * block_size;
+  const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
+  for (uint32_t value : copied)
+    EXPECT_EQ(value, 0u);
+  EXPECT_EQ(const_file[block_count * block_size - 1], 0u);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+
+  for (uint32_t reg = 0; reg < block_count * block_size; ++reg)
+    file[reg] = reg + 1;
+  // The 104-register layout crosses a 4 KiB chunk boundary in this block.
+  const_file.copy_to(reused_base, block_size, std::as_writable_bytes(std::span(copied)));
+  for (uint32_t reg = 0; reg < block_size; ++reg)
+    EXPECT_EQ(copied[reg], reused_base + reg + 1);
+
+  file.free(reused_base);
+  ASSERT_EQ(file.allocate(1), static_cast<int32_t>(reused_base));
+  for (uint32_t reg = 0; reg < block_count * block_size; ++reg) {
+    const bool was_freed = reg >= reused_base && reg < reused_base + block_size;
+    EXPECT_EQ(const_file[reg], was_freed ? 0u : reg + 1) << reg;
+  }
+  for (uint32_t block = 0; block < block_count; ++block)
+    file.free(block * block_size);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+  ASSERT_EQ(file.allocate(block_size), 0);
+  EXPECT_EQ(const_file[block_size - 1], 0u);
+  EXPECT_EQ(file.materialized_chunk_count(), 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(SgprLayouts, LazyScalarRegisterFileTest, ::testing::Values(104u, 128u));
 
 TEST(RegisterFileTest, SoftwareLazyStorageClearsReusedUnalignedBlock) {
   using Vgpr = simdojo::VectorReg<64, uint32_t>;

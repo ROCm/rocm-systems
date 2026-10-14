@@ -108,8 +108,8 @@ release(bool, DISABLE_DEFERRED_ALLOC, false,                                  \
         "Disables deferred memory allocation on device")                      \
 release(int, AMD_GPU_FORCE_SINGLE_FP_DENORM, -1,                              \
         "Force denorm for single precision: -1 - don't force, 0 - disable, 1 - enable") \
-release(uint, OCL_SET_SVM_SIZE, 256*1024,                                     \
-        "set SVM space size for discrete GPU")                                \
+release(uint, OCL_SET_SVM_SIZE, 4 * 1024 * 1024,                              \
+        "Set SVM space size for discrete GPU (MiB)")                          \
 release(uint, GPU_WAVES_PER_SIMD, 0,                                          \
         "Force the number of waves per SIMD (1-10)")                          \
 release(bool, OCL_STUB_PROGRAMS, false,                                       \
@@ -223,8 +223,6 @@ release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \
         "Force the stream wait memory operation to wait on CP.")              \
-release(bool, HIPRTC_USE_RUNTIME_UNBUNDLER, false,                            \
-        "Set this to true to force runtime unbundler in hiprtc.")             \
 release(size_t, HIP_INITIAL_DM_SIZE, 8 * Mi,                                  \
         "Set initial heap size for device malloc.")                           \
 release(bool, HIP_FORCE_DEV_KERNARG, true,                                    \
@@ -286,7 +284,7 @@ release(bool, DEBUG_CLR_DISABLE_FALLBACK, false,                              \
         "Disables certain fallback paths")                                    \
 release(bool, DEBUG_CLR_DIRECT_DOORBELL, false,                               \
         "Write the hardware doorbell directly from CLR")                      \
-release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 0,                                     \
+release(uint, DEBUG_CLR_AQL_DEV_QUEUE, 1,                                     \
         "Device-memory AQL ring buffer for supported asics "                  \
         "(1=enabled, 0=force system mem (default))")                          \
 release(uint, DEBUG_CLR_USE_MOVDIR64B, 1,                                     \

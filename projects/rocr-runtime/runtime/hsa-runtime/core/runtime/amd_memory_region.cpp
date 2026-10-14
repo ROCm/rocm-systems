@@ -151,7 +151,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
-  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
   if (IsSystem() && (size > max_sysmem_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
@@ -595,12 +595,6 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
     local_mem_flag.ui32.ExtendedCoherent = 0;
   }
 
-  // This is a pin: the mapping must stay valid until Unlock. Under the KFD SVM
-  // API the registration is otherwise advisory, and KFD will unmap the range
-  // from the GPU on any MMU invalidation while XNACK is on -- including while a
-  // transfer is reading it.
-  local_mem_flag.ui32.AlwaysMapped = 1;
-
   // Call kernel driver to register and pin the memory.
   if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {
@@ -629,6 +623,16 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
   }
 
   if (full_profile()) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Lock leaves a userptr registration or an SVM registration (no thunk
+  // object). Any other object at host_ptr reserved this VA after the lock's
+  // registration was retired as stale; unmapping would tear down its mapping.
+  // The registration is already gone, so there is nothing left to unlock.
+  HsaPointerInfo info = {};
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(host_ptr, &info)) == HSAKMT_STATUS_SUCCESS &&
+      info.Type != HSA_POINTER_REGISTERED_USER && info.Type != HSA_POINTER_UNKNOWN) {
     return HSA_STATUS_SUCCESS;
   }
 

@@ -5,16 +5,20 @@
 #include "common/path.hpp"
 #include "logger/debug.hpp"
 
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <rocprofiler-sdk-rocattach/rocattach.h>
@@ -23,39 +27,43 @@ namespace
 {
 struct attach_options
 {
-    int                      pid            = -1;
-    std::string              output_path    = {};
-    std::vector<std::string> profile_format = {};
+    int                      pid          = -1;
+    int                      detach_after = -1;  // seconds; -1 = wait for stdin ENTER
+    std::string              output_path;
+    std::vector<std::string> profile_format;
 };
 
 void
 print_usage(const char* prog_name)
 {
-    std::cout << "Usage: " << prog_name << " -p <pid> [OPTIONS]\n"
-              << "\n"
-              << "Attach to a running process for profiling.\n"
-              << "\n"
-              << "Options:\n"
-              << "  -p <pid>             Process ID to attach to (required)\n"
-              << "  -o, --output PATH    Output path for profiling results\n"
-              << "  -F, --format FORMAT[,FORMAT,...]\n"
-              << "                       Output format(s): perfetto, rocpd\n"
-              << "  -h, --help           Show this help message\n"
-              << "\n"
-              << "Environment variables:\n"
-              << "  ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data\n"
-              << "  ROCPROFSYS_TRACE             Enable perfetto trace output\n"
-              << "  ROCPROFSYS_USE_ROCPD         Enable rocpd database output\n"
-              << "  ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library\n"
-              << "\n"
-              << "Once attached, press ENTER to detach from the process.\n";
+    std::cout
+        << "Usage: " << prog_name << " -p <pid> [OPTIONS]\n"
+        << "\n"
+        << "Attach to a running process for profiling.\n"
+        << "\n"
+        << "Options:\n"
+        << "  -p <pid>             Process ID to attach to (required)\n"
+        << "  -o, --output PATH    Output path for profiling results\n"
+        << "  -F, --format FORMAT[,FORMAT,...]\n"
+        << "                       Output format(s): perfetto, rocpd\n"
+        << "  -d, --detach-after SECONDS\n"
+        << "                       Detach automatically after SECONDS "
+           "(non-interactive).\n"
+        << "                       When omitted, waits for ENTER on stdin.\n"
+        << "  -h, --help           Show this help message\n"
+        << "\n"
+        << "Environment variables:\n"
+        << "  ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data\n"
+        << "  ROCPROFSYS_TRACE             Enable perfetto trace output\n"
+        << "  ROCPROFSYS_USE_ROCPD         Enable rocpd database output\n"
+        << "  ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library\n"
+        << "\n"
+        << "Once attached, press ENTER to detach from the process (interactive mode).\n";
 }
 
 void
-setup_tool_library_env()
+setup_session_env()
 {
-    const auto* attach_tool_library_env_name = "ROCPROF_ATTACH_TOOL_LIBRARY";
-    const auto* rocp_tool_libraries_env_name = "ROCP_TOOL_LIBRARIES";
     const auto* output_use_current_time_env_name =
         rocprofsys::env_vars::OUTPUT_USE_CURRENT_TIME;
     const auto* reattach_add_session_id_env_name =
@@ -66,23 +74,50 @@ setup_tool_library_env()
 
     // enable the re-attach to add a session ID to the output path
     setenv(reattach_add_session_id_env_name, "true", 1);
+}
 
-    const auto* existing = std::getenv(attach_tool_library_env_name);
-    if(existing != nullptr)
+/**
+ * Picks the tool library path, as seen by process @p pid: the user's
+ * ROCPROF_ATTACH_TOOL_LIBRARY, else this installation's library if the target can see it,
+ * else the library shipped next to the target's own librocprofiler-register (e.g. inside
+ * a container with its own ROCm installation).
+ */
+std::optional<std::string>
+resolve_tool_library(pid_t pid)
+{
+    namespace path = rocprofsys::common::path;
+
+    if(const auto* user_library = std::getenv("ROCPROF_ATTACH_TOOL_LIBRARY"))
     {
-        setenv(rocp_tool_libraries_env_name, existing, 0);
-        LOG_INFO("Using tool library: {}", existing);
-        return;
+        if(!path::is_missing_in_target(pid, user_library))
+        {
+            return std::string{ user_library };
+        }
+        LOG_ERROR("Tool library '{}' from ROCPROF_ATTACH_TOOL_LIBRARY does not exist in "
+                  "the mount namespace of process {}.",
+                  user_library, pid);
+        return std::nullopt;
     }
 
-    const auto path =
-        rocprofsys::common::path::get_internal_libpath("librocprof-sys-dl.so");
-    if(!path.empty())
+    const auto own_library = path::get_internal_libpath("librocprof-sys-dl.so");
+    if(!path::is_missing_in_target(pid, own_library))
     {
-        setenv(attach_tool_library_env_name, path.c_str(), 0);
-        setenv(rocp_tool_libraries_env_name, path.c_str(), 0);
-        LOG_INFO("Using tool library: {}", path);
+        return own_library;
     }
+
+    if(auto target_library = path::find_library_in_loaded_dir(
+           pid, "librocprof-sys-dl.so", "librocprofiler-register.so"))
+    {
+        LOG_INFO("Found tool library in the ROCm installation of process {}", pid);
+        return target_library;
+    }
+
+    LOG_ERROR(
+        "Tool library '{}' does not exist in the mount namespace of process {}, and "
+        "no librocprof-sys-dl.so was found in its ROCm installation. Set "
+        "ROCPROF_ATTACH_TOOL_LIBRARY to the path as seen by the target.",
+        own_library, pid);
+    return std::nullopt;
 }
 
 void
@@ -106,10 +141,13 @@ setup_output_env(const std::string& output_path)
 void
 setup_output_format_env(const std::vector<std::string>& formats)
 {
-    if(formats.empty()) return;
+    if(formats.empty())
+    {
+        return;
+    }
 
-    auto has_format = [&formats](const std::string& fmt) {
-        return std::find(formats.begin(), formats.end(), fmt) != formats.end();
+    auto const has_format = [&formats](const std::string& fmt) {
+        return std::ranges::find(formats, fmt) != formats.end();
     };
 
     // setenv("ROCPROFSYS_PROFILE", "false", 1);
@@ -155,6 +193,24 @@ parse_pid(attach_options& opts, const char* arg)
     } catch(const std::exception&)
     {
         LOG_ERROR("Invalid PID '{}'.", arg);
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+void
+parse_detach_after(attach_options& opts, const char* arg)
+{
+    try
+    {
+        opts.detach_after = std::stoi(arg);
+        if(opts.detach_after < 0)
+        {
+            LOG_ERROR("--detach-after must be non-negative.");
+            std::exit(EXIT_FAILURE);
+        }
+    } catch(const std::exception&)
+    {
+        LOG_ERROR("Invalid --detach-after value '{}'.", arg);
         std::exit(EXIT_FAILURE);
     }
 }
@@ -211,6 +267,12 @@ parse_args(int argc, char* argv[])
             continue;
         }
 
+        if(is_option(arg, "-d", "--detach-after"))
+        {
+            parse_detach_after(opts, consume_arg(i, argc, argv, "-d/--detach-after"));
+            continue;
+        }
+
         LOG_ERROR("Unknown option '{}'.", arg);
         print_usage(argv[0]);
         std::exit(EXIT_FAILURE);
@@ -244,7 +306,7 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    auto opts = parse_args(argc, argv);
+    auto const opts = parse_args(argc, argv);
 
     if(opts.pid < 0)
     {
@@ -253,11 +315,20 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    setup_tool_library_env();
+    setup_session_env();
     setup_output_env(opts.output_path);
     setup_output_format_env(opts.profile_format);
 
     const auto pid = opts.pid;
+
+    const auto tool_library = resolve_tool_library(pid);
+    if(!tool_library)
+    {
+        return EXIT_FAILURE;
+    }
+    LOG_INFO("Using tool library: {}", *tool_library);
+    setenv("ROCPROF_ATTACH_TOOL_LIBRARY", tool_library->c_str(), 1);
+    setenv("ROCP_TOOL_LIBRARIES", tool_library->c_str(), 1);
 
     LOG_INFO("Trying to attach to process {}", pid);
 
@@ -268,8 +339,17 @@ main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    LOG_INFO("Attached to process {}. Press ENTER to detach.", pid);
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    if(opts.detach_after >= 0)
+    {
+        LOG_INFO("Attached to process {}. Detaching after {} second(s).", pid,
+                 opts.detach_after);
+        std::this_thread::sleep_for(std::chrono::seconds(opts.detach_after));
+    }
+    else
+    {
+        LOG_INFO("Attached to process {}. Press ENTER to detach.", pid);
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
 
     result = rocattach_detach(pid);
     if(result != ROCATTACH_STATUS_SUCCESS)

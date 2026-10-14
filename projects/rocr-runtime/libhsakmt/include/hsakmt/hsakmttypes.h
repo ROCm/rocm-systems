@@ -232,7 +232,8 @@ typedef union
     {
         unsigned int PerSDMAQueueResetSupported : 1;  // Indicates per-sdma queue reset supported
         unsigned int AqlEmulationPm4_ : 1;            // Indicates device uses AQL emulation via PM4 packets
-        unsigned int Reserved : 30; // Reserved
+        unsigned int StallOnRetryFault : 1;           // Node runs in recoverable-fault mode
+        unsigned int Reserved : 29; // Reserved
     } ui32;
 } HSA_CAPABILITY2;
 
@@ -454,6 +455,7 @@ typedef struct _HaCacheProperties
     HSAuint32    CacheLatency;     // Cache latency in ns
     HsaCacheType CacheType;
     HSAuint32    SiblingMap[HSA_CPU_SIBLINGS];
+    HSAuint32    PersistingCacheSizeMax; //Maximum persisting cache size in L2 Cache topology.
 } HsaCacheProperties;
 
 
@@ -601,13 +603,7 @@ typedef struct _HsaMemFlags
             unsigned int Contiguous:    1; // Allocate contiguous VRAM
             unsigned int ExecuteBlit:   1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
             unsigned int QueueObject:   1; // AQL queue object, used in windows for CPU access to get the read pointer from amd_queue_t
-            unsigned int AlwaysMapped:  1; // default = 0; If 1: the caller is pinning this memory (hsaKmtRegisterMemory* on
-                                           // behalf of hsa_amd_memory_lock) and requires the GPU mapping to stay valid for
-                                           // the lifetime of the registration. Under the SVM API this sets
-                                           // HSA_SVM_FLAG_GPU_ALWAYS_MAPPED so KFD does not unmap the range from the GPU on
-                                           // MMU invalidation while a transfer is in flight. Ignored on the userptr BO path,
-                                           // which is already durable. Requires KFD interface minor version >= 11.
-            unsigned int Reserved:      6;
+            unsigned int Reserved:      7;
 
         } ui32;
         HSAuint32 Value;
@@ -1537,12 +1533,14 @@ typedef enum _HsaAisFlags {
 /* memory object handle used for translating drm BO object*/
 typedef struct _HsaMemoryObjectHandle* HsaMemoryObjectHandle;
 
-/* Access Permissions for memory mapping */
+/* Access Permissions for memory mapping.
+ * Read, write, and execute are independent bits and may be combined. */
 typedef enum _HsaMemoryMapFlags {
     HSA_MEMORY_ACCESS_NONE = 0,
-    HSA_MEMORY_ACCESS_RO   = 1,
-    HSA_MEMORY_ACCESS_WO   = 2,
-    HSA_MEMORY_ACCESS_RW   = 3
+    HSA_MEMORY_ACCESS_RO   = 1 << 0,
+    HSA_MEMORY_ACCESS_WO   = 1 << 1,
+    HSA_MEMORY_ACCESS_RW   = (1 << 0) | (1 << 1),
+    HSA_MEMORY_ACCESS_EX   = 1 << 2
 } HsaMemoryMapFlags;
 
 /* Handle type for import */
@@ -1580,6 +1578,12 @@ typedef struct _HsaHandleImportFlags {
         unsigned int Reserved       : 29;
     } ui32;
 } HsaHandleImportFlags;
+
+typedef struct _HsaDmaBufInfo {
+    HSAuint64 Size;             // allocation size in bytes
+    HSAuint32 GpuId;            // KFD id of the node owning the buffer object
+    HSAuint32 IsDeviceMemory;   // non-zero when device-local (VRAM), zero for host (GTT/USERPTR)
+} HsaDmaBufInfo;
 
 typedef struct _HsaStructureSizes {
   HSAuint16 StructureSizes;           // sizeof(HsaStructureSizes) used for check overflow

@@ -342,6 +342,7 @@ class GpuAgent : public GpuAgentInt {
                            uint32_t private_segment_size, uint32_t group_segment_size,
                            bool metadata_queue, core::Queue** queue) override;
 
+  hsa_status_t SetAgentAttribute(hsa_agent_info_t attribute, void* value);
   // @brief Decrement GWS ref count.
   void GWSRelease();
 
@@ -443,6 +444,11 @@ class GpuAgent : public GpuAgentInt {
   // @brief returns true if agent uses MES scheduler
   __forceinline const bool isMES() const { return (supported_isas()[0]->GetMajorVersion() >= 11) ? true : false; };
 
+  // @brief returns true for gfx12.5+ parts (used by the PC sampling drain path)
+  __forceinline bool is_gfx1250() const {
+    return supported_isas()[0]->GetMajorVersion() == 12 && supported_isas()[0]->GetMinorVersion() >= 5;
+  }
+
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
   __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
@@ -474,9 +480,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
-      _mm_sfence();
+      store_fence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
-      _mm_mfence();
+      memory_fence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }
@@ -776,6 +782,10 @@ class GpuAgent : public GpuAgentInt {
   // @brief Query the driver to get the cache properties.
   void InitCacheList();
 
+  // @brief Get the maximum persisting L2 cache size supported by this GPU.
+  // @return Maximum size in bytes, or 0 if not supported.
+  size_t GetMaxPersistingL2CacheSize() const;
+
   // @brief Create internal queues and blits.
   void InitDma();
 
@@ -987,7 +997,7 @@ class GpuAgent : public GpuAgentInt {
   struct alignas(64) per_xcc_pcs_data_t {
     pcs_sampling_data_t* device_data;         // This XCC's device buffer region
     os::Thread thread;                        // Thread handle for this XCC's flush thread
-    uint32_t which_buffer;                    // Current buffer selector (0 or 1)
+    std::atomic<uint32_t> which_buffer{0};    // Current buffer selector (0 or 1)
     hsa_signal_t done_sig0;                   // Signal for buffer 0 completion
     hsa_signal_t done_sig1;                   // Signal for buffer 1 completion
     uint64_t host_write_offset;               // Write offset into host buffer (mutex-protected)
@@ -996,7 +1006,7 @@ class GpuAgent : public GpuAgentInt {
     uint8_t* host_buffer_begin;               // Cached: start of this XCC's host buffer partition
     std::atomic<size_t> lost_sample_count;    // Per-XCC lost sample counter (atomic for lock-free access)
 
-    /* PM4 fallback resources (per-XCC to avoid races on multi-XCC non-large-BAR systems) */
+    /* PM4 drain resources (per-XCC to avoid races when multiple XCC threads submit concurrently) */
     uint64_t* old_val;                        // Staging area for PM4 atomic return value
     uint32_t* cmd_data;                       // PM4 command buffer
     size_t cmd_data_sz;                       // PM4 command buffer size
@@ -1057,7 +1067,7 @@ class GpuAgent : public GpuAgentInt {
                                                   pcs::PcsRuntime::PcSamplingSession& session,
                                                   uint32_t xcc_id);
 
-  // @brief Flush device buffers using PM4 commands (fallback for non-large-BAR systems)
+  // @brief Flush device buffers using PM4 commands on the command processor (fallback for non-large-BAR systems)
   hsa_status_t PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data_t* pcs_data,
                                                       pcs::PcsRuntime::PcSamplingSession& session,
                                                       uint32_t xcc_id);
@@ -1086,6 +1096,14 @@ class GpuAgent : public GpuAgentInt {
   // structure for stochastic sampling
   pcs_data_t pcs_stochastic_data_;
 
+  // Serializes PM4 submit-and-wait sequences on queues_[QueuePCSampling].
+  // AqlQueue::ExecutePM4 stages commands in a single per-queue indirect buffer that it
+  // reuses as soon as it returns, so only one asynchronous PM4 submission may be in
+  // flight on that queue at a time. The per-XCC flush threads and PcSamplingFlush all
+  // share the queue, as do the hosttrap and stochastic sessions.
+  // Lock order: host_buffer_mutex -> pcs_pm4_mutex_.
+  std::mutex pcs_pm4_mutex_;
+
   /// @brief XGMI CPU<->GPU
   bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
@@ -1099,6 +1117,8 @@ class GpuAgent : public GpuAgentInt {
   hsa_amd_dim3_t cluster_max_dim_;
 
   size_t max_wave_scratch_;
+
+  size_t persisting_l2_cache_size_;
 
   std::atomic<bool> accelerator_ready_{false};
 

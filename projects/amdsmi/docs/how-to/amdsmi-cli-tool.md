@@ -45,7 +45,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 27.0.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.2.0 | ROCm version: 10.2.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -172,9 +172,10 @@ output](#cli-ex-static) for `amd-smi static`.
 
 ```shell-session
 ~$ amd-smi static --help
-usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
-                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+usage: amd-smi static [-h] [-a] [-b] [-I] [-d] [-v] [-c] [-B] [-R] [-r] [-C [CLOCK ...]]
+                      [-p] [-m] [-A] [-l] [-P] [-x] [-o] [-u] [-s] [-i] [-g GPU [GPU ...]
+                      | -U CPU [CPU ...]] [--json | --csv] [--file FILE] [--overwrite]
+                      [--append] [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
 If no static argument is provided, all static information will be displayed.
@@ -183,7 +184,7 @@ Static Arguments:
   -h, --help               show this help message and exit
   -a, --asic               All asic information
   -b, --bus                All bus information
-  -I, --ifwi               All video bios\IFWI information (if available)
+  -I, --ifwi               All video bios/IFWI information (if available)
   -d, --driver             Displays driver version
   -v, --vram               All vram information
   -c, --cache              All cache information
@@ -193,10 +194,20 @@ Static Arguments:
                                 Sudo may be required for some features
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
-  -p, --partition          Partition information
+  -p, --partition          Partition information:
+                                No longer available in default output.
+                                Argument is required to display.
+                                Ex. `amd-smi static -p` or use
+                                `amd-smi partition -c -m`/`sudo amd-smi partition -a`
+  -m, --mem-carveout       Display VRAM carveout memory options and current setting.
+                                Only supported on some APUs.
+  -A, --ampp               Display AMPP (amdsmi power profile) recipe table: per-profile
+                                version/active/writable/configured state and per-field
+                                name/unit/value/min/max.
   -l, --limit              All limit metric values (i.e. power and thermal limits)
   -P, --soc-pstate         The available soc pstate policy
   -x, --xgmi-plpd          The available XGMI per-link power down policy
+  -o, --profile            Display current and available power profiles
   -u, --numa               All numa node information
 
 CPU Arguments:
@@ -218,11 +229,13 @@ Device Arguments:
                              all | Selects all devices
 
 Command Modifiers:
-  --json                       Displays output in JSON format (human readable by default).
-  --csv                        Displays output in CSV format (human readable by default).
-  --file FILE                  Saves output into a file on the provided path (stdout by default).
-  --loglevel LEVEL             Set the logging level from the possible choices:
-                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --json                   Displays output in JSON format
+  --csv                    Displays output in CSV format
+  --file FILE              Saves output into a file on the provided path
+  --overwrite              Overwrite the file
+  --append                 Append to the file
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                               DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
 (cmd-firmware)=
@@ -329,7 +342,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--cpu-dimm-pow-consumption DIMM_ADDR]
                       [--cpu-dimm-thermal-sensor DIMM_ADDR] [--core-boost-limit]
                       [--core-curr-active-freq-core-limit] [--core-energy]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL] [--show-unsupported]
 
 If no GPU is specified, returns metric information for all GPUs on the system.
 If no metric argument is provided, all metric information will be displayed.
@@ -431,7 +444,45 @@ Command Modifiers:
   --file FILE                               Saves output into a file on the provided path (stdout by default).
   --loglevel LEVEL                          Set the logging level from the possible choices:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --show-unsupported                        Print every field, including the ones the GPU's gpu_metrics
+                                                table version cannot carry and which are omitted by default;
+                                                affects human-readable output only, since --json and --csv
+                                                always print every field
 ```
+
+The `gpu_metrics` table the driver exposes has a version, and each version
+carries a different set of fields. Fields the detected version cannot carry are
+omitted from human-readable output. Pass `--show-unsupported` to print them as
+`N/A` instead, which restores the output of earlier releases.
+
+`--json` and `--csv` are never filtered. They are consumed by scripts, so they
+keep emitting every field, the `N/A` ones included, and their key and column
+sets are unchanged from earlier releases. `--show-unsupported` is accepted
+alongside them and has no effect.
+
+This is scoped to the metrics table version, not to what the ASIC supports. Only
+fields whose sole sources are the metrics blobs are eligible, such as the
+`hbm_stacks`, `mid`, `aid` and `xcd` temperature arrays and the `uclk_aid` and
+`socclks_mid` clock arrays. Anything the CLI can also read from hwmon or sysfs is
+always printed: the `edge`, `hotspot` and `mem` temperature sensors, the fan
+section, the voltages, and the `gfx_N`, `vclk_N`, `dclk_N`, `mem_N` and
+`socclk_N` clock slots. A field the version *does* carry but the ASIC or driver
+leaves unpopulated also still prints `N/A`.
+
+Filtering never removes a field that reports a value, and it suppresses nothing
+at all when the metrics version is unrecognized or its header cannot be read.
+
+A section named on the command line is never emptied by filtering. Plain
+`amd-smi metric` prints every section, so a section the version can populate
+nothing of is dropped entirely; on a metrics v1.3 GPU that removes the whole
+`throttle` section. Asking for that section by name instead, as in `amd-smi
+metric --throttle`, prints it in full rather than answering with silence. A named
+section that is only partly suppressed is still filtered, so `amd-smi metric
+--usage` on a v1.9 GPU still omits `jpeg_activity`.
+
+`--partition` scopes the data rather than naming a section, so it protects
+nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
+metric`.
 
 (cmd-process)=
 ### amd-smi process
@@ -618,7 +669,7 @@ Set options for specified devices.
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [-a MODE] [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS] [-n WATTS]
                    [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE [UTIL PPT_LIMIT]]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -630,6 +681,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
+                   [-A PROFILE_NAME] [--ampp-configure PROFILE_NAME [KEY=VALUE ...]]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -668,6 +720,22 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -A, --ampp-activate PROFILE_NAME            Activate an AMPP (amdsmi power profile) by name.
+                                                Use `amd-smi static --ampp` to see available profiles.
+  --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]
+                                               Configure an AMPP (amdsmi power profile) custom slot by staging one or
+                                                more KEY=VALUE fields, then committing them.
+                                                Use `amd-smi static --ampp` to see writable profiles and field names.
+                                                Example: --ampp-configure profile_2 PPT0_Limit=300
+                                                Alternatively, pass @<path> to restore every writable profile found
+                                                in a JSON file (as produced by `amd-smi static --ampp --json`).
+                                                Example: --ampp-configure @profiles.json
+  --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}
+                                                Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.
+                                                This is a system-wide setting, not per-GPU.
+  -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
+                                                This is a node-wide setting, not per-GPU.
+                                                Max node power limit: 6000 W
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -1001,7 +1069,7 @@ not supported.
 
 ```shell-session
 ~$ amd-smi fabric --help
-usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+usage: amd-smi fabric [-h] [-t] [-T] [-g GPU [GPU ...]] [--json | --csv]
                       [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns information for all GPUs on the system.
@@ -1009,8 +1077,8 @@ If no fabric argument is provided, all fabric information will be displayed.
 
 Fabric arguments:
   -h, --help               show this help message and exit
-  -t, --topology           Display fabric topology data (counters per category, instance, and item)
-  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -t, --topology           Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -T, --telemetry          Display fabric telemetry data (counters per category, instance, and item)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
@@ -1066,8 +1134,30 @@ NODE:
 ```
 
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
-`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
-`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+`AMDSMI_STATUS_NOT_SUPPORTED`, and both fields report `N/A` (also under the
+`tray`/`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`):
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: N/A
+        TRAY_TYPE: N/A
+```
+
+`amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
+balancing mode (`POWER_BALANCING`, the default, or `FREQUENCY_BALANCING`).
+This field reads `N/A` when the underlying value is missing or unreadable,
+not when NPM is disabled (see `STATUS` for enablement). Use
+`amd-smi set --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}` to
+change it (AMD-SMI-only; not exposed via BMC Redfish/APML).
+
+It also includes `SUPPORTED_BALANCING_MODES`, the balancing modes supported by
+this node's platform/ASIC (e.g. `POWER_BALANCING, FREQUENCY_BALANCING`),
+independent of current NPM enablement. `amd-smi set --node-balancing-mode`
+returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` with a message naming the
+requested mode if it is absent from this set, distinct from
+`AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
 
 ## Interpreting the output
 
@@ -1085,9 +1175,9 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI            27.0.0                                                    |
-| amdgpu Version:    6.19.4                                                    |
-| ROCm Version:      7.14.0                                                    |
+| AMD-SMI            27.2.0                                                    |
+| amdgpu Version:    6.19.14.31400000-2370381                                  |
+| ROCm Version:      10.2.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
@@ -1261,7 +1351,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.4
+        VERSION: 6.19.14.31400000-2370381
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A
@@ -1661,17 +1751,36 @@ users inspect and tune the BIOS VRAM carveout and the TTM `pages_limit`
 (shared GTT) respectively. Both features talk directly to kernel UAPI
 interfaces (sysfs / modprobe.d) and do **not** require libdrm.
 
+`amd-smi node -p` / `amd-smi node --power-management` also reports a
+`CURRENT_NODE_POWER` line alongside the existing `LIMIT`/`STATUS`/`THRESHOLD`
+fields: the current (instantaneous) node power draw in watts, read once per
+node rather than once per GPU. Use `amd-smi set -n WATTS` /
+`amd-smi set --node-power-limit WATTS` to change the node-level power limit
+(also a node-wide, not per-GPU, setting):
+
+```shell-session
+~$ amd-smi node -p
+NODE:
+    POWER_MANAGEMENT:
+        LIMIT: 6000 W
+        STATUS: ENABLED
+        THRESHOLD: N/A W
+        CURRENT_NODE_POWER: 5800 W
+```
+
 ### Supported ASICs
 
 | Feature | Hardware | Status |
 |---|---|---|
-| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported |
+| `--mem-carveout` (UMA carveout) | Strix and later APUs (gfx1150, gfx1151, gfx1152) whose VBIOS exposes ATCS 0xA | Supported (amdgpu sysfs node) |
+| `--mem-carveout` (UMA carveout) | UEFI-HII APU platforms (e.g. HP ZBook Ultra G1a, Z2 Mini G1a) that expose the carveout through fwupd | Supported (via the fwupd daemon) |
 | `--mem-carveout` (UMA carveout) | Radeon dGPUs, Instinct MI-series (MI100, MI200, MI300, MI300A) | Not supported — reported as `MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)` |
 | `--gtt` (TTM `pages_limit`) | Any amdgpu system, including Instinct MI300A (`amdttm` / `amd-ttm`) and Ryzen APUs (`ttm`) | Supported |
 
 ### Prerequisites
 
 - **UMA carveout:** Linux kernel >= 7.0 (upstream commit [`685b711`](https://github.com/torvalds/linux/commit/685b711); some distros backport it to earlier kernels), an APU VBIOS that advertises ATCS 0xA + IGP info table v2.3, root, and a reboot after changing the index.
+- **UMA carveout (UEFI-HII platforms, via fwupd):**AMD SMI library reads and writes the carveout through the fwupd daemon's D-Bus BIOS-settings interface. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+). PolicyKit brokers authorization (no explicit `sudo`) for writes, and a reboot applies the new size.
 - **GTT (TTM `pages_limit`):** root (to write `/etc/modprobe.d/<module>.conf`), optionally `dracut` (the tool will rebuild the initramfs automatically when `dracut` is present), and a reboot to apply the new limit. amd-smi auto-detects the TTM kernel module name (`ttm`, `amdttm`, or `amd-ttm`) and writes the matching `.conf`.
 
 ### Troubleshooting: `MEM_CARVEOUT: N/A`
@@ -1684,5 +1793,84 @@ prints
 MEM_CARVEOUT: N/A (UMA carveout is not supported on this ASIC/VBIOS)
 ```
 
-This is expected. Use `amd-smi node --gtt` / `amd-smi set --gtt` to tune
-shared GPU memory on those platforms instead.
+On UEFI-HII APU platforms the same knob may still be reachable through fwupd; see
+the fwupd prerequisite above.
+
+This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
+`amd-smi set --gtt` to tune shared GPU memory on those platforms instead.
+
+## AMPP: power profile activation and configuration
+
+`amd-smi static --ampp` / `amd-smi set --ampp-activate PROFILE_NAME` /
+`amd-smi set --ampp-configure PROFILE_NAME KEY=VALUE ...` let users inspect,
+activate, and (for writable custom slots) configure AMPP (amdsmi power
+profile) recipes -- predefined power/performance settings exposed by the
+driver under the kernel UAPI sysfs tree
+`/sys/class/drm/<device>/device/app_modes/` (not libdrm). Profiles, fields,
+and units are all dynamically enumerated at runtime; amd-smi does not assume
+a fixed profile count or field set. This is unrelated to the legacy
+`amd-smi set --profile` (power profile preset-mask) command.
+
+`amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi`
+version once, followed by a `PROFILE`/`ACTIVE`/`WRITABLE`/`CONFIGURED` block
+per profile. Configured profiles also list a `FIELDS` block with each
+field's name, unit, current value, and (when published by the driver)
+guidance-only min/max bounds.
+
+```shell-session
+~$ amd-smi static --gpu 0 --ampp
+GPU: 0
+    AMPP:
+        VERSION: 1.0
+        PROFILE: profile_0
+            ACTIVE: true
+            WRITABLE: false
+            CONFIGURED: true
+            FIELDS:
+                PPT0_LIMIT: 500 W (min=100, max=700)
+                MAXGFXCLKFREQ: 2100 MHz (min=500, max=2200)
+                BOOSTMODE: 1 -
+        PROFILE: profile_6
+            ACTIVE: false
+            WRITABLE: true
+            CONFIGURED: false
+```
+
+```shell-session
+~$ sudo amd-smi set --ampp-activate profile_2
+```
+
+```shell-session
+~$ sudo amd-smi set --ampp-configure profile_5 PPT0_Limit=300
+```
+
+`--ampp-configure` also accepts `@<path>` in place of `PROFILE_NAME
+KEY=VALUE ...`, restoring every writable profile with staged fields found in
+a JSON file for the current GPU in one call. The file must be shaped like
+`amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
+per-GPU objects, each identified by an integer `"gpu"` index and containing
+an `"ampp"."profiles"` list.
+
+```shell-session
+~$ sudo amd-smi static --ampp --json --file profiles.json
+~$ sudo amd-smi set --gpu 0 --ampp-configure @profiles.json
+```
+
+Profiles are restored one at a time and independently: a failure on one
+profile (for example, a malformed `fields` entry, or the driver rejecting a
+value) is reported per-profile and does not stop the remaining profiles in
+the file from being applied, nor roll back ones already applied. The one
+exception is a permission error (not run with `sudo`), which aborts the
+whole `--ampp-configure @<path>` call immediately instead of continuing to
+the remaining profiles.
+
+### Prerequisites
+
+- Requires a driver build that publishes `app_modes/` under
+  `/sys/class/drm/<device>/device/`; on ASICs/VBIOS combinations that do not
+  publish it, `amd-smi static --ampp` reports
+  `N/A (AMPP is not supported on this ASIC/VBIOS)`.
+- `amd-smi set --ampp-activate` / `--ampp-configure` require root/`CAP_SYS_ADMIN`.
+- `--ampp-configure` may only target a slot listed in
+  `app_modes/config/writable_slot_mask`; use `amd-smi static --ampp` first to
+  find writable profiles and their field names.

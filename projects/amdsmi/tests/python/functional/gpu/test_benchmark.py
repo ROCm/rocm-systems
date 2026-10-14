@@ -227,6 +227,11 @@ class TestGpuBenchmark(unittest.TestCase):
     def test_performance_clean_gpu_local_data(self):
         self.common.print_func_name("")
 
+        if self.common.cleaner_shader_resets_gpu():
+            msg = "\tSkipping test_performance_clean_gpu_local_data as it resets the GPU (gfx906)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
         for i, processor in enumerate(self.processors):
             self._log_test_start("amdsmi_clean_gpu_local_data", "Processor", i)
 
@@ -1714,8 +1719,9 @@ class TestGpuBenchmark(unittest.TestCase):
 
     def test_performance_get_gpu_reg_table_info(self):
         self.common.print_func_name("")
-        if self.TODO_SKIP_FAIL:
-            self.skipTest("Skipping test_performance_get_gpu_reg_table_info as it fails on MI300.")
+        self.skipTest(
+            "Skipping test_performance_get_gpu_reg_table_info as it causes resets on some MI3x systems."
+        )
 
         for i, processor in enumerate(self.processors):
             for reg_type_name, reg_type, reg_type_cond in common.REG_TYPES:

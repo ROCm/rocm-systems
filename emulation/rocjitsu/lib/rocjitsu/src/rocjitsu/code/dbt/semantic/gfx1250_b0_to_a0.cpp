@@ -250,7 +250,7 @@ constexpr uint16_t kGfx1250ScratchBaseSgprEnd = 104;
 /// high-bank scratch requires physicalizing this set first.
 [[nodiscard]] RegisterSet gfx1250_instruction_registers(const Instruction &inst) {
   const InstDefUse def_use(inst);
-  return def_use.uses | def_use.defs;
+  return (def_use.uses | def_use.defs).ordinary_only();
 }
 
 /// @brief Whether an ordinary SGPR window satisfies one scratch request.
@@ -1674,13 +1674,14 @@ void append_gfx1250_f32_to_e5m3(std::vector<uint32_t> &words, uint16_t source, u
       0x380u);
 
   // E5M3 subnormals have a constant 2^-17 quantum. Scaling by 2^17 is exact
-  // in F32, so a direct nearest-integer conversion implements RNE without an
-  // intermediate-format rounding step.
+  // in F32. Round to an integral F32 with ties to even before converting to
+  // integer; V_CVT_NEAREST_I32_F32 instead rounds ties toward positive infinity.
   append_literal(cdna5::kVMulF32Vop3,
                  {.vdst = static_cast<uint8_t>(temp), .src0 = 255, .src1 = gfx1250_vgpr_src(out)},
                  0x48000000u);
-  append_words(words,
-               cdna5::build_vop3(cdna5::kVCvtNearestI32F32Vop3, {.vdst = static_cast<uint8_t>(temp),
+  append_words(words, cdna5::build_vop3(cdna5::kVRndneF32Vop3, {.vdst = static_cast<uint8_t>(temp),
+                                                                .src0 = gfx1250_vgpr_src(temp)}));
+  append_words(words, cdna5::build_vop3(cdna5::kVCvtU32F32Vop3, {.vdst = static_cast<uint8_t>(temp),
                                                                  .src0 = gfx1250_vgpr_src(temp)}));
   append_words(words,
                cdna5::build_vop3(cdna5::kVCndmaskB32Vop3, {.vdst = static_cast<uint8_t>(out),

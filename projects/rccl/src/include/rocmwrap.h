@@ -198,7 +198,14 @@ static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, 
 
 extern int ncclCuMemEnable();
 extern int ncclIsCuMemSupported();
+// Default visibility: rccl-tests (and other out-of-tree binaries) skip
+// symmetric/device-API paths when the runtime cuMem stack is unusable.
+// librccl is otherwise built with -fvisibility=hidden.
+#if defined(__GNUC__)
+extern int ncclCuMemRuntimeSupported() __attribute__((visibility("default")));
+#else
 extern int ncclCuMemRuntimeSupported();
+#endif
 extern int ncclCuMemHostEnable();
 extern int64_t rcclParamForceEnableDMABUF();
 extern int64_t ncclParamDmaBufEnable();

@@ -679,12 +679,14 @@ struct FuncPreMulSum<rccl_float8> {
   using EltType = rccl_float8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg holds float bits, not fp8 bits: see hostToDevRedOp, ncclRedOpCreatePreMulSum
+    // and RedOpArg<FuncPreMulSum<rccl_float8>> below.
     union {
       uint64_t u64;
-      rccl_float8 val;
+      float val;
     };
     u64 = opArg;
-    scalar = (float)(val);
+    scalar = val;
   }
 };
 
@@ -697,12 +699,44 @@ struct FuncPreMulSum<rccl_bfloat8> {
   using EltType = rccl_bfloat8;
   float scalar;
   __device__ FuncPreMulSum(uint64_t opArg = 0) {
+    // opArg holds float bits, as for FuncPreMulSum<rccl_float8>.
     union {
       uint64_t u64;
-      rccl_bfloat8 val;
+      float val;
     };
     u64 = opArg;
-    scalar = (float)(val);
+    scalar = val;
+  }
+};
+
+// A device-resident scalar is an fp8 value in user memory, decoded here with the device's
+// own typedef and widened to the float bits the constructors above expect. No test reaches
+// these yet: the harness cannot build such a scalar for an FNUZ device (AICOMRCCL-2322).
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_float8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = float(*(rccl_float8*)ptr);
+    return u64;
+  }
+};
+
+template <>
+struct RedOpArg<FuncPreMulSum<rccl_bfloat8>> {
+  static constexpr bool ArgUsed = true;
+  __device__ __forceinline__ static uint64_t loadArg(void* ptr) {
+    union {
+      uint64_t u64;
+      float val;
+    };
+    u64 = 0;
+    val = float(*(rccl_bfloat8*)ptr);
+    return u64;
   }
 };
 #endif
@@ -1395,8 +1429,9 @@ DEFINE_Apply_LoadMultimem_sum(uint32_t, u32, 4) DEFINE_Apply_LoadMultimem_minmax
 #endif
 
 #if defined(RCCL_BFLOAT16)
-#if NCCL_CUDA_ARCH_SPECIFIC == 1000 || NCCL_CUDA_ARCH_SPECIFIC == 1010 || NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1000 || \
-  NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1010 || NCCL_CUDA_ARCH_SPECIFIC == 1200 || NCCL_CUDA_ARCH_SPECIFIC == 1210
+#if NCCL_CUDA_ARCH_SPECIFIC == 1000 || NCCL_CUDA_ARCH_SPECIFIC == 1010 || NCCL_CUDA_ARCH_SPECIFIC == 1070 || \
+  NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1000 || NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1010 || \
+  NCCL_CUDA_ARCH_SPECIFIC == 1200 || NCCL_CUDA_ARCH_SPECIFIC == 1210
                     DEFINE_Apply_LoadMultimem_sum_v4_and_xparts(__nv_fp8_e4m3, e4m3x4, 4)
                       DEFINE_Apply_LoadMultimem_minmax_v4_and_xparts(__nv_fp8_e4m3, e4m3x4, 4)
                         DEFINE_Apply_LoadMultimem_sum_v4_and_xparts(__nv_fp8_e5m2, e5m2x4, 4)

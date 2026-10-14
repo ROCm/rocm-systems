@@ -1,3 +1,13 @@
+// SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+
+/*
+ * This file is derived from the rdma-core source code,
+ * the userspace components for the Linux kernel drivers/infiniband subsystem,
+ * and is distributed under the license below.
+ *
+ * The file COPYING is in the main directory of the origin source tree.
+ */
+
 /*
  * Copyright (c) 2025, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Limited and/or its subsidiaries.
