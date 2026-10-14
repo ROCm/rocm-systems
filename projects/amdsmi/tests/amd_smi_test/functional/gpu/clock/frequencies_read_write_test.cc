@@ -106,6 +106,7 @@ void TestFrequenciesReadWrite::Run(void) {
     const char* only_clk_env = std::getenv("AMDSMI_TEST_CLK");
 
     uint32_t clocks_exercised = 0;
+    bool skipped_an_empty_clock_file = false;
     for (uint32_t clk = AMDSMI_CLK_TYPE_FIRST; clk <= AMDSMI_CLK_TYPE__MAX; ++clk) {
       amdsmi_clk = (amdsmi_clk_type_t)clk;
 
@@ -173,6 +174,7 @@ void TestFrequenciesReadWrite::Run(void) {
           if (amdsmi_get_gpu_asic_info(processor_handles_[dv_ind], &asic_info) ==
                   AMDSMI_STATUS_SUCCESS &&
               (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {
+            skipped_an_empty_clock_file = true;
             return false;
           }
         }
@@ -365,13 +367,12 @@ void TestFrequenciesReadWrite::Run(void) {
       freq_write();
     }
 
-    // Every clock can decline one at a time -- PCIE always, an unsupported
-    // domain, or an APU power-gating one into an empty file. If that accounts
-    // for all of them the device was never exercised, which must not read as a
-    // pass. Skipped when AMDSMI_TEST_CLK narrows the run to a single clock.
-    if (only_clk_env == nullptr) {
+    // Only guard the skip added here: a device that declines every clock
+    // on its own did so before this test changed. Narrowing the run to one
+    // clock leaves nothing to compare against.
+    if (skipped_an_empty_clock_file && only_clk_env == nullptr) {
       EXPECT_GT(clocks_exercised, 0u)
-          << "device " << dv_ind << " reported no readable clock domain at all";
+          << "device " << dv_ind << " had every clock skipped as an empty file";
     }
   }
 }
