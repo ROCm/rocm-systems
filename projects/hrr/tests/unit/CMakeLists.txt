@@ -86,6 +86,7 @@ if(TARGET hrr-playback AND NOT WIN32)
   set(HRR_HANDLER_TEST_SOURCES
     hrr_query_retry_test.cc
     hrr_host_budget_test.cc
+    hrr_graph_deps_test.cc
     hrr_blob_refusal_test.cc
   )
 
