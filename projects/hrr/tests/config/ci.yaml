@@ -1,0 +1,84 @@
+# What HRR CI runs and where, read by
+# projects/hrr/tests/scripts/hrr_ci_configure.py (hrr-ci.yml's configure job).
+# Unknown keys, triggers or families are errors.
+version: 1
+
+# The ROCm SDK the host unit job installs. Pinned so a run does not depend on
+# the day's nightly.
+rocm_sdk_version: "10.1.0a20260822"
+
+# Path prefixes, relative to the repository root. A path ending in "/" matches
+# everything under it; any other path matches only itself.
+paths:
+  # A change under any of these runs the generated-source, script and unit jobs.
+  cpu:
+    - projects/hrr/
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/hip/include/hip/hip_runtime_api.h
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # A change under any of these also runs the capture-enabled build and the GPU
+  # suite. hip_runtime_api.h is deliberately absent: almost every HIP API change
+  # touches it, and the generated-source job already checks HRR against it.
+  capture:
+    - projects/clr/hipamd/src/hrr/
+    - projects/clr/hipamd/src/hip_context.cpp
+    - projects/clr/hipamd/src/hip_code_object.cpp
+    - projects/clr/hipamd/src/hip_code_object.hpp
+    - projects/clr/hipamd/include/hip/amd_detail/hip_api_trace.hpp
+    - projects/hrr/CMakeLists.txt
+    - projects/hrr/include/
+    - projects/hrr/playback/
+    - projects/hrr/tests/CMakeLists.txt
+    - projects/hrr/tests/include/
+    - projects/hrr/tests/integration/
+    - projects/hrr/tests/config/ci.yaml
+    - projects/hrr/tests/config/integration.yaml
+    - projects/hrr/tests/scripts/run_catch2.py
+    - projects/hrr/tests/scripts/hrr_test_config.py
+    - projects/hrr/tests/scripts/summarize_junit.py
+    - projects/hrr/tests/scripts/hrr_capture_build.py
+    - projects/hrr/tests/scripts/hrr_ci_configure.py
+    - projects/hrr/tests/scripts/hrr_ci_report.py
+    - .github/workflows/hrr-ci.yml
+    - .github/workflows/hrr-gpu.yml
+  # Ignored by both lists; hrr-skills.yml covers these.
+  excluded:
+    - projects/hrr/skills/
+    - projects/hrr/README.md
+
+# A pull request with this label runs the GPU suite even when it touches no
+# capture path.
+capture_label: ci:hrr-capture
+
+# The GPU families the suite runs on, as TheRock family keys
+# (build_tools/github_actions/amdgpu_family_matrix.py). The integration binary
+# is built for targets.arch in integration.yaml, which must cover them.
+#
+# Per family, all optional:
+#   enabled    false: run only when requested by a ci:gfx... label or the
+#              workflow_dispatch families input. Default true.
+#   triggers   Events that run this family: pull_request, push, schedule,
+#              workflow_dispatch. Default all four.
+#   runner     Runner label to use instead of TheRock's.
+#   multi_gpu  Use TheRock's multi-GPU runner; the T3 tier needs two devices.
+#              Default false.
+#
+# A family without a runner label is skipped. Every job queues on its own
+# runner pool and the summary waits for all of them, so to reduce GPU load or
+# take a pool out, set enabled: false or narrow triggers here.
+families:
+  gfx90a: {}
+  gfx94x: {}
+  gfx950:
+    multi_gpu: true
+  gfx103x: {}
+  gfx110x: {}
+  gfx1150: {}
+  gfx1151: {}
+  gfx1153: {}
+  gfx120x: {}
+  # This pool is not reliably online; a job that finds no runner stays queued
+  # and holds up the summary until GitHub times it out.
+  gfx125x: {}

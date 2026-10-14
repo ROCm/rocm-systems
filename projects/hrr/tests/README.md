@@ -10,7 +10,8 @@ are the same ones it uses.
 tests/
   unit/          C++ (Catch2). hrr-unit-tests: CPU only, no GPU, no capture runtime.
   integration/   C++ (Catch2). hrr-integration-tests: real capture, then replay, on a GPU.
-  config/        One YAML file per suite: every case, and where it runs.
+  config/        One YAML file per suite: every case, and where it runs. ci.yaml:
+                 which CI jobs run and on which GPU families.
   include/       Headers both suites include (hrr_test_common.hh, hrr_test_process.hh).
   scripts/       CI helpers that run a suite and report on it, plus the unittest
                  suites for those helpers and for ../tools. Not built.
@@ -130,6 +131,28 @@ HRR CI scripts (`hrr_ci_configure.py`, `hrr_capture_build.py`, `hrr_ci_report.py
 plus the tools in `../tools`: the HRR API ID compatibility check, the
 generated-source checks (`hrr_check_sources.py`), the playback-handler default in
 the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
+
+## Choosing what CI runs
+
+[`config/ci.yaml`](config/ci.yaml) is the policy the configure job of `hrr-ci.yml`
+applies (`scripts/hrr_ci_configure.py`):
+
+- `paths.cpu`: a change under one of these runs the generated-source, script and unit
+  jobs. `paths.capture` also runs the capture-enabled build and the GPU suite.
+  `paths.excluded` counts for neither.
+- `capture_label` (`ci:hrr-capture`) runs the GPU suite on a pull request that touches
+  no capture path.
+- `families`: the GPU families the suite runs on, as TheRock family keys, on the runner
+  TheRock's family matrix names. By default each runs on every event (`pull_request`,
+  `push`, `schedule`, `workflow_dispatch`). Per family, `enabled: false` leaves it to
+  explicit requests, `triggers` narrows the events, `runner` overrides the runner label
+  and `multi_gpu: true` takes TheRock's multi-GPU runner. A `ci:gfx...` label adds a
+  family; the `workflow_dispatch` input `families` replaces the selection. Both can
+  name a disabled family.
+- `rocm_sdk_version`: the ROCm SDK the unit job installs.
+
+An unknown key, trigger or family fails the configure job. To take load off the GPU
+pools, disable families or narrow their triggers here.
 
 ## Configuring where a case runs
 

@@ -1,8 +1,8 @@
 # HRR CI: generated-source checks, the HRR helper-script tests and the host
 # unit suite, plus the GPU capture/replay suite (hrr-gpu.yml) for changes that
 # touch capture or replay. projects/hrr/tests/scripts/hrr_ci_configure.py
-# decides what runs; "HRR CI Summary" reports every platform and GPU family in
-# one table.
+# decides what runs from projects/hrr/tests/config/ci.yaml; "HRR CI Summary"
+# reports every platform and GPU family in one table.
 
 name: HRR CI
 
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       families:
-        description: "Comma-separated GPU families (TheRock keys, e.g. gfx94x,gfx110x). Empty: the nightly set."
+        description: "Comma-separated GPU families (TheRock keys, e.g. gfx94x,gfx110x). Empty: the families ci.yaml selects."
         type: string
         default: ""
       ignore_test_config:
@@ -33,10 +33,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # The unit suite only needs HIP headers and the hip CMake package. Pinned so
-  # a run does not depend on the day's nightly.
+  # The unit suite only needs HIP headers and the hip CMake package; ci.yaml
+  # pins the version.
   ROCM_INDEX_URL: "https://rocm.nightlies.amd.com/whl-multi-arch/"
-  ROCM_SDK_VERSION: "10.1.0a20260822"
 
 jobs:
   configure:
@@ -50,12 +49,15 @@ jobs:
       run_gpu: ${{ steps.decide.outputs.run_gpu }}
       families: ${{ steps.decide.outputs.families }}
       reason: ${{ steps.decide.outputs.reason }}
+      rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          sparse-checkout: projects/hrr/tests/scripts/hrr_ci_configure.py
+          sparse-checkout: |
+            projects/hrr/tests/scripts/hrr_ci_configure.py
+            projects/hrr/tests/config/ci.yaml
           sparse-checkout-cone-mode: false
 
       - name: Checkout TheRock family matrix
@@ -81,6 +83,9 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --no-cache-dir PyYAML==6.0.2
 
       - name: Decide
         id: decide
@@ -201,6 +206,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install the ROCm SDK
+        env:
+          ROCM_SDK_VERSION: ${{ needs.configure.outputs.rocm_sdk_version }}
         run: |
           python -m pip install --no-cache-dir PyYAML==6.0.2
           python -m pip install --no-cache-dir --index-url "${ROCM_INDEX_URL}" "rocm[devel]==${ROCM_SDK_VERSION}"
