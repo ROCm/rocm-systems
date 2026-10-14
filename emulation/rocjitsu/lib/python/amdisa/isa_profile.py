@@ -776,9 +776,12 @@ class IsaProfile(ABC):
         return {}
 
     @property
-    def ds_addtid_wraps_20bit_address(self) -> bool:
-        """True when DS ADDTID wraps M0 plus lane offset to twenty bits."""
-        return False
+    def ds_addtid_m0_base_bits(self) -> int:
+        """Width of the ADDTID M0 byte base.
+
+        The 16-bit form adds OFFSET at that width before widening; the 20-bit
+        form widens OFFSET before addition. Lane offsets are added last."""
+        return 16
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
@@ -1520,12 +1523,12 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
+        """True if this ISA has AccVGPRs (CDNA1-4)."""
         return False
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA3/4)."""
+        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA1/3/4)."""
         return 0
 
     @property
@@ -2952,14 +2955,8 @@ class Cdna5Profile(Rdna4Profile):
         return overrides
 
     @property
-    def semantic_class_overrides(self) -> dict[str, str]:
-        return {
-            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-        }
-
-    @property
-    def ds_addtid_wraps_20bit_address(self) -> bool:
-        return True
+    def ds_addtid_m0_base_bits(self) -> int:
+        return 20
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:

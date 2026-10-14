@@ -9401,20 +9401,17 @@ class CodeGenerator:
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
         lines.append('    uint32_t m0 = wf.m0();')
-        if self.isa_spec.profile.ds_addtid_wraps_20bit_address:
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
-            lines.append(
-                '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
-            )
+        mask = (1 << self.isa_spec.profile.ds_addtid_m0_base_bits) - 1
+        if self.isa_spec.profile.ds_addtid_m0_base_bits == 16:
+            # The 16-bit base-plus-offset expression widens before adding laneID.
+            lines.append(f'    uint32_t byte_base = (m0 + offset) & 0x{mask:x}u;')
         else:
-            lines.append('    uint32_t byte_base = m0 & 0xFFFFu;')
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append(
-                '      d->per_lane_addr[lane] = byte_base + lane * 4u + offset + wf.lds_base();'
-            )
+            lines.append(f'    uint32_t byte_base = (m0 & 0x{mask:x}u) + offset;')
+        lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        lines.append('      if (!(exec & (1ULL << lane))) continue;')
+        lines.append(
+            '      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();'
+        )
         lines.append('    }')
         lines.append('  }')
 

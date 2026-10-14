@@ -352,8 +352,8 @@ def test_gfx1250_addtid_uses_m0_byte_base_addresses(
     )
     load_body = _generated_method_body(vds, 'DsLoadAddtidB32Vds', 'DsPermuteB32Vds')
     for body in (store_body, load_body):
-        assert 'uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;' in body
-        assert 'lane_offset + offset + wf.lds_base()' in body
+        assert 'uint32_t byte_base = (m0 & 0xfffffu) + offset;' in body
+        assert 'byte_base + lane * 4u + wf.lds_base()' in body
         assert 'ds_stride_bytes' not in body
 
 
@@ -395,14 +395,14 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
         return derive_all_semantics(spec)
 
     gfx1250 = semantics_for(Cdna5Profile())
-    assert Cdna5Profile().ds_addtid_wraps_20bit_address
+    assert Cdna5Profile().ds_addtid_m0_base_bits == 20
     assert gfx1250['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert gfx1250[name].semantic_class == 'ds_atomic2'
         assert gfx1250[name].operation == 'swap'
 
     rdna4 = semantics_for(Rdna4Profile())
-    assert not Rdna4Profile().ds_addtid_wraps_20bit_address
+    assert Rdna4Profile().ds_addtid_m0_base_bits == 16
     assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert rdna4[name].semantic_class == 'ds_atomic2'

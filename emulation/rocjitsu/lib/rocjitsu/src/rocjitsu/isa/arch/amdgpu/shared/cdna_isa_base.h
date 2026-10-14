@@ -7,7 +7,7 @@
 /// Provides `CdnaStatusReg` — the common wavefront status register layout —
 /// and `CdnaIsaBase` — a struct containing the static constants shared by all
 /// CDNA ISAs. Each per-ISA `isa.h` inherits from `CdnaIsaBase` and overrides
-/// only the fields that differ (e.g. `MAX_ACC_VGPRS_PER_WF` for CDNA2/3/4).
+/// only the fields that differ (e.g. `MAX_ACC_VGPRS_PER_WF` for CDNA1-4).
 ///
 /// SGPR count: 102 (not 104 — verified per CDNA ISA specifications; the two
 /// highest-numbered SGPRs are reserved for VCC on CDNA Wave64).
@@ -85,7 +85,7 @@ public:
 ///
 /// @details Inheriting structs may shadow any constant with an ISA-specific
 /// override, e.g. `static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 256;`
-/// for CDNA2/3/4.  Constants not overridden are inherited as-is.
+/// for CDNA1-4.  Constants not overridden are inherited as-is.
 ///
 /// `Context` is fixed to `amdgpu::Wavefront` for all CDNA ISAs; each per-ISA
 /// `Isa` struct adds `Decoder`, `MachineInst`, `OperandType`, and `StatusReg`

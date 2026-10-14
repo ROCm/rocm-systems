@@ -2384,7 +2384,7 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
             num_elems=1,
             operation='st64' if is_st64 else None,
         )
-    # ADDTID uses M0 as a byte base and an implicit thread index.
+    # Classify ADDTID before the ordinary DS write/read suffix tables.
     if 'ADDTID' in upper:
         if is_write:
             return InstructionSemantics(

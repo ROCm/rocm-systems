@@ -566,7 +566,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       }
     }
   }
-  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
+  if (host_arch == ROCJITSU_CODE_ARCH_CDNA1 && result.target_agpr_count != 0) {
+    // gfx908 has separate equal-sized VGPR/AGPR allocations, with no ACCUM_OFFSET.
+    result.target_accvgpr_base = 0;
+    required_vgpr_allocation = std::max(required_vgprs, result.target_agpr_count);
+  } else if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
     required_vgpr_allocation =
         std::max(required_vgprs, result.target_accvgpr_base + result.target_agpr_count);
   } else {

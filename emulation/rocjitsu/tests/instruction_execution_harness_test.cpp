@@ -7614,26 +7614,33 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
-    config.lds_size_kb = 64;
+    config.lds_size_kb = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 128 : 64;
     auto cu = amdgpu::ComputeUnitCore::create("addtid_cu", config, &memory, &l2);
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, 102, 16);
     ASSERT_NE(wf, nullptr);
     wf->set_lds_base(128);
-    wf->set_lds_size(8192);
+    wf->set_lds_size(config.lds_size_kb * 1024 - 128);
     const auto vb = wf->vgpr_alloc().base;
     const uint64_t full = ~uint64_t{0} >> (64 - wf->wf_size());
-    for (uint32_t m0 : {0u, 0x120u, 0xabc00120u})
+    for (uint32_t m0 : {0u, 0x120u, 0xabc00120u, 0x10120u, 0xfff0u, 0xffffcu, 0xfe80u})
       for (uint64_t exec : {uint64_t{0}, uint64_t{0x8000000100000025} & full, full}) {
         SCOPED_TRACE(testing::Message() << "arch=" << arch << " m0=" << m0 << " exec=" << exec);
-        // CDNA5 wraps M0 + thread*4 to 20 bits; earlier families use M0[15:0].
-        // This high-bit example keeps both rules inside the allocated LDS.
+        // The pre-CDNA5 base plus OFFSET wraps at 16 bits; lane addition never wraps.
+        const auto address = [&](unsigned lane) {
+          const uint32_t base =
+              arch == ROCJITSU_CODE_ARCH_CDNA5 ? (m0 & 0xfffffu) + 0x104 : (m0 + 0x104) & 0xffffu;
+          return 128 + base + lane * 4;
+        };
+        const bool address_only =
+            m0 == 0xfe80u || (arch == ROCJITSU_CODE_ARCH_CDNA5 && m0 == 0xffffcu);
         wf->set_m0(m0);
         wf->set_exec(exec);
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           cu->write_vgpr(vb + 2, lane, 0x12340000 + lane);
           cu->write_vgpr(vb + 4, lane, 0xcccccccc);
-          wf->lds().write32(128 + (m0 & 0xffff) + 0x104 + lane * 4, 0xdddddddd);
+          if (!address_only)
+            wf->lds().write32(address(lane), 0xdddddddd);
         }
         for (bool load : {false, true}) {
           std::array<uint32_t, 2> words;
@@ -7691,15 +7698,18 @@ TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitec
           ASSERT_NE(state, nullptr);
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
             if (exec & (uint64_t{1} << lane)) {
-              EXPECT_EQ(state->per_lane_addr[lane], 128 + (m0 & 0xffff) + 0x104 + lane * 4);
+              EXPECT_EQ(state->per_lane_addr[lane], address(lane));
             }
+          if (address_only)
+            continue;
           amdgpu::LocalMemPipeline pipeline;
           ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
         }
+        if (address_only)
+          continue;
         for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           const bool active = exec & (uint64_t{1} << lane);
-          EXPECT_EQ(wf->lds().read32(128 + (m0 & 0xffff) + 0x104 + lane * 4),
-                    active ? 0x12340000 + lane : 0xdddddddd);
+          EXPECT_EQ(wf->lds().read32(address(lane)), active ? 0x12340000 + lane : 0xdddddddd);
           EXPECT_EQ(cu->read_vgpr(vb + 4, lane), active ? 0x12340000 + lane : 0xcccccccc);
         }
       }
@@ -7738,8 +7748,10 @@ TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
       for (bool scalar : {false, true})
         for (uint64_t exec :
              {uint64_t{0}, uint64_t{1}, uint64_t{0x8000000100000025}, ~uint64_t{0}}) {
+          // The full-wave EXEC rule is explicit in the CDNA3/4 control tables.
+          // Older targets only qualify the accumulator bank at full EXEC.
           if (arch < ROCJITSU_CODE_ARCH_CDNA3 &&
-              test.opcode == cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma)
+              (exec != ~uint64_t{0} || test.opcode == cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma))
             continue;
           // CDNA3 uses the FNUZ exponent bias; CDNA4 uses IEEE E5M2.
           const auto input = arch == ROCJITSU_CODE_ARCH_CDNA3 && test.input == 0x3c3c3c3c

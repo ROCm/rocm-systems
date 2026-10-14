@@ -3072,11 +3072,11 @@ void DsStoreAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_id = wf.wf_id();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
+    uint32_t byte_base = (m0 & 0xfffffu) + offset;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;
-      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
   auto &cu = wf.cu();
@@ -3119,11 +3119,11 @@ void DsLoadAddtidB32Vds::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_id = wf.wf_id();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
+    uint32_t byte_base = (m0 & 0xfffffu) + offset;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;
-      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
   set_data(std::move(d));

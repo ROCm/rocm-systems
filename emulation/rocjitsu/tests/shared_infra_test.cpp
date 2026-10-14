@@ -158,6 +158,7 @@ struct ForceScalarGuard {
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<cdna5::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
+static_assert(HasAccVgpr<cdna1::Isa>);
 static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
 static_assert(HasAccVgpr<cdna4::Isa>);

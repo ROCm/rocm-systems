@@ -630,11 +630,11 @@ void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_id = wf.wf_id();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
-    uint32_t byte_base = m0 & 0xFFFFu;
+    uint32_t byte_base = (m0 + offset) & 0xffffu;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      d->per_lane_addr[lane] = byte_base + lane * 4u + offset + wf.lds_base();
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
   auto &cu = wf.cu();
@@ -2918,11 +2918,11 @@ void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_id = wf.wf_id();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
-    uint32_t byte_base = m0 & 0xFFFFu;
+    uint32_t byte_base = (m0 + offset) & 0xffffu;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      d->per_lane_addr[lane] = byte_base + lane * 4u + offset + wf.lds_base();
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
   set_data(std::move(d));
