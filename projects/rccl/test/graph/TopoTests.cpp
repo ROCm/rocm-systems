@@ -1138,6 +1138,97 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
       {{"NCCL_CROSS_NIC", "2"}});
 }
 
+TEST_F(TopoTest, CheckP2p_LevelXgmiRejectsPhbPeer) {
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "CheckP2p_LevelXgmiRejectsPhbPeer",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        const uint64_t host = 0xe6;
+        struct ncclXmlNode* cpu = addSystemCpu(host);
+        addGpuPci(cpu, "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+        addGpuPci(cpu, "0000:1c:00.0", "gfx942", /*rank=*/1, /*dev=*/1);
+
+        struct ncclTopoSystem* built = buildSystemWithPaths(host);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_PHB);
+
+        int p2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &p2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(p2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_LEVEL", "XGMI"}});
+}
+
+TEST_F(TopoTest, ComputePaths_CpxPeersUseLocalPath) {
+  RUN_ISOLATED_TEST(
+      "ComputePaths_CpxPeersUseLocalPath",
+      [this]() {
+        ::unsetenv("NCCL_P2P_DISABLE");
+        ::unsetenv("NCCL_P2P_LEVEL");
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // The fixture builds two real CPX partitions under one PCI function.
+        // Path discovery must retain their local inter-partition connection.
+        EXPECT_EQ(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_EQ(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+
+        ncclTopoFree(built);
+      });
+}
+
+TEST_F(TopoTest, ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath) {
+  // NCCL_P2P_DISABLE is cached process-wide. Isolate the test so it is the
+  // first P2P policy lookup and cannot affect other topology tests.
+  RUN_ISOLATED_TEST_WITH_ENV(
+      "ComputePaths_P2pDisableDivertsCpxPeersButPreservesSelfPath",
+      [this]() {
+        const uint64_t host = 0xe5;
+        struct ncclTopoSystem* built =
+            buildRailSystem(host, /*nGpus=*/2, /*partitioned=*/true);
+        ASSERT_NE(built, nullptr);
+        ASSERT_EQ(built->nodes[GPU].count, 2);
+        ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+        // Disabling P2P must not replace a GPU's zero-hop self path with a
+        // route through the CPU.
+        for (int g = 0; g < built->nodes[GPU].count; g++) {
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].type, PATH_LOC);
+          EXPECT_EQ(built->nodes[GPU].nodes[g].paths[GPU][g].count, 0);
+        }
+        int selfP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 0, &selfP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(selfP2p, 1);
+
+        // NCCL_P2P_DISABLE must divert the local CPX peer path through the CPU.
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[0].paths[GPU][1].count, 0);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].type, PATH_LOC);
+        EXPECT_GT(built->nodes[GPU].nodes[1].paths[GPU][0].count, 0);
+        int peerP2p = -1;
+        ASSERT_EQ(ncclTopoCheckP2p(nullptr, built, 0, 1, &peerP2p, nullptr,
+                                   nullptr, nullptr, nullptr),
+                  ncclSuccess);
+        EXPECT_EQ(peerP2p, 0);
+
+        ncclTopoFree(built);
+      },
+      {{"NCCL_P2P_DISABLE", "1"}});
+}
+
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)
 
 // ncclTopoAddXGMI() is not built on non-HIP platforms, so register one skipped
