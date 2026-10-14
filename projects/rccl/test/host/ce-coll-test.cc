@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -669,5 +670,133 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                          ::testing::Values(LaunchPath::kSingleStream, LaunchPath::kMultiStream, LaunchPath::kBatchAsync,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
+
+// CE-Scratch AllToAll (useDda: staged in ddaScratch, then copied back) on a gfx1250 fabric comm shares the
+// scratch with the barrier-free DDA LL / LL128 slots. After the copy-back the staged range is zeroed and one
+// more barrier follows, so no peer's next LL kernel can overwrite the scratch mid copy-back or accept stale
+// payload as a flag. Comms without fabric DDA keep the two barriers and no memset.
+class CeAlltoAllDdaScratchMicrotest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    ResetAllFakes();
+    g_hipStreamBatchMemOp = [this](hipStream_t stream, unsigned int, hipStreamBatchMemOpParams*, unsigned int) {
+      Record("sync", stream);
+      return hipSuccess;
+    };
+    g_hipMemcpyAsync = [this](void* dst, const void* src, size_t bytes, hipMemcpyKind, hipStream_t stream) {
+      if (dst == reinterpret_cast<void*>(kUserRecv)) {
+        EXPECT_EQ(reinterpret_cast<const void*>(kRecvBase), src);
+        EXPECT_EQ(kFull, bytes);
+        Record("copyback", stream);
+      } else {
+        Record("copy", stream);
+      }
+      return hipSuccess;
+    };
+    g_hipMemsetAsync = [this](void* dst, int value, size_t bytes, hipStream_t stream) {
+      EXPECT_EQ(reinterpret_cast<void*>(kRecvBase), dst);
+      EXPECT_EQ(0, value);
+      EXPECT_EQ(kFull, bytes);
+      Record("memset", stream);
+      return hipSuccess;
+    };
+    g_hipEventRecord = [](hipEvent_t, hipStream_t) { return hipSuccess; };
+    g_hipStreamWaitEvent = [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; };
+    g_devrGetLsaRankPtr = [](ncclComm* comm, ncclDevrWindow*, size_t offset, int lsaRank, void** outPtr) {
+      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaSize) return ncclInvalidArgument;
+      *outPtr = reinterpret_cast<void*>(kPeerWindowBase + lsaRank * kPeerWindowStride + offset);
+      return ncclSuccess;
+    };
+  }
+  void TearDown() override { ResetAllFakes(); }
+  void Record(const char* op, hipStream_t stream) {
+    ops_.push_back(op);
+    streams_.push_back(stream);
+  }
+  static void ResetAllFakes() {
+    ResetHipFakes();
+    ResetDevRuntimeFakes();
+    ResetNcclFakes();
+    ResetNcclStubs();
+    ResetEnvFakes();
+  }
+
+  // Launches one CE-Scratch AllToAll on rank 0 of kRanks; returns the stream-ordered op trace.
+  std::vector<std::string> Launch(bool fabric) {
+    std::vector<int> lsaRankList(kRanks);
+    for (int r = 0; r < kRanks; ++r) lsaRankList[r] = r;
+    std::vector<uint32_t> syncFlags(2 * kRanks, 0);
+    ncclDevrWindow syncWin = {};
+    syncWin.userPtr = syncFlags.data();
+    ncclCudaStreamList streams = {};
+    streams.stream = kStream;
+    auto comm = std::make_unique<ncclComm>();
+    comm->rank = 0;
+    comm->nRanks = kRanks;
+    comm->nNodes = 1;
+    comm->devrState.lsaSize = kRanks;
+    comm->devrState.lsaSelf = 0;
+    comm->devrState.lsaRankList = lsaRankList.data();
+    comm->symkState.hasLsaMultimem = false;
+    comm->planner.streams = &streams;
+    comm->planner.capturingGraph.graphId = ULLONG_MAX;  // CE-Scratch is never selected under capture
+    comm->ceColl.intraBatchSyncFreq = CE_COLL_INTRA_BATCH_SYNC_FREQ;
+    comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
+    comm->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(syncFlags.data());
+    comm->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(syncFlags.data() + kRanks);
+    comm->ceColl.ceSyncWin = &syncWin;
+    comm->ddaFabricMemHandler = fabric ? reinterpret_cast<ncclFabricMemHandler*>(0x1) : nullptr;
+    void* peerBases[kRanks];
+    for (int r = 0; r < kRanks; ++r) peerBases[r] = reinterpret_cast<void*>(kPeerWindowBase + r * kPeerWindowStride);
+
+    ncclCeCollArgs args = {};
+    args.func = ncclFuncAlltoAll;
+    args.datatype = ncclInt8;
+    args.eltSize = 1;
+    args.nElts = kChunk;
+    args.sendBuff = reinterpret_cast<uint8_t*>(kSendBase);
+    args.recvBuff = reinterpret_cast<uint8_t*>(kRecvBase);  // the scratch
+    args.useDda = true;
+    args.ddaPeerBases = peerBases;
+    args.ddaUserRecvBuff = reinterpret_cast<uint8_t*>(kUserRecv);
+    ncclKernelPlan plan = {};
+    plan.ceCollArgs = &args;
+    ops_.clear();
+    streams_.clear();
+    EXPECT_EQ(ncclSuccess, ncclLaunchCeColl(comm.get(), &plan));
+    barriers_ = comm->ceColl.ceSeqNum;
+    comm->ddaFabricMemHandler = nullptr;
+    return ops_;
+  }
+
+  static constexpr int kRanks = 4;
+  static constexpr size_t kChunk = 4 * kMiB + 4;
+  static constexpr size_t kFull = kRanks * kChunk;
+  static constexpr uintptr_t kUserRecv = 0x400000000000;
+  const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5717);
+  std::vector<std::string> ops_;
+  std::vector<hipStream_t> streams_;  // the stream of each op in ops_
+  uint32_t barriers_ = 0;
+};
+
+TEST_F(CeAlltoAllDdaScratchMicrotest, FabricComm_ZeroesTheScratchThenBarriersAfterTheCopyBack) {
+  const std::vector<std::string> ops = Launch(/*fabric=*/true);
+  ASSERT_GE(ops.size(), 4u);
+  EXPECT_EQ((std::vector<std::string>{"sync", "copyback", "memset", "sync"}),
+            std::vector<std::string>(ops.end() - 4, ops.end()));
+  EXPECT_EQ(ops.front(), "sync");
+  EXPECT_EQ(3u, barriers_);
+  // The memset and the trailing barrier are ordered after the copy-back only by being on its stream.
+  ASSERT_EQ(ops.size(), streams_.size());
+  for (size_t i = ops.size() - 3; i < ops.size(); ++i) EXPECT_EQ(kStream, streams_[i]) << ops[i];
+}
+
+TEST_F(CeAlltoAllDdaScratchMicrotest, NonFabricComm_CopyBackOnlyAfterTheTwoBarriers) {
+  const std::vector<std::string> ops = Launch(/*fabric=*/false);
+  ASSERT_GE(ops.size(), 2u);
+  EXPECT_EQ((std::vector<std::string>{"sync", "copyback"}), std::vector<std::string>(ops.end() - 2, ops.end()));
+  EXPECT_EQ(0, std::count(ops.begin(), ops.end(), "memset"));
+  EXPECT_EQ(2u, barriers_);
+}
 
 }  // namespace

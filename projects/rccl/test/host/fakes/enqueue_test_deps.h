@@ -28,6 +28,25 @@
 // TRAP: NCCL_PROTO is latched in a static at updateCollCostTable:2527 and read via raw getenv at topoGetAlgoInfo:2687.
 // TRAP: a test that fills the work FIFO must fail the poll or set abortFlag, or waitWorkFifoAvailable spins and hangs.
 
+// taskAppend's AllToAll tests make taskAppend live in this binary. The rccl_wrap.cc entry points it reaches
+// are defined in enqueue_test_deps.cc (only this binary compiles enqueue.cc without rccl_wrap.cc). The
+// in-place AllToAll helpers, forced CE-Scratch and NCCL_ALGO are seams; the rest return the default-off
+// answer or fail loudly.
+#include <functional>
+#include "rccl_common.h"  // rcclA2aInPlaceSite
+struct ncclComm;
+extern std::function<bool(const ncclComm*, const void*, const void*)> g_rcclAlltoAllCeScratchInPlace;
+extern std::function<ncclResult_t(const ncclComm*, const void*, const void*, size_t)> g_rcclAlltoAllInPlaceGuard;
+extern int g_rcclAlltoAllInPlaceGuardCalls;
+// What the last guard call was told (site, capturing, registeredCe); see rccl_common.h.
+extern rcclA2aInPlaceSite g_rcclAlltoAllInPlaceGuardSite;
+extern bool g_rcclAlltoAllInPlaceGuardCapturing;
+extern bool g_rcclAlltoAllInPlaceGuardRegisteredCe;
+// rcclAlltoAllRegisteredCeRefused: this value for in-place calls, false out of place (gfx1250 when true).
+extern bool g_rcclAlltoAllRegisteredCeRefused;
+extern bool g_rcclForceCeScratchEnabled;  // rcclForceCeScratchEnabled
+extern bool g_rcclNcclAlgoEnvIsSet;       // rcclNcclAlgoEnvIsSet (NCCL_ALGO set)
+
 void ResetEnqueueTestDeps();
 
 #endif  // RCCL_TEST_HOST_ENQUEUE_TEST_DEPS_H_
