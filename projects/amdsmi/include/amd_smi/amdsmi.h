@@ -210,7 +210,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 27
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 1
+#define AMDSMI_LIB_VERSION_MINOR 2
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point
 //! release
@@ -1284,6 +1284,20 @@ typedef enum {
 } amdsmi_link_status_t;
 
 /**
+ * @brief Unified link topology information between two processors
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint64_t weight;                   //!< link weight
+  amdsmi_link_status_t link_status;  //!< link status; synthesized on baremetal (not live HW status)
+  amdsmi_link_type_t link_type;      //!< type of the link
+  uint8_t num_hops;                  //!< number of hops
+  uint8_t fb_sharing;                //!< 1 if P2P framebuffer access is available, 0 otherwise
+  uint32_t reserved[10];
+} amdsmi_link_topology_t;
+
+/**
  * @brief Link Metrics
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -1858,6 +1872,18 @@ typedef enum {
   AMDSMI_CPER_NOTIFY_TYPE_CXL_COMPONENT = 0x49A341DF69293BC9 /**< Compute Express Link
                                                                   Component Error */
 } amdsmi_cper_notify_type_t;
+
+/**
+ * @brief IFoE CPER notify type GUID
+ *
+ * Placeholder GUID for IFoE fabric error records. The all-FF value means
+ * "N/A, not yet assigned". Will be replaced with official GUID once provided
+ * by UALoE team.
+ *
+ * @cond @tag{host} @endcond
+ */
+#define AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID \
+  {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 
 /**
  * @brief Ras policy v4.0
@@ -2731,6 +2757,18 @@ typedef struct {
 } amdsmi_npm_info_t;
 
 /**
+ * @brief NPM balancing mode
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NPM_BALANCING_MODE_INVALID = 0,  //!< Invalid/unavailable (e.g. unreadable sysfs value)
+  AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,      //!< Power Balancing (PB), the default mode
+  AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,  //!< Frequency Balancing (FB)
+  AMDSMI_NPM_BALANCING_MODE_MAX = 3  //!< Not a valid mode; bounds the defined enum range
+} amdsmi_npm_balancing_mode_t;
+
+/**
  * @brief Compute tray type
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3206,7 +3244,8 @@ typedef struct {
  *
  *  @details This function initializes the library and the internal data structures,
  *  including those corresponding to sources of information that SMI provides.
- *  Singleton Design, requires the same number of inits as shutdowns.
+ *  Singleton Design, requires the same number of inits as shutdowns. Threads may call
+ *  ::amdsmi_init and ::amdsmi_shut_down concurrently; the calls are serialized.
  *
  *  The @p init_flags decides which type of processor
  *  can be discovered by ::amdsmi_get_socket_handles(). AMDSMI_INIT_AMD_GPUS returns
@@ -3232,7 +3271,8 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags);
  *
  *  @details This function shuts down the library and internal data structures and
  *  performs any necessary clean ups. Singleton Design, requires the same number
- *  of inits as shutdowns.
+ *  of inits as shutdowns. The call that releases the last reference frees every
+ *  handle, so no other thread may still be using one.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -4075,7 +4115,13 @@ amdsmi_status_t amdsmi_get_gpu_pci_replay_counter(amdsmi_processor_handle proces
  *  ::amdsmi_frequencies_t::num_supported (of ::amdsmi_pcie_bandwidth_t) bits of
  *  this mask are relevant.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p bw_bitmask selects no settable bandwidth
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  */
 amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                                              uint64_t bw_bitmask);
@@ -5443,33 +5489,46 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
  *
  *  @platform{gpu_bm_linux}
  *
- *  @details Given a processor handle @p processor_handle, a clock type @p clk_type, and a
- *  64 bit bitmask @p freq_bitmask, this function will limit the set of
- *  allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- *  the frequency (as ordered in an ::amdsmi_frequencies_t returned by
- *  amdsmi_get_clk_freq()) corresponding to that bit index will be
- *  allowed.
+ *  @details Given a processor handle @p processor_handle, this
+ *  function restricts clock @p clk_type to the frequencies
+ *  selected in @p freq_bitmask. Bit N maps to DPM level N in the
+ *  order returned by amdsmi_get_clk_freq(). Set a bit to 1 to
+ *  enable and 0 to disable that level.
  *
- *  This function will change the performance level to
- *  ::AMDSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- *  frequencies. Caller will need to set to ::AMDSMI_DEV_PERF_LEVEL_AUTO in order
- *  to get back to default state.
+ *  Only settable DPM levels can be enabled. Bits outside the settable range are
+ *  dropped before the request is sent, so an out-of-range level is never
+ *  requested; the remaining in-range bits are still applied. The deep-sleep
+ *  frequency (see ::amdsmi_frequencies_t::has_deep_sleep)
+ *  is not settable, so when it is present the settable level count is
+ *  ::amdsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ *  frequency, all ::amdsmi_frequencies_t::num_supported levels (0 to
+ *  num_supported - 1) are settable. The call returns ::AMDSMI_STATUS_INVAL if
+ *  @p freq_bitmask selects no settable level, or ::AMDSMI_STATUS_UNEXPECTED_DATA
+ *  if the device reports zero settable levels for @p clk_type.
  *
- *  All bits with indices greater than or equal to
- *  ::amdsmi_frequencies_t::num_supported will be ignored.
+ *  This call sets the performance level to ::AMDSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ *  back to ::AMDSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @note This function requires admin/sudo privileges
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::amdsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @retval ::AMDSMI_STATUS_INVAL @p clk_type is not a valid ::amdsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than AMDSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  */
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                                     amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
@@ -5833,8 +5892,12 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
  */
 typedef enum {
   AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE =
-      32,  //!< Active accelerators bitmap size (32 x 32-bit words = 1024 bits)
-  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16  //!< Maximum local GPUs in fabric
+      32,                              //!< Maximum active accelerator IDs reported per vPoD
+  AMDSMI_FABRIC_MAX_LOCAL_GPUS = 16,   //!< Maximum local GPUs in fabric
+  AMDSMI_FABRIC_MAX_BITMAP_SIZE = 64,  //!< Maximum bitmap size (64 bytes = 512 bits)
+  AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS =
+      37  //!< Growth window in ::amdsmi_fabric_info_v2_t (148 bytes). New fields are carved
+          //!< from here so ::amdsmi_fabric_info_t never changes size again
 } amdsmi_fabric_size_constants_t;
 
 /**
@@ -5876,7 +5939,77 @@ typedef enum {
 } amdsmi_fabric_accelerator_vpod_state_t;
 
 /**
+ * @brief Physical PoD (PPOD) data payload
+ *
+ * @details Shared data members embedded in both ::amdsmi_fabric_ppod_config_t and
+ * ::amdsmi_fabric_info_v2_t
+ *
+ * Fields with no data present read back at a sentinel: numeric fields at their maximum
+ * representable value (ie: accelerator_id at 0xFFFFFFFF), and the ppod_id byte array at the
+ * guard byte 0x99
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t accelerator_id;                    //!< Accelerator identifier (range 0 to 1023)
+  uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes; not all-zero
+                                              //!< nor all-0x99)
+  uint32_t ppod_size;                         //!< Physical PoD size
+  uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
+  uint32_t local_accelerator_count;                           //!< Count of valid local accelerators
+  uint32_t bandwidth;                                         //!< Station bandwidth share in Mb/s
+  uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
+} amdsmi_fabric_ppod_data_t;
+
+/**
+ * @brief Virtual PoD (VPOD) data payload
+ *
+ * @details Shared data members embedded in both ::amdsmi_fabric_vpod_config_t and
+ * ::amdsmi_fabric_info_v2_t
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t vpod_id;    //!< Virtual PoD Identifier (nonzero; 0 is not a valid pod ID)
+  uint32_t vpod_size;  //!< Virtual PoD size
+  uint32_t vpod_active_accelerators
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
+                                                        //!< read UINT32_MAX (UNSET), as with
+                                                        //!< local_accelerators. A longer list than
+                                                        //!< this array holds is reported as absent
+                                                        //!< rather than truncated
+  amdsmi_fabric_npa_address_mode_t addr_mode;           //!< Source aliasing or identification mode
+} amdsmi_fabric_vpod_data_t;
+
+/**
+ * @brief DF/station data payload
+ *
+ * @details Shared data members embedded in both ::amdsmi_fabric_station_config_t and
+ * ::amdsmi_fabric_info_v2_t
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t station_flags;  //!< DF/station flags
+  uint8_t num_stations;    //!< Number of stations (0 to 255). The driver reports this count in 32
+                           //!< bits (ualoe_lib.h, up to 1016 stations); a larger value is reported
+                           //!< as absent rather than truncated
+  uint8_t lane_en_bitmap[AMDSMI_FABRIC_MAX_BITMAP_SIZE];  //!< Per-lane enable bitmap (64 bytes =
+                                                          //!< 512 bits); reads 0 (lanes disabled)
+                                                          //!< when absent
+} amdsmi_fabric_station_data_t;
+
+/**
  * @brief Fabric device configuration information (version 1)
+ *
+ * @details Flat layout. Frozen: the field order and offsets below are relied on by
+ * binaries already linked against this library and must never change
+ *
+ * Presence/configured-ness is conveyed by the top-level return of
+ * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
+ * accel_state field
+ *
+ * Fields with no data are left at their sentinel value
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -5891,12 +6024,62 @@ typedef struct {
   uint32_t vpod_id;    //!< Virtual PoD Identifier
   uint32_t vpod_size;  //!< Virtual PoD size
   uint32_t vpod_active_accelerators
-      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< 1024-bit list (32 x 32-bit words): bit
-                                                        //!< N set = accelerator ID N is active
+      [AMDSMI_FABRIC_ACTIVE_ACCELERATORS_BITMAP_SIZE];  //!< Active accelerator IDs; unused slots
+                                                        //!< read UINT32_MAX (UNSET), as with
+                                                        //!< local_accelerators
   uint32_t local_accelerators[AMDSMI_FABRIC_MAX_LOCAL_GPUS];  //!< Local Accelerator IDs
   amdsmi_fabric_npa_address_mode_t addr_mode;          //!< Source aliasing or identification mode
   amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
 } amdsmi_fabric_info_v1_t;
+
+/**
+ * @brief Fabric device configuration information (version 2)
+ *
+ * @details Groups the version 1 fields into the ppod/vpod/station payloads shared with
+ * ::amdsmi_set_gpu_fabric_ppod_config and friends, and adds the DF/station data that has
+ * no version 1 equivalent
+ *
+ * Presence/configured-ness is conveyed by the top-level return of
+ * ::amdsmi_get_gpu_fabric_info (SUCCESS / NOT_SUPPORTED / NO_DATA) and by the
+ * accel_state field
+ *
+ * Fields with no data are left at their sentinel value, except lane_en_bitmap,
+ * which reads 0 (lanes disabled) when absent
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  amdsmi_fabric_type_t fabric_type;                    //!< UALOE or UALINK
+  amdsmi_fabric_accelerator_vpod_state_t accel_state;  //!< Accelerator vPoD State
+  amdsmi_fabric_ppod_data_t ppod;                      //!< Physical PoD data
+  amdsmi_fabric_vpod_data_t vpod;                      //!< Virtual PoD data
+  amdsmi_fabric_station_data_t station;                //!< DF/station data
+  uint32_t ppod_mask;     //!< ::amdsmi_fabric_ppod_field_t bits actually read into @p ppod; a clear
+                          //!< bit means that field holds its sentinel
+  uint32_t vpod_mask;     //!< ::amdsmi_fabric_vpod_field_t bits actually read into @p vpod
+  uint32_t station_mask;  //!< ::amdsmi_fabric_df_field_t bits actually read into @p station
+  uint32_t reserved[AMDSMI_FABRIC_INFO_V2_RESERVED_WORDS];  //!< Reserved for future use. New
+                                                            //!< fields are carved from here rather
+                                                            //!< than added as a new version
+} amdsmi_fabric_info_v2_t;
+
+/**
+ * @brief Fabric device information layout selector
+ *
+ * @details Written to ::amdsmi_fabric_info_t::fabric_version before calling
+ * ::amdsmi_get_gpu_fabric_info to choose which union member is filled
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_INFO_VERSION_1 = 0x00000000u,  //!< Flat layout. What zero-initialization yields,
+                                               //!< so it is the default for a caller that does not
+                                               //!< set the field
+  AMDSMI_FABRIC_INFO_VERSION_2 = 0xFAB10002u   //!< Nested layout. Deliberately high-entropy: an
+                                               //!< uninitialized fabric_version must not be able
+                                               //!< to select a member larger than the caller
+                                               //!< allocated
+} amdsmi_fabric_info_version_t;
 
 /**
  * @brief Fabric device information structure
@@ -5904,12 +6087,18 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  amdsmi_bdf_t bdf;  //!< BDF (Bus, Device, Function) of the Fabric device
-  uint32_t fabric_version;
+  amdsmi_bdf_t bdf;         //!< BDF (Bus, Device, Function) of the Fabric device
+  uint32_t fabric_version;  //!< IN: ::amdsmi_fabric_info_version_t selecting the union member to
+                            //!< fill. Any value other than ::AMDSMI_FABRIC_INFO_VERSION_2 selects
+                            //!< v1. OUT: the member actually filled
   union fabric_info_ {
-    amdsmi_fabric_info_v1_t v1;
+    amdsmi_fabric_info_v1_t v1;  //!< Filled when fabric_version is not
+                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
+    amdsmi_fabric_info_v2_t v2;  //!< Filled when fabric_version is
+                                 //!< ::AMDSMI_FABRIC_INFO_VERSION_2
   } fabric_info;
-  uint32_t reserved[15];  //!< Reserved for future use
+  uint32_t reserved[15];  //!< Reserved for future use. Not written by
+                          //!< ::amdsmi_get_gpu_fabric_info
 } amdsmi_fabric_info_t;
 
 /**
@@ -5919,31 +6108,213 @@ typedef struct {
  *
  *  @platform{gpu_bm_linux} @platform{host}
  *
- *  @details Reads optional UALoE fabric attributes from sysfs (one file per field).
- *  Missing or unreadable files are skipped so the call can return partial data:
- *    - any field that was not updated from sysfs keeps its sentinel value (ie:
- *      numeric fields at their maximum representable value, and unknown enumeration
- *      values where documented for ::amdsmi_fabric_info_v1_t).
- *    - The device BDF in @p info is always filled when the call completes successfully
- *      or returns ::AMDSMI_STATUS_NO_DATA.
+ *  @details Reads optional UALoE fabric attributes
+ *  Missing/unreadable files are skipped so the call can return partial data:
+ *      - any field that was not updated from sysfs keeps its sentinel value (ie:
+ *      numeric fields at their maximum representable value, the ppod_id byte array at
+ *      the guard byte 0x99, and unknown enumeration values where documented for
+ *      ::amdsmi_fabric_info_v1_t and ::amdsmi_fabric_info_v2_t)
+ *      - The device BDF in @p info is always filled when the call completes
+ *      successfully or returns ::AMDSMI_STATUS_NO_DATA
+ *
+ *  Request the nested layout, which is the only one carrying the DF/station fields:
+ *  @code
+ *    amdsmi_fabric_info_t info = {0};  // C++: amdsmi_fabric_info_t info = {};
+ *    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+ *    amdsmi_get_gpu_fabric_info(handle, &info);
+ *  @endcode
  *
  *  @param[in] processor_handle - Handle for the target processor
  *
- *  @param[out] info - Pointer to Fabric information structure to be populated.
+ *  @param[in,out] info - Pointer to Fabric information structure to be populated
  *  Must be allocated by the caller. Written on every return except errors such
- *  as ::AMDSMI_STATUS_INVAL.
+ *  as ::AMDSMI_STATUS_INVAL
+ *
+ *  On input, @p info->fabric_version selects the union member to fill. Any value other
+ *  than ::AMDSMI_FABRIC_INFO_VERSION_2 selects ::amdsmi_fabric_info_v1_t, so a
+ *  zero-initialized structure and one left uninitialized both yield the flat layout and
+ *  no byte past the v1 member is written. An unrecognized value is not an error
+ *
+ *  On output, @p info->fabric_version reports the member filled. The reserved trailing
+ *  words of @p info are never written
  *
  *  @return ::amdsmi_status_t
- *  - ::AMDSMI_STATUS_SUCCESS if at least one sysfs file yielded usable content.
- *  - ::AMDSMI_STATUS_NO_DATA if no sysfs file yielded usable lines (output still
- *    contains BDF and default/sentinel fabric fields).
- *  - Other codes (e.g. invalid processor handle) on failure.
+ *  - ::AMDSMI_STATUS_SUCCESS if at least one attribute yielded usable content
+ *  - ::AMDSMI_STATUS_NO_DATA if no attribute yielded usable data (output still
+ *    contains BDF and default/sentinel fabric fields)
+ *  - Other codes (e.g. ::AMDSMI_STATUS_INVAL for an invalid processor handle) on
+ *    failure
  *
- *  @note This path reads sysfs only. It does not require UALoE netlink
- *  (::ualoe_open) to succeed; that handle is still needed for fabric telemetry APIs.
+ *  An unconfigured accelerator is not an error: the read returns
+ *  ::AMDSMI_STATUS_SUCCESS and the accel_state field reports the unconfigured state
+ *
  */
 amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_handle,
                                            amdsmi_fabric_info_t* info);
+
+/**
+ * @brief UALink fabric configuration struct versions
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_PPOD_CONFIG_V1 = 1,
+  AMDSMI_FABRIC_VPOD_CONFIG_V1 = 1,
+  AMDSMI_FABRIC_STATION_CONFIG_V1 = 1
+} amdsmi_fabric_config_version_t;
+
+/**
+ * @brief PPOD config field mask bits (::amdsmi_fabric_ppod_config_t::mask)
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID = (1u << 0),
+  AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID = (1u << 1),
+  AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE = (1u << 2),
+  AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS = (1u << 3),
+  AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH = (1u << 4),
+  AMDSMI_FABRIC_PPOD_FIELD_LATENCY = (1u << 5)
+} amdsmi_fabric_ppod_field_t;
+
+/**
+ * @brief VPOD config field mask bits (::amdsmi_fabric_vpod_config_t::mask)
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID = (1u << 0),
+  AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE = (1u << 1),
+  AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS = (1u << 2),
+  AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE = (1u << 3)
+} amdsmi_fabric_vpod_field_t;
+
+/**
+ * @brief DF/station config field mask bits (::amdsmi_fabric_station_config_t::mask)
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS = (1u << 0),
+  AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP = (1u << 1),
+  AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS = (1u << 2)
+} amdsmi_fabric_df_field_t;
+
+/**
+ * @brief PPOD setup request
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_PPOD_CONFIG_V1
+  uint32_t mask;     //!< ::AMDSMI_FABRIC_PPOD_FIELD_* bits for parameters to write (32 bits)
+  bool commit;       //!< When true, write the masked parameters then setup/commit; when false,
+                     //!< validate the request and write nothing
+  amdsmi_fabric_ppod_data_t data;  //!< PPOD data payload
+} amdsmi_fabric_ppod_config_t;
+
+/**
+ * @brief VPOD configuration request
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_VPOD_CONFIG_V1
+  uint32_t mask;
+  bool commit;
+  amdsmi_fabric_vpod_data_t data;  //!< VPOD data payload
+} amdsmi_fabric_vpod_config_t;
+
+/**
+ * @brief DF/Station reconfiguration request
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint32_t version;  //!< Must be ::AMDSMI_FABRIC_STATION_CONFIG_V1
+  uint32_t mask;
+  bool commit;
+  amdsmi_fabric_station_data_t data;  //!< DF/station data payload
+} amdsmi_fabric_station_config_t;
+
+/**
+ *  @brief Apply PPOD configuration
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details When @p config->commit is true, writes setup/accel_id, setup/ppod_id, setup/ppod_size,
+ *  setup/local_accels, setup/bandwidth, and setup/latency for each bit set in @p config->mask
+ *  (fixed order), then setup/commit. When false, the request is validated and nothing is written:
+ *  the driver ignores the staging files unless a commit follows
+ *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
+ *
+ *  @param[in] processor_handle Handle for the target GPU
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
+ *
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_set_gpu_fabric_ppod_config(amdsmi_processor_handle processor_handle,
+                                                  const amdsmi_fabric_ppod_config_t* config);
+
+/**
+ *  @brief Apply VPOD configuration
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details When @p config->commit is true, writes config/vpod_id, config/vpod_size,
+ *  config/vpod_active_accels, and config/addr_mode for each bit set in @p config->mask, then
+ *  config/commit. When false, the request is validated and nothing is written: the driver
+ *  ignores the staging files unless a commit follows
+ *
+ *  @note vpod_active_accelerators has no count field: unused slots hold the UNSET
+ *  sentinel (UINT32_MAX). Serialization emits the leading run of IDs and stops at
+ *  the first UINT32_MAX. Fill unused slots with UINT32_MAX; 0 is a valid accelerator ID.
+ *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
+ *
+ *  @param[in] processor_handle Handle for the target GPU
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
+ *
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_set_gpu_fabric_vpod_config(amdsmi_processor_handle processor_handle,
+                                                  const amdsmi_fabric_vpod_config_t* config);
+
+/**
+ *  @brief Apply DF/Station configuration
+ *
+ *  @ingroup tagFabric
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details When @p config->commit is true, writes stations/station_flags, stations/num_stations,
+ *  and stations/lane_en_bitmap for each bit set in @p config->mask, then stations/commit. When
+ *  false, the request is validated and nothing is written: the driver ignores the staging files
+ *  unless a commit follows
+ *
+ *  @note Masked fields are written one sysfs file at a time. A failure part way through leaves the
+ *  earlier fields staged, and a commit applies everything staged rather than only what its own mask
+ *  named, so a later unrelated commit will pick up that residue. There is no discard primitive:
+ *  re-issue the full field set before committing again
+ *
+ *  @param[in] processor_handle Handle for the target GPU
+ *  @param[in] config Non-NULL request; @p config->mask must select at least one field
+ *
+ *  @return ::amdsmi_status_t
+ */
+amdsmi_status_t amdsmi_set_gpu_fabric_station_config(amdsmi_processor_handle processor_handle,
+                                                     const amdsmi_fabric_station_config_t* config);
 
 /** @} End tagFabric */
 
@@ -6233,6 +6604,53 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_ha
                                             uint32_t severity_mask, char* cper_data,
                                             uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
                                             uint64_t* entry_count, uint64_t* cursor);
+
+/**
+ *  @brief Retrieve CPER entries for IFoE fabric RAS events
+ *
+ *  @ingroup tagRasInfo
+ *
+ *  @platform{host}
+ *
+ *  @details Returns CPER-formatted error records for IFoE network port link events
+ *  (link down, link up, fatal errors).
+ *
+ *  Records are fetched from the UALoE library and transformed into full UEFI CPER
+ *  format. The notify_type field is set to AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID to
+ *  distinguish fabric events from GPU events.
+ *
+ *  @param[in] processor_handle GPU processor handle with UALoE fabric support.
+ *  @param[in] severity_mask Bitmask of severity levels to retrieve.
+ *                           Use (1U << AMDSMI_CPER_SEV_*) to construct the mask.
+ *                           Use (1U << AMDSMI_CPER_SEV_NUM) to retrieve all severities.
+ *
+ *  @param[in,out] cper_data Caller-allocated buffer for raw CPER data.
+ *                 Records are packed back-to-back.
+ *
+ *  @param[in,out] buf_size [in] size of cper_data buffer in bytes.
+ *                 [out] actual bytes written.
+ *
+ *  @param[in,out] cper_hdrs Array of pointers into cper_data, one per
+ *                 returned entry. Caller allocates the array.
+ *
+ *  @param[in,out] entry_count [in] maximum number of entries the cper_hdrs array can hold,
+ *                 must be in [1, 4096].
+ *                 [out] number of CPER entries returned.
+ *
+ *  @param[in,out] cursor [in] cursor from previous call (0 = start).
+ *                 [out] cursor for next call (0 = no more data).
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success with no more data,
+ *          ::AMDSMI_STATUS_MORE_DATA if entries returned but more remain,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UALoE not available,
+ *          ::AMDSMI_STATUS_INVAL if null pointer or out-of-range entry_count arguments,
+ *          ::AMDSMI_STATUS_OUT_OF_RESOURCES if buffer too small (cursor advanced, partial output
+ * may be present), or if internal allocation fails, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor);
 
 /** @} End tagRasInfo */
 
@@ -6897,6 +7315,41 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
                                           amdsmi_processor_handle processor_handle_dst,
                                           uint64_t* hops, amdsmi_link_type_t* type);
+
+/**
+ *  @brief Retrieve the unified link topology information between 2 GPUs
+ *
+ *  @ingroup tagHWTopology
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Returns weight, status, type, hops, and framebuffer sharing in
+ *  ::amdsmi_link_topology_t, matching the host interface.
+ *
+ *  @note Baremetal behavior:
+ *  - Self pair: INTERNAL, ENABLED, zero weight and hops, fb_sharing=1.
+ *  - Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+ *  - Current successful calls always report ::AMDSMI_LINK_STATUS_ENABLED.
+ *  - UNKNOWN-to-DISABLED is defensive, not a current success case.
+ *    INACTIVE and ERROR are not produced.
+ *  - Status provides host API parity, not link health or P2P access.
+ *    The topology CLI uses ::amdsmi_is_P2P_accessible, so its status can differ.
+ *  - num_hops is the abstracted count from ::amdsmi_topo_get_link_type,
+ *    not physical xGMI links; values above 255 are capped.
+ *  - fb_sharing is best-effort: 0 means no P2P access or a failed P2P query.
+ *  - Queries are sequential, so topology changes can affect field consistency.
+ *
+ *  @param[in] processor_handle_src the source processor handle
+ *
+ *  @param[in] processor_handle_dst the destination processor handle
+ *
+ *  @param[out] topology_info Receives the link topology.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_link_topology(amdsmi_processor_handle processor_handle_src,
+                                         amdsmi_processor_handle processor_handle_dst,
+                                         amdsmi_link_topology_t* topology_info);
 
 /**
  *  @brief Retrieve the set of GPUs that are nearest to a given device
@@ -7729,6 +8182,75 @@ amdsmi_status_t amdsmi_get_gpu_xcd_counter(amdsmi_processor_handle processor_han
  * @return ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure.
  */
 amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_info_t* info);
+
+/**
+ * @brief Retrieves the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Queries whether the node is currently operating in Power Balancing (PB) or Frequency
+ * Balancing (FB) mode. This call is not gated on NPM enablement: it reports the last-selected
+ * mode regardless of whether NPM is currently enabled or disabled on the node.
+ * ::AMDSMI_STATUS_NOT_SUPPORTED is returned, and @p mode left unset, if the underlying sysfs
+ * value is missing or unreadable. If the sysfs value is present but cannot be decoded,
+ * ::AMDSMI_STATUS_UNEXPECTED_DATA is returned instead.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] mode Pointer to amdsmi_npm_balancing_mode_t to receive the current balancing mode.
+ *             Must be allocated by the user.
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if the sysfs value is
+ * missing or unreadable. ::AMDSMI_STATUS_UNEXPECTED_DATA if the sysfs value is present but not
+ * decodable. Non-zero on other failures.
+ */
+amdsmi_status_t amdsmi_get_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t* mode);
+
+/**
+ * @brief Sets the NPM balancing mode for the specified node.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @details Sets the node to Power Balancing (PB) or Frequency Balancing (FB) mode. This is an
+ * AMD-SMI only operation; it is not exposed via BMC Redfish/APML. Requires elevated privileges.
+ *
+ * @param[in] node_handle Handle to the Node to configure.
+ * @param[in] mode Requested balancing mode (::AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING or
+ *            ::AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING).
+ *
+ * @return ::AMDSMI_STATUS_SUCCESS on success. ::AMDSMI_STATUS_NOT_SUPPORTED if NPM is disabled on
+ * the node (no write is attempted). ::AMDSMI_STATUS_SETTING_UNAVAILABLE if the requested mode is
+ * not present in this platform's supported balancing modes (see
+ * ::amdsmi_get_npm_supported_balancing_modes). ::AMDSMI_STATUS_NO_PERM if the caller lacks
+ * elevation.
+ */
+amdsmi_status_t amdsmi_set_npm_balancing_mode(amdsmi_node_handle node_handle,
+                                              amdsmi_npm_balancing_mode_t mode);
+
+/**
+ * @brief Retrieves the set of NPM balancing modes supported by this node's platform/ASIC,
+ * independent of current NPM enablement.
+ *
+ * @ingroup tagNodeInfo
+ *
+ * @platform{gpu_bm_linux} @platform{host}
+ *
+ * @note Bit N of *supported_modes corresponds to enum value N of ::amdsmi_npm_balancing_mode_t.
+ * Decoding should iterate the full defined enum range (up to ::AMDSMI_NPM_BALANCING_MODE_MAX) so
+ * that modes added in the future are picked up without caller changes. Not gated on NPM enablement.
+ *
+ * @param[in]  node_handle Handle to the Node to query.
+ * @param[out] supported_modes Pointer to amdsmi_bit_field_t to receive the supported-modes bitmask.
+ *             Must be allocated by the user.
+ *
+ * @retval ::AMDSMI_STATUS_SUCCESS call was successful
+ */
+amdsmi_status_t amdsmi_get_npm_supported_balancing_modes(amdsmi_node_handle node_handle,
+                                                         amdsmi_bit_field_t* supported_modes);
 
 /**
  * @brief Retrieves compute-tray type and accelerator count for the specified node.

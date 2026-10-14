@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Linux KFD and DRM identities associated with a discovered endpoint.
@@ -30,7 +31,7 @@ impl Endpoint {
     /// DRM contract.
     #[must_use]
     pub fn linux_kfd_drm_info(&self) -> Option<KfdDrmEndpointInfo> {
-        match &self.native {
+        match &self.selector {
             crate::driver::EndpointSelector::LinuxKfd(native) => Some(KfdDrmEndpointInfo {
                 node_id: native.node,
                 gpu_id: native.gpu_id,

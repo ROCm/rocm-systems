@@ -2,18 +2,22 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 1.10.0
+## (Unreleased) rocDecode 1.12.0
 
 ### Added
 
 * Invalid video size handling for AVC/HEVC.
 * Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
+* Initial Windows support: hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Requires HIP and the vaon12 VA-API driver from TheRock for Windows.
+* On Windows, the TheRock VA-API DLLs (`rocm_sysdeps_va_win32.dll`, `rocm_sysdeps_va.dll`) are loaded at run time, matching the Linux dlopen behavior. `%ROCM_PATH%\lib\rocm_sysdeps\bin` no longer needs to be on `PATH`.
 
 ### Resolved issues
 
 * Fixed decode errors of some AVC interlaced container streams by adding support for the picture data packet from the demuxer which contains multiple pictures.
 * Corrected fake CTest passes.
 * Resolved vendored libva link issue in samples without extra env vars.
+* Fixed a stray RASL picture being output from the first CRA picture after an application signals end of sequence with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
+* Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
 
 ## rocDecode 1.8.0 for ROCm 7.13
 

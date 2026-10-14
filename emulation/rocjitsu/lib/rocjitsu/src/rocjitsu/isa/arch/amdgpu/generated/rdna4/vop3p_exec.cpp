@@ -967,9 +967,15 @@ void VFmaMixF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -1025,9 +1031,15 @@ RJ_NOINLINE void VFmaMixF32Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -1073,9 +1085,15 @@ void VFmaMixloF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -1130,9 +1148,15 @@ RJ_NOINLINE void VFmaMixloF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -1177,9 +1201,15 @@ void VFmaMixhiF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)
@@ -1234,9 +1264,15 @@ RJ_NOINLINE void VFmaMixhiF16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf)
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
-    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
-    uint32_t raw2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
+    uint32_t raw0 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src0, uint64_t{1} << lane, src0.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw1 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src1, uint64_t{1} << lane, src1.register_byte_mask())
+                        .lane(lane);
+    uint32_t raw2 = amdgpu::RegisterAccess(wf)
+                        .read_operand(src2, uint64_t{1} << lane, src2.register_byte_mask())
+                        .lane(lane);
     auto read_mix_src = [](uint32_t raw, uint32_t src_selector, bool src_is_f16,
                            bool high_half) -> float {
       if (!src_is_f16)

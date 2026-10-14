@@ -1725,6 +1725,17 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
+  if (drm_date == "0") {
+    return {};
+  }
+  if (drm_date.size() == 8) {
+    return std::string{drm_date.substr(0, 4)} + "/" + std::string{drm_date.substr(4, 2)} + "/" +
+           std::string{drm_date.substr(6, 2)} + " 00:00";
+  }
+  return std::string{drm_date};
+}
+
 auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
                                         std::string_view machine, std::string* active_version)
     -> amdsmi_status_t {
