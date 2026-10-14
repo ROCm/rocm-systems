@@ -821,8 +821,10 @@ static void atfork_child() {
   g_output_dir.clear();
   g_manifest_path[0] = '\0';
   // The child's archive is a new one: an event the parent dropped is not
-  // missing from it.
+  // missing from it. Nor is a failed write to the parent's events.bin.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
+  g_events_io_failed.store(false, std::memory_order_relaxed);
+  g_trailer_at = -1;
   // After flush() nothing would finalize a child's archive. The fd stays open
   // until close(), but the shutdown that runs both is on the parent's exiting
   // thread and no longer pending in the child. A parent that is itself a child
@@ -1396,7 +1398,12 @@ bool open(const char* output_dir) {
     // atfork_child: a failure recorded against one closed earlier in this
     // process must not cost this one its trailer. A resumed archive keeps it.
     // So does the unreplayable list, which a forked child also drops here.
+    // A failed write to an earlier events.bin, and where its trailer was, go
+    // with it: flush() and close(), the other users of g_trailer_at, also run
+    // under g_reopen_mu.
     g_capture_incomplete.store(false, std::memory_order_relaxed);
+    g_events_io_failed.store(false, std::memory_order_relaxed);
+    g_trailer_at = -1;
     {
       std::lock_guard<std::mutex> lk(g_unreplayable_mu);
       g_unreplayable_apis.clear();
