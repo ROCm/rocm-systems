@@ -84,6 +84,7 @@ function(rccl_define_micro_source_lists)
     ras-diagnostics-common-test.cc       # src/ras/diagnostics_checks_common.cc
     ras-collectives-test.cc              # src/ras/collectives.cc
     ras-diagnostics-test.cc              # src/ras/diagnostics.cc
+    rasnet-test.cc                       # src/ras/rasnet.cc
     ras-diagnostics-gpu-test.cc              # src/ras/diagnostics_gpu.cc
     ras-peers-test.cc                    # src/ras/peers.cc
     ras-diagnostics-env-test.cc          # src/ras/diagnostics_env.cc
@@ -98,6 +99,7 @@ function(rccl_define_micro_source_lists)
     dev-runtime-test.cc
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
+    dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
     process-isolated-runner-test.cc
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
@@ -847,6 +849,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # so add_file_unique() renames this one. Re-check after any source-list reorder.
     COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/collectives_tmp.cc"
     RAS_DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_tmp.cc"
+    RASNET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/rasnet.cc"
     RAS_DIAGNOSTICS_GPU_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_gpu.cc"
     RAS_PEERS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/peers.cc"
     RAS_DIAGNOSTICS_ENV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/diagnostics_env.cc"
@@ -877,7 +880,31 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
     GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
+    IONICDV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
+    MLX5DV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
+    DV_PROVIDER_FAKE_IONIC_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic>"
+    DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
+    DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
+# The test finds them beside its own executable, in the build tree and in an install.
+foreach(_fake ionic ionic-no-gda mlx5)
+  string(REGEX REPLACE "-.*" "" _dv "${_fake}")
+  add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
+  target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
+  add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
+  if(BUILD_TESTS)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
+  endif()
+endforeach()
+target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
+target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE
+  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map)
+set_property(TARGET rccl-micro-dv-provider-fake-ionic-no-gda APPEND PROPERTY
+  LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/fakes/dv_provider_fake_ionic_no_gda.map")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
@@ -965,11 +992,25 @@ endif()
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
 # ---------------------------------------------------------------------------
+# In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
+set(_MICRO_CE_BATCH_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemcpyBatchAsync "hip/hip_runtime_api.h" _MICRO_HIP_MEMCPY_BATCH_ASYNC)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEMCPY_BATCH_ASYNC)
+    set(_MICRO_CE_BATCH_DEF CE_BATCH_ASYNC_SUPPORTED)
+  endif()
+endif()
 rccl_add_micro_binary(rccl-UnitTestsMicroCe
   SOURCES ${TEST_MICRO_CE_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
+    ${_MICRO_CE_BATCH_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
     CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
