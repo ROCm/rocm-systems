@@ -22,9 +22,9 @@ from pathlib import Path
 
 PRODUCER_DIR = Path(__file__).resolve().parent.parent
 
-# Runs in the child. The archive is pid-<pid> with an active marker in it, as
-# the capture writer leaves it while it runs, so a started producer goes on to
-# enable history straight away.
+# Runs in the child. The archive is pid-<pid> with an active marker in it that
+# names this process by boot id and start time, as the capture writer leaves it
+# while it runs, so a started producer goes on to enable history straight away.
 CHILD = r"""
 import json, os, sys, threading, time, types
 
@@ -39,6 +39,9 @@ sys.modules["torch"] = torch
 archive = os.path.join(os.environ["HIP_HRR_CAPTURE_OUTPUT"], "pid-%d" % os.getpid())
 os.mkdir(archive, 0o700)
 fd = os.open(os.path.join(archive, "active"), os.O_CREAT | os.O_WRONLY, 0o600)
+boot = open("/proc/sys/kernel/random/boot_id").readline().strip()
+line = open("/proc/self/stat").readline()
+os.write(fd, ("%s %s\n" % (boot, line[line.rfind(")") + 1:].split()[19])).encode())
 os.close(fd)
 
 sys.path.insert(0, sys.argv[1])
