@@ -29,6 +29,7 @@
 #include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/hasher.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
@@ -852,32 +853,61 @@ metadata::get_instruction_index(rocprofiler_pc_t record)
 void
 metadata::add_decoder(rocprofiler_code_object_info_t* obj_data)
 {
+    auto add_content_hash = [this](uint64_t code_object_id, const char* data, size_t size) {
+        code_object_content_hashes.wlock(
+            [](auto& _hashes, uint64_t _id, std::string _hash) { _hashes[_id] = std::move(_hash); },
+            code_object_id,
+            compute_code_object_content_hash(data, size));
+    };
+
     if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
     {
+        if(obj_data->uri == nullptr) throw std::runtime_error("Empty filepath.");
+
+        // Read the object once: the same bytes are hashed and handed to the decoder.
+        auto binary = rocprofiler::sdk::codeobj::disassembly::CodeObjectBinary{obj_data->uri};
+        add_content_hash(obj_data->code_object_id, binary.buffer.data(), binary.buffer.size());
         decoder.wlock(
-            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v) {
-                _decoder.addDecoder(obj_data_v->uri,
+            [](auto&                           _decoder,
+               rocprofiler_code_object_info_t* obj_data_v,
+               const std::vector<char>&        bytes) {
+                _decoder.addDecoder(bytes.data(),
+                                    bytes.size(),
                                     obj_data_v->code_object_id,
                                     obj_data_v->load_delta,
                                     obj_data_v->load_size);
             },
-            obj_data);
+            obj_data,
+            binary.buffer);
     }
     else
     {
+        // NOLINTBEGIN(performance-no-int-to-ptr)
+        const auto* bytes = reinterpret_cast<const char*>(obj_data->memory_base);
+        // NOLINTEND(performance-no-int-to-ptr)
+        add_content_hash(obj_data->code_object_id, bytes, obj_data->memory_size);
         decoder.wlock(
-            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v) {
-                _decoder.addDecoder(
-                    // NOLINTBEGIN(performance-no-int-to-ptr)
-                    reinterpret_cast<const void*>(obj_data_v->memory_base),
-                    // NOLINTEND(performance-no-int-to-ptr)
-                    obj_data_v->memory_size,
-                    obj_data_v->code_object_id,
-                    obj_data_v->load_delta,
-                    obj_data_v->load_size);
+            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v, const char* bytes_v) {
+                _decoder.addDecoder(bytes_v,
+                                    obj_data_v->memory_size,
+                                    obj_data_v->code_object_id,
+                                    obj_data_v->load_delta,
+                                    obj_data_v->load_size);
             },
-            obj_data);
+            obj_data,
+            bytes);
     }
+}
+
+std::optional<std::string>
+metadata::get_code_object_content_hash(uint64_t code_obj_id) const
+{
+    return code_object_content_hashes.rlock(
+        [](const auto& _hashes, uint64_t _id) -> std::optional<std::string> {
+            if(auto itr = _hashes.find(_id); itr != _hashes.end()) return itr->second;
+            return std::nullopt;
+        },
+        code_obj_id);
 }
 
 std::unique_ptr<instruction_t>
@@ -915,6 +945,12 @@ create_agent_index(const rocprofiler::tool::agent_indexing index,
     ROCP_CI_LOG(WARNING) << fmt::format(
         "Unsupported agent indexing {} for agent-{}", static_cast<int>(index), agent_abs_index);
     return agent_index{};
+}
+
+std::string
+compute_code_object_content_hash(const char* data, size_t size)
+{
+    return fmt::format("fnv1a64:{:016x}", common::fnv1a_hasher{}.update(data, size).digest());
 }
 }  // namespace tool
 }  // namespace rocprofiler

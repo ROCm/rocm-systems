@@ -71,6 +71,14 @@ _EVT_GRAPH_1 = 6
 _EVT_GRAPH_2 = 7
 _EVT_GRAPH_3 = 8
 _EVT_HIP_EVENT_1 = 9
+_EVT_PC_HOST_TRAP = 10
+_EVT_PC_STOCHASTIC = 11
+
+_PC_SCHEMA_HOST_TRAP = 1
+_PC_SCHEMA_STOCHASTIC = 2
+_PC_FULL_EXEC_MASK = "18446744073709551615"
+_PC_HOST_TRAP_OFFSET = 0x100
+_PC_STOCHASTIC_OFFSET = 0x104
 
 _PMC_NO_SPM_ID = 1
 _PMC_SPM_ID = 2
@@ -612,6 +620,153 @@ def insert_minimal_data(
                 _QUEUE_ID,  # source_queue_id == queue_id for a RECORD operation
                 _EVT_HIP_EVENT_1,
                 "{}",
+            ),
+        )
+
+    # PC sampling (blob tables, rocpd_gpu_pc_sample, rocpd_disassembly_data, and
+    # rocpd_event.parent_id) was introduced in schema 3.0.6.
+    if ver >= (3, 0, 6):
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_schema')} "
+            "(id, guid, nid, pid, name, source_table, byte_order, alignment, "
+            "struct_size, version) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    _PC_SCHEMA_HOST_TRAP,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_hosttrap",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    2,
+                    2,
+                ),
+                (
+                    _PC_SCHEMA_STOCHASTIC,
+                    guid,
+                    _NID,
+                    _PID,
+                    "pc_sample_extdata_stochastic",
+                    "rocpd_gpu_pc_sample",
+                    "little",
+                    1,
+                    3,
+                    2,
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_info_blob_field')} "
+            "(guid, schema_id, name, offset, size, data_type, is_signed) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [
+                (guid, _PC_SCHEMA_HOST_TRAP, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_HOST_TRAP, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "hw_id_wave_id", 0, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "wave_in_group", 1, 1, "uint8_t", 0),
+                (guid, _PC_SCHEMA_STOCHASTIC, "arb_state_issue_valu", 2, 1, "uint8_t", 0),
+            ],
+        )
+        # Each sample event is a child of the first kernel dispatch event.
+        for event_id, correlation_id in ((_EVT_PC_HOST_TRAP, 1), (_EVT_PC_STOCHASTIC, 2)):
+            conn.execute(
+                f"INSERT INTO {tbl('rocpd_event')} "
+                "(id, guid, category_id, stack_id, parent_stack_id, correlation_id, parent_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    guid,
+                    _STR_CATEGORY,
+                    event_id,
+                    0,
+                    correlation_id,
+                    _EVT_KERNEL_1,
+                ),
+            )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_blob_event')} "
+            "(guid, nid, pid, event_id, schema_id, blob) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_HOST_TRAP,
+                    _PC_SCHEMA_HOST_TRAP,
+                    bytes([3, 7]),
+                ),
+                (
+                    guid,
+                    _NID,
+                    _PID,
+                    _EVT_PC_STOCHASTIC,
+                    _PC_SCHEMA_STOCHASTIC,
+                    bytes([4, 9, 1]),
+                ),
+            ],
+        )
+        conn.executemany(
+            f"INSERT INTO {tbl('rocpd_gpu_pc_sample')} "
+            "(id, guid, timestamp, nid, pid, tid, agent_id, event_id, dispatch_id, "
+            "correlation_id, exec_mask, code_object_id, code_object_offset, "
+            "wave_issued, inst_type, stall_reason, wave_count) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    1,
+                    guid,
+                    _T_START + 10_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_HOST_TRAP,
+                    1,
+                    1,
+                    _PC_FULL_EXEC_MASK,
+                    _CODE_OBJ_ID,
+                    _PC_HOST_TRAP_OFFSET,
+                    None,  # host-trap samples have no stochastic fields
+                    None,
+                    None,
+                    None,
+                ),
+                (
+                    2,
+                    guid,
+                    _T_START + 20_000,
+                    _NID,
+                    _PID,
+                    _TID,
+                    _AGENT_ID,
+                    _EVT_PC_STOCHASTIC,
+                    1,
+                    2,
+                    "255",
+                    _CODE_OBJ_ID,
+                    _PC_STOCHASTIC_OFFSET,
+                    1,  # wave_issued
+                    1,  # inst_type: ROCPROFILER_PC_SAMPLING_INSTRUCTION_TYPE_VALU
+                    None,
+                    4,  # wave_count
+                ),
+            ],
+        )
+        # Stored text for the host-trap PC; the stochastic PC is decoded lazily.
+        conn.execute(
+            f"INSERT INTO {tbl('rocpd_disassembly_data')} "
+            "(guid, nid, pid, code_object_id, code_object_offset, instruction, comment) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (
+                guid,
+                _NID,
+                _PID,
+                _CODE_OBJ_ID,
+                _PC_HOST_TRAP_OFFSET,
+                "s_nop 0",
+                "kernel.cpp:10",
             ),
         )
 

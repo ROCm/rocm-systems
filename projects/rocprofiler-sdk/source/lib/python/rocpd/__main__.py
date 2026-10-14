@@ -48,7 +48,7 @@ def main(argv=None, config=None):
     from . import summary
     from . import time_window
     from . import version_info
-    from .importer import RocpdImportData
+    from .importer import RocpdImportData, add_decode_args, get_decode_args
 
     convert_examples = """
 
@@ -151,35 +151,6 @@ Example usage:
             help=input_help_string,
         )
         return _required_params
-
-    def add_decode_args(_parser):
-        _decode = _parser.add_argument_group("ISA decode options")
-        _decode.add_argument(
-            "--no-cache-disassembly",
-            dest="cache_disassembly",
-            action="store_false",
-            default=True,
-            help=(
-                "Keep the input database(s) read-only. By default, instructions "
-                "disassembled lazily while reading PC-sampling data are written back "
-                "into the input database(s) at exit so later opens reuse them "
-                "(best-effort, skipped for read-only inputs); pass this to disable "
-                "that write-back."
-            ),
-        )
-        _decode.add_argument(
-            "--codeobj-path-prefix-map",
-            metavar="SRC=DST",
-            nargs="+",
-            default=None,
-            help=(
-                "Relocate recorded code-object paths when decoding in a different "
-                "filesystem layout than profiling ran in (e.g. a container path "
-                "decoded on the host). Space-separated SRC=DST prefix pairs; the "
-                "first matching SRC prefix of an existing file is rewritten to DST."
-            ),
-        )
-        return _decode
 
     subparsers = parser.add_subparsers(dest="command")
     converter = subparsers.add_parser(
@@ -300,8 +271,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
-            codeobj_path_prefix_map=getattr(args, "codeobj_path_prefix_map", None),
-            cache_disassembly=getattr(args, "cache_disassembly", True),
+            **get_decode_args(args),
         )
 
         all_args = {}
@@ -361,8 +331,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
-            codeobj_path_prefix_map=getattr(args, "codeobj_path_prefix_map", None),
-            cache_disassembly=getattr(args, "cache_disassembly", True),
+            **get_decode_args(args),
         )
 
         # query subparser args
@@ -384,8 +353,7 @@ Example usage:
             automerge_limit=getattr(
                 args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
             ),
-            codeobj_path_prefix_map=getattr(args, "codeobj_path_prefix_map", None),
-            cache_disassembly=getattr(args, "cache_disassembly", True),
+            **get_decode_args(args),
         )
 
         # summary subparser args

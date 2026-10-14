@@ -38,6 +38,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
+#include "lib/output/metadata.hpp"
 #include "lib/output/output_config.hpp"
 #include "lib/output/output_stream.hpp"
 #include "lib/output/sql/common.hpp"
@@ -71,6 +72,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -260,7 +262,8 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                 uint64_t                          code_object_id,
                 uint64_t                          load_delta,
                 uint64_t                          load_size) {
-                 auto bytes = static_cast<std::string>(data);
+                 // The decoder copies the bytes; a view avoids a second copy.
+                 auto bytes = static_cast<std::string_view>(data);
                  self.addDecoder(bytes.data(), bytes.size(), code_object_id, load_delta, load_size);
              })
         .def("decode",
@@ -278,6 +281,18 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                  result["vaddr"]       = instruction->vaddr;
                  return result;
              });
+
+    pyrocpd.def(
+        "code_object_content_hash",
+        [](const py::bytes& data) {
+            char*      buffer = nullptr;
+            Py_ssize_t length = 0;
+            if(PyBytes_AsStringAndSize(data.ptr(), &buffer, &length) != 0)
+                throw py::error_already_set{};
+            return tool::compute_code_object_content_hash(buffer, static_cast<size_t>(length));
+        },
+        "Return the content hash rocprofv3 records for a code object it decodes during PC "
+        "sampling (rocpd_info_code_object extdata 'content_hash').");
 
     // Expose the SDK's canonical PC-sampling enum->name lookups so post-processing
     // (rocpd importer) can resolve inst_type / stall_reason names without hardcoding

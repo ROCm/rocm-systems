@@ -24,6 +24,7 @@
 ###############################################################################
 
 import os
+import re
 import sys
 import time
 
@@ -32,7 +33,7 @@ from datetime import datetime
 
 from . import output_config
 from . import libpyrocpd
-from .importer import RocpdImportData
+from .importer import RocpdImportData, add_decode_args, get_decode_args
 
 __all__ = [
     "export_sqlite_query",
@@ -121,14 +122,20 @@ def _significant_tokens(tokens):
     return [token for token in tokens if token[0] not in ("space", "comment")]
 
 
-def _cte_names(tokens):
-    """Return top-level CTE names so they are never treated as physical tables."""
-    significant = _significant_tokens(tokens)
-    if not significant or significant[0][1].casefold() != "with":
-        return set()
+def _skip_parenthesized(significant, index):
+    """Return the index just past the parenthesized group opening at *index*."""
+    depth = 1
+    index += 1
+    while index < len(significant) and depth:
+        depth += significant[index][1] == "("
+        depth -= significant[index][1] == ")"
+        index += 1
+    return index
 
+
+def _cte_list_names(significant, index):
+    """Return the CTE names of the WITH list whose first token is at *index*."""
     names = set()
-    index = 1
     if index < len(significant) and significant[index][1].casefold() == "recursive":
         index += 1
     while index < len(significant):
@@ -138,27 +145,75 @@ def _cte_names(tokens):
         names.add(_identifier_value(token[1]).casefold())
         index += 1
         if index < len(significant) and significant[index][1] == "(":
-            depth = 1
-            index += 1
-            while index < len(significant) and depth:
-                depth += significant[index][1] == "("
-                depth -= significant[index][1] == ")"
-                index += 1
+            index = _skip_parenthesized(significant, index)
         if index >= len(significant) or significant[index][1].casefold() != "as":
             break
         index += 1
+        if index < len(significant) and significant[index][1].casefold() == "not":
+            index += 1
+        if (
+            index < len(significant)
+            and significant[index][1].casefold() == "materialized"
+        ):
+            index += 1
         if index >= len(significant) or significant[index][1] != "(":
             break
-        depth = 1
-        index += 1
-        while index < len(significant) and depth:
-            depth += significant[index][1] == "("
-            depth -= significant[index][1] == ")"
-            index += 1
+        index = _skip_parenthesized(significant, index)
         if index >= len(significant) or significant[index][1] != ",":
             break
         index += 1
     return names
+
+
+def _cte_names(tokens):
+    """Return the names of every CTE in the query, at any nesting depth.
+
+    Names are not scoped: a CTE that shadows a blob source table anywhere keeps
+    that name unrewritten everywhere, so the query runs exactly as written.
+    """
+    significant = _significant_tokens(tokens)
+    names = set()
+    for index, token in enumerate(significant):
+        if token[0] == "identifier" and token[1].casefold() == "with":
+            names.update(_cte_list_names(significant, index + 1))
+    return names
+
+
+# Keywords that can directly follow a table name in a FROM/JOIN without being an alias.
+_TABLE_FACTOR_FOLLOWERS = frozenset(
+    (
+        "cross",
+        "except",
+        "full",
+        "group",
+        "having",
+        "indexed",
+        "inner",
+        "intersect",
+        "join",
+        "left",
+        "limit",
+        "natural",
+        "not",
+        "on",
+        "order",
+        "outer",
+        "returning",
+        "right",
+        "union",
+        "using",
+        "where",
+        "window",
+    )
+)
+
+
+def _starts_table_alias(token):
+    """Return True when *token*, which follows a table name, begins its alias."""
+    if token is None or token[0] != "identifier":
+        return False
+    keyword = token[1].casefold()
+    return keyword == "as" or keyword not in _TABLE_FACTOR_FOLLOWERS
 
 
 def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
@@ -177,6 +232,10 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
     with ``temp``, are rewritten (the decoded views are TEMP views, so a
     ``main.``/attached-database qualifier is left untouched), and every table
     factor in a comma-separated ``FROM`` list is rewritten, not just the first.
+    A rewritten table factor without an alias is aliased to its original name,
+    so ``<source>.<column>`` references keep resolving.  A name defined as a CTE
+    anywhere in *query* is never rewritten; select the ``_decoded`` view
+    explicitly where a query needs both.
 
     When no rewritable blob source tables are registered, or *query* is ``None``,
     returns *query* unchanged.
@@ -308,16 +367,19 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
         replacement = replacements.get(name.casefold())
         if not replacement:
             continue
-        # An unqualified name matching a top-level CTE is the CTE, not a table.
+        # An unqualified name matching a CTE is the CTE, not a table.
         if qualifier is None and name.casefold() in cte_names:
             continue
-        edits.append(
-            (
-                name_token[2],
-                name_token[3],
-                _quote_like_identifier(name_token[1], replacement),
-            )
+        replacement_text = _quote_like_identifier(name_token[1], replacement)
+        alias_position = position + (3 if qualifier is not None else 1)
+        alias_token = (
+            tokens[significant_indexes[alias_position]]
+            if alias_position < len(significant_indexes)
+            else None
         )
+        if not _starts_table_alias(alias_token):
+            replacement_text += f" AS {name_token[1]}"
+        edits.append((name_token[2], name_token[3], replacement_text))
 
     for start, end, replacement in reversed(edits):
         query = query[:start] + replacement + query[end:]
@@ -327,6 +389,16 @@ def update_query_for_blob_views(conn, query: str = None, profile: bool = False):
         print(f"Blob view query rewrite: elapsed={elapsed_ms:.2f} ms")
 
     return query
+
+
+_INTEGER_TEXT = re.compile(r"\s*[+-]?[0-9]+\s*")
+
+
+def _integer_text_to_int(value):
+    """Return integer text as an int; leave every other value unchanged."""
+    if isinstance(value, str) and _INTEGER_TEXT.fullmatch(value):
+        return int(value)
+    return value
 
 
 def export_sqlite_query(
@@ -354,6 +426,9 @@ def export_sqlite_query(
     If export_format == "dashboard", you may optionally pass a
     dashboard_template_path (a Jinja2 template file). If omitted,
     a built-in default template is used.
+
+    For CSV, the ``integer_columns`` keyword names columns whose integer text
+    values are written as unquoted numbers; all other values are unchanged.
     """
     try:
         import pandas as pd
@@ -400,21 +475,11 @@ def export_sqlite_query(
         if export_format == "csv":
             import csv
 
-            # Preserve integer-looking Exec_Mask values as numeric so
-            # QUOTE_NONNUMERIC does not wrap them in quotes. Keep non-numeric
-            # values unchanged for pandas versions that no longer support
-            # errors="ignore" in to_numeric.
-            if "Exec_Mask" in df.columns:
-
-                def _to_int_if_numeric(value):
-                    if pd.isna(value):
-                        return value
-                    try:
-                        return int(value)
-                    except (TypeError, ValueError, OverflowError):
-                        return value
-
-                df["Exec_Mask"] = df["Exec_Mask"].map(_to_int_if_numeric)
+            # Callers name columns that hold integer text (e.g. a 64-bit mask
+            # stored as TEXT) so QUOTE_NONNUMERIC writes them as numbers.
+            for column in kwargs.get("integer_columns", ()):
+                if column in df.columns:
+                    df[column] = df[column].map(_integer_text_to_int)
 
             cols = [f"{itr}" for itr in df.columns.tolist()]
             col_names = (
@@ -855,11 +920,14 @@ def main(argv=None):
     process_generic_args = output_config.add_generic_args(parser)
     process_time_window_args = time_window.add_args(parser)
     process_query_args = add_args(parser)
+    add_decode_args(parser)
 
     args = parser.parse_args(argv)
 
     input = RocpdImportData(
-        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+        args.input,
+        automerge_limit=getattr(args, "automerge_limit", None),
+        **get_decode_args(args),
     )
 
     out_cfg_args = process_out_config_args(input, args)

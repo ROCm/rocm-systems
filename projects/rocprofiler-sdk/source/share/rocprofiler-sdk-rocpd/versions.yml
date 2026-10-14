@@ -90,3 +90,5 @@ rocprofiler-sdk-rocpd:
 # - Added rocpd_disassembly_data table (optional persisted instruction text)
 # - Added rocpd_event.parent_id for parent/child event relationships
 # - Populated rocpd_info_code_object.storage_type (column present since 3.0.1)
+# - rocpd_info_code_object.extdata records content_hash for code objects decoded
+#   during PC sampling
