@@ -242,15 +242,8 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
    successfully without hang or segfault*/
 #if __linux__ && HT_AMD
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
-  // The following code block checks for xnack+
-  // so as to skip if the device is not xnack+
-  hipDeviceProp_t prop;
-  int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
-
-  if (gfxName.find("xnack+") != std::string::npos) {
+  // Skip if XNACK is off
+  if (HipTest::isXnackOn()) {
     int pageMemAccess = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0));
     WARN("hipDeviceAttributePageableMemoryAccess:" << pageMemAccess);
@@ -290,13 +283,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
     HIP_SKIP_TEST("cannot set XNACK via environment.");
   }
 
-  hipDeviceProp_t prop;
-  int device;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  std::string gfxName(prop.gcnArchName);
-
-  if (gfxName.find("xnack+") != std::string::npos) {
+  if (HipTest::isXnackOn()) {
     hip::SpawnProc proc("hipMemAdviseTstAlignedAllocMem", true);
     REQUIRE(proc.run() == 0);
   } else {
