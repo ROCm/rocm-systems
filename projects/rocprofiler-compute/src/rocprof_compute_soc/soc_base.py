@@ -36,6 +36,7 @@ from utils.utils_common import (
     is_only_pc_sampling,
     is_tcc_channel_counter,
     parse_sets_yaml,
+    selects_roofline,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -787,17 +788,13 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-        # Roofline can be skipped via --no-roof
+        # Roofline can be skipped via the deprecated --no-roof
         # Roofline not supported on MI 100
-        # If --filter-blocks is provided, roofline block (block 4) should be mentioned
+        # If -b or --set selected blocks, roofline (block 4) must be one of them
         if (
             self.get_args().no_roof
             or self.__arch not in BENCHMARKING_SUPPORTED
-            or (
-                self.get_args().filter_blocks
-                and "4" not in self.get_args().filter_blocks
-                and "roof" not in self.get_args().filter_blocks
-            )
+            or not selects_roofline(self.get_args().filter_blocks)
         ):
             console_log("roofline", "Skipping roofline")
         else:

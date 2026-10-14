@@ -35,6 +35,8 @@ from vendored import yaml
 # Global constants
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
+# Block 4 and its alias; ids such as 4.1 are roofline metrics
+ROOFLINE_BLOCK_IDS = ("4", "roofline")
 PROFILE_OUTPUT_FORMAT = "rocpd"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
@@ -602,6 +604,22 @@ def parse_pmc_perf(pmc_perf_file: str) -> list[str]:
     if not jobs:
         return []
     return jobs[0].get("pmc") or []
+
+
+def is_roofline_block(block: str) -> bool:
+    """Return True if a --block value selects roofline: 4, 4.x, or the alias."""
+    block = str(block)
+    return block in ROOFLINE_BLOCK_IDS or block.startswith("4.")
+
+
+def selects_roofline(filter_blocks: Optional[list[str]]) -> bool:
+    """Return True if nothing is selected (everything) or a block is roofline."""
+    return not filter_blocks or any(is_roofline_block(b) for b in filter_blocks)
+
+
+def is_roofline_only(filter_blocks: Optional[list[str]]) -> bool:
+    """Return True if blocks are selected and all of them are roofline."""
+    return bool(filter_blocks) and all(is_roofline_block(b) for b in filter_blocks)
 
 
 def is_only_pc_sampling(filter_blocks: list[str]) -> bool:

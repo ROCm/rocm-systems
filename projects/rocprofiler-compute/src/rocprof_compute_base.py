@@ -48,6 +48,7 @@ from utils.utils_common import (
     get_job_rank_and_size,
     get_version,
     get_version_display,
+    is_roofline_only,
     load_panel_configs,
     parse_sets_yaml,
     reconfigure_stdio_utf8,
@@ -296,8 +297,8 @@ class RocProfCompute:
 
     def handle_profile_args(self) -> None:
         apply_panel_shortcuts(self.__args, "filter_blocks")
-        # True when only block 4 is selected, by --roofline or -b 4
-        self.__args.roof_only = self.__args.filter_blocks == ["4"]
+        # True when every selected block is roofline (block 4, 4.x or the alias)
+        self.__args.roof_only = is_roofline_only(self.__args.filter_blocks)
 
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
