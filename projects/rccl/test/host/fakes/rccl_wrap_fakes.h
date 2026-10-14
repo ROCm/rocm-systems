@@ -40,6 +40,9 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
+extern int g_rcclUpdateCollectiveAlgorithmCalls;
+extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
 extern int g_rcclOptThreadBlockSizeCalls;

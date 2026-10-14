@@ -40,6 +40,17 @@ void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclT
   ++g_rcclSetPipeliningCalls;
   g_rcclSetPipelining(comm, nBytes, info);
 }
+int g_rcclUpdateCollectiveAlgorithmCalls = 0;
+bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+int g_rcclUpdateCollectiveChannelsCalls = 0;
+void rcclUpdateCollectiveAlgorithm(struct ncclComm*, size_t, struct ncclTaskColl*, float (*)[NCCL_NUM_PROTOCOLS]) {
+  ++g_rcclUpdateCollectiveAlgorithmCalls;
+  // Production requires the algorithm hook to run before the protocol hook.
+  g_rcclUpdateCollectiveAlgorithmBeforeProtocol = g_rcclUpdateCollectiveProtocolCalls == 0;
+}
+void rcclUpdateCollectiveChannels(struct ncclComm*, size_t, const struct ncclTaskColl*, int&) {
+  ++g_rcclUpdateCollectiveChannelsCalls;
+}
 void rcclUpdateThreadThreshold(struct ncclComm*, size_t const&, struct ncclTaskColl*, int&) {
   ++g_rcclUpdateThreadThresholdCalls;
 }
@@ -167,6 +178,9 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
+  g_rcclUpdateCollectiveAlgorithmCalls = 0;
+  g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
+  g_rcclUpdateCollectiveChannelsCalls = 0;
   g_rcclSetPipeliningCalls = 0;
   g_rcclUpdateThreadThresholdCalls = 0;
   g_rcclOptThreadBlockSizeCalls = 0;

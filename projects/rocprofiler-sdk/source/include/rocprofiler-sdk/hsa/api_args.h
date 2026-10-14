@@ -1612,6 +1612,12 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_vmem_handle_info_t* info;
     } hsa_amd_vmem_get_vmem_info;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    struct
+    {
+        rocprofiler_hsa_api_no_args no_args;
+    } hsa_amd_enable_high_precision_timestamps;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

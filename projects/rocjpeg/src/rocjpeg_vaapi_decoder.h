@@ -332,6 +332,25 @@ public:
     const VcnJpegSpec& GetCurrentVcnJpegSpec() const {return current_vcn_jpeg_spec_;}
 
     /**
+     * @brief Returns the minimum and maximum picture dimensions supported by the VCN JPEG decoder.
+     */
+    uint32_t GetMinPictureWidth() const {return min_picture_width_;}
+    uint32_t GetMinPictureHeight() const {return min_picture_height_;}
+    uint32_t GetMaxPictureWidth() const {return max_picture_width_;}
+    uint32_t GetMaxPictureHeight() const {return max_picture_height_;}
+
+    /**
+     * @brief Returns the layout the VCN JPEG decoder writes for a chroma subsampling.
+     *
+     * The layout is the one SubmitDecode/SubmitDecodeBatched request for non-RGB output. If the VA-API driver reports
+     * its supported surface pixel formats, the layout is returned only when the driver lists the corresponding fourcc.
+     *
+     * @param chroma_subsampling The chroma subsampling.
+     * @return The surface format, or ROCJPEG_SURFACE_FORMAT_NONE if the chroma subsampling is not supported.
+     */
+    RocJpegSurfaceFormat GetNativeSurfaceFormat(ChromaSubsampling chroma_subsampling) const;
+
+    /**
      * Sets the specified VASurfaceID as idle.
      *
      * @param surface_id The VASurfaceID to set as idle.
@@ -354,6 +373,7 @@ private:
     uint32_t default_surface_width_; // The default width of the surface
     uint32_t default_surface_height_; // The default height of the surface
     bool supports_modifiers_; // DRM format modifiers support
+    std::vector<uint32_t> driver_pixel_formats_; // Surface pixel formats (fourcc) reported by the VA-API driver for the JPEG config
     VADisplay va_display_; // The VAAPI display
     VAContextID va_context_id_; // The VAAPI context ID
     std::vector<VAConfigAttrib> va_config_attrib_; // The VAAPI configuration attributes

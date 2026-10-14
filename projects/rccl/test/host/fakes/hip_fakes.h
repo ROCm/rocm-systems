@@ -217,6 +217,12 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
                                 std::uint64_t /*value*/, unsigned int /*flags*/,
                                 std::uint64_t /*mask*/)>
     g_hipStreamWaitValue64;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+extern std::function<hipError_t(void** /*dsts*/, void** /*srcs*/, size_t* /*sizes*/, size_t /*count*/,
+                                hipMemcpyAttributes* /*attrs*/, size_t* /*attrsIdxs*/, size_t /*numAttrs*/,
+                                size_t* /*failIdx*/, hipStream_t /*stream*/)>
+    g_hipMemcpyBatchAsync;
+#endif
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.
