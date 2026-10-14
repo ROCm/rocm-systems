@@ -87,7 +87,7 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             '--race-tests', '--workers', '3', '--soft-timeout', '17'
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 7)
+        self.assertEqual(len(calls), 8)
         for call in calls:
             wrapper = shlex.split(self.option(call, '--run-wrapper'))
             self.assertIn(
@@ -111,9 +111,11 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             else:
                 self.assertIn('--skip-tests-config', call['args'])
         self.assertEqual(
-            [self.option(c, '--target') for c in calls[-2:]], ['gfx950', 'gfx1151']
+            [self.option(c, '--target') for c in calls[-3:]],
+            ['gfx942', 'gfx950', 'gfx1151'],
         )
         reports = self.root / '.pytest-artifacts/junit'
+        self.assertTrue((reports / 'race-gfx942.xml').is_file())
         self.assertTrue((reports / 'race-gfx950.xml').is_file())
         self.assertTrue((reports / 'race-gfx1151.xml').is_file())
 

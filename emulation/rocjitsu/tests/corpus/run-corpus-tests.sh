@@ -330,6 +330,7 @@ done
 
 if [[ "${race_tests}" == true ]]; then
   race_targets=(
+    "gfx942 ${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
     # The pinned buffer-to-LDS race fixture allocates no LDS after optimization.
     # Skip that case until its launch reserves storage in the corpus.
     "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json gfx950_skip_tests.json"
