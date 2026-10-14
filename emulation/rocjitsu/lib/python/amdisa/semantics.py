@@ -357,6 +357,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         )
     if name == 'S_BRANCH':
         return InstructionSemantics(name, 'branch', branch_condition='always')
+    if name == 'S_SETKILL':
+        return InstructionSemantics(name, 'setkill')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_TRAP':
@@ -772,7 +774,7 @@ _VOP1_OP_MAP = {
     'V_NOP': ('true_nop', None),
     'V_CLREXCP': ('true_nop', None),
     'V_SAT_PK_U8_I16': ('vector_sat_pack', 'u8_i16'),
-    'V_SCREEN_PARTITION_4SE': ('nop', None),
+    'V_SCREEN_PARTITION_4SE': ('vector_unary', 'screen_partition_4se'),
     'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
     'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),

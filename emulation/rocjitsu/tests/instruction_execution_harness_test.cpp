@@ -191,6 +191,264 @@ struct ForceScalarGuard {
   bool old_force_scalar;
 };
 
+struct ScalarControlArch {
+  rj_code_arch_t arch;
+  uint32_t absdiff, movrels32, movrels64, movreld32, movreld64, setkill;
+};
+constexpr ScalarControlArch kScalarControlArches[] = {
+    {ROCJITSU_CODE_ARCH_CDNA1, cdna1::kSAbsdiffI32Sop2, cdna1::kSMovrelsB32Sop1,
+     cdna1::kSMovrelsB64Sop1, cdna1::kSMovreldB32Sop1, cdna1::kSMovreldB64Sop1,
+     cdna1::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_CDNA2, cdna2::kSAbsdiffI32Sop2, cdna2::kSMovrelsB32Sop1,
+     cdna2::kSMovrelsB64Sop1, cdna2::kSMovreldB32Sop1, cdna2::kSMovreldB64Sop1,
+     cdna2::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_CDNA3, cdna3::kSAbsdiffI32Sop2, cdna3::kSMovrelsB32Sop1,
+     cdna3::kSMovrelsB64Sop1, cdna3::kSMovreldB32Sop1, cdna3::kSMovreldB64Sop1,
+     cdna3::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_CDNA4, cdna4::kSAbsdiffI32Sop2, cdna4::kSMovrelsB32Sop1,
+     cdna4::kSMovrelsB64Sop1, cdna4::kSMovreldB32Sop1, cdna4::kSMovreldB64Sop1,
+     cdna4::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_RDNA1, rdna1::kSAbsdiffI32Sop2, rdna1::kSMovrelsB32Sop1,
+     rdna1::kSMovrelsB64Sop1, rdna1::kSMovreldB32Sop1, rdna1::kSMovreldB64Sop1,
+     rdna1::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_RDNA2, rdna2::kSAbsdiffI32Sop2, rdna2::kSMovrelsB32Sop1,
+     rdna2::kSMovrelsB64Sop1, rdna2::kSMovreldB32Sop1, rdna2::kSMovreldB64Sop1,
+     rdna2::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_RDNA3, rdna3::kSAbsdiffI32Sop2, rdna3::kSMovrelsB32Sop1,
+     rdna3::kSMovrelsB64Sop1, rdna3::kSMovreldB32Sop1, rdna3::kSMovreldB64Sop1,
+     rdna3::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::kSAbsdiffI32Sop2, rdna3_5::kSMovrelsB32Sop1,
+     rdna3_5::kSMovrelsB64Sop1, rdna3_5::kSMovreldB32Sop1, rdna3_5::kSMovreldB64Sop1,
+     rdna3_5::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_RDNA4, rdna4::kSAbsdiffI32Sop2, rdna4::kSMovrelsB32Sop1,
+     rdna4::kSMovrelsB64Sop1, rdna4::kSMovreldB32Sop1, rdna4::kSMovreldB64Sop1,
+     rdna4::kSSetkillSopp},
+    {ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSAbsdiffI32Sop2, cdna5::kSMovrelsB32Sop1,
+     cdna5::kSMovrelsB64Sop1, cdna5::kSMovreldB32Sop1, cdna5::kSMovreldB64Sop1, 0xffffffffu},
+};
+
+TEST(ScalarControlTest, AbsDifferenceWrapsBeforeTakingMagnitude) {
+  constexpr std::array<std::array<uint32_t, 3>, 8> cases{{{0, 0, 0},
+                                                          {5, 3, 2},
+                                                          {3, 5, 2},
+                                                          {0x80000000u, 1, 0x7fffffffu},
+                                                          {0x7fffffffu, 0xffffffffu, 0x80000000u},
+                                                          {0x80000000u, 0x7fffffffu, 1},
+                                                          {0x7fffffffu, 0x80000000u, 1},
+                                                          {0, 0x80000000u, 0x80000000u}}};
+  for (const auto &arch : kScalarControlArches) {
+    amdgpu::GpuMemory memory("absdiff_memory");
+    amdgpu::L2Cache l2("absdiff_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch.arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 16;
+    auto cu = amdgpu::ComputeUnitCore::create("absdiff", config, &memory, &l2);
+    auto decoder = Decoder::create(arch.arch);
+    auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(0);
+    const auto base = wave->sgpr_alloc().base;
+    for (unsigned destination : {0u, 2u})
+      for (const auto &c : cases) {
+        SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " a=" << c[0] << " b=" << c[1]);
+        cu->write_sgpr(base, c[0]);
+        cu->write_sgpr(base + 1, c[1]);
+        wave->write_scc(true);
+        const auto words = encode_sop2(arch.absdiff, destination, 0, 1);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+        EXPECT_EQ(cu->read_sgpr(base + destination), c[2]);
+        EXPECT_EQ(wave->read_scc(), c[2] != 0);
+      }
+    wave->halt();
+  }
+}
+
+TEST(ScalarControlTest, MovrelUsesDwordOffsetsForBothWidthsAndDirections) {
+  for (const auto &arch : kScalarControlArches) {
+    amdgpu::GpuMemory memory("movrel_memory");
+    amdgpu::L2Cache l2("movrel_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch.arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 16;
+    auto cu = amdgpu::ComputeUnitCore::create("movrel", config, &memory, &l2);
+    auto decoder = Decoder::create(arch.arch);
+    auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(0);
+    const auto base = wave->sgpr_alloc().base;
+    for (bool wide : {false, true})
+      for (bool destination : {false, true})
+        for (unsigned offset : {0u, 1u, 2u, 3u, 10u, 80u, 108u, 128u, 0x100u, 0x80000002u,
+                                0xfffffffeu, 0xffffffffu}) {
+          SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " wide=" << wide
+                                          << " dst=" << destination << " offset=" << offset);
+          for (unsigned r = 0; r < 102; ++r)
+            cu->write_sgpr(base + r, 0x12340000u + r);
+          wave->set_m0(offset);
+          wave->write_scc(true);
+          const auto opcode = destination ? (wide ? arch.movreld64 : arch.movreld32)
+                                          : (wide ? arch.movrels64 : arch.movrels32);
+          const auto words = encode_sop1(opcode, 20, 4);
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+          const uint64_t aligned = wide ? offset & ~1u : offset;
+          const uint64_t src = 4 + (destination ? 0 : aligned);
+          const uint64_t dst = 20 + (destination ? aligned : 0);
+          for (unsigned reg = 0; reg < 102; ++reg) {
+            uint32_t expected = 0x12340000u + reg;
+            if (dst + (wide ? 2u : 1u) <= 102 && reg >= dst && reg < dst + (wide ? 2u : 1u))
+              expected = 0x12340000u + (src + (wide ? 2u : 1u) <= 102 ? src : 0) + reg - dst;
+            EXPECT_EQ(cu->read_sgpr(base + reg), expected) << "reg=" << reg;
+          }
+          EXPECT_TRUE(wave->read_scc());
+        }
+    wave->halt();
+  }
+}
+
+TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
+  for (const auto &arch : kScalarControlArches) {
+    if (arch.setkill == 0xffffffffu)
+      continue;
+    for (unsigned immediate : {0u, 2u, 1u, 3u, 0xffffu})
+      for (bool pending : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " immediate=" << immediate
+                                        << " pending=" << pending);
+        amdgpu::GpuMemory memory("setkill_memory");
+        amdgpu::L2Cache l2("setkill_l2");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch.arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 102;
+        config.vgprs_per_wf = 16;
+        auto cu = amdgpu::ComputeUnitCore::create("setkill", config, &memory, &l2);
+        auto decoder = Decoder::create(arch.arch);
+        auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(0);
+        if (pending)
+          wave->wait_counters().lgkmcnt = 1;
+        const uint32_t words[] = {0xbf800000u | (arch.setkill << 16) | immediate};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        EXPECT_EQ(bool(inst->flags() & PROGRAM_TERMINATOR), bool(immediate & 1));
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+        EXPECT_EQ(wave->is_halted(), bool(immediate & 1) && !pending);
+        if (immediate & 1 && pending) {
+          EXPECT_EQ(wave->state(), amdgpu::WfState::ENDING);
+        }
+        if (!wave->is_halted()) {
+          wave->wait_counters().lgkmcnt = 0;
+          wave->halt();
+        }
+      }
+  }
+}
+
+TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    amdgpu::GpuMemory memory("screen_memory");
+    amdgpu::L2Cache l2("screen_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 16;
+    auto cu = amdgpu::ComputeUnitCore::create("screen", config, &memory, &l2);
+    auto decoder = Decoder::create(arch);
+    auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wave, nullptr);
+    const auto base = wave->vgpr_alloc().base;
+    for (bool scalar : {false, true}) {
+      ForceScalarGuard force(scalar);
+      for (bool vop3 : {false, true})
+        for (unsigned destination : {2u, 4u})
+          for (unsigned batch = 0; batch < 4; ++batch)
+            for (uint64_t mask : {uint64_t{0}, uint64_t{0x80000000800000a5}, ~uint64_t{0}}) {
+              wave->set_exec(mask);
+              for (unsigned lane = 0; lane < 64; ++lane) {
+                cu->write_vgpr(base + 4, lane, 0x12345678);
+                cu->write_vgpr(base + 2, lane, 0xabcd0000u | (batch * 64 + lane));
+              }
+              const auto words =
+                  vop3 ? encode_cdna_vop3(375, destination, vgpr_src(2), 0, 0)
+                       : std::array<uint32_t, 2>{
+                             0x7e000000u | (destination << 17) | (55u << 9) | vgpr_src(2), 0};
+              std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+              ASSERT_NE(inst, nullptr);
+              ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+              for (unsigned lane = 0; lane < 64; ++lane) {
+                const unsigned selector = batch * 64 + lane;
+                const unsigned xmin = selector >> 6, ymin = (selector >> 4) & 3;
+                const unsigned dx = (((selector >> 2) & 3) - xmin) & 3;
+                const unsigned dy = ((selector & 3) - ymin) & 3;
+                uint32_t coverage = 0;
+                for (unsigned x = xmin; x <= xmin + dx; ++x)
+                  for (unsigned y = ymin; y <= ymin + dy; ++y) {
+                    const unsigned se = (((x ^ (y >> 1)) & 1) << 1) | ((y ^ (x >> 1)) & 1);
+                    coverage |= 1u << se;
+                  }
+                const uint32_t original = destination == 2 ? 0xabcd0000u | selector : 0x12345678;
+                EXPECT_EQ(cu->read_vgpr(base + destination, lane),
+                          mask & (1ull << lane) ? coverage : original);
+              }
+            }
+    }
+    wave->halt();
+  }
+}
+
+TEST(ScreenPartitionTest, DppAndSdwaStageSourcesAndPreserveMaskedDestinations) {
+  amdgpu::GpuMemory memory("screen_modifier_memory");
+  amdgpu::L2Cache l2("screen_modifier_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 102;
+  config.vgprs_per_wf = 16;
+  auto cu = amdgpu::ComputeUnitCore::create("screen_modifier", config, &memory, &l2);
+  auto decoder = Decoder::create(config.arch);
+  auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  const uint32_t prefix = 0x7e000000u | (4u << 17) | (cdna4::kVScreenPartition4seB32Vop1 << 9);
+  const auto execute = [&](std::array<uint32_t, 2> words) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+  };
+  for (bool scalar : {false, true}) {
+    ForceScalarGuard force(scalar);
+    wave->set_exec(1);
+    cu->write_vgpr(base + 2, 0, 0x55002100u);
+    cu->write_vgpr(base + 4, 0, 0xdeadbeefu);
+    execute({prefix | amdgpu::SRC_SDWA, 2u | (amdgpu::sdwa::BYTE_2 << 8) |
+                                            (amdgpu::sdwa::UNUSED_PRESERVE << 11) |
+                                            (amdgpu::sdwa::BYTE_1 << 16)});
+    EXPECT_EQ(cu->read_vgpr(base + 4, 0), 0xde0fbeefu);
+    wave->set_exec(~uint64_t{0});
+    for (unsigned lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(base + 2, lane, lane);
+      cu->write_vgpr(base + 4, lane, 0xdeadbeefu);
+    }
+    execute(
+        {prefix | amdgpu::SRC_DPP, 2u | (amdgpu::dpp::ROW_SHR1 << 8) | (15u << 24) | (1u << 28)});
+    constexpr uint32_t kCoverage[] = {1, 3, 7, 15, 5, 15, 15, 15, 7, 15, 15, 15, 15, 15, 15};
+    for (unsigned lane = 0; lane < 64; ++lane)
+      EXPECT_EQ(cu->read_vgpr(base + 4, lane),
+                lane > 0 && lane < 16 ? kCoverage[lane - 1] : 0xdeadbeefu);
+  }
+  wave->halt();
+}
+
 TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
   struct ArchCase {
     rj_code_arch_t arch;

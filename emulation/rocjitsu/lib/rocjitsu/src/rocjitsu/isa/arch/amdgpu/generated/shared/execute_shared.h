@@ -232,11 +232,12 @@ template <typename Inst>
 inline void execute_s_absdiff_i32_sop2([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   int32_t result = [&]() {
-    auto a = static_cast<int64_t>(static_cast<int32_t>(
-        static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))));
-    auto b = static_cast<int64_t>(static_cast<int32_t>(
-        static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1))));
-    return static_cast<uint32_t>(a > b ? a - b : b - a);
+    uint32_t difference =
+        static_cast<uint32_t>(
+            static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc0))) -
+        static_cast<uint32_t>(
+            static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_scalar(inst.ssrc1)));
+    return difference & 0x80000000u ? 0u - difference : difference;
   }();
   amdgpu::RegisterAccess(wf).write_scalar(inst.sdst, result);
   wf.write_scc((result != 0));
@@ -2488,7 +2489,10 @@ template <typename Inst>
 inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  if (inst.simm16.encoding_value_ & 1u)
+    wf.end();
+}
 
 template <typename Inst>
 inline void execute_s_setprio_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
@@ -18960,6 +18964,32 @@ inline void execute_v_sat_pk_u8_i16_vop3([[maybe_unused]] Inst &inst,
     uint32_t result = static_cast<uint32_t>(std::clamp(lo, 0, 255)) |
                       (static_cast<uint32_t>(std::clamp(hi, 0, 255)) << 8);
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
+  }
+}
+
+template <typename Inst>
+inline void execute_v_screen_partition_4se_b32_vop1([[maybe_unused]] Inst &inst,
+                                                    [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::screen_partition_4se(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+  }
+}
+
+template <typename Inst>
+inline void execute_v_screen_partition_4se_b32_vop3([[maybe_unused]] Inst &inst,
+                                                    [[maybe_unused]] Wavefront &wf) {
+  uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        inst, wf, inst.vdst, lane,
+        amdgpu::screen_partition_4se(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
   }
 }
 
