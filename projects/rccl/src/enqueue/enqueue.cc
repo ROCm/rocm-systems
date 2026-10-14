@@ -1448,6 +1448,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     }
   }
 
+  int connStepSize[2] = {0, 0};
   if (!selfSend) {
     for (int part = 0; part < nChannelsMax; part++) {
       int channelId =
@@ -1462,6 +1463,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
         hasLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
         hasLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
+        connStepSize[dir] = part == 0 ? conn->conn.stepSize : std::min(connStepSize[dir], conn->conn.stepSize);
         bool isNet = conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
         network[dir] |= isNet;
         // Only AND sameProcess on NET connectors. Unused/unconnected P2P parts
@@ -1483,11 +1485,13 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   int chunkDataSize_u32fp8[2];
   bool netRegistered[2] = {false, false};
   bool ipcRegistered[2] = {false, false};
-  int p2pSimpleStepSize = ncclP2pCeStepSize(comm->cudaArch, comm->p2pChunkSize);
+  int simpleStepSize[2];
 
   for (int dir = 0; dir < 2; dir++) { // 0=recv, 1=send
+    simpleStepSize[dir] =
+      rcclP2pSimpleStepSize(comm->p2pChunkSize, comm->buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS, connStepSize[dir]);
     // Assume SIMPLE protocol to start with to determine number of channels
-    stepSize[dir] = p2pSimpleStepSize;
+    stepSize[dir] = simpleStepSize[dir];
 
     if (bytes[dir] == -1) nChannels[dir] = 0;
     else if (bytes[dir] == 0) nChannels[dir] = 1;
@@ -1537,7 +1541,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
 
     stepSize[dir] = (protocol[dir] == NCCL_PROTO_LL128 ? comm->p2pLl128BuffSize : comm->buffSizes[protocol[dir]]) /
                     NCCL_STEPS;
-    if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = p2pSimpleStepSize;
+    if (protocol[dir] == NCCL_PROTO_SIMPLE) stepSize[dir] = simpleStepSize[dir];
     chunkSize[dir] = stepSize[dir];
     if (paramChunkSize != 0) {
       chunkSize[dir] = paramChunkSize;
@@ -3977,12 +3981,6 @@ static bool collConfigIsProfilerTagOnly(const ncclCollConfig_t* config, int comm
 }
 
 static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info, struct ncclDevRedOpFull opDev) {
-  if (!rcclP2pCeSupportsKernelCollectives(ncclP2pUsesMemcpy())) {
-    WARN("%s: NCCL_P2P_USE_CUDA_MEMCPY does not support kernel collectives; unset it or use the native CE collective "
-         "controls",
-         info->opName);
-    return ncclInvalidUsage;
-  }
   struct ncclKernelPlanner* planner = &comm->planner;
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.

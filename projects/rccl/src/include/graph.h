@@ -39,14 +39,19 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
 int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int configuredCap);
+// Collective graphs keep the kernel P2P transport even when NCCL_P2P_USE_CUDA_MEMCPY is set.
+inline bool rcclP2pUseCeForConnection(bool useMemcpy, bool collectiveGraph) {
+  return useMemcpy && !collectiveGraph;
+}
 inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
-  return cudaArch == 1250 && useMemcpy && configured > 0 ? configured : fallback;
+  return cudaArch == 1250 && useMemcpy && configured > (int64_t)fallback ? configured : fallback;
 }
-inline bool rcclP2pCeUsesPerThreadStream(int cudaArch, bool useMemcpy) {
-  return cudaArch == 1250 && useMemcpy;
+inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
+  return cudaArch == 1250;
 }
-inline bool rcclP2pCeSupportsKernelCollectives(bool useMemcpy) {
-  return !useMemcpy;
+// Only Copy Engine connectors have steps above the default SIMPLE step. connStepSize <= 0 means unknown.
+inline int rcclP2pSimpleStepSize(int p2pChunkSize, int defaultStepSize, int connStepSize) {
+  return connStepSize > defaultStepSize ? connStepSize : p2pChunkSize;
 }
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();

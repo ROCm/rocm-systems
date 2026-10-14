@@ -5,6 +5,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.
+* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
@@ -13,6 +15,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. The Copy Engine transport now carries only send/recv-based operations, so collectives keep the kernel P2P transport instead of routing SIMPLE steps through Copy Engine copies.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 
@@ -37,8 +40,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_CE_CHUNK_SIZE` (default 8 MiB): chunk size for the round-robin chunking that host RMA Copy Engine batches use when per-peer transfer sizes differ.
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
 * `NCCL_GIN_MLOPART`: allows GIN on MLO/CPX partitions. A partition reaches xGMI and the network over the physical device's paths, so GIN is as available to a partition as to the whole GPU. By default a single-node partitioned communicator keeps GIN, and one spanning several nodes does not, because past one node admitting a partition also reaches the hierarchical Copy Engine path. Set `1` to allow GIN on partitions on any number of nodes, or `0` to restore the previous partition exclusion.
-* `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one per-thread proxy stream to avoid SDMA completion stalls. Kernel collectives reject the P2P CE transport instead of entering its unsupported progress path.
-* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_TREE_COMPACT` (default `0`): builds the inter-node trees with a half-interleave node remapping, for jobs whose nodes are ordered by network domain. Both trees keep cross-domain hops at the leaves only when the nodes split evenly into two domains; with an uneven split, the first tree does so when the first domain holds at least half of the nodes, and the second tree still crosses domains. All ranks in a communicator must use the same value; initialization fails with `ncclInvalidUsage` otherwise.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
