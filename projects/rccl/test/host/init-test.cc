@@ -1632,7 +1632,7 @@ TEST_F(InitMicrotest, GetAsyncError_DdaA2aTrip_ReturnsRemoteErrorAndSticks) {
   ncclResult_t e = ncclInProgress;
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclSuccess, e);  // healthy word: no error
-  word = 3;                   // a wait-site trip
+  word = 3;                   // kDdaWdPushReady trip
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclRemoteError, e);
   EXPECT_EQ(ncclRemoteError, rc.get()->asyncResult);

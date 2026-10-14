@@ -104,6 +104,10 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # allocator.cc ncclMemAlloc FABRIC gate (include/rccl_memalloc_fabric.h)
       - "MemAllocFabricMicrotest.*"
+      # algorithms/dda/alltoall/dda_alltoall_lazy.h
+      - "DdaA2aLazyMicrotest.*"
+      # algorithms/dda/alltoall/dda_alltoall.h push host helpers
+      - "DdaA2aPushHostMicrotest.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)

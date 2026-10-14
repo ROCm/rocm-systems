@@ -800,6 +800,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaFabricMaxBlocks = 0;
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->ddaA2aPushState = nullptr;
+  comm->ddaA2aLazy = -1;  // dda_a2a_lazy::kOff until ncclDdaFabricCommInit succeeds
   comm->ddaA2aErrDev = nullptr;
   comm->ddaA2aErrHost = nullptr;
 

@@ -531,9 +531,9 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   if (comm != nullptr && comm->ddaA2aErrHost != nullptr) {
     const uint32_t site = __atomic_load_n(comm->ddaA2aErrHost, __ATOMIC_ACQUIRE);
     if (site != 0) {
-      WARN("ncclAlltoAll: rank %d: an earlier DDA AllToAll on this communicator %s (wait site %u); no further "
+      WARN("ncclAlltoAll: rank %d: an earlier DDA AllToAll on this communicator %s (site %u: %s); no further "
            "AllToAll can run on it", comm->rank,
-           site == kDdaA2aErrAborted ? "was abandoned on an abort" : "failed on the device", site);
+           site == kDdaA2aErrAborted ? "was abandoned on an abort" : "failed", site, ncclDdaA2aWdSiteName(site));
       return rcclDdaA2aErrorResult(site);
     }
   }
@@ -594,6 +594,10 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     case RCCL_DDA_FABRIC_VMM:
       return rcclAddonLaunch(comm, stream, [&] {
         return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
+    case RCCL_DDA_FABRIC_A2A_PUSH:
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaFabricPush(sendbuff, recvbuff, count, datatype, comm, stream);
       });
     case RCCL_DDA_IPC:
       return rcclAddonLaunch(comm, stream, [&] {

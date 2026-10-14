@@ -881,6 +881,32 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | gfx1250 MNNVL communicators: enables the one-shot push DDA AllToAll path for out-of-place calls
+          above the LL128 window up to 1 GiB (in-place calls never use it), which stages through a
+          per-rank fabric buffer (see ``RCCL_DDA_A2A_PUSH_BUFFER_SIZE``). The buffer is created on every
+          rank by the first AllToAll that can use it (a communicator that never runs one allocates
+          nothing; if any rank's communicator is nonblocking it is created at initialization). That
+          first call waits on the host until every rank has made it, so ranks must issue AllToAlls of a
+          communicator, and the first ones of different communicators, in the same order (the usual
+          collective contract). A rank only creates a buffer that leaves 2 GiB of
+          device memory free, because p2p (which in-place calls and the other sizes still take)
+          allocates its connection buffers on first use. If the configured size does not fit, a
+          smaller buffer (down to 64 MiB) is used; if none fits on some rank, the path is off on every
+          rank with a warning (those calls take p2p). Operations larger than the buffer run in rounds. The buffer
+          is persistent: ``ncclCommSuspend`` does not release it, only destroying or aborting the
+          communicator does. Calls at or below the architecture's LL128 window never use push, even
+          when LL128 is off (``RCCL_DDA_LL=0``); misaligned buffers or per-peer sizes that are not a
+          multiple of 16 bytes take p2p and never create the buffer. Two push AllToAlls of different
+          communicators on the same GPUs must not run concurrently (each can fill the GPU while it
+          waits for its peers); ``ncclCommAbort`` or ``RCCL_DDA_A2A_TIMEOUT`` ends such a hang.
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled; no buffer is allocated.
+
+    * - | ``RCCL_DDA_A2A_PUSH_BUFFER_SIZE``
+        | Data bytes of the per-rank push buffer (rounded down to 4 KiB; all ranks use the minimum).
+      - | ``1073741824`` (1 GiB, default).
+
     * - | ``RCCL_DDA_A2A_TIMEOUT``
         | Device-side wait timeout of the DDA AllToAll kernels, in seconds. By default the kernels wait for
           a late peer indefinitely, as NCCL kernels do (rank skew is normal in training), and leave within

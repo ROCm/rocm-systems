@@ -65,6 +65,12 @@ DEFINE_DDA_BLOCKS(allToAllDdaIpcBlocks, ncclAllToAllDdaIpcBlocks, 141)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricBlocks, ncclAllToAllDdaFabricBlocks, 142)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricLLBlocks, ncclAllToAllDdaFabricLLBlocks, 143)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricLL128Blocks, ncclAllToAllDdaFabricLL128Blocks, 144)
+// gfx1250 one-shot push path (dda_alltoall_fabric_push_host.h).
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricPushEligible, ncclAllToAllDdaFabricPushEligible)
+DEFINE_DDA_BLOCKS(allToAllDdaFabricPushBlocks, ncclAllToAllDdaFabricPushBlocks, 145)
+// Lazy creation of the push buffer (dda_alltoall_fabric_lazy_host.h); default: no-op success.
+std::function<ncclResult_t(ncclComm*)> g_ddaA2aLazyInit = [](ncclComm*) { return ncclSuccess; };
+ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) { return g_ddaA2aLazyInit(comm); }
 
 DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaIpcEligible, ncclReduceScatterDdaIpcEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(reduceScatterDdaFabricEligible, ncclReduceScatterDdaFabricEligible)

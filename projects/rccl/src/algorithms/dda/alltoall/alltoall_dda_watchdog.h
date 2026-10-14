@@ -63,6 +63,10 @@ constexpr uint32_t kDdaA2aWdAbortMask = 8191;  // abort flag every 8192 spins (a
 
 // Wait-site ids (value of the error word; the host names them, see ncclDdaA2aWdSiteName).
 enum : uint32_t {
+  kDdaWdPushEntry = 1,
+  kDdaWdPushReady = 3,
+  kDdaWdPushCuEntry = 4,
+  kDdaWdPushCuReady = 5,
   kDdaWdLL = 21,
   kDdaWdLL128V2 = 23,
   // Two push/direct kernels of one communicator in flight at once (ordering violation by the caller).

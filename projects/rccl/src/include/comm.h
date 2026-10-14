@@ -719,6 +719,11 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
+  // DDA fabric AllToAll one-shot push state (own fabric buffer), or nullptr.
+  void* ddaA2aPushState;
+  // Created on the first AllToAll that can use it (dda_alltoall_fabric_lazy_host.h):
+  // dda_a2a_lazy::kUntried (0) / kDone (1) / kOff (-1, no fabric path).
+  int ddaA2aLazy;
   // DDA fabric AllToAll per-comm watchdog state (device, dda::common::DdaA2aErr: error word + constant
   // config; kernels take this one pointer) and the host-pinned mirror of the error word (wait-site id
   // of the first trip, 0 = healthy); see alltoall_dda_watchdog.h.
