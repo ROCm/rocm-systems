@@ -296,10 +296,21 @@ static bool write_all_fd(int fd, const void* data, size_t len) {
 
 // Drain the app buffer to the events fd. Caller must hold g_file_mu (or be the
 // crash callback that has claimed g_buf_busy via test_and_set). Does not fsync.
-static void flush_buffer_locked() {
-  if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return; }
-  write_all_fd(g_events_fd, g_buf, g_buf_len);
+// Returns false if the write failed.
+static bool flush_buffer_locked() {
+  if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return true; }
+  const bool written = write_all_fd(g_events_fd, g_buf, g_buf_len);
   g_buf_len = 0;
+  return written;
+}
+
+static constexpr const char* kEventsWriteFailed =
+    "a write to events.bin failed, so records are missing";
+
+// flush_buffer_locked() for a writer thread, which marks the archive incomplete
+// if the write fails. Caller holds g_file_mu, which comes before g_blob_mu.
+static void flush_events_locked() {
+  if (!flush_buffer_locked()) mark_incomplete(kEventsWriteFailed);
 }
 
 // Append `len` bytes of one complete record to the buffer, flushing first if it
@@ -308,11 +319,12 @@ static void flush_buffer_locked() {
 // args) is flushed-then-written directly so it never overruns g_buf. Caller must
 // hold g_file_mu.
 static void buffer_append_locked(const void* data, size_t len) {
-  if (g_buf_len + len > kBufCap) flush_buffer_locked();
+  if (g_buf_len + len > kBufCap) flush_events_locked();
   if (len > kBufCap) {
     // Oversized record: buffer is now empty (flushed above); write it straight
     // through rather than memcpy'ing past the end of g_buf.
-    if (g_events_fd >= 0) write_all_fd(g_events_fd, data, len);
+    if (g_events_fd >= 0 && !write_all_fd(g_events_fd, data, len))
+      mark_incomplete(kEventsWriteFailed);
     return;
   }
   memcpy(g_buf + g_buf_len, data, len);
@@ -530,8 +542,10 @@ static void atfork_prepare() {
   g_reopen_mu.lock();
   g_file_mu.lock();
   claim_buf_locked();
+  // A failed write marks the parent's archive; atfork_child() clears the flag
+  // for the child's.
   if (g_events_fd >= 0)
-    flush_buffer_locked();
+    flush_events_locked();
   g_buf_busy.clear(std::memory_order_release);
   g_blob_mu.lock();
   // The child's shutdown writes its manifest under this one.
@@ -1142,7 +1156,7 @@ bool open(const char* output_dir) {
 void checkpoint() {
   BufWriteGuard lk;
   if (g_events_fd < 0) return;
-  flush_buffer_locked();
+  flush_events_locked();
   HRR_FSYNC(g_events_fd);
   g_events_since_ckpt = 0;
 }
@@ -1230,6 +1244,9 @@ void flush(const char* /*output_dir*/) {
     incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
     out_dir = g_output_dir;
     if (g_events_fd >= 0 && !g_events_finalized) {
+      // The buffered events go out before the trailer decision, so a failed
+      // write among them leaves the trailer out.
+      flush_events_locked();
       {
         // Stop new blob and code object claims, then wait for the claimed writes
         // to end: a failed one marks the capture incomplete, which decides the
@@ -1249,7 +1266,13 @@ void flush(const char* /*output_dir*/) {
         rec.hdr.thread_id    = current_thread_id();
         buffer_append_locked(&rec, sizeof(rec));
       }
-      flush_buffer_locked();
+      // Only the trailer is left to write. If it does not land whole, the
+      // reader finds a torn tail, and the manifest must not say complete
+      // either, so this counts after the cut-off that mark_incomplete() keeps.
+      if (!flush_buffer_locked()) {
+        std::lock_guard<std::mutex> blk(g_blob_mu);
+        mark_incomplete_locked(kEventsWriteFailed);
+      }
       HRR_FSYNC(g_events_fd);
     }
     incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
@@ -1405,7 +1428,7 @@ static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len,
       fresh[i] = list_unreplayable_locked(t_staged_notes[i].api, t_staged_notes[i].reason);
   }
   if (++g_events_since_ckpt >= kCheckpointEvents) {
-    flush_buffer_locked();
+    flush_events_locked();
     HRR_FSYNC(g_events_fd);
     g_events_since_ckpt = 0;
   }

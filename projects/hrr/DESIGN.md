@@ -1483,6 +1483,9 @@ The event wire format (finding H5):
   also a `uint16_t` on the wire. A launch whose name is longer than 65,535 bytes is
   dropped and the archive marked incomplete in the same way, rather than recorded with a
   truncated name that matches no symbol at replay.
+- **A failed write to `events.bin` fails loudly too.** Records that did not reach the
+  file mark the archive incomplete in the same way, so the trailer is omitted and
+  `manifest.complete=false`.
 - **Pointer-translation size precondition.** Whole-arg pointer translation requires the
   recorded `arg_size >= 8`; a smaller pointer descriptor is copied through untranslated,
   passing the stale capture-time VA to the kernel.

@@ -48,6 +48,10 @@
  *     a blob or code object that cannot be written leaves the archive marked
  *     incomplete (POSIX).
  *
+ *   Unit_HRR_CaptureEventsWriteFails:
+ *     events.bin writes that fail leave the archive without the clean-shutdown
+ *     trailer and marked incomplete (POSIX).
+ *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
  *     while the capture runs, names the process instance on Linux, and is
@@ -229,6 +233,15 @@ bool manifest_says_complete(const fs::path& archive, bool complete) {
   return read_text_file(archive / "manifest.json")
              .find(complete ? "\"complete\": true" : "\"complete\": false") != std::string::npos;
 }
+
+// True if the events file ends in the clean-shutdown trailer.
+bool ends_in_trailer(const fs::path& events_file) {
+  const std::string events = read_text_file(events_file);
+  if (events.size() < sizeof(hrr_file_header) + sizeof(hrr_eof_record)) return false;
+  hrr_eof_record rec{};
+  std::memcpy(&rec, events.data() + events.size() - sizeof(rec), sizeof(rec));
+  return rec.hdr.event_type == HRR_EOF_MARKER && rec.eof_magic == HRR_EOF_MAGIC;
+}
 #endif
 
 }  // namespace
@@ -372,6 +385,29 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
   g_hrr_statvfs_hook = plant_marker_link;
   HRR_HIP_CHECK(hipSetDevice(0));
   g_hrr_statvfs_hook = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureEventsWriteFails: once the capture
+// is on, it limits the size of the files it writes to kEventsFileLimit, with
+// SIGXFSZ ignored so that a write past the limit fails with EFBIG, and records
+// far more events than fit. The manifest stays well under the limit.
+// ---------------------------------------------------------------------------
+constexpr rlim_t kEventsFileLimit = 64 * 1024;
+
+TEST_CASE("Unit_HRR_CaptureEventsFail_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  HRR_HIP_CHECK(hipFree(d));
+  struct rlimit lim {};
+  REQUIRE(::getrlimit(RLIMIT_FSIZE, &lim) == 0);
+  REQUIRE((lim.rlim_max == RLIM_INFINITY || lim.rlim_max >= kEventsFileLimit));
+  lim.rlim_cur = kEventsFileLimit;
+  REQUIRE(std::signal(SIGXFSZ, SIG_IGN) != SIG_ERR);
+  REQUIRE(::setrlimit(RLIMIT_FSIZE, &lim) == 0);
+  // A record each, several times the limit in all.
+  for (int i = 0; i < 16384; ++i) (void)hipGetLastError();
 }
 
 #endif
@@ -778,6 +814,32 @@ HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
     INFO("Path: " << rel.string());
     CHECK(fs::is_directory(fs::symlink_status(archives.front() / rel)));
   }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureEventsFail_Direct, whose events.bin writes fail
+ *     once the file reaches the size limit it sets.
+ *   - events.bin ends without the clean-shutdown trailer and the manifest
+ *     says the archive is incomplete.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureEventsWriteFails) {
+#ifdef _WIN32
+  HRR_SKIP("RLIMIT_FSIZE");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_events_fail"};
+  const fs::path base = work.path / "capture";
+  const PlantedRun run = capture_workload(base, "Unit_HRR_CaptureEventsFail_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  CHECK(fs::file_size(archives.front() / "events.bin") == kEventsFileLimit);
+  CHECK_FALSE(ends_in_trailer(archives.front() / "events.bin"));
+  CHECK(manifest_says_complete(archives.front(), false));
 #endif
 }
 

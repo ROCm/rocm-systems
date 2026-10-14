@@ -56,6 +56,8 @@ cases:
   Unit_HRR_CaptureCrashSmallStack_Direct: {}
   Unit_HRR_CaptureDisabledInForkedChild: {}
   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo: {}
+  Unit_HRR_CaptureEventsFail_Direct: {}
+  Unit_HRR_CaptureEventsWriteFails: {}
   Unit_HRR_CaptureExitSummary: {}
   Unit_HRR_CaptureForkWithoutFds_Direct: {}
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
