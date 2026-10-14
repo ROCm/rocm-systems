@@ -5258,3 +5258,101 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
   }
 }
+
+// ===========================================================================
+// scheduleP2pTasksToPlan (enqueue.cc:1787) -- per-round kernel-argument budget.
+// A round emits one work item and at most one new batch per channel. Reserving
+// more than that moved the last round of a 4-rank, 64-channel-per-peer AllToAll
+// into a second kernel launch.
+// ===========================================================================
+
+namespace {
+struct AllToAllPlanScene {
+  static constexpr int kRanks = 4;
+  static constexpr int kChannelsPerPeer = 64;
+  static constexpr int kP2pChannels = kRanks * kChannelsPerPeer;
+
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/942};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
+  std::vector<ncclTaskP2p> sends = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<ncclTaskP2p> recvs = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<char> sendBufs = std::vector<char>(kRanks);
+  std::vector<char> recvBufs = std::vector<char>(kRanks);
+
+  AllToAllPlanScene() {
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = kRanks;
+    c->p2pnChannels = kP2pChannels;
+    c->p2pnChannelsPerPeer = kChannelsPerPeer;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 512 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 4 << 20;
+    SetSingleGpuArch(topo.get(), "gfx942");
+    c->topo = topo.get();
+
+    for (int round = 0; round < kRanks; ++round) {
+      rounds[round].sendRank = round;
+      rounds[round].recvRank = (kRanks - round) % kRanks;
+    }
+    c->p2pSchedule = rounds.data();
+    c->planner.peers = plannerPeers.data();
+    for (int peer = 0; peer < kRanks; ++peer) peerSlots[peer] = &channelPeers[peer];
+    for (int ch = 0; ch < kP2pChannels; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    for (int peer = 0; peer < kRanks; ++peer) {
+      for (ncclTaskP2p* t : {&sends[peer], &recvs[peer]}) {
+        t->collAPI = ncclFuncAlltoAll;
+        t->bytes = size_t(1) << 30;
+      }
+      sends[peer].func = ncclFuncSend;
+      sends[peer].buff = &sendBufs[peer];
+      recvs[peer].func = ncclFuncRecv;
+      recvs[peer].buff = &recvBufs[peer];
+      ncclIntruQueueEnqueue(&plannerPeers[peer].sendQueue, &sends[peer]);
+      ncclIntruQueueEnqueue(&plannerPeers[peer].recvQueue, &recvs[peer]);
+    }
+    c->planner.nTasksP2p = 2 * kRanks;
+    c->planner.nTasksP2pSend = kRanks;
+    c->planner.nTasksP2pRecv = kRanks;
+  }
+
+  ncclResult_t schedule(ssize_t inArgsBytes) {
+    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, /*out=*/ssize_t(1) << 30);
+    int epoch = 0, round = 0;
+    return scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget);
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_FourRoundsOf64Channels_FitOneKernelLaunch) {
+  AllToAllPlanScene sc;
+  const ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(sc.bp.c()->cudaArch)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+  ASSERT_GE(inArgs, ssize_t(AllToAllPlanScene::kP2pChannels) * kBatch)
+      << "precondition: the kernel-argument budget holds one batch per channel";
+  ASSERT_EQ(ncclSuccess, sc.schedule(inArgs));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "every AllToAll round must land in the first plan";
+  EXPECT_EQ(AllToAllPlanScene::kP2pChannels, sc.bp.p()->nWorkBatches);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneBatchPerChannelForTheNextRound) {
+  // Three rounds use 192 batches. The fourth needs 64 more: one batch short must
+  // defer it to the next plan, an exact fit must not.
+  const int used = 3 * AllToAllPlanScene::kChannelsPerPeer;
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the fourth round's send and recv must wait";
+    EXPECT_EQ(used, sc.bp.p()->nWorkBatches);
+  }
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer) * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(used + AllToAllPlanScene::kChannelsPerPeer, sc.bp.p()->nWorkBatches);
+  }
+}

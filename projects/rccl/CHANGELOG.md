@@ -13,6 +13,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed a large-message `ncclAllToAll` bandwidth loss of up to 44% on communicators whose P2P rounds fill most of the kernel-argument batch budget, such as 4 ranks with 64 P2P channels per peer. The P2P planner reserved room for two work items per round although a round always emits one, so the last round moved to a second kernel launch.
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
 
