@@ -48,7 +48,7 @@ enum SchedLevel {
 /// @brief Kind of hardware queue to create. AQL and SDMA are mutually exclusive.
 enum HwQueueKind {
   kHwQueuePm4 = 0,  ///< PM4 / compute queue (AQL->PM4 translation); default
-  kHwQueueAql,      ///< Native AQL queue
+  kHwQueueAql,      ///< Native AQL queue for compute
   kHwQueueSdma,     ///< Native HSA SDMA user queue
 };
 

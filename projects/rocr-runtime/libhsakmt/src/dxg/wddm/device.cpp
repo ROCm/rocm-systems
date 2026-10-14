@@ -527,8 +527,8 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debug
   else
     args.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(engine, &device_info_);
 
-  pr_debug("CreateContext engine=%d ordinal=%d schedid=%d hws=%d sdma_native=%d\n",
-           engine, ordinal, schedid, (int)IsHwsEnabled(engine), (int)sdma_native);
+  pr_debug("CreateContext engine=%d ordinal=%d hws=%d sdma_native=%d\n",
+           engine, ordinal, (int)IsHwsEnabled(engine), (int)sdma_native);
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
