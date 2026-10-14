@@ -1095,6 +1095,17 @@ ncclResult_t ncclTopoGetGraphFromXmlSub(struct ncclXmlNode* xmlGraph, struct ncc
 
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "pattern", &graph->pattern));
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "nchannels", &graph->nChannels));
+  // graph->nChannels becomes the loop bound downstream code uses over the
+  // MAXCHANNELS-sized intra/inter arrays, so it may not simply be whatever the
+  // file says. ncclTopoGetXmlFromGraph emits exactly nChannels <channel>
+  // elements, so requiring agreement also rules out a file claiming channels
+  // that were never imported. The per-channel guard in
+  // ncclTopoGetChannelFromXml bounds the count itself against MAXCHANNELS.
+  if (graph->nChannels != xmlGraph->nSubs) {
+    WARN("XML Import Graph : nchannels %d does not match the %d channels present.",
+         graph->nChannels, xmlGraph->nSubs);
+    return ncclInvalidUsage;
+  }
   NCCLCHECK(xmlGetAttrFloat(xmlGraph, "speedintra", &graph->bwIntra));
   NCCLCHECK(xmlGetAttrFloat(xmlGraph, "speedinter", &graph->bwInter));
   const char* str;
