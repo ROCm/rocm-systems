@@ -13,8 +13,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
-* Options that take a list now accept values separated by commas, for example `-b 2,5` or `-R FP16,FP32`. Values separated by spaces still work.
-
 ### Changed
 
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
