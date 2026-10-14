@@ -79,6 +79,15 @@ __global__ void kernelDecode(const uint8_t* __restrict__ in, float* __restrict__
   out[i] = (float)fromPack<T>(p);
 }
 
+// Reports whether the device code was compiled with the pk8 specialization.
+__global__ void kernelHasPk8(int* out) {
+#if defined(RCCL_FP8_HAS_PK8)
+  out[0] = 1;
+#else
+  out[0] = 0;
+#endif
+}
+
 // Ask the device which fp8 encoding it actually compiled in, rather than
 // re-deriving it from the architecture name. Byte 0x80 is -0.0 under OCP and NaN
 // under FNUZ, so decoding it on device distinguishes the two. Reading it off the
@@ -96,6 +105,30 @@ bool deviceIsFnuz() {
     cached = std::isnan(f.copyTo()[0]) ? 1 : 0;
   }
   return cached == 1;
+}
+
+bool isGfx1250(int device) {
+  hipDeviceProp_t prop{};
+  if (hipGetDeviceProperties(&prop, device) != hipSuccess) return false;
+  return std::string(prop.gcnArchName).rfind("gfx1250", 0) == 0;
+}
+
+// Host compilation always sees the OCP typedefs (rccl_float8.h), so producing a
+// byte in the encoding the device uses has to name that encoding explicitly.
+// Mirror of rcclFp8ToFloat.
+uint8_t rcclFloatToFp8(float v, bool isE5m2, bool fnuz) {
+  if (isE5m2) {
+    if (fnuz) return __hip_fp8_e5m2_fnuz(v).__x;
+    return __hip_fp8_e5m2(v).__x;
+  }
+  if (fnuz) return __hip_fp8_e4m3_fnuz(v).__x;
+  return __hip_fp8_e4m3(v).__x;
+}
+
+// e4m3 tops out at 240.0 under FNUZ and 448.0 under OCP; e5m2 is 57344.0 in both.
+float fp8MaxFinite(bool isE5m2, bool fnuz) {
+  if (isE5m2) return 57344.0f;
+  return fnuz ? 240.0f : 448.0f;
 }
 
 class Fp8ReduceTest : public DeviceTestBase {
@@ -171,9 +204,132 @@ protected:
                       << " scalar=0x" << (int)scalar[first]
                       << " wide=0x" << (int)(*wide[w])[first] << std::dec
                       << " (scalar=" << decScalar[first] << " wide=" << decWide[first] << ")";
-        break; // one failure per width is enough to localize it
       }
     }
+  }
+
+  // Exhaustive over every pair whose exact sum stays in range.
+  template<typename T>
+  void ExpectMatchesHostModel(bool isE5m2, const char* name) {
+    const bool fnuz = deviceIsFnuz();
+    const float maxFinite = fp8MaxFinite(isE5m2, fnuz);
+
+    std::vector<uint8_t> ha(kPairs), hb(kPairs);
+    for (int i = 0; i < kPairs; i++) {
+      ha[i] = (uint8_t)(i >> 8);
+      hb[i] = (uint8_t)(i & 0xff);
+    }
+
+    DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
+    da.copyFrom(ha);
+    db.copyFrom(hb);
+    kernelReducePacks<T, FuncSum<T>, 1>
+      <<<gridFor(kPairs), kDefaultBlockSize>>>(da.ptr, db.ptr, dout.ptr, kPairs, 0);
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    auto dev = dout.copyTo();
+
+    int checked = 0, excluded = 0, bad = 0, first = -1;
+    uint8_t firstWant = 0;
+    for (int i = 0; i < kPairs; i++) {
+      const float fa = rcclFp8ToFloat(ha[i], isE5m2, fnuz);
+      const float fb = rcclFp8ToFloat(hb[i], isE5m2, fnuz);
+      if (std::isnan(fa) || std::isnan(fb) || std::isinf(fa) || std::isinf(fb)) {
+        excluded++;
+        continue;
+      }
+      const float sum = fa + fb; // exact: two 8-bit values always sum exactly in float
+      if (std::fabs(sum) > maxFinite) {
+        excluded++;
+        continue;
+      }
+      checked++;
+      // host software round-to-nearest-even encode, in the device's encoding
+      const uint8_t want = rcclFloatToFp8(sum, isE5m2, fnuz);
+      if (dev[i] != want) {
+        if (bad == 0) {
+          first = i;
+          firstWant = want;
+        }
+        bad++;
+      }
+    }
+
+    EXPECT_GT(checked, 50000) << name << ": too few pairs actually compared";
+    EXPECT_EQ(bad, 0) << name << ": device reduction disagrees with the host software model on "
+                      << bad << "/" << checked << " in-range pairs (" << excluded
+                      << " excluded as non-finite or overflowing). First: a=0x" << std::hex
+                      << (int)ha[first] << " b=0x" << (int)hb[first] << " device=0x"
+                      << (int)dev[first] << " host=0x" << (int)firstWant << std::dec
+                      << " (" << rcclFp8ToFloat(ha[first], isE5m2, fnuz) << " + "
+                      << rcclFp8ToFloat(hb[first], isE5m2, fnuz) << ")";
+  }
+
+  // Exact small-integer sums, which pin the conversion scale.
+  template<typename T>
+  void ExpectExactSmallSums(bool isE5m2, const char* name) {
+    const bool fnuz = deviceIsFnuz();
+    // Values exactly representable in both e4m3 and e5m2, whose sums are too.
+    const float lhs[] = {1.0f, 2.0f, 4.0f, 0.5f, -1.0f, 8.0f, 0.25f, 16.0f};
+    const float rhs[] = {1.0f, 2.0f, 4.0f, 0.5f, 3.0f, -8.0f, 0.75f, 16.0f};
+    constexpr int kN = sizeof(lhs) / sizeof(lhs[0]);
+
+    std::vector<uint8_t> ha(kPairs, 0), hb(kPairs, 0);
+    for (int i = 0; i < kN; i++) {
+      ha[i] = rcclFloatToFp8(lhs[i], isE5m2, fnuz);
+      hb[i] = rcclFloatToFp8(rhs[i], isE5m2, fnuz);
+    }
+    DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
+    da.copyFrom(ha);
+    db.copyFrom(hb);
+    // Width 8 so the pk8 path is the one under test where it exists.
+    const int nPacks = kPairs / 8;
+    kernelReducePacks<T, FuncSum<T>, 8>
+      <<<gridFor(nPacks), kDefaultBlockSize>>>(da.ptr, db.ptr, dout.ptr, nPacks, 0);
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    auto dev = dout.copyTo();
+
+    for (int i = 0; i < kN; i++) {
+      const float got = rcclFp8ToFloat(dev[i], isE5m2, fnuz);
+      const float want = lhs[i] + rhs[i];
+      EXPECT_EQ(got, want) << name << ": " << lhs[i] << " + " << rhs[i] << " gave " << got
+                           << " (0x" << std::hex << (int)dev[i] << std::dec
+                           << "). A result near 2^-127 means the pk8 upcast scale is not the"
+                              " E8M0 encoding of 1.0 (127).";
+    }
+  }
+
+  template<typename T>
+  void ExpectOverflowConsistent(bool isE5m2, const char* name) {
+    const bool fnuz = deviceIsFnuz();
+    const float maxFinite = fp8MaxFinite(isE5m2, fnuz);
+
+    std::vector<uint8_t> ha(kPairs), hb(kPairs);
+    const uint8_t maxBits = rcclFloatToFp8(maxFinite, isE5m2, fnuz);
+    for (int i = 0; i < kPairs; i++) {
+      ha[i] = maxBits;
+      hb[i] = maxBits;
+    }
+    DeviceBuffer<uint8_t> da(kPairs), db(kPairs), d1(kPairs), d8(kPairs);
+    da.copyFrom(ha);
+    db.copyFrom(hb);
+    const int nPacks8 = kPairs / 8;
+    kernelReducePacks<T, FuncSum<T>, 1>
+      <<<gridFor(kPairs), kDefaultBlockSize>>>(da.ptr, db.ptr, d1.ptr, kPairs, 0);
+    kernelReducePacks<T, FuncSum<T>, 8>
+      <<<gridFor(nPacks8), kDefaultBlockSize>>>(da.ptr, db.ptr, d8.ptr, nPacks8, 0);
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    auto s1 = d1.copyTo();
+    auto s8 = d8.copyTo();
+
+    EXPECT_EQ(s1[0], s8[0]) << name << ": scalar and pk8 disagree on max+max (0x" << std::hex
+                            << (int)s1[0] << " vs 0x" << (int)s8[0] << std::dec << ")";
+    const float got = rcclFp8ToFloat(s1[0], isE5m2, fnuz);
+    EXPECT_TRUE(std::isnan(got) || std::isinf(got) || std::fabs(got) >= maxFinite)
+      << name << ": " << maxFinite << " + " << maxFinite << " gave " << got
+      << ", which is neither non-finite nor saturated";
   }
 };
 
@@ -224,63 +380,6 @@ TEST_F(Fp8ReduceTest, PackWidthsAgreeMaxE5m2) {
 //    not a reduction bug.
 // ---------------------------------------------------------------------------
 
-namespace {
-template<typename T>
-void ExpectMatchesHostModel(bool isE5m2, const char* name) {
-  const bool fnuz = deviceIsFnuz();
-  const float maxFinite = isE5m2 ? 57344.0f : 448.0f;
-
-  std::vector<uint8_t> ha(kPairs), hb(kPairs);
-  for (int i = 0; i < kPairs; i++) {
-    ha[i] = (uint8_t)(i >> 8);
-    hb[i] = (uint8_t)(i & 0xff);
-  }
-
-  DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
-  da.copyFrom(ha);
-  db.copyFrom(hb);
-  kernelReducePacks<T, FuncSum<T>, 1><<<dim3((kPairs + 255) / 256), 256>>>(
-    da.ptr, db.ptr, dout.ptr, kPairs, 0);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-  auto dev = dout.copyTo();
-
-  int checked = 0, excluded = 0, bad = 0, first = -1;
-  uint8_t firstWant = 0;
-  for (int i = 0; i < kPairs; i++) {
-    const float fa = rcclFp8ToFloat(ha[i], isE5m2, fnuz);
-    const float fb = rcclFp8ToFloat(hb[i], isE5m2, fnuz);
-    if (std::isnan(fa) || std::isnan(fb) || std::isinf(fa) || std::isinf(fb)) {
-      excluded++;
-      continue;
-    }
-    const float sum = fa + fb; // exact: two 8-bit values always sum exactly in float
-    if (std::fabs(sum) > maxFinite) {
-      excluded++;
-      continue;
-    }
-    checked++;
-    const uint8_t want = T(sum).__x; // host software round-to-nearest-even encode
-    if (dev[i] != want) {
-      if (bad == 0) {
-        first = i;
-        firstWant = want;
-      }
-      bad++;
-    }
-  }
-
-  EXPECT_GT(checked, 50000) << name << ": too few pairs actually compared";
-  EXPECT_EQ(bad, 0) << name << ": device reduction disagrees with the host software model on "
-                    << bad << "/" << checked << " in-range pairs (" << excluded
-                    << " excluded as non-finite or overflowing). First: a=0x" << std::hex
-                    << (int)ha[first] << " b=0x" << (int)hb[first] << " device=0x"
-                    << (int)dev[first] << " host=0x" << (int)firstWant << std::dec
-                    << " (" << rcclFp8ToFloat(ha[first], isE5m2, fnuz) << " + "
-                    << rcclFp8ToFloat(hb[first], isE5m2, fnuz) << ")";
-}
-} // namespace
-
 TEST_F(Fp8ReduceTest, MatchesHostModelE4m3) {
   ExpectMatchesHostModel<rccl_float8>(/*isE5m2=*/false, "e4m3");
 }
@@ -297,41 +396,6 @@ TEST_F(Fp8ReduceTest, MatchesHostModelE5m2) {
 //    can survive a smoke test. These exact small-integer sums pin the scale.
 // ---------------------------------------------------------------------------
 
-namespace {
-template<typename T>
-void ExpectExactSmallSums(bool isE5m2, const char* name) {
-  const bool fnuz = deviceIsFnuz();
-  // Values exactly representable in both e4m3 and e5m2, whose sums are too.
-  const float lhs[] = {1.0f, 2.0f, 4.0f, 0.5f, -1.0f, 8.0f, 0.25f, 16.0f};
-  const float rhs[] = {1.0f, 2.0f, 4.0f, 0.5f, 3.0f, -8.0f, 0.75f, 16.0f};
-  constexpr int kN = sizeof(lhs) / sizeof(lhs[0]);
-
-  std::vector<uint8_t> ha(kPairs, 0), hb(kPairs, 0);
-  for (int i = 0; i < kN; i++) {
-    ha[i] = T(lhs[i]).__x;
-    hb[i] = T(rhs[i]).__x;
-  }
-  DeviceBuffer<uint8_t> da(kPairs), db(kPairs), dout(kPairs);
-  da.copyFrom(ha);
-  db.copyFrom(hb);
-  // Width 8 so the pk8 path is the one under test where it exists.
-  kernelReducePacks<T, FuncSum<T>, 8><<<dim3((kPairs / 8 + 255) / 256), 256>>>(
-    da.ptr, db.ptr, dout.ptr, kPairs / 8, 0);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-  auto dev = dout.copyTo();
-
-  for (int i = 0; i < kN; i++) {
-    const float got = rcclFp8ToFloat(dev[i], isE5m2, fnuz);
-    const float want = lhs[i] + rhs[i];
-    EXPECT_EQ(got, want) << name << ": " << lhs[i] << " + " << rhs[i] << " gave " << got
-                         << " (0x" << std::hex << (int)dev[i] << std::dec
-                         << "). A result near 2^-127 means the pk8 upcast scale is not the"
-                            " E8M0 encoding of 1.0 (127).";
-  }
-}
-} // namespace
-
 TEST_F(Fp8ReduceTest, ExactSmallSumsE4m3) {
   ExpectExactSmallSums<rccl_float8>(/*isE5m2=*/false, "e4m3");
 }
@@ -340,53 +404,39 @@ TEST_F(Fp8ReduceTest, ExactSmallSumsE5m2) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Saturating sums stay non-finite, and every width agrees on what they are.
+// 4. Saturating sums stay non-finite.
 //
 //    max+max overflows the format. The exact encoding (NaN vs infinity) is an
 //    architecture property, so this asserts the invariant that actually matters:
-//    the result leaves the finite range, and all pack widths produce identical
-//    bits. A width that silently clipped to max-finite while another produced
-//    NaN would be a real inconsistency.
+//    the result leaves the finite range. Cross-width agreement on this pair is
+//    already covered exhaustively by ExpectWidthsAgree, which enumerates every
+//    input pair at all four widths and all 8 lane rotations.
 // ---------------------------------------------------------------------------
-
-namespace {
-template<typename T>
-void ExpectOverflowConsistent(bool isE5m2, const char* name) {
-  const bool fnuz = deviceIsFnuz();
-  const float maxFinite = isE5m2 ? 57344.0f : 448.0f;
-
-  std::vector<uint8_t> ha(kPairs), hb(kPairs);
-  const uint8_t maxBits = T(maxFinite).__x;
-  for (int i = 0; i < kPairs; i++) {
-    ha[i] = maxBits;
-    hb[i] = maxBits;
-  }
-  DeviceBuffer<uint8_t> da(kPairs), db(kPairs), d1(kPairs), d8(kPairs);
-  da.copyFrom(ha);
-  db.copyFrom(hb);
-  kernelReducePacks<T, FuncSum<T>, 1><<<dim3((kPairs + 255) / 256), 256>>>(
-    da.ptr, db.ptr, d1.ptr, kPairs, 0);
-  kernelReducePacks<T, FuncSum<T>, 8><<<dim3((kPairs / 8 + 255) / 256), 256>>>(
-    da.ptr, db.ptr, d8.ptr, kPairs / 8, 0);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-  auto s1 = d1.copyTo();
-  auto s8 = d8.copyTo();
-
-  EXPECT_EQ(s1[0], s8[0]) << name << ": scalar and pk8 disagree on max+max (0x" << std::hex
-                          << (int)s1[0] << " vs 0x" << (int)s8[0] << std::dec << ")";
-  const float got = rcclFp8ToFloat(s1[0], isE5m2, fnuz);
-  EXPECT_TRUE(std::isnan(got) || std::isinf(got) || std::fabs(got) >= maxFinite)
-    << name << ": " << maxFinite << " + " << maxFinite << " gave " << got
-    << ", which is neither non-finite nor saturated";
-}
-} // namespace
 
 TEST_F(Fp8ReduceTest, OverflowConsistentE4m3) {
   ExpectOverflowConsistent<rccl_float8>(/*isE5m2=*/false, "e4m3");
 }
 TEST_F(Fp8ReduceTest, OverflowConsistentE5m2) {
   ExpectOverflowConsistent<rccl_bfloat8>(/*isE5m2=*/true, "e5m2");
+}
+
+// ---------------------------------------------------------------------------
+// 5. The pk8 specialization is actually compiled in on gfx1250.
+//
+//    Width 8 falls back to the hadd2 recursion if RCCL_FP8_HAS_PK8 stops being
+//    defined. That fallback is numerically identical, so every test above stays
+//    green while the optimization is silently gone.
+// ---------------------------------------------------------------------------
+
+TEST_F(Fp8ReduceTest, Pk8CompiledOnGfx1250) {
+  DeviceBuffer<int> d(1);
+  kernelHasPk8<<<1, 1>>>(d.ptr);
+  syncAndCheck();
+  const bool gfx1250 = isGfx1250(0);
+  const int actual = d.download();
+  EXPECT_EQ(actual, gfx1250 ? 1 : 0)
+    << "RCCL_FP8_HAS_PK8 is " << actual << " but gfx1250=" << gfx1250
+    << "; the width-8 fp8 reduction is falling back to the hadd2 recursion";
 }
 
 } // namespace RcclUnitTesting

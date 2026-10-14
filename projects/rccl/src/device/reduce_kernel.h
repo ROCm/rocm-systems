@@ -482,7 +482,7 @@ SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
 
 #undef SPECIALIZE_REDUCE
 
-#if defined(RCCL_FP8_HAS_PK8)
+#if defined(RCCL_FLOAT8) && defined(RCCL_FP8_HAS_PK8)
 // gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
 // at once instead of letting Apply_Reduce recurse down to pairs.
 #define SPECIALIZE_REDUCE_PK8(T, hadd8_fn) \
