@@ -4,27 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/misc/roctx.cc (NVTX payload -> roctx message
-// translation and the RAII range used by NCCL_NVTX3_FUNC_RANGE*) and
-// src/misc/nvmlwrap_stub.cc (the ROCm stand-in for NVML, which reports no
-// devices so NVML-driven callers skip their checks).
-//
-// Both files are compiled for real into this binary. Neither needs the shared
-// fakes: this TU supplies its own ncclDebugLog (to record WARNs) and
-// g_loadParam (param_redirect.h routes rcclParamLogRoctx() through it on every
-// call instead of caching, so each test picks LOG_ROCTX independently).
-//
-// The scoped range has two production arms. With ROCTX_ENABLE it calls
-// roctxRangePushA/Pop, which this TU defines to record the messages pushed;
-// without it, it falls back to one WARN per enter/exit. In-tree builds inherit
-// ROCTX_ENABLE from the rccl target when roctracer is found. The standalone
-// build compiles this TU twice: rccl-UnitTestsMicroRoctxNvml without it, and
-// rccl-UnitTestsMicroRoctxNvml-roctx with it against the stand-in
-// fakes/roctracer/roctx.h, so CI runs both arms. The range tests hold in either.
-//
-// Every stringify() case here stays under MAX_MESSAGE_LENGTH on purpose: past
-// it, stringify() writes beyond its 1024-byte buffer (confirmed under ASan),
-// tracked as AICOMRCCL-2914 rather than pinned here as undefined behaviour.
+// Host-only microtests for src/misc/roctx.cc and src/misc/nvmlwrap_stub.cc. The -roctx variant
+// builds roctx.cc's ROCTX_ENABLE arm; the range tests hold in either. stringify() inputs stay
+// under MAX_MESSAGE_LENGTH: past it, it overflows its buffer (AICOMRCCL-2914).
 
 #include <gtest/gtest.h>
 
@@ -61,18 +43,14 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* 
 
 #include "fakes/param_redirect.h"
 
-// malloc seam for roctx.cc only, so roctxAlloc's two failure paths are reachable. Every header
-// roctx.cc includes is pulled in first, so their include guards keep the macro below from
-// rewriting any declaration; it applies to roctx.cc's own function bodies and nothing else.
+// malloc seam for roctx.cc's own bodies only, so roctxAlloc's failure paths are reachable.
 #include <cstdlib>
 #include "roctx.h"
 namespace {
 std::function<void*(size_t)> g_roctxMalloc;
 }  // namespace
 
-// With ROCTX_ENABLE (inherited in-tree when roctracer is found, or set by the standalone -roctx
-// variant), roctx.cc calls the roctracer entry points. Nothing on the micro-test link line provides
-// them, so record the calls instead; that also lets the range tests check the exact message pushed.
+// With ROCTX_ENABLE, record roctracer's push/pop instead of linking it.
 #ifdef ROCTX_ENABLE
 namespace {
 std::vector<std::string> g_roctxPushed;
@@ -105,8 +83,7 @@ protected:
   void TearDown() override {
     g_loadParam = [](const char*, int64_t deftVal) { return deftVal; };
     g_roctxMalloc = nullptr;
-    // nvtxToRoctx is a production global that two tests insert into; restoring it here rather
-    // than inline keeps a failed assertion in one of them from leaking into the next test.
+    // Restored here so a failed assertion can't leak entries into the next test.
     nvtxToRoctx = savedNvtxToRoctx_;
     ResetRecorders();
   }
@@ -119,8 +96,7 @@ protected:
 #endif
   }
 
-  // Range enter/exit events, whichever form this build gives them: roctracer push/pop calls with
-  // ROCTX_ENABLE, one WARN each without it. With logging off there must be none either way.
+  // Enter/exit events: roctracer push/pop with ROCTX_ENABLE, one WARN each without; none if off.
   static size_t RangeEvents() {
 #ifdef ROCTX_ENABLE
     EXPECT_TRUE(g_logged.empty()) << "a ROCTX_ENABLE build must not fall back to WARN";
@@ -140,8 +116,7 @@ protected:
 #endif
   }
 
-  // After a range's scope ends: exactly one enter and one exit, checked separately so a
-  // destructor that pushed instead of popping cannot pass as two events.
+  // One enter and one exit, counted apart so a destructor that pushes can't pass.
   static void ExpectOneRangeEnteredAndExited() {
 #ifdef ROCTX_ENABLE
     EXPECT_TRUE(g_logged.empty()) << "a ROCTX_ENABLE build must not fall back to WARN";
@@ -225,9 +200,7 @@ struct MixedPayload {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // Lookup tables
-// ---------------------------------------------------------------------------
 
 TEST_F(RoctxNvmlRoctxMicrotest, NvtxToRoctx_MapsEachSupportedNvtxTypeToItsRoctxType) {
   EXPECT_EQ(nvtxToRoctx.size(), 4u);
@@ -248,8 +221,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, NameTables_MatchTheEnumOrder) {
   for (int i = 0; i < ncclNumTypes; ++i) EXPECT_STREQ(ncclDataTypeStr[i], dataTypes[i]) << "type " << i;
 }
 
-// One slot per roctx entry type. The DATATYPE slot has no initialiser today, but nothing in the
-// tree reads this table, so that gap is left unpinned rather than locked in.
+// One slot per roctx entry type (DATATYPE has no initialiser; nothing reads it).
 TEST_F(RoctxNvmlRoctxMicrotest, RoctxEntryTypeStr_HasOneSlotPerEntryType) {
   static_assert(sizeof(roctxEntryTypeStr) / sizeof(roctxEntryTypeStr[0]) == ROCTX_PAYLOAD_NUM_ENTRY_TYPES,
                 "roctxEntryTypeStr must have one slot per roctxPayloadEntryType");
@@ -258,9 +230,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, RoctxEntryTypeStr_HasOneSlotPerEntryType) {
   EXPECT_STREQ(roctxEntryTypeStr[ROCTX_PAYLOAD_ENTRY_TYPE_REDOP], "ROCTX_PAYLOAD_ENTRY_TYPE_REDOP");
 }
 
-// ---------------------------------------------------------------------------
 // roctxAlloc / roctxFree
-// ---------------------------------------------------------------------------
 
 TEST_F(RoctxNvmlRoctxMicrotest, Alloc_AllocatesEntriesAndMessage_FreeReleasesBoth) {
   roctxPayloadInfo info;
@@ -284,9 +254,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Alloc_EntriesAllocationFails_LeavesBothPointersN
   EXPECT_EQ(*calls, 1);
 }
 
-// The message allocation fails after the entries succeeded: the entries buffer is released
-// (under ASan, LeakSanitizer catches a missing free) and nulled, so a later roctxFree cannot
-// double-free.
+// The message allocation fails after the entries succeeded: entries are freed and nulled.
 TEST_F(RoctxNvmlRoctxMicrotest, Alloc_MessageAllocationFails_ReleasesEntriesAndNullsBoth) {
   int* calls = FailMallocAfter(1);
   roctxPayloadInfo info;
@@ -304,9 +272,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Free_ToleratesNullPointers) {
   EXPECT_EQ(info.message, nullptr);
 }
 
-// ---------------------------------------------------------------------------
 // extractPayloadInfo / stringify
-// ---------------------------------------------------------------------------
 
 TEST_F(RoctxNvmlRoctxMicrotest, Extract_NoEntriesBuffer_ReturnsWithoutTouchingInfo) {
   roctxPayloadInfo info;
@@ -357,8 +323,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Stringify_ZeroEntriesIsJustTheId) {
   EXPECT_EQ(Stringify("Empty", {}), "{Empty: }");
 }
 
-// Out-of-range redop/datatype values print "unknown" instead of indexing past the tables;
-// the highest valid values sit right next to them so an off-by-one in either bound shows.
+// Out-of-range values print "unknown"; the top valid values sit next to them to pin the bounds.
 TEST_F(RoctxNvmlRoctxMicrotest, Stringify_OutOfRangeRedOpAndDataTypePrintUnknown) {
   std::vector<roctxPayloadSchemaEntryInfo> entries(4);
   entries[0] = {"lastOp", ROCTX_PAYLOAD_ENTRY_TYPE_REDOP, {}};
@@ -385,8 +350,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Stringify_MissingBufferIsANoOp) {
   EXPECT_EQ(info.message, nullptr);
 }
 
-// Entries present but no message buffer: still a no-op, checked separately from the
-// both-null case above because the guard is `!entries || !message`.
+// Entries but no message: still a no-op (the guard is `!entries || !message`).
 TEST_F(RoctxNvmlRoctxMicrotest, Stringify_EntriesWithoutMessageIsANoOp) {
   roctxPayloadSchemaEntryInfo entry{"n", ROCTX_PAYLOAD_ENTRY_TYPE_INT, {}};
   roctxPayloadInfo info;
@@ -397,8 +361,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Stringify_EntriesWithoutMessageIsANoOp) {
   EXPECT_EQ(info.message, nullptr);
 }
 
-// A mapping to a roctx type outside the enum reaches extractPayloadInfo's default branch,
-// which stores the type but no payload, and stringify then prints the unknown-type text.
+// An out-of-enum roctx type stores no payload and prints the unknown-type text.
 TEST_F(RoctxNvmlRoctxMicrotest, Extract_MappingToUnknownRoctxTypeTakesTheDefaultBranch) {
   const uint64_t nvtxType = NVTX_PAYLOAD_ENTRY_TYPE_INT + 2;
   ASSERT_EQ(nvtxToRoctx.count(nvtxType), 0u);
@@ -415,8 +378,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Extract_MappingToUnknownRoctxTypeTakesTheDefault
   roctxFree(&info);
 }
 
-// Pinned as observed: an nvtx type with no mapping is looked up with std::map::operator[],
-// which inserts it as ROCTX_PAYLOAD_ENTRY_TYPE_INT (value 0) and decodes the field as an int.
+// Pinned as observed: an unmapped nvtx type is inserted by operator[] as INT and decoded as one.
 TEST_F(RoctxNvmlRoctxMicrotest, Extract_UnmappedNvtxTypeIsTreatedAsIntAndInsertedIntoTheMap) {
   const uint64_t unmapped = NVTX_PAYLOAD_ENTRY_TYPE_INT + 1;
   ASSERT_EQ(nvtxToRoctx.count(unmapped), 0u);
@@ -432,9 +394,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, Extract_UnmappedNvtxTypeIsTreatedAsIntAndInserte
   roctxFree(&info);
 }
 
-// ---------------------------------------------------------------------------
 // roctx_scoped_range_in
-// ---------------------------------------------------------------------------
 
 TEST_F(RoctxNvmlRoctxMicrotest, LogRoctxParam_IsReadFromRcclLogRoctxWithDefaultZero) {
   std::string seenEnv;
@@ -459,8 +419,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_LoggingOff_DoesNothing) {
   EXPECT_TRUE(g_logged.empty());
 }
 
-// One range is one event on enter and one on exit: a roctracer push/pop with ROCTX_ENABLE,
-// otherwise the WARN that stands in for each.
+// One range: one enter event and one exit event.
 TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_LoggingOn_OneEventOnEnterAndOneOnExit) {
   SetLogRoctx(1);
   {
@@ -480,10 +439,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_DefaultConstructorDelegatesToTheMess
   ExpectOneRangeEnteredAndExited();
 }
 
-// The payload constructor builds the message from the schema (pushed verbatim with ROCTX_ENABLE)
-// and the destructor frees it in both builds; under ASan, LeakSanitizer flags a missing roctxFree.
-// The two mallocs (entries, message) are checked directly too, since without ROCTX_ENABLE the
-// pushed message is not observable.
+// The constructor pushes the schema-built message; the destructor frees it in both builds.
 TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOn_PushesTheStringifiedPayload) {
   SetLogRoctx(1);
   int* mallocs = CountMallocs();
@@ -499,8 +455,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOn_Push
   ExpectOneRangeEnteredAndExited();
 }
 
-// roctxAlloc fails inside the constructor, leaving the message null: construction and
-// destruction must still complete without crashing and report one enter and one exit.
+// roctxAlloc fails in the constructor: the range still enters and exits once, without crashing.
 TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOnAndAllocFailure_StillEntersAndExits) {
   SetLogRoctx(1);
   int* mallocs = FailMallocAfter(0);
@@ -524,9 +479,7 @@ TEST_F(RoctxNvmlRoctxMicrotest, ScopedRange_PayloadConstructorWithLoggingOff_Doe
   EXPECT_TRUE(g_logged.empty());
 }
 
-// ---------------------------------------------------------------------------
 // nvmlwrap_stub.cc: no NVML on ROCm, so every query reports "no device".
-// ---------------------------------------------------------------------------
 
 namespace {
 nvmlDevice_t FakeDevice() { return reinterpret_cast<nvmlDevice_t>(0x1234); }
@@ -589,8 +542,7 @@ TEST(RoctxNvmlStubMicrotest, DeviceLookupsFailWithoutWritingOutputs) {
   EXPECT_EQ(value, 99u);
 }
 
-// These fail too, but clear their output first so a caller that ignores the error
-// reads a defined value instead of stack garbage.
+// These fail too, but clear their output first.
 TEST(RoctxNvmlStubMicrotest, FailingQueriesClearTheirOutputs) {
   char name[8] = "garbage";
   EXPECT_EQ(ncclNvmlDeviceGetName(FakeDevice(), name, sizeof(name)), ncclSystemError);

@@ -293,11 +293,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroRoctxNvml -- src/misc/roctx.cc + src/misc/nvmlwrap_stub.cc. Its own binary:
-  # fakes/comm_fakes.cc (linked by rccl-UnitTestsMicro and most other targets) stubs the
-  # roctx_scoped_range_in constructor/destructor this target compiles as the real thing, and
-  # ras-diagnostics-gpu-test.cc defines its own NVML seams. The test TU supplies ncclDebugLog and
-  # g_loadParam itself, so no shared fakes are linked.
+  # rccl-UnitTestsMicroRoctxNvml -- src/misc/roctx.cc + src/misc/nvmlwrap_stub.cc. Own binary:
+  # fakes/comm_fakes.cc stubs the roctx_scoped_range_in this target compiles for real.
   set(TEST_MICRO_ROCTX_NVML_SOURCE_FILES
     roctx-nvml-stub-test.cc
     ../common/main_altrsmi.cpp
@@ -753,8 +750,7 @@ function(rccl_standalone_setup)
   # binary; run_host_tests.sh (the only in-repo workflow that runs these) uses
   # this standalone path, so build the shipping arm explicitly too.
   set(_ENQ_BUILD_DEVLINKER TRUE PARENT_SCOPE)
-  # Same reason for roctx.cc's ROCTX_ENABLE arm: in-tree inherits it from the rccl target when
-  # roctracer is found, so standalone builds that arm explicitly.
+  # Likewise roctx.cc's ROCTX_ENABLE arm (-roctx).
   set(_MICRO_BUILD_ROCTX_VARIANT TRUE PARENT_SCOPE)
   # No GENERATE_SYM_KERNELS variable exists in this standalone project(); check
   # for the generated host TU on disk instead.
@@ -1081,9 +1077,7 @@ set(_roctx_nvml_common_args
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml ${_roctx_nvml_common_args})
-# roctx.cc gates its roctracer calls on ROCTX_ENABLE at the preprocessor, so one compile covers
-# one arm. The -roctx variant covers the roctracer arm against a stand-in <roctracer/roctx.h>
-# (fakes/roctx_include), so it builds whether or not roctracer is installed.
+# -roctx builds roctx.cc's ROCTX_ENABLE arm against the stand-in fakes/roctx_include.
 if(_MICRO_BUILD_ROCTX_VARIANT)
   rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml-roctx ${_roctx_nvml_common_args})
   target_compile_definitions(rccl-UnitTestsMicroRoctxNvml-roctx PRIVATE ROCTX_ENABLE)
