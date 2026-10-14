@@ -1,40 +1,21 @@
 ---
 name: cmake-conventions
-description: CMake hard rules for rocprofiler-systems — presets, whole-project builds, formatting
+description: Rules for writing and editing rocprofiler-systems CMake files — linkage, target scope, formatting
 ---
 
 # CMake Conventions — rocprofiler-systems
 
-## Presets
+Use this when writing or editing `CMakeLists.txt` and `*.cmake` files.
+Configure and build instructions are in `cmake-build.md`.
 
-Use `CMakePresets.json` whenever a preset fits:
+## Linkage
 
-| Preset | Build type | Testing | Use for |
-| --- | --- | --- | --- |
-| `ci` | Release | ON | CI builds |
-| `debug` | Debug | ON | Day-to-day development |
-| `debug-optimized` | RelWithDebInfo | ON | Debugging with realistic performance |
-| `release` | Release | OFF | Production builds |
-| `debug-mpi` | Debug | ON | Debug build with MPI |
-| `release-mpi` | Release | OFF | Release build with MPI |
-| `coverage` | Debug | ON | GCC coverage |
-
-Preset binary directories are `build/<preset>`.
-
-```bash
-cmake --preset <preset>
-cmake --preset release -DROCPROFSYS_BUILD_DYNINST=ON   # override on top of a preset
-```
-
-## Whole-project builds only
-
-Never pass `--target` to `cmake --build` or invoke a target through Ninja or
-Make directly. Unit tests aggregate object libraries from across `source/`, so
-always build the complete configured tree:
-
-```bash
-cmake --build build/<preset> --parallel <jobs>
-```
+- Link only libraries the target uses directly. Do not copy another target's
+  link list or add a dependency that is not needed to compile or link it.
+- Prefer `PRIVATE`. Use `PUBLIC` or `INTERFACE` only when dependents use that
+  library's headers or symbols through this target.
+- Do not link an aggregate, such as `rocprofiler-systems-object-library`, when
+  a narrower library provides the required symbols.
 
 ## Style
 

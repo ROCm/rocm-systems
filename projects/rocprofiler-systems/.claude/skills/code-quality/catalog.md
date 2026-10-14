@@ -5,6 +5,95 @@ Full reference of 22 code smells and 60+ refactoring techniques. Organized in tw
 - **Part 1: Smell Detection** -- what to look for, thresholds, severity
 - **Part 2: Refactoring Techniques** -- how to fix each smell, with step-by-step instructions and code examples
 
+Search the tables below, then open the matching `####` heading. Do not scan the whole file. **Fixes** names are Part 2 headings, in the order to try them.
+
+While writing code, check **every row** of the Smell index and use the listed technique so the smell is not introduced. Do not write the smelly form and report it afterward.
+
+## Smell index
+
+| Smell | Category | Fixes, in order |
+| --- | --- | --- |
+| Long Method | Bloaters | Extract Method, Replace Temp with Query, Introduce Parameter Object, Decompose Conditional, Replace Method with Method Object |
+| Large Class | Bloaters | Extract Class, Extract Subclass, Extract Interface |
+| Primitive Obsession | Bloaters | Replace Data Value with Object, Introduce Parameter Object, Preserve Whole Object, Replace Type Code with Class, Replace Type Code with Subclasses, Replace Type Code with State/Strategy |
+| Long Parameter List | Bloaters | Replace Parameter with Method Call, Preserve Whole Object, Introduce Parameter Object |
+| Data Clumps | Bloaters | Extract Class, Introduce Parameter Object, Preserve Whole Object |
+| Switch Statements | Object-Orientation Abusers | Replace Conditional with Polymorphism, Replace Type Code with Subclasses, Replace Type Code with State/Strategy |
+| Temporary Field | Object-Orientation Abusers | Extract Class, Replace Method with Method Object, Introduce Null Object |
+| Refused Bequest | Object-Orientation Abusers | Replace Inheritance with Delegation, Extract Superclass |
+| Alternative Classes with Different Interfaces | Object-Orientation Abusers | Rename Method, Move Method, Extract Superclass |
+| Divergent Change | Change Preventers | Extract Class, Extract Superclass, Extract Subclass |
+| Shotgun Surgery | Change Preventers | Move Method, Move Field, Inline Class |
+| Parallel Inheritance Hierarchies | Change Preventers | Move Method, Move Field |
+| Comments | Dispensables | Extract Variable, Extract Method, Rename Method, Introduce Assertion |
+| Duplicate Code | Dispensables | Extract Method, Pull Up Method, Form Template Method, Extract Superclass, Consolidate Conditional Expression |
+| Lazy Class | Dispensables | Inline Class, Collapse Hierarchy |
+| Data Class | Dispensables | Encapsulate Field, Encapsulate Collection, Move Method |
+| Dead Code | Dispensables | Delete, Remove Parameter, Inline Class, Collapse Hierarchy |
+| Speculative Generality | Dispensables | Collapse Hierarchy, Inline Class, Inline Method, Remove Parameter |
+| Feature Envy | Couplers | Move Method, Extract Method |
+| Inappropriate Intimacy | Couplers | Move Method, Move Field, Extract Class, Hide Delegate, Change Bidirectional to Unidirectional |
+| Message Chains | Couplers | Hide Delegate, Extract Method, Move Method |
+| Middle Man | Couplers | Remove Middle Man |
+| Incomplete Library Class | Couplers | Introduce Foreign Method, Introduce Local Extension |
+
+Three names in the **Fixes** column have no Part 2 heading: **Delete** (remove the unused code), **Replace Parameter with Method Call** (get the value from an object the method can already reach), and **Change Bidirectional to Unidirectional** (drop one side of a two-way link). Apply those from the smell's Part 1 section.
+
+## Technique index
+
+| Technique | Category | Use for |
+| --- | --- | --- |
+| Extract Method | Composing Methods | Long Method, Duplicate Code, Comments |
+| Inline Method | Composing Methods | Speculative Generality, excessive delegation |
+| Extract Variable | Composing Methods | Complex expressions, Comments |
+| Replace Temp with Query | Composing Methods | Long Method, preparation for Extract Method |
+| Split Temporary Variable | Composing Methods | Variable reuse, unclear intent |
+| Remove Assignments to Parameters | Composing Methods | Confusing parameter modification |
+| Replace Method with Method Object | Composing Methods | Long Method with intertwined local variables |
+| Substitute Algorithm | Composing Methods | Inefficient or unclear algorithm |
+| Move Method | Moving Features Between Objects | Feature Envy, Shotgun Surgery |
+| Move Field | Moving Features Between Objects | Feature Envy, Data Clumps |
+| Extract Class | Moving Features Between Objects | Large Class, Divergent Change, Data Clumps |
+| Inline Class | Moving Features Between Objects | Lazy Class, Speculative Generality |
+| Hide Delegate | Moving Features Between Objects | Message Chains, tight coupling |
+| Remove Middle Man | Moving Features Between Objects | Middle Man |
+| Introduce Foreign Method | Moving Features Between Objects | Incomplete Library Class, 1-2 methods |
+| Introduce Local Extension | Moving Features Between Objects | Incomplete Library Class, many methods |
+| Self Encapsulate Field | Organizing Data | Direct field access |
+| Replace Data Value with Object | Organizing Data | Primitive Obsession, Data Clumps |
+| Replace Magic Number with Symbolic Constant | Organizing Data | Magic numbers |
+| Encapsulate Field | Organizing Data | Public fields, Data Class |
+| Encapsulate Collection | Organizing Data | Collection exposure |
+| Replace Type Code with Class | Organizing Data | Primitive Obsession, type codes without behavior |
+| Replace Type Code with Subclasses | Organizing Data | Switch Statements, type codes with behavior |
+| Replace Type Code with State/Strategy | Organizing Data | Switch Statements when the type changes at runtime |
+| Decompose Conditional | Simplifying Conditional Expressions | Long Method, complex conditionals |
+| Consolidate Conditional Expression | Simplifying Conditional Expressions | Duplicate conditionals |
+| Consolidate Duplicate Conditional Fragments | Simplifying Conditional Expressions | Duplicate Code in branches |
+| Replace Nested Conditional with Guard Clauses | Simplifying Conditional Expressions | Deep nesting |
+| Replace Conditional with Polymorphism | Simplifying Conditional Expressions | Switch Statements, type-based conditionals |
+| Introduce Null Object | Simplifying Conditional Expressions | Repeated null checks |
+| Introduce Assertion | Simplifying Conditional Expressions | Implicit assumptions |
+| Rename Method | Simplifying Method Calls | Unclear intent, Comments |
+| Add Parameter / Remove Parameter | Simplifying Method Calls | Missing or unused data |
+| Separate Query from Modifier | Simplifying Method Calls | Side effects, hard to test |
+| Parameterize Method | Simplifying Method Calls | Similar methods, Duplicate Code |
+| Introduce Parameter Object | Simplifying Method Calls | Long Parameter List, Data Clumps |
+| Preserve Whole Object | Simplifying Method Calls | Long Parameter List, Feature Envy |
+| Replace Constructor with Factory Method | Simplifying Method Calls | Complex construction, type-based creation |
+| Replace Error Code with Exception | Simplifying Method Calls | Error-handling clutter |
+| Replace Exception with Test | Simplifying Method Calls | Exception misuse |
+| Pull Up Field / Pull Up Method | Dealing with Generalization | Duplicate Code in subclasses |
+| Pull Up Constructor Body | Dealing with Generalization | Duplicate constructor code |
+| Push Down Method / Push Down Field | Dealing with Generalization | Superclass has irrelevant members |
+| Extract Subclass | Dealing with Generalization | Large Class, features used only sometimes |
+| Extract Superclass | Dealing with Generalization | Duplicate Code, similar classes |
+| Extract Interface | Dealing with Generalization | Tight coupling, untestable code |
+| Collapse Hierarchy | Dealing with Generalization | Lazy Class, unnecessary subclass |
+| Form Template Method | Dealing with Generalization | Similar algorithms in subclasses |
+| Replace Inheritance with Delegation | Dealing with Generalization | Refused Bequest, wrong hierarchy |
+| Replace Delegation with Inheritance | Dealing with Generalization | Excessive delegation |
+
 ---
 
 ## Part 1: Smell Detection

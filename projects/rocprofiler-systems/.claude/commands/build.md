@@ -13,4 +13,4 @@ Preset: `${1:-debug}` (one of `ci`, `debug`, `debug-optimized`, `release`, `cove
 4. Report: configure success/failure, build success/failure, warnings, build
    directory path.
 
-See the `cmake-conventions` rule for preset and whole-project-build guidance.
+See the `cmake-build` rule for presets and the whole-project-build rule.
