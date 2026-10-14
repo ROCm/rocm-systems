@@ -371,7 +371,10 @@ def wave_time(waves: list[WaveTrace]) -> dict:
                 stall_by_class[c] += i.stall
             if k:
                 parts[IDLE] += i.idle
-    share = lambda v: round(100 * v / life, 1) if life else 0.0
+
+    def share(v: float) -> float:
+        return round(100 * v / life, 1) if life else 0.0
+
     explained = sum(
         v
         for k, v in parts.items()
