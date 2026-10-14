@@ -12,7 +12,6 @@
 #include <hip_test_common.hh>
 
 #include <algorithm>
-#include <cstring>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -22,6 +21,8 @@ namespace {
 constexpr size_t ONE_MB = 1024 * 1024;
 // Noise allowed when comparing free memory, e.g. from the OS budget query
 constexpr size_t FREE_MEM_TOLERANCE = 64 * ONE_MB;
+// Requests grow in steps of this fraction of the idle free memory until one fails
+constexpr size_t REQUEST_STEPS = 20;
 
 size_t FreeMemory() {
   size_t freeMem = 0, totalMem = 0;
@@ -29,69 +30,92 @@ size_t FreeMemory() {
   return freeMem;
 }
 
+#ifdef _WIN32
 enum class AllocKind { Device, HostMalloc, HostRegister };
 
-#ifdef _WIN32
-// Holds device and host memory, makes one allocation of the given kind fail under that pressure
-// and checks that free memory is unchanged by the failure and back to idle after the release.
+struct Allocation {
+  AllocKind kind;
+  void* ptr = nullptr;
+  void* sysMem = nullptr;  // pageable memory for hipHostRegister
+
+  hipError_t Allocate(size_t size) {
+    switch (kind) {
+      case AllocKind::Device:
+        return hipMalloc(&ptr, size);
+      case AllocKind::HostMalloc:
+        return hipHostMalloc(&ptr, size, hipHostMallocDefault);
+      case AllocKind::HostRegister:
+        sysMem = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+        if (sysMem == nullptr) return hipErrorOutOfMemory;
+        return hipHostRegister(sysMem, size, hipHostRegisterDefault);
+    }
+    return hipErrorInvalidValue;
+  }
+
+  // Frees what Allocate() allocated; registered is false if hipHostRegister failed
+  void Release(bool registered) {
+    if (kind == AllocKind::Device && ptr != nullptr) HIP_CHECK(hipFree(ptr));
+    if (kind == AllocKind::HostMalloc && ptr != nullptr) HIP_CHECK(hipHostFree(ptr));
+    if (sysMem != nullptr) {
+      if (registered) HIP_CHECK(hipHostUnregister(sysMem));
+      VirtualFree(sysMem, 0, MEM_RELEASE);
+    }
+    ptr = sysMem = nullptr;
+  }
+};
+
+// Holds device and host memory, then makes larger and larger allocations of the given kind until
+// one fails. Free memory must be unchanged by the failure and grow again after the release.
 void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   const size_t idle = FreeMemory();
-  // Ratios reproduce the failure on an APU with 8 GB dedicated memory (17 GB reported): the
-  // request passes the runtime's own free memory check, but WDDM can't make it resident
-  const size_t heldDevSize = idle / 100 * 41;
-  const size_t heldHostSize = std::min(idle / 100 * 23, static_cast<size_t>(4096) * ONE_MB);
-  const size_t size = idle / 100 * 54;
+  const size_t heldDevSize = idle / 100 * 40;
+  const size_t heldHostSize = std::min(idle / 100 * 20, static_cast<size_t>(4096) * ONE_MB);
   INFO("Idle free memory : " << idle / ONE_MB << " MB, held device : " << heldDevSize / ONE_MB
-                             << " MB, held host : " << heldHostSize / ONE_MB
-                             << " MB, request : " << size / ONE_MB << " MB");
+                             << " MB, held host : " << heldHostSize / ONE_MB << " MB");
 
   void* heldDev = nullptr;
   void* heldHost = nullptr;
-  HIP_CHECK(hipMalloc(&heldDev, heldDevSize));
-  HIP_CHECK(hipMemset(heldDev, 0, heldDevSize));
-  HIP_CHECK(hipHostMalloc(&heldHost, heldHostSize, hipHostMallocDefault));
-  HIP_CHECK(hipDeviceSynchronize());
-  const size_t before = FreeMemory();
-
-  void* ptr = nullptr;
-  void* sysMem = nullptr;
-  hipError_t result = hipSuccess;
-  switch (kind) {
-    case AllocKind::Device:
-      result = hipMalloc(&ptr, size);
-      break;
-    case AllocKind::HostMalloc:
-      result = hipHostMalloc(&ptr, size, hipHostMallocDefault);
-      break;
-    case AllocKind::HostRegister:
-      sysMem = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-      REQUIRE(sysMem != nullptr);
-      memset(sysMem, 1, size);
-      result = hipHostRegister(sysMem, size, hipHostRegisterDefault);
-      break;
+  if (hipMalloc(&heldDev, heldDevSize) != hipSuccess ||
+      hipHostMalloc(&heldHost, heldHostSize, hipHostMallocDefault) != hipSuccess) {
+    if (heldDev != nullptr) HIP_CHECK(hipFree(heldDev));
+    HIP_SKIP_TEST("Could not hold the memory needed to create memory pressure");
   }
-  // Clear the error, as an application recovering from out of memory would
-  static_cast<void>(hipGetLastError());
-  const size_t after = FreeMemory();
-  INFO("Allocation result : " << hipGetErrorName(result) << ", free before : " << before / ONE_MB
-                              << " MB, after : " << after / ONE_MB << " MB");
+  // Touch the held device memory so it is backed by physical memory
+  HIP_CHECK(hipMemset(heldDev, 0, heldDevSize));
+  HIP_CHECK(hipDeviceSynchronize());
 
-  if (result == hipSuccess) {
-    WARN("Allocation did not fail; the failure path was not exercised");
-    if (kind == AllocKind::Device) HIP_CHECK(hipFree(ptr));
-    if (kind == AllocKind::HostMalloc) HIP_CHECK(hipHostFree(ptr));
-    if (kind == AllocKind::HostRegister) HIP_CHECK(hipHostUnregister(sysMem));
-  } else {
+  bool failed = false;
+  size_t beforeFailure = 0;
+  for (size_t step = 1; step <= REQUEST_STEPS && !failed; ++step) {
+    const size_t size = idle / REQUEST_STEPS * step;
+    const size_t before = FreeMemory();
+    Allocation alloc{kind};
+    const hipError_t result = alloc.Allocate(size);
+    if (result == hipSuccess) {
+      alloc.Release(true);
+      continue;
+    }
+    // Clear the error, as an application recovering from out of memory would
+    static_cast<void>(hipGetLastError());
+    const size_t after = FreeMemory();
+    alloc.Release(false);
+    failed = true;
+    beforeFailure = before;
+    INFO("Request : " << size / ONE_MB << " MB -> " << hipGetErrorName(result) << ", free before : "
+                      << before / ONE_MB << " MB, after : " << after / ONE_MB << " MB");
     REQUIRE(after + FREE_MEM_TOLERANCE >= before);
   }
 
   HIP_CHECK(hipFree(heldDev));
   HIP_CHECK(hipHostFree(heldHost));
   HIP_CHECK(hipDeviceSynchronize());
-  if (sysMem != nullptr) VirtualFree(sysMem, 0, MEM_RELEASE);
+  if (!failed) HIP_SKIP_TEST("No allocation failed, the failure path was not exercised");
+
+  // Not compared with idle: freed host allocations can stay cached in the runtime. The held device
+  // memory must come back, though.
   const size_t released = FreeMemory();
-  INFO("Free memory after releasing everything : " << released / ONE_MB << " MB");
-  REQUIRE(released + FREE_MEM_TOLERANCE >= idle);
+  INFO("Free memory after releasing the held memory : " << released / ONE_MB << " MB");
+  REQUIRE(released + FREE_MEM_TOLERANCE >= beforeFailure + heldDevSize);
 }
 #endif /* _WIN32 */
 }  // namespace
@@ -100,12 +124,13 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
  * Test Description
  * ------------------------
  * - A failed allocation must not change the free memory reported by hipMemGetInfo.
- * - Holds device and host memory, then makes a hipMalloc, hipHostMalloc or hipHostRegister fail
- *   because the memory can't be made resident. Free memory must be unchanged by the failure and
- *   return to its idle value after everything is released.
- * - Regression test: the runtime subtracted the size of a failed allocation from its free memory
- *   counters without having added it; the counter wrapped, hipMemGetInfo reported 0 for the rest
- *   of the process and, on APUs, later device allocations were placed in system memory.
+ * - Holds device and host memory, then makes larger and larger hipMalloc, hipHostMalloc or
+ *   hipHostRegister requests until one fails. Free memory must be unchanged by the failure and
+ *   grow by the held device memory when that is freed. Skipped if no request fails.
+ * - Regression test: when memory could not be made resident, the runtime subtracted the size of the
+ *   failed allocation from its free memory counters without having added it. The counter wrapped,
+ *   hipMemGetInfo reported 0 for the rest of the process and, on APUs, later device allocations
+ *   went to system memory, ending in hipErrorLaunchFailure.
  * Test source
  * ------------------------
  * - unit/memory/hipMallocFailure_test.cc
