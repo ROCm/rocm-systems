@@ -13,7 +13,6 @@ from utils.inject_roctx._backends import torch as torch_backend
 from utils.inject_roctx._backends.torch import (
     DEEP_TENSOR_METHOD_WRAPS,
     TENSOR_METHOD_WRAPS,
-    format_wrap_args,
 )
 
 
@@ -96,9 +95,11 @@ def recorded_ranges(monkeypatch):
 
 def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
     tensor = fake_tensor()
-    rendered = format_wrap_args((tensor, "skip"), {"bias": tensor, "flag": True})
+    rendered = torch_backend.format_wrap_args(
+        (tensor, "skip"), {"bias": tensor, "flag": True}
+    )
     assert rendered == "(float32[2x4], bias=float32[2x4])"
-    assert format_wrap_args((), {}) == "n/a"
+    assert torch_backend.format_wrap_args((), {}) == "n/a"
 
 
 def test_dispatcher_marker_name_for_aten_packet():
@@ -321,11 +322,8 @@ def test_format_wrap_args_preserves_readable_tensors(torch_module):
 
 @pytest.mark.parametrize("conversion", ["device", "dtype"])
 def test_direct_tensor_to_wrapper_converts_uninitialized_parameter(
-    torch_module, monkeypatch, conversion
+    torch_module, recorded_ranges, conversion
 ):
-    markers = []
-    monkeypatch.setattr(core._STATE, "range_push", markers.append)
-    monkeypatch.setattr(core._STATE, "range_pop", lambda: None)
     parameter = torch_module.nn.parameter.UninitializedParameter(
         device="cpu", dtype=torch_module.float32
     )
@@ -343,9 +341,9 @@ def test_direct_tensor_to_wrapper_converts_uninitialized_parameter(
     assert isinstance(converted, torch_module.Tensor)
     assert converted.device == expected.device
     assert converted.dtype == expected.dtype
-    assert len(markers) == 1
-    assert markers[0].startswith("torch.Tensor.to:")
-    assert "|args=n/a|torch" in markers[0]
+    assert len(recorded_ranges) == 1
+    assert recorded_ranges[0].startswith("torch.Tensor.to:")
+    assert "|args=n/a|torch" in recorded_ranges[0]
 
 
 @pytest.mark.parametrize(
