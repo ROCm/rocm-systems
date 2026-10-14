@@ -1816,14 +1816,18 @@ HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
   }
   const std::vector<fs::path> archives = hrr_process_archives(cap.path);
   REQUIRE(archives.size() == 2);
+  int children = 0;
   for (const fs::path& archive : archives) {
     const std::string manifest = read_text_file(archive / "manifest.json");
     INFO("Process manifest:\n" << manifest);
     const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
     const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
     const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
-    CHECK((manifest.find("\"complete\": false") != std::string::npos) == child);
+    children += child ? 1 : 0;
+    CHECK(manifest.find(child ? "\"complete\": false" : "\"complete\": true") !=
+          std::string::npos);
   }
+  REQUIRE(children == 1);
 }
 
 /**
