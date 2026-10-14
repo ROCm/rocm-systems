@@ -340,6 +340,17 @@ def test_a_pid_directory_without_events_is_a_leftover_not_a_capture(tmp_path):
     assert inspect_archive.verdict(direct) == "nothing captured"
 
 
+def test_an_archive_moved_aside_is_not_a_process_of_the_capture(tmp_path):
+    """The writer moves an earlier process's archive with the same pid to
+    pid-<pid>.prev-<n>, and the reader skips it, so the verdict has to as well.
+    """
+    make_process(tmp_path, 61).rename(tmp_path / "pid-61.prev-1")
+    make_process(tmp_path, 61)
+
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+    assert [p.pid for p in report.processes] == [61]
+
+
 def test_the_json_report_carries_an_unreadable_root_manifest(tmp_path, capsys):
     make_process(tmp_path, 59)
     (tmp_path / "manifest.json").write_text("{not json")
