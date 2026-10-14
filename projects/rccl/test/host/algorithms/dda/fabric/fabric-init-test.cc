@@ -10,15 +10,15 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <functional>
-#include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "FailWhen.h"
+#include "HostAllocLedger.h"
 #include "ScopedHook.h"
 #include "fakes/bootstrap_stubs.h"
 #include "fakes/env_fakes.h"
@@ -45,26 +45,9 @@
 #include "param.h"
 #include "rccl_common.h"
 
-// Host allocations by fabric_init.cu, with sizes.
-static std::map<void*, size_t> g_initHostLive;
-template <typename T>
-static ncclResult_t InitCalloc(T** ptr, size_t nelem, const char* file, int line, const char* fn) {
-  ncclResult_t ret = ncclCallocDebug(ptr, nelem, file, line, fn, true);
-  if (ret == ncclSuccess && *ptr != nullptr) g_initHostLive[*ptr] = nelem * sizeof(T);
-  return ret;
-}
-static int g_initBadFrees = 0;
-static void InitFree(void* ptr) {
-  if (ptr != nullptr && g_initHostLive.erase(ptr) == 0) {
-    ++g_initBadFrees;
-    return;
-  }
-  std::free(ptr);
-}
-
 #undef ncclCalloc
-#define ncclCalloc(...) InitCalloc(__VA_ARGS__, __FILE__, __LINE__, __func__)
-#define free(ptr) InitFree(ptr)
+#define ncclCalloc(...) g_hostAllocs.Calloc(__VA_ARGS__, __FILE__, __LINE__, __func__)
+#define free(ptr) g_hostAllocs.Free(ptr)
 
 #include FABRIC_INIT_CC_PATH
 
@@ -75,20 +58,18 @@ namespace {
 
 using dda_fabric_test::FabricLedgerTest;
 using dda_fabric_test::kBootstrap;
+using dda_fabric_test::kHandleType;
 using dda_fabric_test::kNRanks;
+using dda_fabric_test::kPage;
 using dda_fabric_test::kRank;
+using dda_fabric_test::MemManagerSpy;
+using dda_fabric_test::ParamName;
+using dda_fabric_test::PeerRanks;
 
 // Above kNRanks * 8, so the block count sizes the epoch cells.
 constexpr int kCuCount = 40;
 constexpr int64_t kScratchBytes = 64 * 1024;
 char kGfx1250[] = "gfx1250";
-
-// Fails the calls `when` picks; passes the rest through.
-template <typename R, typename... Args, typename When>
-void FailWhen(std::function<R(Args...)>& slot, When when, R fail) {
-  auto pass = slot;
-  slot = [pass, when, fail](Args... args) mutable -> R { return when(args...) ? fail : pass(args...); };
-}
 
 void ExpectNoFabricResources(const ncclComm& comm) {
   EXPECT_EQ(comm.ddaFabricMemHandler, nullptr);
@@ -142,7 +123,7 @@ INSTANTIATE_TEST_SUITE_P(FabricInitArch, FabricInitUseFabricPathMicrotest,
                                            ArchCase{"MnnvlOtherArch", 1, "gfx950", false},
                                            ArchCase{"MnnvlGfx1200", 1, "gfx1200", false},
                                            ArchCase{"MnnvlNoArch", 1, nullptr, false}),
-                         [](const ::testing::TestParamInfo<ArchCase>& info) { return info.param.name; });
+                         ParamName<ArchCase>);
 
 // ---------------------------------------------------------------------------
 // Fixture for Init / Fini
@@ -150,45 +131,23 @@ INSTANTIATE_TEST_SUITE_P(FabricInitArch, FabricInitUseFabricPathMicrotest,
 
 class FabricInitMicrotest : public FabricLedgerTest {
  protected:
-  struct Memset {
-    void* dst;
-    int value;
-    size_t bytes;
-  };
-
   void SetUp() override {
     FabricLedgerTest::SetUp();
     if (HasFatalFailure()) return;
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
-    g_initHostLive.clear();
-    g_initBadFrees = 0;
+    g_hostAllocs.Reset();
     // Host-to-host copies must land inside a tracked host block.
     auto ledgerCopy = g_hipMemcpy;
-    g_hipMemcpy = [this, ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
-      if (kind == hipMemcpyHostToHost && !RangeCovers(g_initHostLive, dst, n)) {
-        hostCopiesRefused_++;
+    g_hipMemcpy = [ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
+      if (kind == hipMemcpyHostToHost && !g_hostAllocs.Covers(dst, n)) {
+        ++g_hostAllocs.refusedCopies;
         return hipErrorInvalidValue;
       }
       return ledgerCopy(dst, src, n, kind);
     };
-    auto ledgerMemset = g_hipMemset;
-    g_hipMemset = [this, ledgerMemset](void* dst, int value, size_t bytes) {
-      memsets_.push_back({dst, value, bytes});
-      return ledgerMemset(dst, value, bytes);
-    };
-    g_cuMemEnable = [] { return 1; };
     g_loadParam = [this](const char* name, int64_t deftVal) {
       const bool unset = !bufferSize_.has_value() || std::string(name) != "RCCL_DDA_FABRIC_BUFFER_SIZE";
       return unset ? deftVal : *bufferSize_;
-    };
-    // Every peer publishes what this rank published.
-    g_bootstrapAllGather = [this](void* state, void* allData, int size) {
-      gatherStates_.push_back(state);
-      auto* slots = static_cast<char*>(allData);
-      for (int r = 0; r < comm_->nRanks; ++r) {
-        if (r != comm_->rank) std::memcpy(slots + r * size, slots + comm_->rank * size, size);
-      }
-      return ncclSuccess;
     };
 
     comm_ = std::make_unique<ncclComm>();
@@ -199,6 +158,7 @@ class FabricInitMicrotest : public FabricLedgerTest {
     comm_->cuCount = kCuCount;
     comm_->MNNVL = 1;
     comm_->archName = kGfx1250;
+    MirrorAllGather(&comm_->nRanks, &comm_->rank);
   }
 
   void TearDown() override {
@@ -209,11 +169,8 @@ class FabricInitMicrotest : public FabricLedgerTest {
   }
 
   ::testing::AssertionResult HostClean() const {
-    if (g_initHostLive.empty() && hostCopiesRefused_ == 0 && g_initBadFrees == 0) {
-      return ::testing::AssertionSuccess();
-    }
-    return ::testing::AssertionFailure() << g_initHostLive.size() << " host allocations live; " << hostCopiesRefused_
-                                         << " host copies refused; " << g_initBadFrees << " bad frees";
+    if (g_hostAllocs.Clean()) return ::testing::AssertionSuccess();
+    return ::testing::AssertionFailure() << g_hostAllocs.Summary();
   }
 
   ::testing::AssertionResult AllReleased() const {
@@ -228,26 +185,14 @@ class FabricInitMicrotest : public FabricLedgerTest {
     g_bootstrapAllGather = [this, caps, homogeneous](void* state, void* allData, int size) {
       if (size != static_cast<int>(sizeof(int))) return homogeneous(state, allData, size);
       auto* slots = static_cast<int*>(allData);
-      for (int r = 0; r < comm_->nRanks; ++r) {
-        if (r != comm_->rank) slots[r] = caps[r];
-      }
+      for (int r : PeerRanks(comm_->nRanks, comm_->rank)) slots[r] = caps[r];
       return ncclSuccess;
     };
   }
 
-  const Memset* MemsetOf(const void* dst) const {
-    for (const Memset& m : memsets_) {
-      if (m.dst == dst) return &m;
-    }
-    return nullptr;
-  }
-
   std::optional<int64_t> bufferSize_ = kScratchBytes;  // RCCL_DDA_FABRIC_BUFFER_SIZE
-  int hostCopiesRefused_ = 0;
   std::unique_ptr<ncclMemManager> manager_;  // outlives TearDown
   std::unique_ptr<ncclComm> comm_;
-  std::vector<Memset> memsets_;
-  std::vector<void*> gatherStates_;
 };
 
 using FabricInitCommInitMicrotest = FabricInitMicrotest;
@@ -304,7 +249,7 @@ INSTANTIATE_TEST_SUITE_P(
                                }},
                       SkipCase{"VmmUnavailable",
                                [](ncclComm*, std::optional<int64_t>*) { g_cuMemEnable = [] { return 0; }; }}),
-    [](const ::testing::TestParamInfo<SkipCase>& info) { return info.param.name; });
+    ParamName<SkipCase>);
 
 // ---------------------------------------------------------------------------
 // ncclDdaFabricCommInit: success
@@ -356,7 +301,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchFromDda
   g_rcclParamDdaLL = 0;
   g_rcclParamDdaLL128 = 0;
   // Not a page multiple.
-  constexpr size_t kPayloadCap = 3 * 4096 + 100;
+  constexpr size_t kPayloadCap = 3 * kPage + 100;
   ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
 
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
@@ -368,7 +313,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchForTheA
   bufferSize_.reset();
   g_rcclParamDdaLL = 0;
   g_rcclParamDdaLL128 = 1;
-  constexpr size_t kPayloadCap = 4096;
+  constexpr size_t kPayloadCap = kPage;
   constexpr size_t kLL128Threshold = 1024 * 1024;
   ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
   ScopedHook ll128(g_rcclDdaLL128Threshold, [](const ncclComm*, ncclFunc_t func) {
@@ -383,15 +328,30 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchForTheA
   EXPECT_EQ(comm_->ddaScratchBytes, expected);
 }
 
+TEST_F(FabricInitCommInitMicrotest, CommInit_BufferSizeUnset_SizesScratchForTheLLSlots) {
+  comm_->nRanks = 2;  // keeps the LL floor (2 banks * nRanks * 32 MiB) small
+  comm_->clique.size = 2;
+  bufferSize_.reset();
+  g_rcclParamDdaLL = 1;
+  g_rcclParamDdaLL128 = 0;
+  constexpr size_t kPayloadCap = kPage;
+  ScopedHook cap(g_rcclDdaScratchPayloadCap, [](const ncclComm*) { return kPayloadCap; });
+
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  const size_t expected = nccl_dda_detail::ddaFabricScratchSizing(2, -1, 1, kPayloadCap, 1, 0, 0);
+  ASSERT_GT(expected, kPayloadCap);
+  EXPECT_EQ(comm_->ddaScratchBytes, expected);
+}
+
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeersMapTheWholeScratch) {
-  constexpr int64_t kUnalignedScratch = 5 * 4096 + 100;  // not a page multiple
+  constexpr int64_t kUnalignedScratch = 5 * kPage + 100;  // not a page multiple
   bufferSize_ = kUnalignedScratch;
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   auto* const* dev = static_cast<void* const*>(comm_->ddaPeerPtrsDev);  // host stand-in
   const size_t ownSize = ledger_.mappedSize.at(comm_->ddaScratch);
 
-  for (int i = 0; i < kNRanks; ++i) {
-    if (i == kRank) continue;
+  for (int i : PeerRanks()) {
     ASSERT_EQ(ledger_.mappedSize.count(dev[i]), 1u) << "peer " << i;
     EXPECT_EQ(ledger_.mappedSize.at(dev[i]), ownSize) << "peer " << i;
   }
@@ -416,9 +376,7 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeerTablesHoldOwnScratch
     }
   }
   std::set<void*> peerSlots;
-  for (int i = 0; i < kNRanks; ++i) {
-    if (i != kRank) peerSlots.insert(dev[i]);
-  }
+  for (int i : PeerRanks()) peerSlots.insert(dev[i]);
   EXPECT_EQ(peerSlots, scratchMappings);
   EXPECT_EQ(peerSlots.size(), static_cast<size_t>(kNRanks - 1));
 }
@@ -426,11 +384,11 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_PeerTablesHoldOwnScratch
 TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_ZeroesScratchAndEpochCells) {
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
 
-  const Memset* scratch = MemsetOf(comm_->ddaScratch);
+  const HipVmmLedger::Memset* scratch = ledger_.MemsetOf(comm_->ddaScratch);
   ASSERT_NE(scratch, nullptr) << "scratch never zeroed";
   EXPECT_EQ(scratch->value, 0);
   EXPECT_EQ(scratch->bytes, static_cast<size_t>(kScratchBytes));
-  const Memset* epoch = MemsetOf(comm_->ddaLLEpochDev);
+  const HipVmmLedger::Memset* epoch = ledger_.MemsetOf(comm_->ddaLLEpochDev);
   ASSERT_NE(epoch, nullptr) << "epoch cells never zeroed";
   EXPECT_EQ(epoch->value, 0);
   EXPECT_EQ(epoch->bytes, static_cast<size_t>(comm_->ddaLLEpochLen) * sizeof(uint32_t));
@@ -447,46 +405,41 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry)
   EXPECT_EQ(barrier.peerFlags, state->resources->peerFlagsDev->get());
 }
 
-TEST_F(FabricInitCommInitMicrotest, CommInit_WithManager_TracksScratchAndUntracksPeerMappingsInIt) {
+TEST_F(FabricInitCommInitMicrotest, CommInit_WithManager_TracksAndUntracksEveryAllocationInIt) {
   manager_ = std::make_unique<ncclMemManager>();
   ncclMemManager* const manager = manager_.get();
   comm_->memManager = manager;
-  std::vector<std::pair<ncclMemManager*, void*>> tracked;
-  std::vector<std::pair<ncclMemManager*, void*>> untracked;
-  std::vector<hipMemAllocationHandleType> types;
-  ScopedHook track(g_memTrack, [&tracked, &types](ncclMemManager* m, void* ptr, size_t,
-                                                  hipMemGenericAllocationHandle_t, hipMemAllocationHandleType type,
-                                                  ncclMemType_t) {
-    tracked.push_back({m, ptr});
-    types.push_back(type);
-    return ncclSuccess;
-  });
-  auto untrackLive = g_memUntrackDynamic;
-  ScopedHook untrack(g_memUntrackDynamic,
-                     [&untracked, untrackLive](ncclMemManager* m, void* ptr, ncclMemUntrackInfo* info) {
-                       untracked.push_back({m, ptr});
-                       return untrackLive(m, ptr, info);
-                     });
+  MemManagerSpy spy;
   ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
   void* const scratch = comm_->ddaScratch;
-  std::vector<void*> peers;
+  void* const flags = comm_->ddaFabricBarrierState->resources->selfFlagBuf->get();
   auto* const* dev = static_cast<void* const*>(comm_->ddaPeerPtrsDev);  // host stand-in
-  for (int i = 0; i < kNRanks; ++i) {
-    if (i != kRank) peers.push_back(dev[i]);
-  }
+  std::vector<void*> peers;
+  for (int i : PeerRanks()) peers.push_back(dev[i]);
 
   ASSERT_EQ(ncclDdaFabricCommFini(comm_.get()), ncclSuccess);
 
-  auto has = [](const std::vector<std::pair<ncclMemManager*, void*>>& v, ncclMemManager* m, void* p) {
-    return std::find(v.begin(), v.end(), std::make_pair(m, p)) != v.end();
-  };
-  auto it = std::find(tracked.begin(), tracked.end(), std::make_pair(manager, scratch));
-  ASSERT_NE(it, tracked.end()) << "scratch not tracked in the comm's manager";
-  EXPECT_EQ(types[it - tracked.begin()], ncclCuMemHandleType);
-  EXPECT_TRUE(has(untracked, manager, scratch)) << "scratch not untracked from the comm's manager";
-  for (void* peer : peers) {
-    EXPECT_TRUE(has(untracked, manager, peer)) << "peer mapping " << peer << " not untracked";
-  }
+  EXPECT_TRUE(spy.Tracked(manager, scratch, kHandleType)) << "scratch not tracked in the comm's manager";
+  EXPECT_TRUE(spy.Untracked(manager, scratch)) << "scratch not untracked from the comm's manager";
+  EXPECT_TRUE(spy.Tracked(manager, flags, kHandleType)) << "barrier flag buffer not tracked in the comm's manager";
+  EXPECT_TRUE(spy.Untracked(manager, flags)) << "barrier flag buffer not untracked";
+  for (void* peer : peers) EXPECT_TRUE(spy.Untracked(manager, peer)) << "peer mapping " << peer;
+  EXPECT_TRUE(AllReleased());
+}
+
+TEST_F(FabricInitCommInitMicrotest, CommInit_FailsWithManager_UntracksScratchFromIt) {
+  manager_ = std::make_unique<ncclMemManager>();
+  comm_->memManager = manager_.get();
+  MemManagerSpy spy;
+  FailWhen(
+      g_hipMemset, [](void*, int, size_t bytes) { return bytes == static_cast<size_t>(kScratchBytes); },
+      hipErrorInvalidValue);
+
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  ExpectNoFabricState(*comm_);
+  ASSERT_FALSE(spy.tracked.empty());
+  EXPECT_TRUE(spy.Untracked(manager_.get(), spy.tracked.front().ptr)) << "scratch not untracked on the fail path";
   EXPECT_TRUE(AllReleased());
 }
 
@@ -512,7 +465,7 @@ INSTANTIATE_TEST_SUITE_P(FabricInitCaps, FabricInitPeerCapsMicrotest,
                          ::testing::Values(CapsCase{"SmallestFirst", {36, -1, 38, 39}},
                                            CapsCase{"SmallestMiddle", {kCuCount, -1, 36, 38}},
                                            CapsCase{"SmallestLast", {38, -1, 39, 36}}),
-                         [](const ::testing::TestParamInfo<CapsCase>& info) { return info.param.name; });
+                         ParamName<CapsCase>);
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_PeerCapNotPositive_FallsBackWithoutEpochAllocation) {
   for (int bad : {0, -1}) {
@@ -589,6 +542,8 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BlockCapGatherFails_ReturnsErrorWit
   EXPECT_TRUE(AllReleased());
 }
 
+// Current behaviour, tracked as AICOMRCCL-2827: a rank that fails here falls back
+// alone, skipping exchanges its peers still enter.
 struct FailCase {
   const char* name;
   std::function<void()> install;
@@ -650,6 +605,7 @@ INSTANTIATE_TEST_SUITE_P(
                        [table](void* dst, const void*, size_t, hipMemcpyKind) { return dst == *table; },
                        hipErrorInvalidValue);
                  }},
+        FailCase{"PeerTableHostAlloc", [] { g_hostAllocs.failBytes = kPeerTableBytes; }},
         FailCase{"PeerTableHostCopy",
                  [] {
                    FailWhen(
@@ -683,7 +639,7 @@ INSTANTIATE_TEST_SUITE_P(
                        g_hipMemset, [](void*, int, size_t bytes) { return bytes == kEpochBytes; },
                        hipErrorInvalidValue);
                  }}),
-    [](const ::testing::TestParamInfo<FailCase>& info) { return info.param.name; });
+    ParamName<FailCase>);
 
 // ---------------------------------------------------------------------------
 // ncclDdaFabricCommFini
@@ -705,9 +661,9 @@ TEST_F(FabricInitCommFiniMicrotest, CommFini_AfterInit_ReleasesEverythingAndClea
 
 TEST_F(FabricInitCommFiniMicrotest, CommFini_NonVmmScratch_FreesItAsAPlainBuffer) {
   void* scratch = nullptr;
-  ASSERT_EQ(hipMalloc(&scratch, 4096), hipSuccess);
+  ASSERT_EQ(hipMalloc(&scratch, kPage), hipSuccess);
   comm_->ddaScratch = scratch;
-  comm_->ddaScratchBytes = 4096;
+  comm_->ddaScratchBytes = kPage;
   comm_->ddaScratchIsVmm = false;
 
   EXPECT_EQ(ncclDdaFabricCommFini(comm_.get()), ncclSuccess);

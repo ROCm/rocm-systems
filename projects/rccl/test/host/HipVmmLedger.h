@@ -116,6 +116,7 @@ class HipVmmLedger {
       return hipSuccess;
     };
     g_hipMemset = [this](void* dst, int value, size_t n) {
+      memsets.push_back({dst, value, n});
       if (!Covers(dst, n)) return Reject("hipMemset outside any live allocation");
       std::memset(dst, value, n);
       return hipSuccess;
@@ -137,6 +138,19 @@ class HipVmmLedger {
   std::vector<hipMemGenericAllocationHandle_t> released;          // every hipMemRelease, in order
   std::map<void*, size_t> liveBuffers;                            // hipMalloc / hipExtMallocWithFlags -> size
   std::vector<std::string> rejected;                              // calls refused, in order
+
+  struct Memset {
+    void* dst;
+    int value;
+    size_t bytes;
+  };
+  std::vector<Memset> memsets;  // every synchronous hipMemset, in order
+  const Memset* MemsetOf(const void* dst) const {
+    for (const Memset& m : memsets) {
+      if (m.dst == dst) return &m;
+    }
+    return nullptr;
+  }
 
  private:
   hipError_t Reject(const char* what) {
