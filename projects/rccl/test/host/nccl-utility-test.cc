@@ -97,6 +97,9 @@ TEST(NcclUtilityMicrotest, AlignUpDown_ScalarOverload_AssumesPowerOfTwoAlignment
   EXPECT_EQ(alignDown(15u, 16u), 0u);
   EXPECT_EQ(alignDown(16u, 16u), 16u);
   EXPECT_EQ(alignDown(31u, 16u), 16u);
+  // Above 2*a: below it, `x & -Z(a)` (utility.h:166) cannot be told from `x & Z(a)`.
+  EXPECT_EQ(alignDown(48u, 16u), 48u);
+  EXPECT_EQ(alignDown(33u, 16u), 32u);
 }
 
 TEST(NcclUtilityMicrotest, AlignUpDown_PointerOverload_RoundsTheAddressNotTheByte) {
@@ -136,6 +139,11 @@ TEST(NcclUtilityMicrotest, RollingLessEqAndLessThan_WrapAroundHalfTheRangeCorrec
   // Equal values: LessEq true, LessThan false (strict).
   EXPECT_TRUE(rollingLessEq(uint8_t(7), uint8_t(7), 8));
   EXPECT_FALSE(rollingLessThan(uint8_t(7), uint8_t(7), 8));
+
+  // The half-range boundary itself: m is 0xFF here, so m >> 1 is 127. A
+  // distance of exactly 127 is still "less or equal", 128 is not.
+  EXPECT_TRUE(rollingLessEq(uint8_t(0), uint8_t(127), 8));
+  EXPECT_FALSE(rollingLessEq(uint8_t(0), uint8_t(128), 8));
 
   // Every call above passes nBits == 8*sizeof(Uint) (a no-op mask), so the
   // `m = Uint(-1) >> (8*sizeof(Uint) - nBits)` shift at utility.h:197 is
@@ -201,6 +209,11 @@ TEST(NcclUtilityMicrotest, ImulRcp32_HandlesZeroReciprocalShortCircuitsAndMatche
   // x=2, y=2 exercises the other side of that same branch (no correction
   // needed), so both directions of the rounding check are verified.
   EXPECT_EQ(imulRcp32(2u, idivRcp32(2u), 2u, idivRcp32(2u)), idivRcp32(4u));
+
+  // x=3, y=3 pins the `0u -` in rem: mul32hi already returns the exact
+  // 0x1C71C71C, so rem is 4 and 9 <= 4 wants no correction. Without the
+  // negation rem is 0xFFFFFFFC and the correction fires, returning one too many.
+  EXPECT_EQ(imulRcp32(3u, idivRcp32(3u), 3u, idivRcp32(3u)), idivRcp32(9u));
 }
 
 TEST(NcclUtilityMicrotest, ImulRcp64_HandlesZeroReciprocalShortCircuitsAndMatchesIdivRcpOfProduct) {
@@ -216,6 +229,10 @@ TEST(NcclUtilityMicrotest, ImulRcp64_HandlesZeroReciprocalShortCircuitsAndMatche
 
   // (2,2) exercises the other side of that same branch (no correction needed).
   EXPECT_EQ(imulRcp64(2ull, idivRcp64(2ull), 2ull, idivRcp64(2ull)), idivRcp64(4ull));
+
+  // (3,3) pins the `0 -` in rem the same way: mul64hi returns the exact
+  // 0x1C71C71C71C71C71, so rem is 7 and 9 <= 7 wants no correction.
+  EXPECT_EQ(imulRcp64(3ull, idivRcp64(3ull), 3ull, idivRcp64(3ull)), idivRcp64(9ull));
 }
 
 TEST(NcclUtilityMicrotest, IdivmodFast32_MatchesOrdinaryDivisionAcrossDivisorsAndYrcpZeroShortcut) {
