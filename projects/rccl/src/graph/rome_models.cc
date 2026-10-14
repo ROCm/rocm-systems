@@ -4048,6 +4048,11 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               if (g == system->nodes[GPU].nodes[j].gpu.dev) break;
             if (j < ngpus) {
               while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')') {
+                if (str[start_offset] < '0' || str[start_offset] > '9') {
+                  WARN("Stray character '%c' in a user-defined tree (RCCL_TREES); initialization will fail",
+                       str[start_offset]);
+                  return ncclInvalidUsage;
+                }
                 start_offset++;
               }
               if (start_offset >= offset) {
@@ -4064,6 +4069,12 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               }
             } else return ncclInternalError;
           }
+        }
+        // Every number the scanner found must have been transcribed, or a stray separator
+        // swallowed one and the tree would silently lose a GPU.
+        if (r != gpu) {
+          WARN("Fewer GPU numbers transcribed than parsed in a user-defined tree (RCCL_TREES); initialization will fail");
+          return ncclInvalidUsage;
         }
         graph->treeBase[x][y] = 0;
         x++;

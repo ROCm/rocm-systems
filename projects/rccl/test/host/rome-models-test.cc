@@ -162,6 +162,17 @@ TEST_F(RomeModelsParseGraphLightMicrotest, TrailingNumberWithNoClosingParen_IsRe
             ncclInvalidUsage);
 }
 
+TEST_F(RomeModelsParseGraphLightMicrotest, StrayCharacterInsideATree_IsRejected) {
+  // Each of these parses two GPU numbers but transcribes only the first: the scan for the
+  // end of a number swallows the stray character and everything after it up to the next
+  // parenthesis, so the second number is silently dropped from treeBase.
+  for (const char* strayCharacter : {"(1x2)", "(0(1)(2,3))", "(-1)"}) {
+    SCOPED_TRACE(strayCharacter);
+
+    EXPECT_EQ(parseGraphLight(strayCharacter, system(), graph(), nullptr), ncclInvalidUsage);
+  }
+}
+
 TEST_F(RomeModelsParseGraphLightMicrotest, MoreTokensThanNumbersParsed_IsRejected) {
   EXPECT_EQ(parseGraphLight("(5)(6)|(0)(x)", system(), graph(), nullptr), ncclInvalidUsage);
 }
