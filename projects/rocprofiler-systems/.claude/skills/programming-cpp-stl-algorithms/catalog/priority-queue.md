@@ -7,15 +7,25 @@ The smallest or largest element is always taken next.
 ## Implement this
 
 ```cpp
-struct later_deadline {
-    bool operator()(const task& a, const task& b) const { return a.deadline > b.deadline; }
+struct later_deadline
+{
+    [[nodiscard]] bool operator()(const task& left, const task& right) const
+    {
+        return left.deadline > right.deadline;
+    }
 };
 
-using task_queue = std::priority_queue<task, std::vector<task>, later_deadline>;  // top() = earliest deadline
+using task_queue = std::priority_queue<task, std::vector<task>,
+                                       later_deadline>;  // top() = earliest deadline
 
-std::optional<task> pop_next(task_queue& queue) {
-    if (queue.empty()) { return std::nullopt; }
-    task next = queue.top();
+[[nodiscard]] std::optional<task>
+pop_next(task_queue& queue)
+{
+    if(queue.empty())
+    {
+        return std::nullopt;
+    }
+    const task next = queue.top();
     queue.pop();
     return next;
 }
@@ -24,8 +34,9 @@ std::optional<task> pop_next(task_queue& queue) {
 ## Switch only if priorities change after insert, or any element can be removed
 
 ```cpp
-std::set<std::pair<deadline_t, task_id>> queue;  // begin() is next; erase + insert to reprioritize
-auto next = queue.extract(queue.begin()).value();
+std::set<std::pair<deadline_t, task_id>>
+           queue;  // begin() is next; erase + insert to reprioritize
+const auto next = queue.extract(queue.begin()).value();
 ```
 
 ## Pitfalls

@@ -7,23 +7,36 @@ Values are looked up by key.
 ## Implement this
 
 ```cpp
-struct string_hash {
+struct string_hash
+{
     using is_transparent = void;
-    std::size_t operator()(std::string_view s) const noexcept { return std::hash<std::string_view>{}(s); }
+    [[nodiscard]] std::size_t operator()(std::string_view text) const noexcept
+    {
+        return std::hash<std::string_view>{}(text);
+    }
 };
 
-class symbol_cache {
+class symbol_cache
+{
 public:
-    void add(std::string name, std::uint64_t addr) { addresses_.try_emplace(std::move(name), addr); }  // keeps the first
+    void add(std::string name, std::uint64_t address)
+    {
+        m_addresses.try_emplace(std::move(name), address);  // keeps the first
+    }
 
-    std::optional<std::uint64_t> find(std::string_view name) const {
-        auto it = addresses_.find(name);  // no std::string temporary
-        if (it == addresses_.end()) { return std::nullopt; }
-        return it->second;
+    [[nodiscard]] std::optional<std::uint64_t> find(std::string_view name) const
+    {
+        const auto iter = m_addresses.find(name);  // no std::string temporary
+        if(iter == m_addresses.end())
+        {
+            return std::nullopt;
+        }
+        return iter->second;
     }
 
 private:
-    std::unordered_map<std::string, std::uint64_t, string_hash, std::equal_to<>> addresses_;
+    std::unordered_map<std::string, std::uint64_t, string_hash, std::equal_to<>>
+        m_addresses;
 };
 ```
 
@@ -42,4 +55,4 @@ Overwrite instead of keep: `insert_or_assign(key, value)`.
 - `m[key]` to read inserts a default value on a miss and does not compile on a `const` map. Read with `find`.
 - `insert` and `emplace` may build the value even when the key exists, and neither overwrites it. `try_emplace` builds nothing on a hit.
 - `std::unordered_map` iteration order changes between runs and library versions. Never write output files or test expectations in that order.
-- Without a transparent hash, `find(std::string_view)` does not compile, and `find(std::string(sv))` allocates on every lookup.
+- Without a transparent hash, `find(std::string_view)` does not compile, and `find(std::string(text))` allocates on every lookup.

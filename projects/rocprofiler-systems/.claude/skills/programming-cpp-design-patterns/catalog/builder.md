@@ -9,13 +9,19 @@ Construction has many fields or steps. Independent fields do not need a builder.
 An aggregate with defaults. Designated initializers follow member order.
 
 ```cpp
-struct trace_config {
-    std::size_t buffer_size = 1'048'576;
-    bool compression = false;
+constexpr std::size_t k_default_buffer_size = 1'048'576;
+constexpr std::size_t k_startup_buffer_size = 4096;
+
+struct trace_config
+{
+    std::size_t                buffer_size = k_default_buffer_size;
+    bool                       compression = false;
     std::optional<std::string> label;
 };
 
-trace_config config{.buffer_size = 4096, .compression = true, .label = "startup"};
+trace_config config{ .buffer_size = k_startup_buffer_size,
+                     .compression = true,
+                     .label       = "startup" };
 ```
 
 ## Pattern only if order or cross-field checks must fail before the value exists
@@ -23,25 +29,29 @@ trace_config config{.buffer_size = 4096, .compression = true, .label = "startup"
 `build()` is the only way to obtain the value, and it rejects an invalid combination.
 
 ```cpp
-class car_builder {
+class car_builder
+{
 public:
-    car_builder& set_engine(engine value) {
-        engine_ = std::move(value);
+    [[nodiscard]] car_builder& set_engine(engine value)
+    {
+        m_engine = std::move(value);
         return *this;
     }
-    car_builder& set_gps(bool enabled) {
-        gps_ = enabled;
+    [[nodiscard]] car_builder& set_gps(bool enabled)
+    {
+        m_gps = enabled;
         return *this;
     }
-    car build() const {
-        if (gps_ && !engine_) throw std::invalid_argument{"gps requires an engine"};
-        return car{engine_, gps_};
+    [[nodiscard]] car build() const
+    {
+        if(m_gps && !m_engine) throw std::invalid_argument{ "gps requires an engine" };
+        return car{ m_engine, m_gps };
     }
 
 private:
-    std::optional<engine> engine_;
-    bool gps_ = false;
+    std::optional<engine> m_engine;
+    bool                  m_gps = false;
 };
 
-auto made = car_builder{}.set_engine(v8).set_gps(true).build();
+const auto made = car_builder{}.set_engine(block).set_gps(true).build();
 ```

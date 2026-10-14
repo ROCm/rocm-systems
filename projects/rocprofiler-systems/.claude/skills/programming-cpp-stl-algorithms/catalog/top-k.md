@@ -7,8 +7,10 @@ Only the first k elements of the sorted order are needed. A full sort does O(n l
 ## Implement this
 
 ```cpp
-std::vector<std::uint64_t> top_k(const std::vector<sample>& samples, std::size_t k) {
-    std::vector<std::uint64_t> top(std::min(k, samples.size()));
+[[nodiscard]] std::vector<std::uint64_t>
+top_k(const std::vector<sample>& samples, std::size_t count)
+{
+    std::vector<std::uint64_t> top(std::min(count, samples.size()));
     std::ranges::partial_sort_copy(samples | std::views::transform(&sample::ts), top,
                                    std::ranges::greater{});
     return top;
@@ -18,11 +20,12 @@ std::vector<std::uint64_t> top_k(const std::vector<sample>& samples, std::size_t
 ## Switch only if the k elements need no order among themselves
 
 ```cpp
-std::ranges::nth_element(v, v.begin() + k, std::ranges::greater{});  // v[0..k) are the k largest
-v.resize(k);
+std::ranges::nth_element(values, values.begin() + count,
+                         std::ranges::greater{});  // values[0..count) are the largest
+values.resize(count);
 ```
 
 ## Pitfalls
 
-- Size the output with `std::min(k, n)`. `v.begin() + k` past `end()` is undefined behavior; check `k < v.size()` before `nth_element`.
+- Size the output with `std::min(count, total)`. `values.begin() + count` past `end()` is undefined behavior; check `count < values.size()` before `nth_element`.
 - `partial_sort_copy` leaves the input untouched. `partial_sort` and `nth_element` reorder it.

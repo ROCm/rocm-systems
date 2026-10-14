@@ -7,16 +7,19 @@ Work is stored to run later, or it must be undone. Store the call and the data t
 ## Implement this
 
 ```cpp
-struct action {
+struct action
+{
     std::function<void()> execute;
     std::function<void()> undo;
 };
 
 // The caller keeps target alive while the returned action is stored.
-action make_assign(int& target, int next) {
-    int previous = target;
+[[nodiscard]] action
+make_assign(int& target, int next)
+{
+    const int previous = target;
     return {
-        [&target, next] { target = next; },
+        [&target, next] { target     = next; },
         [&target, previous] { target = previous; },
     };
 }
@@ -25,11 +28,12 @@ action make_assign(int& target, int next) {
 ## Pattern only if the operation is logged, queued, or undone as its own object
 
 ```cpp
-class command {
+class command_interface
+{
 public:
-    virtual ~command() = default;
-    virtual void execute() = 0;
-    virtual void undo() = 0;
+    virtual ~command_interface() = default;
+    virtual void execute()       = 0;
+    virtual void undo()          = 0;
 };
 ```
 

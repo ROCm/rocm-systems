@@ -7,16 +7,18 @@ Many objects repeat the same immutable data. Share that data. Keep the per-objec
 ## Implement this
 
 ```cpp
-class flyweight_factory {
+class flyweight_factory
+{
 public:
-    std::shared_ptr<const flyweight> get(const std::string& key) {
-        auto [it, inserted] = cache_.try_emplace(key, nullptr);
-        if (inserted) it->second = std::make_shared<const flyweight>(key);
-        return it->second;
+    [[nodiscard]] std::shared_ptr<const flyweight> get(const std::string& key)
+    {
+        auto [iter, inserted] = m_cache.try_emplace(key, nullptr);
+        if(inserted) iter->second = std::make_shared<const flyweight>(key);
+        return iter->second;
     }
 
 private:
-    std::unordered_map<std::string, std::shared_ptr<const flyweight>> cache_;
+    std::unordered_map<std::string, std::shared_ptr<const flyweight>> m_cache;
 };
 ```
 

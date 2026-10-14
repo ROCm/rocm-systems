@@ -9,7 +9,9 @@ An operation runs over a set of types. A closed set uses `std::visit`.
 ```cpp
 using element = std::variant<element_a, element_b>;
 
-void apply(element& value) {
+void
+apply(element& value)
+{
     std::visit([](auto& item) { item.summarize(); }, value);
 }
 ```
@@ -17,21 +19,24 @@ void apply(element& value) {
 ## Pattern only if the element hierarchy is already open and new operations arrive more often than new elements
 
 ```cpp
-class visitor {
+class visitor_interface
+{
 public:
-    virtual ~visitor() = default;
+    virtual ~visitor_interface()           = default;
     virtual void visit(element_a& element) = 0;
     virtual void visit(element_b& element) = 0;
 };
 
-class element {
+class element_interface
+{
 public:
-    virtual ~element() = default;
-    virtual void accept(visitor& operation) = 0;
+    virtual ~element_interface()                      = default;
+    virtual void accept(visitor_interface& operation) = 0;
 };
 
-class element_a final : public element {
+class element_a final : public element_interface
+{
 public:
-    void accept(visitor& operation) override { operation.visit(*this); }
+    void accept(visitor_interface& operation) override { operation.visit(*this); }
 };
 ```

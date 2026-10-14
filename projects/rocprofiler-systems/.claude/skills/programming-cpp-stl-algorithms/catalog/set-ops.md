@@ -7,23 +7,25 @@ Two collections are combined as sets. The `set_*` algorithms need sorted input a
 ## Implement this
 
 ```cpp
-std::vector<int> merge_unique(std::vector<int> a, std::vector<int> b) {
-    a.insert(a.end(), b.begin(), b.end());
-    std::ranges::sort(a);
-    auto [first, last] = std::ranges::unique(a);
-    a.erase(first, last);
-    return a;
+[[nodiscard]] std::vector<int>
+merge_unique(std::vector<int> left, std::vector<int> right)
+{
+    left.insert(left.end(), right.begin(), right.end());
+    std::ranges::sort(left);
+    auto [first, last] = std::ranges::unique(left);
+    left.erase(first, last);
+    return left;
 }
 
-std::vector<int> only_in_a;
-std::ranges::set_difference(sorted_a, sorted_b, std::back_inserter(only_in_a));
+std::vector<int> only_in_left;
+std::ranges::set_difference(sorted_left, sorted_right, std::back_inserter(only_in_left));
 ```
 
 ## Switch only if one side is small and unsorted
 
 ```cpp
 std::unordered_set<int> excluded(small.begin(), small.end());
-std::erase_if(large, [&excluded](int x) { return excluded.contains(x); });
+std::erase_if(large, [&excluded](int value) { return excluded.contains(value); });
 ```
 
 ## Pitfalls

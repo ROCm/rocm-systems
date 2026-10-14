@@ -7,7 +7,8 @@ A collection is walked. Use the standard library.
 ## Implement this
 
 ```cpp
-for (const element& item : collection) {
+for(const element& item : collection)
+{
     use(item);
 }
 ```
@@ -17,15 +18,16 @@ A custom container provides `begin()` and `end()` returning normal iterators, th
 ## Pattern only if a custom container cannot provide standard iterators
 
 ```cpp
-class cursor {
+class cursor
+{
 public:
-    bool has_next() const { return index_ < items_.size(); }
+    [[nodiscard]] bool has_next() const { return m_index < m_items.size(); }
 
-    const element& next() { return items_[index_++]; }
+    [[nodiscard]] const element& next() { return m_items[m_index++]; }
 
 private:
-    const std::vector<element>& items_;
-    std::size_t index_ = 0;
+    const std::vector<element>& m_items;
+    std::size_t                 m_index = 0;
 };
 ```
 

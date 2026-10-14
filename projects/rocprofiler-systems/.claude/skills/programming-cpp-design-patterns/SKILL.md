@@ -45,7 +45,8 @@ Request: "Make the logger a singleton so every translation unit can reach it."
 `catalog: singleton | pass the object as a parameter`
 
 ```cpp
-void run_worker(logger& log);
+void
+run_worker(logger& log);
 ```
 
 ## Common mistakes

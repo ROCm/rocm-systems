@@ -11,8 +11,11 @@ Closed set. `std::variant` rejects every other type.
 ```cpp
 using item = std::variant<sensor, image>;
 
-void postprocess_all(std::vector<item>& items) {
-    for (item& value : items) {
+void
+postprocess_all(std::vector<item>& items)
+{
+    for(item& value : items)
+    {
         std::visit([](auto& object) { object.postprocess(); }, value);
     }
 }
@@ -26,31 +29,37 @@ std::function<void()> postprocess = [&sensor_value] { sensor_value.postprocess()
 
 ## Pattern only if the set is open and the container owns the value
 
-Match this shape. Adapt the stored type and the method name; keep the private concept, the model, and `std::unique_ptr` ownership.
+Match this shape. Adapt the stored type and the method name; keep the private `concept_interface`, the model, and `std::unique_ptr` ownership.
 
 ```cpp
-class postprocessable {
+class postprocessable
+{
 public:
     template <typename T>
     explicit postprocessable(T object)
-        : storage_{std::make_unique<model<T>>(std::move(object))} {}
+    : m_storage{ std::make_unique<model<T>>(std::move(object)) }
+    {}
 
-    void postprocess() { storage_->postprocess(); }
+    void postprocess() { m_storage->postprocess(); }
 
 private:
-    struct concept_t {
-        virtual ~concept_t() = default;
-        virtual void postprocess() = 0;
+    struct concept_interface
+    {
+        virtual ~concept_interface() = default;
+        virtual void postprocess()   = 0;
     };
 
     template <typename T>
-    struct model final : concept_t {
-        explicit model(T object) : object_(std::move(object)) {}
-        void postprocess() override { object_.postprocess(); }
-        T object_;
+    struct model final : concept_interface
+    {
+        explicit model(T value)
+        : object{ std::move(value) }
+        {}
+        void postprocess() override { object.postprocess(); }
+        T    object;
     };
 
-    std::unique_ptr<concept_t> storage_;
+    std::unique_ptr<concept_interface> m_storage;
 };
 
 std::vector<postprocessable> items;
@@ -63,18 +72,20 @@ items.emplace_back(image{});
 This view does not own the object. The caller keeps it alive.
 
 ```cpp
-class postprocessable_view {
+class postprocessable_view
+{
 public:
     template <typename T>
     explicit postprocessable_view(T& object)
-        : object_{&object}
-        , postprocess_impl_{[](void* ptr) { static_cast<T*>(ptr)->postprocess(); }} {}
+    : m_object{ &object }
+    , m_postprocess{ [](void* ptr) { static_cast<T*>(ptr)->postprocess(); } }
+    {}
 
-    void postprocess() { postprocess_impl_(object_); }
+    void postprocess() { m_postprocess(m_object); }
 
 private:
-    void* object_;
-    std::function<void(void*)> postprocess_impl_;
+    void*                      m_object;
+    std::function<void(void*)> m_postprocess;
 };
 ```
 

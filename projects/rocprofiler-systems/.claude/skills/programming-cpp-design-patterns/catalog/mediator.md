@@ -7,7 +7,9 @@ Objects call one another in a web. Pass the one collaborator a function uses.
 ## Implement this
 
 ```cpp
-void on_click(panel& panel) {
+void
+on_click(panel& panel)
+{
     panel.refresh();
 }
 ```
@@ -15,10 +17,11 @@ void on_click(panel& panel) {
 ## Pattern only if one coordinator replaces those cross-calls
 
 ```cpp
-class mediator {
+class mediator_interface
+{
 public:
-    virtual ~mediator() = default;
-    virtual void notify(component& sender, std::string_view event) = 0;
+    virtual ~mediator_interface()                                       = default;
+    virtual void notify(component& sender, std::string_view event_name) = 0;
 };
 ```
 

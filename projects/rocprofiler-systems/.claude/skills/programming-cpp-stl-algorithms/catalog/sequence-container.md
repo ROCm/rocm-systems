@@ -10,9 +10,10 @@ A container type is chosen for a sequence. Contiguous memory wins on almost ever
 std::vector<event> events;
 events.reserve(expected_count);
 
-std::array<std::uint64_t, 4> counters{};          // size known at compile time, no heap
+std::array<std::uint64_t, 4> counters{};  // size known at compile time, no heap
 
-void write_events(std::span<const event> events);  // parameter: accepts vector, array, C array
+void
+write_events(std::span<const event> events);  // parameter: accepts vector, array, C array
 ```
 
 ## Switch only if

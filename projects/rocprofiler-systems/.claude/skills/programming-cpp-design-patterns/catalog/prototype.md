@@ -13,15 +13,18 @@ widget copy = original;
 ## Pattern only if the copy site does not know the dynamic type
 
 ```cpp
-class prototype {
+class prototype_interface
+{
 public:
-    virtual ~prototype() = default;
-    virtual std::unique_ptr<prototype> clone() const = 0;
+    virtual ~prototype_interface()                                           = default;
+    [[nodiscard]] virtual std::unique_ptr<prototype_interface> clone() const = 0;
 };
 
-class widget final : public prototype {
+class widget final : public prototype_interface
+{
 public:
-    std::unique_ptr<prototype> clone() const override {
+    [[nodiscard]] std::unique_ptr<prototype_interface> clone() const override
+    {
         return std::make_unique<widget>(*this);
     }
 };
