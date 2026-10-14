@@ -1227,7 +1227,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   {
                     code_object_t code_object (code_objects_ids[i]);
 
-                    if (!delay_loading ())
+                    if (!delay_loading () || !g_lazy)
                       {
                         if (!code_object.open ())
                           {
