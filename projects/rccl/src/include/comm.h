@@ -721,7 +721,9 @@ struct ncclComm {
   int ddaLLEpochLen;
   // DDA fabric AllToAll one-shot push state (own fabric buffer), or nullptr.
   void* ddaA2aPushState;
-  // Created on the first AllToAll that can use it (dda_alltoall_fabric_lazy_host.h):
+  // DDA fabric AllToAll zero-copy Direct state (flag buffer), or nullptr.
+  void* ddaA2aDirectState;
+  // Both are created on the first AllToAll that can use them (dda_alltoall_fabric_lazy_host.h):
   // dda_a2a_lazy::kUntried (0) / kDone (1) / kOff (-1, no fabric path).
   int ddaA2aLazy;
   // DDA fabric AllToAll per-comm watchdog state (device, dda::common::DdaA2aErr: error word + constant

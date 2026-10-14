@@ -3286,8 +3286,9 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 }
 
 // gfx1250, message above the LL128 cap (ddaLL128Max[A2A] = 16 MiB; ddaVmmMax[A2A] = 0 disables VMM)
-// on a comm without the push path (its state is null here): falls to Direct p2p. (SelectA2A passes
-// nullptr for both buffers, i.e. in place, which push never takes either.)
+// on a comm without the push / zero-copy Direct paths (their state is null here): falls to Direct p2p.
+// (SelectA2A passes nullptr for both buffers, i.e. in place, which push and zero-copy Direct never
+// take either.)
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3307,7 +3308,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 }
 
 // gfx1250 AllToAll arch-table windows (rcclSelectAlltoAllFabric): LL to 64 KiB total or (from 8
-// ranks) 8 KiB per peer, LL128 V2 to 16 MiB, push out of place to 1 GiB. CE-Scratch is not forced
+// ranks) 8 KiB per peer, LL128 V2 to 16 MiB, zero-copy Direct (symmetric-window recvbuff) from 16 MiB
+// total with P > 1 MiB to 16 GiB, push out of place to 1 GiB. CE-Scratch is not forced
 // (forceCeScratch = false).
 TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
 {
@@ -3318,6 +3320,9 @@ TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
     EXPECT_EQ(tbl->rankScaledMinRanks, 8);
     EXPECT_EQ(tbl->ddaLL128Max[ncclFuncAlltoAll], 16ul << 20);
     EXPECT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul);
+    EXPECT_EQ(tbl->a2aDirectPerPeerCut, 1ul << 20);
+    EXPECT_EQ(tbl->a2aDirectMin, 16ul << 20);
+    EXPECT_EQ(tbl->a2aDirectMax, 16ul << 30);
     EXPECT_EQ(tbl->a2aPushMax, 1ul << 30);
     EXPECT_EQ(tbl->a2aPushCuMin, 128ul << 20);
     EXPECT_EQ(tbl->ceNonRegMax[ncclFuncAlltoAll], 0ul);
@@ -3326,6 +3331,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
     const rcclArchThresholds* t950 = rcclGetArchThresholds("gfx950");
     ASSERT_NE(t950, nullptr);
     EXPECT_EQ(t950->a2aPushMax, 0ul);
+    EXPECT_EQ(t950->a2aDirectMax, 0ul);
 }
 
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):

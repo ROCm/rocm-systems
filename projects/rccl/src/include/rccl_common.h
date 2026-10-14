@@ -90,6 +90,7 @@ typedef enum {
   // values stay stable.
   RCCL_DIRECT_ALLTOALL, // AlltoAll as per-peer Send/Recv (no collective kernel)
   RCCL_DDA_FABRIC_A2A_PUSH, // DDA fabric AlltoAll, one-shot push (own fabric buffer)
+  RCCL_DDA_FABRIC_A2A_DIRECT, // DDA fabric AlltoAll, zero-copy push into a symmetric-window recvbuff
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 

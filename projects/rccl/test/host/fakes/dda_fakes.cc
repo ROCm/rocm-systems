@@ -65,10 +65,14 @@ DEFINE_DDA_BLOCKS(allToAllDdaIpcBlocks, ncclAllToAllDdaIpcBlocks, 141)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricBlocks, ncclAllToAllDdaFabricBlocks, 142)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricLLBlocks, ncclAllToAllDdaFabricLLBlocks, 143)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricLL128Blocks, ncclAllToAllDdaFabricLL128Blocks, 144)
-// gfx1250 one-shot push path (dda_alltoall_fabric_push_host.h).
+// gfx1250 one-shot push and zero-copy Direct paths (dda_alltoall_fabric_{push,direct}_host.h).
 DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricPushEligible, ncclAllToAllDdaFabricPushEligible)
 DEFINE_DDA_BLOCKS(allToAllDdaFabricPushBlocks, ncclAllToAllDdaFabricPushBlocks, 145)
-// Lazy creation of the push buffer (dda_alltoall_fabric_lazy_host.h); default: no-op success.
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricDirectWindowed, ncclAllToAllDdaFabricDirectWindowed)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricDirectEligible, ncclAllToAllDdaFabricDirectEligible)
+std::function<uint32_t(ncclComm*)> g_allToAllDdaFabricDirectBlocks = [](ncclComm*) { return 146u; };
+uint32_t ncclAllToAllDdaFabricDirectBlocks(ncclComm* comm) { return g_allToAllDdaFabricDirectBlocks(comm); }
+// Lazy creation of the push / Direct buffers (dda_alltoall_fabric_lazy_host.h); default: no-op success.
 std::function<ncclResult_t(ncclComm*)> g_ddaA2aLazyInit = [](ncclComm*) { return ncclSuccess; };
 ncclResult_t ncclDdaA2aLazyInit(ncclComm* comm) { return g_ddaA2aLazyInit(comm); }
 

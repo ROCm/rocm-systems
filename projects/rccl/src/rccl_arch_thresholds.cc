@@ -237,11 +237,28 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
 
-  // AllToAll one-shot push, out of place above the LL128 window up to here; A09 8r: 1 GiB push
-  // beats p2p (+17%). Equal to the default push buffer (RCCL_DDA_A2A_PUSH_BUFFER_SIZE).
+  // AllToAll one-shot push, out of place above the LL128 window up to here where Direct does not take
+  // the call (no symmetric window, nRanks > 16, Direct off); A09 8r: 1 GiB push beats p2p (+17%).
+  // Equal to the default push buffer (RCCL_DDA_A2A_PUSH_BUFFER_SIZE).
   .a2aPushMax = 1024ULL*1024*1024,
   // A07 8r: CU-split push wins from 128 MiB, loses at 32-64 MiB (16r keeps it at 4 blocks/peer).
   .a2aPushCuMin = 128ULL*1024*1024,
+  // Zero-copy Direct vs LL128 V2, R0 out of place, busBW median of 3 (M06 step 1, one session; the
+  // Direct kernel fed by the campaign's implicit registration, same kernel as with a window):
+  //   16 ranks: P = 1 MiB   (16M) LL128 292.5 vs Direct 273.4 -> LL128 +7%
+  //             P = 1.5 MiB (24M) Direct 292.6 vs LL128 251.8 -> Direct +16%; Direct wins every P >= 1.5 MiB
+  //    8 ranks: P = 1 MiB   (8M)  LL128 273 (Direct not measured at P <= 1 MiB)
+  //             P = 2 MiB   (16M) Direct 303.5 vs LL128 301.6 -> tie; Direct wins every P >= 4 MiB
+  // The crossover is not one total size (8r ~16 MiB, 16r 16-24 MiB) but fits one per-peer size:
+  // 16r needs the cut in [1, 1.5) MiB, 8r in [1, 2] MiB. 1 MiB satisfies both.
+  // Unmeasured: 2r/4r, and 8r P in (1, 2) MiB (non-pow2 totals 9-15 MiB).
+  .a2aDirectPerPeerCut = 1ULL*1024*1024,
+  // Validated up to 16 GiB per rank (A11).
+  .a2aDirectMax = 16ULL*1024*1024*1024,
+  // P06 (per-peer cut only), R0 OOP busBW median of 6, Direct / LL128: 2r P 2M/4M (T 4M/8M)
+  // 0.81/0.64 (GPUs 0,1) and 0.40/0.34 (0,2); 4r T 6M/8M 0.57/0.66; 8r T 9-14M 0.86-0.93; 16r T 16-24M
+  // 0.99-1.03. -> LL128 up to T = 16 MiB at every n; Direct from 16 MiB (8r 16M tie, P02).
+  .a2aDirectMin = 16ULL*1024*1024,
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.

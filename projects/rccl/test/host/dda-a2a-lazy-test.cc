@@ -4,13 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for the agreement that creates the DDA AllToAll push buffer on the first
-// eligible AllToAll (src/algorithms/dda/alltoall/dda_alltoall_lazy.h). N ranks run as N threads over
-// an in-memory allgather; the per-rank ops are fakes that can fail any step. The properties under
-// test: every rank ends with the same result and push size whatever fails where, every rank makes
-// the same number of bootstrap calls (no rank is ever left waiting), and a buffer that is not agreed
-// is released. Also the HIP-free push host helpers of dda_alltoall.h (DdaA2aPushHostMicrotest):
-// topology sibling, the round loop's poison on failure, and the error-word mapping.
+// Host-only microtests for the agreement that creates the DDA AllToAll push / Direct buffers on the
+// first eligible AllToAll (src/algorithms/dda/alltoall/dda_alltoall_lazy.h). N ranks run as N threads
+// over an in-memory allgather; the per-rank ops are fakes that can fail any step. The properties
+// under test: every rank ends with the same parts and push size whatever fails where, every rank
+// makes the same number of bootstrap calls (no rank is ever left waiting), and every local resource
+// of a part that is not agreed is released. Also the HIP-free push host helpers of dda_alltoall.h
+// (DdaA2aPushHostMicrotest): topology sibling, the round loop's poison on failure, and the error-word
+// mapping.
 
 #include <gtest/gtest.h>
 
@@ -25,6 +26,7 @@
 
 namespace {
 
+using dda_a2a_lazy::kDirect;
 using dda_a2a_lazy::kPush;
 
 constexpr int64_t kFlagBytes = 2ll << 20;  // dda::common::kDdaA2aPushFlagBytes (HIP-only header)
@@ -71,14 +73,15 @@ class FakeBootstrap {
 
 struct Blob {
   uint64_t pushDesc;
+  uint64_t directDesc;
 };
 
 struct RankPlan {
-  bool setupFails = false;   // local create/export fails
-  bool importFails = false;  // peer import fails
+  uint32_t setupFails = 0;   // parts whose local create/export fails
+  uint32_t importFails = 0;  // parts whose peer import fails
   int64_t pushBytes = 1ll << 30;
-  uint32_t want = kPush;
-  int64_t freeBytes = -1;    // >= 0: device memory model; setup() sizes as the HIP ops do
+  uint32_t want = kPush | kDirect;
+  int64_t freeBytes = -1;    // >= 0: device memory model; setup() sizes push as the HIP ops do
 };
 
 class FakeOps {
@@ -89,35 +92,37 @@ class FakeOps {
   int nRanks() const { return n_; }
   ncclResult_t allGather(void* buf, size_t bytes) { return bs_->allGather(rank_, buf, bytes); }
   void setup(uint32_t want, int64_t pushBytes, dda_a2a_lazy::Rec<Blob>* mine) {
-    mine->blob.pushDesc = 0x1000 + rank_;
-    freeLeft_ = plan_.freeBytes;
-    if (plan_.freeBytes >= 0) {
-      // As DdaA2aLazyOps::setup: try pushSizes() largest first; an allocation succeeds whenever
-      // it physically fits (the h13-13 case: 1 GiB fits, the later p2p connections do not).
-      if (!(want & kPush) || plan_.setupFails) return;
-      for (int64_t b : dda_a2a_lazy::pushSizes(pushBytes, n_, kFlagBytes, plan_.freeBytes)) {
-        if (kFlagBytes + b > plan_.freeBytes) continue;
-        held_ |= kPush;
-        mine->ok |= kPush;
-        mine->pushBytes = b;
-        freeLeft_ = plan_.freeBytes - kFlagBytes - b;
-        return;
-      }
-      return;
-    }
-    if ((want & kPush) && !plan_.setupFails) {
-      held_ |= kPush;
-      mine->ok |= kPush;
-    }
     mine->pushBytes = pushBytes;
+    mine->blob.pushDesc = 0x1000 + rank_;
+    mine->blob.directDesc = 0x2000 + rank_;
+    freeLeft_ = plan_.freeBytes;
+    for (uint32_t part : {kPush, kDirect}) {
+      if (!(want & part)) continue;
+      if (plan_.setupFails & part) continue;
+      if (part == kPush && plan_.freeBytes >= 0) {
+        // As DdaA2aLazyOps::setup: try pushSizes() largest first; an allocation succeeds whenever
+        // it physically fits (the h13-13 case: 1 GiB fits, the later p2p connections do not).
+        bool got = false;
+        for (int64_t b : dda_a2a_lazy::pushSizes(pushBytes, n_, kFlagBytes, plan_.freeBytes)) {
+          if (kFlagBytes + b > plan_.freeBytes) continue;
+          mine->pushBytes = b;
+          freeLeft_ = plan_.freeBytes - kFlagBytes - b;
+          got = true;
+          break;
+        }
+        if (!got) continue;
+      }
+      held_ |= part;
+      mine->ok |= part;
+    }
   }
   uint32_t import(const dda_a2a_lazy::Rec<Blob>* all, uint32_t parts, int64_t) {
     for (int i = 0; i < n_; ++i) {
       if ((parts & kPush) && all[i].blob.pushDesc != uint64_t(0x1000 + i)) descOk_ = false;
+      if ((parts & kDirect) && all[i].blob.directDesc != uint64_t(0x2000 + i)) descOk_ = false;
     }
-    const uint32_t ok = plan_.importFails ? 0u : parts;
-    imported_ |= ok;
-    return ok;
+    imported_ |= parts & ~plan_.importFails;
+    return parts & ~plan_.importFails;
   }
   void release(uint32_t parts) {
     if ((parts & held_ & kPush) && plan_.freeBytes >= 0) freeLeft_ = plan_.freeBytes;
@@ -171,36 +176,42 @@ void ExpectUniform(const std::vector<Outcome>& out, uint32_t parts, int64_t push
     EXPECT_EQ(parts, out[r].res.parts) << r;
     EXPECT_EQ(pushBytes, out[r].res.pushBytes) << r;
     EXPECT_EQ(calls, out[r].calls) << r;
-    EXPECT_EQ(parts, out[r].held) << "rank " << r << " keeps the buffer exactly when it is agreed";
+    EXPECT_EQ(parts, out[r].held) << "rank " << r << " keeps exactly the agreed parts";
     EXPECT_TRUE(out[r].descOk) << r;
   }
 }
 
 }  // namespace
 
-TEST(DdaA2aLazyMicrotest, AllRanksOk_PushAgreed) {
-  ExpectUniform(RunRanks(std::vector<RankPlan>(8)), kPush, 1ll << 30, 2);
+TEST(DdaA2aLazyMicrotest, AllRanksOk_BothPartsAgreed) {
+  ExpectUniform(RunRanks(std::vector<RankPlan>(8)), kPush | kDirect, 1ll << 30, 2);
 }
 
-// Allocation failure on one rank only (e.g. OOM at the first large AllToAll): push is off on every
-// rank after one round, nobody waits, every other rank frees its buffer.
-TEST(DdaA2aLazyMicrotest, SetupFailureOnOneRankDisablesPushEverywhereInOneRound) {
+// Allocation failure on one rank only (e.g. OOM at the first large AllToAll): that part is off on
+// every rank, the other part still comes up, nobody waits.
+TEST(DdaA2aLazyMicrotest, SetupFailureOnOneRankDisablesThatPartEverywhere) {
   std::vector<RankPlan> plans(8);
-  plans[3].setupFails = true;
+  plans[3].setupFails = kPush;
   auto out = RunRanks(plans);
-  ExpectUniform(out, 0, 0, 1);
+  ExpectUniform(out, kDirect, 0, 2);
   for (int r = 0; r < 8; ++r) {
     if (r != 3) EXPECT_TRUE(out[r].released & kPush) << "rank " << r << " frees its unused push buffer";
   }
 }
 
+TEST(DdaA2aLazyMicrotest, SetupFailureOfEverythingOnOneRankIsOneRound) {
+  std::vector<RankPlan> plans(4);
+  plans[1].setupFails = kPush | kDirect;
+  ExpectUniform(RunRanks(plans), 0, 0, 1);
+}
+
 // Peer import failure on one rank: decided in the second round, still uniform.
-TEST(DdaA2aLazyMicrotest, ImportFailureOnOneRankDisablesPushEverywhere) {
+TEST(DdaA2aLazyMicrotest, ImportFailureOnOneRankDisablesThatPartEverywhere) {
   std::vector<RankPlan> plans(16);
-  plans[11].importFails = true;
+  plans[11].importFails = kDirect;
   auto out = RunRanks(plans);
-  ExpectUniform(out, 0, 0, 2);
-  for (int r = 0; r < 16; ++r) EXPECT_TRUE(out[r].released & kPush) << r;
+  ExpectUniform(out, kPush, 1ll << 30, 2);
+  for (int r = 0; r < 16; ++r) EXPECT_TRUE(out[r].released & kDirect) << r;
 }
 
 // Per-rank RCCL_DDA_A2A_PUSH_BUFFER_SIZE: the agreed size is the minimum (each rank allocated at
@@ -209,28 +220,30 @@ TEST(DdaA2aLazyMicrotest, MismatchedPushSizesAgreeOnMinimum) {
   std::vector<RankPlan> plans(8);
   plans[2].pushBytes = 256ll << 20;
   plans[5].pushBytes = 512ll << 20;
-  ExpectUniform(RunRanks(plans), kPush, 256ll << 20, 2);
+  ExpectUniform(RunRanks(plans), kPush | kDirect, 256ll << 20, 2);
 }
 
-// Push disabled by env on one rank (RCCL_DDA_A2A_PUSH=0 there) joins as a failure.
-TEST(DdaA2aLazyMicrotest, PushNotWantedOnOneRankIsOffEverywhere) {
+// A part disabled by env on one rank (RCCL_DDA_A2A_DIRECT=0 there) joins as a failure.
+TEST(DdaA2aLazyMicrotest, PartNotWantedOnOneRankIsOffEverywhere) {
   std::vector<RankPlan> plans(8);
+  plans[0].want = kPush;
+  ExpectUniform(RunRanks(plans), kPush, 1ll << 30, 2);
   plans[0].want = 0;
   ExpectUniform(RunRanks(plans), 0, 0, 1);
 }
 
-// A zero push size (RCCL_DDA_A2A_PUSH_BUFFER_SIZE=0 on one rank) disables push.
+// A zero push size (RCCL_DDA_A2A_PUSH_BUFFER_SIZE=0 on one rank) disables push only.
 TEST(DdaA2aLazyMicrotest, ZeroPushSizeDisablesPush) {
   std::vector<RankPlan> plans(2);
   plans[1].pushBytes = 0;
-  ExpectUniform(RunRanks(plans), 0, 0, 1);
+  ExpectUniform(RunRanks(plans), kDirect, 0, 2);
 }
 
 // Failures on different ranks in both rounds at once.
 TEST(DdaA2aLazyMicrotest, MixedFailuresStayUniform) {
   std::vector<RankPlan> plans(16);
-  plans[3].importFails = true;
-  plans[9].importFails = true;
+  plans[3].setupFails = kDirect;
+  plans[9].importFails = kPush;
   ExpectUniform(RunRanks(plans), 0, 0, 2);
 }
 
@@ -258,14 +271,14 @@ TEST(DdaA2aLazyMicrotest, PushSizesKeepP2pHeadroom) {
 // AllToAll. It could allocate the 1 GiB push buffer, so push was agreed on every rank; the in-place
 // AllToAll that followed took p2p, whose connection buffers then failed to allocate on rank 5 only,
 // and the other ranks waited for rank 5 in bootstrap until the job was killed. With the headroom
-// rank 5 offers no buffer: push is off on every rank after one round, and rank 5 keeps its memory
-// for p2p.
+// rank 5 offers no buffer: push is off on every rank (the 2 MiB Direct flag buffer still comes up),
+// and rank 5 keeps its memory for p2p.
 TEST(DdaA2aLazyMicrotest, LowHeadroomOnOneRankDisablesPushEverywhere) {
   std::vector<RankPlan> plans(8);
   for (auto& p : plans) p.freeBytes = 100 * kGiB;
   plans[5].freeBytes = kGiB + (512ll << 20);
   auto out = RunRanks(plans);
-  ExpectUniform(out, 0, 0, 1);
+  ExpectUniform(out, kDirect, 0, 2);
   for (int r = 0; r < 8; ++r) {
     EXPECT_EQ(plans[r].freeBytes, out[r].freeLeft) << "rank " << r << " keeps its free memory for p2p";
   }
@@ -278,7 +291,7 @@ TEST(DdaA2aLazyMicrotest, LowHeadroomOnOneRankShrinksPushUniformly) {
   for (auto& p : plans) p.freeBytes = 100 * kGiB;
   plans[9].freeBytes = 3 * kGiB;
   auto out = RunRanks(plans);
-  ExpectUniform(out, kPush, 512ll << 20, 2);
+  ExpectUniform(out, kPush | kDirect, 512ll << 20, 2);
   for (int r = 0; r < 16; ++r) EXPECT_GE(out[r].freeLeft, dda_a2a_lazy::kPushMinFreeBytes) << r;
 }
 

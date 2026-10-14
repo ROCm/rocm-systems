@@ -60,9 +60,11 @@ const char* ncclDdaA2aWdSiteName(uint32_t site) {
   case kDdaWdPushReady: return "push READY (peer data not arrived)";
   case kDdaWdPushCuEntry: return "push-CU ENTRY (peer has not started the op)";
   case kDdaWdPushCuReady: return "push-CU READY (peer data not arrived)";
+  case kDdaWdDirectEntry: return "direct ENTRY (peer has not started the op)";
+  case kDdaWdDirectDone: return "direct DONE (peer data not arrived)";
   case kDdaWdLL: return "LL line flag";
   case kDdaWdLL128V2: return "LL128 line flag";
-  case kDdaA2aErrLaunch: return "push launch failed on the host (device epoch out of step with the peers)";
+  case kDdaA2aErrLaunch: return "push / Direct launch failed on the host (device epoch out of step with the peers)";
   case kDdaWdConcurrent: return "two AllToAll kernels of this communicator in flight at once (stream ordering broken)";
   case kDdaWdAborted: return "abort flag (ncclCommAbort)";
   default: return "unknown";
@@ -313,9 +315,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   INFO(NCCL_INIT,
        "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
        comm->cuCount, localBlocksMax, nBlocksMax);
-  // AllToAll push staging buffer: created collectively by the first AllToAll that can use it
-  // (dda_alltoall_fabric_lazy_host.h), so comms that never run one allocate nothing.
-  // If any rank's comm is nonblocking it is created now: its API calls must not wait for peers.
+  // AllToAll push staging buffer and Direct flags: created collectively by the first AllToAll that
+  // can use them (dda_alltoall_fabric_lazy_host.h), so comms that never run one allocate nothing.
+  // If any rank's comm is nonblocking they are created now: its API calls must not wait for peers.
   comm->ddaA2aLazy = dda_a2a_lazy::kUntried;
   if (a2aEager) NCCLCHECK(ncclDdaA2aLazyInit(comm));
   return ncclSuccess;
@@ -360,6 +362,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
     }
   }
   (void)ncclDdaA2aPushCommFini(comm);
+  (void)ncclDdaA2aDirectCommFini(comm);
   CUDACHECKIGNORE(cudaFree(comm->ddaA2aErrDev));
   comm->ddaA2aErrDev = nullptr;
   (void)ncclCudaHostFree(comm->ddaA2aErrHost);

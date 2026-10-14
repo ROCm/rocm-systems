@@ -599,6 +599,10 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       return rcclAddonLaunch(comm, stream, [&] {
         return ncclAllToAllDdaFabricPush(sendbuff, recvbuff, count, datatype, comm, stream);
       });
+    case RCCL_DDA_FABRIC_A2A_DIRECT:
+      return rcclAddonLaunch(comm, stream, [&] {
+        return ncclAllToAllDdaFabricDirect(sendbuff, recvbuff, count, datatype, comm, stream);
+      });
     case RCCL_DDA_IPC:
       return rcclAddonLaunch(comm, stream, [&] {
         return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
