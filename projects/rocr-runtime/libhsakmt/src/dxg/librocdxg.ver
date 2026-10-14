@@ -106,6 +106,7 @@ hsaKmtPcSamplingSupport;
 hsaKmtAisReadWriteFile;
 hsaKmtModelEnabled;
 hsaKmtQueueRingDoorbell;
+hsaKmtSetSdmaConfig;
 hsaKmtHandleImport;
 hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
