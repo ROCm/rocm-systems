@@ -295,4 +295,32 @@ TEST_F(SearchXmlChannelMicrotest, LastValidChannelIndex_IsStillAccepted) {
   EXPECT_EQ(graph()->intra[kGpus * kChannel], SearchXmlScene::kRankBase + 2);
 }
 
+TEST_F(SearchXmlChannelMicrotest, MoreNetSubsThanTheChannelHolds_IsRejected) {
+  // A channel's inter slice is two slots (ncclTopoGetXmlFromChannel emits a
+  // leading and a trailing <net>). A third one runs into channel 1's slots.
+  constexpr int kSentinel = -7;
+  graph()->inter[2] = kSentinel;
+  graph()->inter[3] = kSentinel;
+
+  ncclXmlNode* channel = NewNode("channel");
+  for (const char* dev : {"1", "2", "3", "4"}) AddChild(channel, "net", dev);
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(graph()->inter[2], kSentinel);
+  EXPECT_EQ(graph()->inter[3], kSentinel);
+}
+
+TEST_F(SearchXmlChannelMicrotest, ExactlyTwoNetSubs_AreStillAccepted) {
+  // The tightest accepted input for the net bound.
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1");
+  AddChild(channel, "gpu", "0");
+  AddChild(channel, "net", "2");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->inter[0], 1);
+  EXPECT_EQ(graph()->inter[1], 2);
+}
+
 }  // namespace
