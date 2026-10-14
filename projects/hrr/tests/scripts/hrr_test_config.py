@@ -15,7 +15,7 @@ a list under a key is ORed; a missing key matches anything. Glob patterns
 ``kind: unsupported`` is permanent and needs only a reason.
 
 Usage:
-    hrr_test_config.py lint CONFIG [CONFIG ...]
+    hrr_test_config.py lint CONFIG [CONFIG ...]   (their targets.arch must agree)
     hrr_test_config.py check --binary EXE --config CONFIG [--update]
 """
 
@@ -264,6 +264,29 @@ def lint(config: dict, cases: list[dict] | None = None) -> list[str]:
     return errors
 
 
+def arch_mismatches(configs: dict[str, dict]) -> list[str]:
+    """The suites share one architecture vocabulary, so every ``targets.arch``
+    must name the same set as the first config's."""
+    archs = {
+        path: set(config["targets"]["arch"])
+        for path, config in configs.items()
+        if isinstance(config.get("targets"), dict)
+        and isinstance(config["targets"].get("arch"), list)
+    }
+    if len(archs) < 2:
+        return []
+    first, *rest = archs
+    errors = []
+    for path in rest:
+        if archs[path] != archs[first]:
+            missing = ", ".join(sorted(archs[first] - archs[path])) or "-"
+            extra = ", ".join(sorted(archs[path] - archs[first])) or "-"
+            errors.append(
+                f"targets.arch of {path} differs from {first} (missing: {missing}; extra: {extra})"
+            )
+    return errors
+
+
 def list_cases(binary: str, select: str = "*") -> list[dict]:
     """Every case ``select`` matches, hidden ones included when ``select`` is ``*``.
 
@@ -424,6 +447,7 @@ def _print_errors(path: str, errors: list[str]) -> None:
 
 def _cmd_lint(args: argparse.Namespace) -> int:
     failed = False
+    loaded = {}
     for path in args.configs:
         try:
             config = load(path)
@@ -431,12 +455,16 @@ def _cmd_lint(args: argparse.Namespace) -> int:
             print(f"FAIL: {exc}", file=sys.stderr)
             failed = True
             continue
+        loaded[path] = config
         errors = lint(config)
         if errors:
             _print_errors(path, errors)
             failed = True
         else:
             print(f"OK: {path}")
+    for error in arch_mismatches(loaded):
+        print(f"FAIL: {error}", file=sys.stderr)
+        failed = True
     return 1 if failed else 0
 
 

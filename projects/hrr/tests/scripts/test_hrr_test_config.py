@@ -266,6 +266,29 @@ class LintCommandTest(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertIn("version", err.getvalue())
 
+    def test_lint_command_fails_when_targets_arch_differ(self):
+        other = suite({"Runs": {}})
+        other["targets"]["arch"] = ARCHS[:-1] + ["gfx1200"]
+        paths = []
+        for config in (suite({"Runs": {}}), other):
+            tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8")
+            self.addCleanup(lambda name=tmp.name: Path(name).unlink(missing_ok=True))
+            tmp.write(cfg.render(config))
+            tmp.close()
+            paths.append(tmp.name)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = cfg.main(["lint", *paths])
+        self.assertEqual(rc, 1)
+        self.assertIn("missing: gfx1151; extra: gfx1200", err.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cfg.main(["lint", paths[0], paths[0]]), 0)
+
+    def test_repo_suites_share_targets_arch(self):
+        config_dir = Path(__file__).resolve().parent.parent / "config"
+        configs = {name: cfg.load(config_dir / name) for name in ("unit.yaml", "integration.yaml")}
+        self.assertEqual(cfg.arch_mismatches(configs), [])
+
 
 if __name__ == "__main__":
     unittest.main()
