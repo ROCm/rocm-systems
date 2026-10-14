@@ -1372,6 +1372,12 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   // here while threads were still held would abort the process instead of failing
   // the case.
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
+  // Waiter enrollment proves the claim exists, but the owner can be descheduled
+  // before incrementing the translation count. Wait for that progress as well
+  // before sampling; the closed gate keeps it from completing the translation.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (rj_test_translation_count() < 1 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   const uint64_t translations_while_held = rj_test_translation_count();
   rj_test_open_translation_gate();
   for (auto &worker : workers)
