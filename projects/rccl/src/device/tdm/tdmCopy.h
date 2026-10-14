@@ -566,12 +566,14 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
 // and compiles the head peel out.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
-  global = uniform(global);
+  // Only the low bits that steer the split are made uniform. The symmetric kernels
+  // run at the SGPR limit, and holding the full 64-bit address in SGPRs there spills.
+  const uint32_t lineOff = uniform(static_cast<uint32_t>(global)) & (LINE - 1);
   lds = uniform(lds);
   sizeInBytes = uniform(static_cast<uint64_t>(sizeInBytes));
   if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
 
-  if ((((static_cast<uint32_t>(global) & (LINE - 1)) | (static_cast<uint32_t>(sizeInBytes) & (WIDTH - 1))) == 0) &&
+  if (((lineOff | (static_cast<uint32_t>(sizeInBytes) & (WIDTH - 1))) == 0) &&
       sizeInBytes <= static_cast<size_t>(MAX_ROWS) * WIDTH) {
     ldsTileRows<DIR, cp>(global, lds, static_cast<uint32_t>(sizeInBytes / WIDTH));
     return;
@@ -579,7 +581,7 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
 
   size_t off = 0;
   if constexpr (!Aligned) {
-    uint32_t head = static_cast<uint32_t>((LINE - (global & (LINE - 1))) & (LINE - 1));
+    uint32_t head = (LINE - lineOff) & (LINE - 1);
     if (head > sizeInBytes) head = static_cast<uint32_t>(sizeInBytes);
     if (head) {
       ldsTileBytes<DIR, cp>(global, lds, head);
