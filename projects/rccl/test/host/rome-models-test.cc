@@ -29,8 +29,13 @@ class RomeModelsParseScene {
     system_->nodes[GPU].count = nGpus;
     for (int i = 0; i < nGpus; i++) {
       system_->nodes[GPU].nodes[i].gpu.dev = i;
+      // Ranks are deliberately not equal to the dev numbers, so a test that reads
+      // graph->intra cannot pass by accident if the translation step is skipped.
+      system_->nodes[GPU].nodes[i].gpu.rank = kRankBase + i;
     }
   }
+
+  static constexpr int kRankBase = 100;
 
   ncclTopoSystem* system() { return system_.get(); }
 
@@ -248,6 +253,112 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetTreeBase_IsAccepted) {
 }
 
 // ---------------------------------------------------------------------------
+// parseGraph: accepted-input contracts.
+//
+// These pin what a well-formed NCCL_RINGS must keep doing. Every bound added for
+// ROCM-31973 is a chance to reject a valid topology by accident, and only a test
+// that asserts on accepted input can catch that.
+// ---------------------------------------------------------------------------
+
+class RomeModelsParseGraphMicrotest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    scene_ = std::make_unique<RomeModelsParseScene>(kRingGpus);
+    scene_->system()->totalBw = kTotalBw;
+    graph_ = std::make_unique<ncclTopoGraph>();
+    std::memset(graph_.get(), 0, sizeof(*graph_));
+  }
+
+  void TearDown() override { ResetNcclFakes(); }
+
+  ncclTopoSystem* system() { return scene_->system(); }
+  ncclTopoGraph* graph() { return graph_.get(); }
+
+  // The ranks the scene gives devs 0..3, in dev order.
+  static std::vector<int> RanksOf(std::vector<int> devs) {
+    for (int& d : devs) d += RomeModelsParseScene::kRankBase;
+    return devs;
+  }
+
+  std::vector<int> IntraOfChannel(int channel) const {
+    return std::vector<int>(graph_->intra + channel * kRingGpus,
+                            graph_->intra + (channel + 1) * kRingGpus);
+  }
+
+  static constexpr int kRingGpus = 4;
+  static constexpr float kTotalBw = 120.0f;
+
+ private:
+  std::unique_ptr<RomeModelsParseScene> scene_;
+  std::unique_ptr<ncclTopoGraph> graph_;
+};
+
+TEST_F(RomeModelsParseGraphMicrotest, WellFormedRings_AreTranscribedToIntra) {
+  ASSERT_EQ(parseGraph("0 1 2 3|3 2 1 0", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 2);
+  EXPECT_EQ(IntraOfChannel(0), RanksOf({0, 1, 2, 3}));
+  EXPECT_EQ(IntraOfChannel(1), RanksOf({3, 2, 1, 0}));
+  // Bandwidth is split across the channels that were accepted.
+  EXPECT_FLOAT_EQ(graph()->bwIntra, kTotalBw / 2);
+  EXPECT_FLOAT_EQ(graph()->bwInter, kTotalBw / 2);
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, ReversedRing_IsTranscribedBackwards) {
+  ASSERT_EQ(parseGraph("0 1 2 3", system(), graph(), nullptr, nullptr, 1), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(IntraOfChannel(0), RanksOf({3, 2, 1, 0}));
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, GpuNumbersAreTranslatedThroughGpuMap) {
+  // A reversing map, so a result equal to the input cannot pass by accident.
+  std::vector<int> reversingMap(kRingGpus);
+  for (int i = 0; i < kRingGpus; i++) reversingMap[i] = kRingGpus - 1 - i;
+
+  ASSERT_EQ(parseGraph("0 1 2 3", system(), graph(), reversingMap.data(), nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(IntraOfChannel(0), RanksOf({3, 2, 1, 0}));
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, ChannelWithWrongGpuCount_IsIgnored) {
+  // Documented behaviour: rings are supplied for several GPU counts at once and
+  // the ones that do not fit this communicator are skipped, not rejected.
+  //
+  // The short segment comes second, and is a prefix of the first, on purpose. The
+  // gpus[] slot it does not write still holds 3 from the full segment parsed just
+  // before it, so dropping the count check leaves four valid non-duplicate numbers
+  // and the segment is accepted as a second channel. A short segment that stood
+  // alone, or that collided with the carried-over value, would instead be refused
+  // by the bounds or duplicate check next door and the count check would look
+  // tested while being free to delete.
+  ASSERT_EQ(parseGraph("0 1 2 3|0 1 2", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(IntraOfChannel(0), RanksOf({0, 1, 2, 3}));
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, DuplicateGpuInChannel_IsIgnored) {
+  ASSERT_EQ(parseGraph("0 0 1 2|0 1 2 3", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(IntraOfChannel(0), RanksOf({0, 1, 2, 3}));
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, MultiDigitGpuNumbers_AreParsed) {
+  RomeModelsParseScene wide(12);
+  ncclTopoGraph graph;
+  std::memset(&graph, 0, sizeof(graph));
+
+  ASSERT_EQ(parseGraph("0 1 2 3 4 5 6 7 8 9 10 11", wide.system(), &graph, nullptr, nullptr, 0),
+            ncclSuccess);
+
+  EXPECT_EQ(graph.nChannels, 1);
+  EXPECT_EQ(graph.intra[10], RomeModelsParseScene::kRankBase + 10);
+  EXPECT_EQ(graph.intra[11], RomeModelsParseScene::kRankBase + 11);
+}
+
+// ---------------------------------------------------------------------------
 // parseGraph (NCCL_RINGS) -- tests to be written, see ROCM-31973.
 //
 // parseGraph is the NCCL_RINGS counterpart of parseGraphLight above: search.cc
@@ -327,5 +438,6 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetTreeBase_IsAccepted) {
 //   ExactlyMaxChannels_IsAccepted
 //   EveryPresetRingBase_IsAccepted
 // ---------------------------------------------------------------------------
+
 
 }  // namespace
