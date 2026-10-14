@@ -166,6 +166,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
   - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
+- **`amdsmi_get_gpu_activity()` now reports an unavailable usage as `UINT32_MAX`**.  
+  - The `amdsmi_engine_usage_t` fields are `uint32_t`, but `gfx_activity`, `umc_activity` and `mm_activity` were copied from the `uint16_t` GPU metrics fields, so an unavailable usage arrived as `0x0000FFFF`. They now report `0xFFFFFFFF`, matching the other `uint32_t` fields.
+  - C, Go and Rust callers that compare against `0xFFFF` must also accept `0xFFFFFFFF`. The Python interface and the CLI now render both as `N/A`.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -223,6 +227,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
+
+- **Fixed v2.4 APU metrics reporting an unavailable `average_socket_power` or `average_gfx_power` as `65535` mW**.  
+  - v2.4 stores both as `uint16_t` while `amdsmi_apu_metrics_t` holds them as `uint32_t`, so the 16-bit unavailable marker was copied as a real reading and `amd-smi metric` showed `65.53 W` instead of `N/A`. Both now report `UINT32_MAX`, as v3.0 already did.
+
+- **Fixed v1.0 GPU metrics reporting an unavailable `energy_accumulator`, `pcie_link_width` or `pcie_link_speed` as a real value**.  
+  - v1.0 stores these narrower than `amdsmi_gpu_metrics_t` (`uint32_t` energy, `uint8_t` link width/speed), so the unavailable marker arrived as `0xFFFFFFFF` or `0xFF`. They now report `UINT64_MAX` and `UINT16_MAX`, as v1.1 and later already did.
 
 ## amd_smi_lib for ROCm 10.1.0
 
