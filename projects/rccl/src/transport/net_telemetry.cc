@@ -235,11 +235,11 @@ static const RcclTelSampledDesc rcclTelSampled[] = {
   {"ecn_marked_pkts", NULL},                      /* ainic, mlx5, thor2 */
   {"cnp_sent", NULL},                             /* ainic, mlx5, thor2 */
   {"cnp_rcvd", "cnp_handled"},                    /* ainic | mlx5, thor2 */
-  {"out_of_buffer", NULL},                        /* ainic, mlx5 */
+  {"out_of_buffer", NULL},                        /* ainic, mlx5, thor2 */
   {"oos_drop_count", NULL},                       /* ainic, mlx5, thor2 */
   {"seq_err_naks_rcvd", NULL},                    /* ainic, mlx5, thor2 */
   {"rnr_retry_err", NULL},                        /* ainic, mlx5, thor2 */
-  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5, thor2 | ainic */
+  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5 | ainic, thor2 */
 };
 #define RCCL_TEL_NUM_SAMPLED ((int)(sizeof(rcclTelSampled) / sizeof(rcclTelSampled[0])))
 #define RCCL_TEL_MAX_SAMPLES 100000
@@ -297,7 +297,7 @@ typedef struct {
    * IB_SYSFS reads the per-port RoCE counters under
    *   /sys/class/infiniband/<dev>/ports/1/hw_counters/.
    * Some drivers only refresh ETHTOOL tx_bytes/rx_bytes every ~1 s,
-   * so short brackets see delta=0; IB sysfs values update per WQE. */
+   * so short brackets see delta=0. */
   enum RcclHwcSource source;
   const char* tx_bytes;
   const char* rx_bytes;
@@ -530,7 +530,6 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("seq_err_naks_rcvd",          HWC_IB_SYSFS, "seq_err_naks_rcvd"),
   HWC("rnr_retry_err",              HWC_IB_SYSFS, "rnr_naks_rcvd"),
   HWC("max_retry_exceeded",         HWC_IB_SYSFS, "max_retry_exceeded"),
-  HWC("local_ack_timeout_err",      HWC_IB_SYSFS, "local_ack_timeout_err"),
   HWC_FB("oos_drop_count",          HWC_IB_SYSFS, "res_oos_drop_count", "oos_drop_count"),
   HWC("dup_req",                    HWC_IB_SYSFS, "dup_req"),
   HWC("missing_resp",               HWC_IB_SYSFS, "missing_resp"),
@@ -539,13 +538,12 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("bad_resp_err",               HWC_IB_SYSFS, "bad_resp_err"),
   HWC("unrecoverable_err",          HWC_IB_SYSFS, "unrecoverable_err"),
   HWC("recoverable_errors",         HWC_IB_SYSFS, "recoverable_errors"),
-  /* Without the generic/_pkts keys these fall back to the same roce key. */
   HWC_FB("rx_errors",               HWC_IB_SYSFS, "rx_errors", "rx_roce_errors"),
   HWC_FB("rx_discards",             HWC_IB_SYSFS, "rx_discards", "rx_roce_discards"),
   HWC_FB("tx_errors",               HWC_IB_SYSFS, "tx_errors", "tx_roce_errors"),
   HWC_FB("tx_discards",             HWC_IB_SYSFS, "tx_discards", "tx_roce_discards"),
-  HWC_FB("rx_roce_error_pkts",      HWC_IB_SYSFS, "rx_roce_error_pkts", "rx_roce_errors"),
-  HWC_FB("rx_roce_discard_pkts",    HWC_IB_SYSFS, "rx_roce_discard_pkts", "rx_roce_discards"),
+  HWC("rx_roce_error_pkts",         HWC_IB_SYSFS, "rx_roce_error_pkts"),
+  HWC("rx_roce_discard_pkts",       HWC_IB_SYSFS, "rx_roce_discard_pkts"),
 
   /* Responder resource errors (context for the error rates) */
   HWC("res_rx_pci_err",             HWC_IB_SYSFS, "res_rx_pci_err"),
@@ -559,9 +557,8 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("rx_read_req",                HWC_IB_SYSFS, "rx_read_req"),
   HWC("rx_atomic_req",              HWC_IB_SYSFS, "rx_atomic_req"),
 
-  /* rx/tx_pause_frames count only global pause, not PFC. */
-  HWC_FB("pfc_rx_pause_frames",     HWC_ETHTOOL, "rx_pfc_frames", "rx_pause_frames"),
-  HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pfc_frames", "tx_pause_frames"),
+  HWC("pfc_rx_pause_frames",        HWC_ETHTOOL, "rx_pfc_frames"),
+  HWC("pfc_tx_pause_frames",        HWC_ETHTOOL, "tx_pfc_frames"),
 };
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
@@ -650,9 +647,10 @@ void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uin
                                  RcclEthtoolWantedEx* wanted, int nwanted) {
   for (int i = 0; i < nwanted; i++) {
     if (*(wanted[i].target) >= 0) continue;
+    size_t keyLen = strlen(wanted[i].key);
     for (unsigned s = 0; s < n; s++) {
       const char* name = names + (size_t)s * nameStride;
-      if (strnlen(name, nameStride) != strlen(wanted[i].key) ||
+      if (strnlen(name, nameStride) != keyLen ||
           strncmp(name, wanted[i].key, nameStride) != 0)
         continue;
       *(wanted[i].target) = (int64_t)values[s];

@@ -1238,6 +1238,7 @@ static ncclResult_t IbCastQpSharingSenderSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       comm->base.qps[q].qp = slot->qp;
       comm->base.qps[q].devIndex = slot->devIndex;
+      comm->base.qps[q].isDataQp = true;
       comm->base.activeQps[q] = &comm->base.qps[q];
 
       // Populate metadata with shared QP info
@@ -1512,9 +1513,7 @@ ib_recv_dev_list:
         if (comm->base.qps[q].devIndex != i) continue;
         // QPs past the granted slots keep telQpStats == NULL (untracked).
         int telSlot = startSlot + slotOffset++;
-        // Secondary QP copies lack isDataQp; all sender QPs are data QPs.
-        bool isDataQp = (sharingRole == QP_SHARING_SECONDARY) || comm->base.qps[q].isDataQp;
-        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, isDataQp);
+        rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
         comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
       }
     }
