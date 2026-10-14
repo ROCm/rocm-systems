@@ -866,7 +866,16 @@ hsa_status_t Device::iterateGpuMemoryPoolCallback(hsa_amd_memory_pool_t pool, vo
           if (tmp == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
             dev->info_.largeBar_ = false;
           } else {
-            dev->info_.largeBar_ = ROC_ENABLE_LARGE_BAR;
+            // CPU access to this pool is not a large BAR by itself. On an APU
+            // the CPU and GPU share memory, and KFD exposes no interconnect
+            // link. A real large BAR has at least one hop from the CPU agent.
+            int32_t cpu_link_hops = 0;
+            hsa_status_t hop_status = Hsa::agent_memory_pool_get_info(
+                dev->cpu_agent_info_->agent, pool,
+                HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS, &cpu_link_hops);
+            const bool cpu_link =
+                (hop_status == HSA_STATUS_SUCCESS) && (cpu_link_hops >= 1);
+            dev->info_.largeBar_ = ROC_ENABLE_LARGE_BAR && cpu_link && !dev->isAPU_;
           }
 
           // Query the recommended granularity for this pool.
@@ -3568,8 +3577,8 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
   // by default on discrete gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
-  // CLR largeBar_ can be true on APUs because the CPU can access GPU pools, but
-  // ROCr LargeBarEnabled is false for integrated agents and rejects device rings.
+  // largeBar_ requires a CPU interconnect link and a discrete agent. An APU
+  // shares memory with the CPU, so ROCr rejects a device-memory ring there.
   bool device_mem_ring_buf = settings().aql_device_ring_buf_ && info_.largeBar_ && !isAPU_ &&
                              Hsa::amd_queue_create_available();
   hsa_amd_queue_create_desc_t desc = {};
