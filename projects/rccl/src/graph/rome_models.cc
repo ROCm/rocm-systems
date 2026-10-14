@@ -3984,7 +3984,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
       switch (status) {
       case 0:
         if (gpu >= NCCL_TOPO_MAX_NODES) {
-          WARN("Too many GPUs in one tree (max %d), ignoring user-defined trees", NCCL_TOPO_MAX_NODES);
+          WARN("Too many GPUs in one tree (max %d) in user-defined trees (RCCL_TREES); initialization will fail", NCCL_TOPO_MAX_NODES);
           return ncclInvalidUsage;
         }
         gpus[gpu] = digit;
@@ -3992,7 +3992,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         break;
       case 1:
         if (gpus[gpu] > (INT_MAX - digit) / 10) {
-          WARN("GPU number too large in user-defined trees, ignoring user-defined trees");
+          WARN("GPU number too large in user-defined trees (RCCL_TREES); initialization will fail");
           return ncclInvalidUsage;
         }
         gpus[gpu] = gpus[gpu] * 10 + digit;
@@ -4005,7 +4005,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
       status = 0;
       if (str[offset] == '|' || str[offset] == 0) {
         if (x >= maxTrees) {
-          WARN("Too many trees in user-defined trees (max %d), ignoring user-defined trees", maxTrees);
+          WARN("Too many trees in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTrees);
           return ncclInvalidUsage;
         }
         int r = 0, y = 0;
@@ -4013,7 +4013,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
         // for (int r=0; r<gpu; r++) {
           if (str[start_offset] == '(' || str[start_offset] == ')') {
             if (y >= maxTreeBaseLen) {
-              WARN("Tree too long in user-defined trees (max %d), ignoring user-defined trees", maxTreeBaseLen);
+              WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
               return ncclInvalidUsage;
             }
             graph->treeBase[x][y] = str[start_offset];
@@ -4021,14 +4021,14 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
             start_offset++;
           } else {
             if (r >= gpu) {
-              WARN("Malformed tree in user-defined trees, ignoring user-defined trees");
+              WARN("Malformed tree in user-defined trees (RCCL_TREES); initialization will fail");
               return ncclInvalidUsage;
             }
             int g = gpus[r];
             // remap if needed; gpu_map is indexed by GPU number and only has ngpus entries
             if (gpu_map) {
               if (g >= ngpus) {
-                WARN("GPU %d in user-defined trees is out of range, ignoring user-defined trees", g);
+                WARN("GPU %d in user-defined trees (RCCL_TREES) is out of range; initialization will fail", g);
                 return ncclInvalidUsage;
               }
               g = gpu_map[g];
@@ -4042,7 +4042,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')')
                 start_offset++;
               if (start_offset >= offset) {
-                WARN("Malformed tree in user-defined trees, ignoring user-defined trees");
+                WARN("Malformed tree in user-defined trees (RCCL_TREES); initialization will fail");
                 return ncclInvalidUsage;
               }
               // Wide enough for any int, including "-2147483648", plus its terminator.
@@ -4051,7 +4051,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               int k = 0;
               while (number_str[k] != 0) {
                 if (y >= maxTreeBaseLen) {
-                  WARN("Tree too long in user-defined trees (max %d), ignoring user-defined trees", maxTreeBaseLen);
+                  WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
                   return ncclInvalidUsage;
                 }
                 graph->treeBase[x][y] = number_str[k];
