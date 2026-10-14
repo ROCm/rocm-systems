@@ -1037,6 +1037,13 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
     NCCLCHECK(xmlGetAttrStr(sub, "dev", &str));
     dev = strtol(str, NULL, 16);
     if (strcmp(sub->name, "net") == 0) {
+      // A channel owns exactly two inter slots -- the leading and trailing
+      // <net> that ncclTopoGetXmlFromChannel emits. Without this, extra <net>
+      // subs run on into the next channel's slots.
+      if (n >= 2) {
+        WARN("XML Import Channel : too many net subnodes in channel %d (max %d).", c, 2);
+        return ncclInvalidUsage;
+      }
       inter[n++] = dev;
     } else if (strcmp(sub->name, "gpu") == 0) {
       int rank = -1;
