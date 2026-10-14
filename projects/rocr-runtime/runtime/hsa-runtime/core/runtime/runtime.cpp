@@ -1012,9 +1012,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   });
 
   for (uint32_t i = 0; i < num_agents; i++) {
-    // DRM (UKI) agents derive from KfdDriver and inherit its residency path, and
-    // interop import still uses the libhsakmt KFD ioctls in enable_drm mode, so
-    // accept both KFD and DRM driver types here.
+    // Both KFD and DRM driver types are supported for interop import.
     if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD &&
         agents[i]->driver().kernel_driver_type_ != DriverType::DRM) {
       return HSA_STATUS_ERROR_INVALID_AGENT;
@@ -1022,25 +1020,30 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
   }
 
+  assert(num_agents > 0);
+  auto& driver = agents[0]->driver();
+
   const HSA_REGISTER_MEM_FLAGS reg_flags = {
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
+  // Import the dmabuf handle (works for both KFD and DRM)
   auto status = HSAKMT_CALL(
       hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags));
   if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  assert(num_agents > 0);
-  auto& driver = agents[0]->driver();
-
+  // Map the imported buffer to GPU VA
+  // For KFD: uses AMDKFD_IOC_MAP_MEMORY_TO_GPU
+  // For DRM: uses amdgpu_bo_va_op_raw2 via _fmm_map_to_gpu_drm
+  // Note: Coherency flags are retrieved from the object (set during import),
+  // not from the MemFlags parameter passed here.
   uint64_t altAddress;
-  HsaMemFlags mem_flags;
-  mem_flags.Value = 0;
-  mem_flags.ui32.CoarseGrain = 1;
-  mem_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &mem_flags,
+  HsaMemFlags map_flags;
+  map_flags.Value = 0;
+  map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
+  if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
                                 num_agents, nodes) != HSA_STATUS_SUCCESS) {
-    mem_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &mem_flags,
+    map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
+    if (driver.MakeMemoryResident(info.MemoryAddress, info.SizeInBytes, &altAddress, &map_flags,
                                   num_agents, nodes) != HSA_STATUS_SUCCESS) {
       driver.DeregisterMemory(info.MemoryAddress);
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
