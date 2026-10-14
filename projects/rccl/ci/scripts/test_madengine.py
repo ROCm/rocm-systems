@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fcntl
 import hashlib
 import json
 import logging
@@ -1188,7 +1189,9 @@ def append_result(
     if extra:
         entry.update(extra)
 
+    # Matrix legs append in parallel on a shared filesystem.
     with open(datastore, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
         f.write(json.dumps(entry) + "\n")
     log.info("Result appended to %s", datastore)
 
@@ -1507,7 +1510,8 @@ def main() -> None:
         log.info("Collecting %s results from %s", phase, run_dir)
         phase_results[phase] = collect_phase_results(run_dir, metric_key)
 
-        run_artifacts = results_dir / "runs" / run_id / phase
+        # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
+        run_artifacts = results_dir / "runs" / run_id / args.workload / phase
         try:
             run_artifacts.mkdir(parents=True, exist_ok=True)
             for f in ["perf.csv", "perf_entry_super.csv", "perf_entry_super.json"]:
