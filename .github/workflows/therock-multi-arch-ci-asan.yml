@@ -89,16 +89,15 @@ jobs:
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
       ref: users/dravindr/host_asan_8455_test # 2026-09-30
-      # pr_number lets TheRock's path filter use the GitHub PR files API.
-      # Without it, #8800 falls back to `git diff HEAD^` inside the shallow
-      # external-repo checkout, which exits 128 and fails setup.
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
-          "pr_number": "${{ github.event.pull_request.number }}",
-          "base_sha": "${{ github.event.pull_request.base.sha }}",
-          "head_sha": "${{ github.event.pull_request.head.sha }}"
+          "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.sha }}",
+          "pr_number": ${{ github.event.pull_request.number || 'null' }},
+          "event_name": "${{ github.event_name }}",
+          "skip_ci_config": ".github/skip-ci-config.toml"
         }
 
   linux_build_and_test:
