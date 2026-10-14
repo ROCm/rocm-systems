@@ -105,13 +105,12 @@ public:
     if (round.mismatch) {
       return ncclInternalError;
     }
-    return roundIndex == failBarrierRound ? ncclSystemError : ncclSuccess;
+    return ncclSuccess;
   }
 
   int timeouts = 0;
   int desyncs = 0;
   int barrierCalls = 0;
-  int failBarrierRound = -1;
 
 private:
   struct GatherRound {
@@ -163,7 +162,7 @@ protected:
                          comm->ddaScratch != nullptr;
     }
     if (resourcesRemain) {
-      finalizeDdaIpcForAllRanks();
+      finalizeDdaIpcSerially();
     }
   }
 
@@ -185,13 +184,20 @@ protected:
     }
   }
 
-  void finalizeDdaIpcForAllRanks() {
+  void closeDdaIpcPeerMappingsForAllRanks() {
     std::vector<std::thread> threads;
     for (int rank = 0; rank < kRanks; ++rank) {
-      threads.emplace_back([this, rank] { finiResults_[rank] = ncclDdaIpcCommFini(comms_[rank].get()); });
+      threads.emplace_back(
+        [this, rank] { closeResults_[rank] = ncclDdaIpcCommClosePeerMappings(comms_[rank].get()); });
     }
     for (auto& thread : threads) {
       thread.join();
+    }
+  }
+
+  void finalizeDdaIpcSerially() {
+    for (int rank = 0; rank < kRanks; ++rank) {
+      finiResults_[rank] = ncclDdaIpcCommFini(comms_[rank].get());
     }
   }
 
@@ -209,6 +215,7 @@ protected:
   ncclPeerInfo peerInfo_[kRanks] = {};
   std::unique_ptr<ncclComm> comms_[kRanks];
   ncclResult_t initResults_[kRanks] = {};
+  ncclResult_t closeResults_[kRanks] = {};
   ncclResult_t finiResults_[kRanks] = {};
   SimBootstrap bootstrap_;
 
@@ -291,24 +298,29 @@ protected:
   int failCloseCall_ = -1;
 };
 
-TEST_F(DdaIpcLifecycleMicrotest, TeardownClosesEveryPeerMappingBeforeFreeingExportedAllocations) {
+TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialCommFree) {
   initializeDdaIpcForAllRanks();
   for (int rank = 0; rank < kRanks; ++rank) {
     ASSERT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;
     ASSERT_NE(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
     ASSERT_NE(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
-    ASSERT_TRUE(comms_[rank]->ddaIpcInitStarted) << "rank " << rank;
-    comms_[rank]->ddaIpcCollectiveTeardownReady = true;
   }
   EXPECT_EQ(2 * kRanks * (kRanks - 1), openMappingCount());
 
-  finalizeDdaIpcForAllRanks();
+  // commDestroySync runs concurrently per local rank and closes mappings.
+  closeDdaIpcPeerMappingsForAllRanks();
+  EXPECT_EQ(0, openMappingCount());
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, closeResults_[rank]) << "rank " << rank;
+  }
 
+  // commReclaim subsequently calls commFree serially for every local rank.
+  // This must neither block nor free an allocation that a peer still maps.
+  finalizeDdaIpcSerially();
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
-  EXPECT_EQ(2 * kRanks, bootstrap_.barrierCalls);
+  EXPECT_EQ(0, bootstrap_.barrierCalls);
   EXPECT_EQ(0, earlyFrees_);
-  EXPECT_EQ(0, openMappingCount());
   EXPECT_TRUE(liveAllocations_.empty());
   for (int rank = 0; rank < kRanks; ++rank) {
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
@@ -320,11 +332,11 @@ TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaSkipsIpcInitializationAndCollectiveT
 
   initializeDdaIpcForAllRanks();
   for (int rank = 0; rank < kRanks; ++rank) {
-    EXPECT_TRUE(comms_[rank]->ddaIpcInitStarted) << "rank " << rank;
     EXPECT_EQ(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
     EXPECT_EQ(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
   }
-  finalizeDdaIpcForAllRanks();
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
@@ -337,14 +349,8 @@ TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaSkipsIpcInitializationAndCollectiveT
   }
 }
 
-TEST_F(DdaIpcLifecycleMicrotest, EligibleCommWhoseDdaInitNeverStartedSkipsCollectiveTeardown) {
-  for (int rank = 0; rank < kRanks; ++rank) {
-    // A normal destroy barrier alone is not sufficient: parent/grow comms do
-    // not enter ncclDdaIpcCommInit and must not enter DDA teardown barriers.
-    comms_[rank]->ddaIpcCollectiveTeardownReady = true;
-  }
-
-  finalizeDdaIpcForAllRanks();
+TEST_F(DdaIpcLifecycleMicrotest, FinalizationWithoutIpcInitializationIsNonCollectiveNoOp) {
+  finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.barrierCalls);
   EXPECT_TRUE(liveAllocations_.empty());
@@ -358,55 +364,36 @@ TEST_F(DdaIpcLifecycleMicrotest, AbortOrRevokeCleanupStaysLocalAndClosesPeerMapp
   abortFlags_[0] = 1;
   comms_[1]->revokedFlag = true;
 
-  finalizeDdaIpcForAllRanks();
+  // Abort/revoke may have only a subset of ranks alive. Finalization must
+  // remain local and complete even when no normal-destroy barrier is possible.
+  finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
   EXPECT_EQ(0, bootstrap_.barrierCalls);
   EXPECT_EQ(0, openMappingCount());
   EXPECT_TRUE(liveAllocations_.empty());
-  for (int rank = 0; rank < kRanks; ++rank) {
-    EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
-    EXPECT_FALSE(comms_[rank]->ddaIpcInitStarted) << "rank " << rank;
-    EXPECT_FALSE(comms_[rank]->ddaIpcCollectiveTeardownReady) << "rank " << rank;
-  }
-}
-
-TEST_F(DdaIpcLifecycleMicrotest, EntryBarrierFailureIsBestEffortAndCleanupCompletes) {
-  initializeDdaIpcForAllRanks();
-  for (int rank = 0; rank < kRanks; ++rank) {
-    comms_[rank]->ddaIpcCollectiveTeardownReady = true;
-  }
-  bootstrap_.failBarrierRound = 0;
-
-  finalizeDdaIpcForAllRanks();
-
-  EXPECT_EQ(0, bootstrap_.timeouts);
-  EXPECT_EQ(0, bootstrap_.desyncs);
-  EXPECT_EQ(kRanks, bootstrap_.barrierCalls);
-  EXPECT_EQ(0, openMappingCount());
-  EXPECT_TRUE(liveAllocations_.empty());
+  EXPECT_GT(earlyFrees_, 0);
   for (int rank = 0; rank < kRanks; ++rank) {
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
   }
 }
 
-TEST_F(DdaIpcLifecycleMicrotest, PeerCloseFailureIsBestEffortAndCollectiveCleanupCompletes) {
+TEST_F(DdaIpcLifecycleMicrotest, PeerCloseFailureIsBestEffortAndSerialCleanupCompletes) {
   initializeDdaIpcForAllRanks();
-  for (int rank = 0; rank < kRanks; ++rank) {
-    comms_[rank]->ddaIpcCollectiveTeardownReady = true;
-  }
   failCloseCall_ = 1;
 
-  finalizeDdaIpcForAllRanks();
+  closeDdaIpcPeerMappingsForAllRanks();
+  finalizeDdaIpcSerially();
 
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
-  EXPECT_EQ(2 * kRanks, bootstrap_.barrierCalls);
+  EXPECT_EQ(0, bootstrap_.barrierCalls);
   EXPECT_EQ(2 * kRanks * (kRanks - 1), closeCalls_);
   EXPECT_EQ(0, openMappingCount());
   EXPECT_TRUE(liveAllocations_.empty());
   for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, closeResults_[rank]) << "rank " << rank;
     EXPECT_EQ(ncclSuccess, finiResults_[rank]) << "rank " << rank;
   }
 }

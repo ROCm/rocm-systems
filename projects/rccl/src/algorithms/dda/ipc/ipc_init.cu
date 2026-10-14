@@ -32,9 +32,6 @@ using nccl_dda_detail::kDdaNranks;
 
 namespace {
 
-constexpr int kDdaIpcFiniEnteredTag = 0xDDA0;
-constexpr int kDdaIpcFiniClosedTag = 0xDDA1;
-
 bool ddaIpcCommEligible(const ncclComm* comm) {
   if (comm == nullptr || !rcclParamDdaEnable()) {
     return false;
@@ -48,14 +45,6 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
 } // namespace
 
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
-  // Mark entry before any local eligibility or resource check. The caller
-  // invokes this function uniformly for every rank in an 8-rank, single-node
-  // communicator, so normal teardown participation cannot diverge if local
-  // architecture, environment, P2P, or allocation checks differ.
-  if (comm != nullptr) {
-    comm->ddaIpcInitStarted = true;
-  }
-
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -216,23 +205,9 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
+ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
-  }
-
-  // IPC importers must release both the barrier and scratch mappings before any
-  // exporting rank frees its local allocation. Keep abort/revoke cleanup local:
-  // those paths cannot require every rank to enter another collective.
-  bool teardownCollectiveReady = false;
-  if (comm->ddaIpcInitStarted && comm->ddaIpcCollectiveTeardownReady) {
-    ncclResult_t barrierResult =
-      bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniEnteredTag);
-    if (barrierResult == ncclSuccess) {
-      teardownCollectiveReady = true;
-    } else {
-      WARN("ncclDdaIpcCommFini: entry barrier failed (%d); continuing local cleanup", barrierResult);
-    }
   }
 
   auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
@@ -240,24 +215,31 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
       barrierState->resources->ipcMemHandler != nullptr) {
     ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
     if (closeResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommFini: barrier peer mapping close failed (%d); continuing cleanup", closeResult);
+      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",
+           closeResult);
     }
   }
   if (comm->ddaIpcMemHandler != nullptr) {
     ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
     if (closeResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommFini: scratch peer mapping close failed (%d); continuing cleanup", closeResult);
+      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup",
+           closeResult);
     }
   }
+  return ncclSuccess;
+}
 
-  if (teardownCollectiveReady) {
-    ncclResult_t barrierResult =
-      bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniClosedTag);
-    if (barrierResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommFini: peer-close barrier failed (%d); continuing local cleanup", barrierResult);
-    }
+ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
+  if (comm == nullptr) {
+    return ncclSuccess;
   }
 
+  // commFree must remain non-collective. Normal destruction closes mappings
+  // from commDestroySync before its existing intranode barrier; this idempotent
+  // call handles abort, revoke, and partial-init cleanup locally.
+  (void)ncclDdaIpcCommClosePeerMappings(comm);
+
+  auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
   if (comm->ddaIpcBarrierState != nullptr) {
     delete barrierState;
     comm->ddaIpcBarrierState = nullptr;
@@ -273,7 +255,5 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
-  comm->ddaIpcInitStarted = false;
-  comm->ddaIpcCollectiveTeardownReady = false;
   return ncclSuccess;
 }

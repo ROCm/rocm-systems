@@ -794,8 +794,6 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaPeerPtrsDev = nullptr;
   comm->ddaPeerPtrsHost = nullptr;
   comm->ddaIpcBarrierState = nullptr;
-  comm->ddaIpcInitStarted = false;
-  comm->ddaIpcCollectiveTeardownReady = false;
   comm->ddaFabricBarrierState = nullptr;
   comm->ddaFabricMemHandler = nullptr;
   comm->ddaFabricMaxBlocks = 0;
@@ -4260,6 +4258,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
+    // Close imported DDA IPC mappings while commDestroySync is still running
+    // concurrently for every local rank. The existing intranode barrier below
+    // then guarantees all mappings are closed before serial commFree releases
+    // any rank's exported allocations.
+    (void)ncclDdaIpcCommClosePeerMappings(comm);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
@@ -4282,10 +4285,6 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
         INFO(NCCL_DESTROY, "comm 0x%" PRIx64 " rank %d intranode barrier error %d", comm->commHash, comm->rank,
              barrierRet);
         if (ret == ncclSuccess) ret = barrierRet;
-      } else if (comm->ddaIpcInitStarted) {
-        // All host-local ranks reached normal destruction. DDA IPC finalization
-        // may now use its collective close-before-free protocol.
-        comm->ddaIpcCollectiveTeardownReady = true;
       }
       free(hostRanks);
     }
