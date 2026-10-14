@@ -358,6 +358,88 @@ TEST_F(RomeModelsParseGraphMicrotest, MultiDigitGpuNumbers_AreParsed) {
   EXPECT_EQ(graph.intra[11], RomeModelsParseScene::kRankBase + 11);
 }
 
+// A ring list of `channels` identical well-formed segments for the 4-GPU scene.
+std::string RingsWithChannels(int channels) {
+  std::string rings = "0 1 2 3";
+  for (int i = 1; i < channels; i++) rings += "|0 1 2 3";
+  return rings;
+}
+
+// nIntraChannels sits immediately after inter[MAXCHANNELS * 2], so the first
+// channel past the end writes exactly onto it. The overrun therefore stays inside
+// the same ncclTopoGraph and no sanitizer can see it -- this sentinel is the only
+// thing that can catch it.
+constexpr int kIntraChannelsSentinel = 4242;
+
+TEST_F(RomeModelsParseGraphMicrotest, MoreChannelsThanMaxChannels_IsRejected) {
+  // One NET, so the inter[] writes that run off the end actually happen.
+  system()->nodes[NET].count = 1;
+  system()->nodes[NET].nodes[0].id = 77;
+  graph()->nIntraChannels = kIntraChannelsSentinel;
+
+  // Exactly one channel too many, so an off-by-one in the new bound fails here
+  // rather than only something far past the limit.
+  const std::string tooMany = RingsWithChannels(MAXCHANNELS + 1);
+
+  EXPECT_EQ(parseGraph(tooMany.c_str(), system(), graph(), nullptr, nullptr, 0),
+            ncclInvalidUsage);
+  // Returning an error is not enough on its own: before the bound existed this
+  // returned ncclSuccess and left nIntraChannels holding the NET id.
+  EXPECT_EQ(graph()->nIntraChannels, kIntraChannelsSentinel);
+  EXPECT_LE(graph()->nChannels, MAXCHANNELS);
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxChannels_IsAccepted) {
+  system()->nodes[NET].count = 1;
+  system()->nodes[NET].nodes[0].id = 77;
+  graph()->nIntraChannels = kIntraChannelsSentinel;
+
+  // The largest list that still fits, so a bound tightened by one breaks here.
+  const std::string exactlyFull = RingsWithChannels(MAXCHANNELS);
+
+  ASSERT_EQ(parseGraph(exactlyFull.c_str(), system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, MAXCHANNELS);
+  EXPECT_EQ(graph()->nIntraChannels, kIntraChannelsSentinel);
+}
+
+// The shipping preset ring literals reach parseGraph under NCCLCHECK, so a bound
+// that rejected one of them would fail ncclCommInitRank on hardware that matches
+// that model. This is what stops the bounds added for ROCM-31973 from being
+// tightened past what the presets themselves need.
+TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetRingBase_IsAccepted) {
+  constexpr size_t kModels = sizeof(romeTopoModels) / sizeof(romeTopoModels[0]);
+
+  for (size_t i = 0; i < kModels; i++) {
+    const rcclRomeModel& model = romeTopoModels[i];
+
+    for (const char* rings : {model.ringBase, model.ringTail1, model.ringTail2, model.treeRail}) {
+      if (rings == nullptr) continue;
+      SCOPED_TRACE("romeTopoModels[" + std::to_string(i) + "], rings " + rings);
+
+      RomeModelsParseScene scene(model.nGpus);
+      scene.system()->totalBw = 120.0f;
+      scene.system()->nodes[NET].count = model.nNics;
+      for (int n = 0; n < model.nNics; n++) scene.system()->nodes[NET].nodes[n].id = n;
+
+      ncclTopoGraph graph;
+      std::memset(&graph, 0, sizeof(graph));
+      // The production map is a permutation of the GPU numbers; identity is the
+      // representative one, and its length is what bounds the guarded lookup.
+      std::vector<int> identityMap(model.nGpus);
+      for (int g = 0; g < model.nGpus; g++) identityMap[g] = g;
+      std::vector<int> identityNets(model.nNics > 0 ? model.nNics : 1);
+      for (int n = 0; n < model.nNics; n++) identityNets[n] = n;
+
+      EXPECT_EQ(parseGraph(rings, scene.system(), &graph, identityMap.data(), identityNets.data(),
+                           /*reverse=*/0),
+                ncclSuccess);
+    }
+  }
+
+  ResetNcclFakes();
+}
+
 // ---------------------------------------------------------------------------
 // parseGraph (NCCL_RINGS) -- tests to be written, see ROCM-31973.
 //
@@ -438,6 +520,7 @@ TEST_F(RomeModelsParseGraphMicrotest, MultiDigitGpuNumbers_AreParsed) {
 //   ExactlyMaxChannels_IsAccepted
 //   EveryPresetRingBase_IsAccepted
 // ---------------------------------------------------------------------------
+
 
 
 }  // namespace

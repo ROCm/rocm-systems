@@ -3879,6 +3879,15 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           if (gpu != ngpus) goto newchannel;
           // Ignore if net_count is not 0 or odd number
           if (net_count && net_count % 2) goto newchannel;
+          // graph->intra, graph->inter and graph->intraNets are all indexed by
+          // nChannels, so a longer ring list writes past every one of them.
+          // Refuse rather than truncate: a silently shortened graph is not the
+          // topology that was asked for.
+          if (nChannels >= MAXCHANNELS) {
+            WARN("Too many channels in user-defined rings (max %d) (NCCL_RINGS); initialization will fail",
+                 MAXCHANNELS);
+            return ncclInvalidUsage;
+          }
 
           for (int r = 0; r < ngpus; r++) {
             int g = gpus[r];
