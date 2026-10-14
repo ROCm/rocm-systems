@@ -53,6 +53,7 @@ class ExpansionKind(Enum):
     WMMA = auto()
     CMP_REMOVED = auto()
     ATOMIC_FP_POLICY = auto()
+    BUFFER_FORMAT_POLICY = auto()
 
 
 @dataclass
@@ -742,6 +743,29 @@ def _apply_domain_rules(
         # downstream encoding/semantic translators have the right dst_op even
         # when the action is overridden to flag a domain-specific lowering.
         prev_op = entry.action.target_opcode
+
+        # Formatted stores need both compatible descriptor/format encoding and
+        # the same missing-channel policy. A raw re-encoding cannot supply either.
+        format_family = {
+            'cdna1': 'gfx9',
+            'cdna2': 'gfx9',
+            'cdna3': 'gfx9',
+            'cdna4': 'gfx9',
+            'rdna1': 'gfx10',
+            'rdna2': 'gfx10',
+            'rdna3': 'gfx11',
+            'rdna3_5': 'gfx11',
+            'rdna3.5': 'gfx11',
+            'rdna4': 'gfx12',
+            'cdna5': 'no_formatted_buffer',
+        }
+        if (
+            name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+            and 'FORMAT' in name
+            and format_family.get(src_isa, src_isa)
+            != format_family.get(dst_isa, dst_isa)
+        ):
+            entry.action = LegalizationAction.expand(ExpansionKind.BUFFER_FORMAT_POLICY)
 
         if name in (
             'S_WAITCNT',

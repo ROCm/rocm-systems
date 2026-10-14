@@ -892,6 +892,26 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
                                    "does not expose a non-empty .text section"));
 }
 
+TEST(BinaryTranslatorE2E, FormattedStoresRequireCrossFamilySemanticExpansion) {
+  for (bool typed : {false, true})
+    for (uint16_t opcode : {4, 5, 6, 7, 12, 13, 14, 15}) {
+      const auto store =
+          typed ? cdna4::build_mtbuf(
+                      opcode, {.dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128})
+                : cdna4::build_mubuf(opcode, {.vdata = 8, .srsrc = 1, .soffset = 128});
+      const auto image =
+          make_minimal_amdgpu_elf_with_descriptor_after_text({store[0], store[1], 0xbf810000u});
+      AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+      const auto result = translator.translate(source);
+      EXPECT_FALSE(result.ok()) << "typed=" << typed << " opcode=" << opcode;
+      EXPECT_EQ(result.elf_bytes, image);
+      EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                       "no expansion rule is implemented"));
+    }
+}
+
 TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
   for (uint16_t opcode : {cdna4::kDsMinF32Ds, cdna4::kDsMaxF32Ds}) {
     // Legacy SNaN propagation differs from RDNA4 MIN_NUM/MAX_NUM. Refuse the

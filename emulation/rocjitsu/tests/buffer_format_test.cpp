@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/mubuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mtbuf.h"
@@ -95,8 +96,7 @@ TEST(BufferFormatTest, PacksConvertedComponentsWithExplicitMissingChannelPolicy)
   ASSERT_TRUE(amdgpu::pack_buffer_format(46, identity, {}, bytes,
                                          amdgpu::BufferFormatEncoding::Gfx11,
                                          amdgpu::BufferStoreMissingChannel::ReplicateFirst)
-                  .succeeded());
-  EXPECT_EQ(bytes, (std::array<uint8_t, 4>{}));
+                  .failed());
   const std::array<uint32_t, 2> halves{bits(1), bits(-2)};
   ASSERT_TRUE(amdgpu::pack_buffer_format(29, identity, halves, bytes).succeeded());
   EXPECT_EQ(bytes, (std::array<uint8_t, 4>{0, 0x3c, 0, 0xc0}));
@@ -453,25 +453,23 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
   const bool replicate = arch == ROCJITSU_CODE_ARCH_RDNA4;
   for (bool typed : {false, true})
     for (bool d16 : {false, true}) {
-      if ((typed || d16) && (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2))
-        continue; // GFX10 uses a separate D16 encoding; scalar channel policy is shared.
-      for (unsigned count = 1; count <= 4; ++count)
+      for (uint32_t count = 1; count <= 4; ++count)
         for (bool reverse : {false, true}) {
           SCOPED_TRACE(testing::Message() << "typed=" << typed << " d16=" << d16
                                           << " count=" << count << " reverse=" << reverse);
           const uint32_t selectors = reverse ? 7 | (6 << 3) | (5 << 6) | (4 << 9) : identity;
           descriptor(46, 4, selectors); // 8_8_8_8_UINT, typed instructions use identity.
-          for (unsigned lane = 0; lane < 3; ++lane) {
+          for (uint32_t lane = 0; lane < 3; ++lane) {
             memory.write32(0x1000 + lane * 4, 0xa5a5a5a5);
             cu->write_vgpr(vb, lane, lane);
-            for (unsigned reg = 0; reg < 4; ++reg)
+            for (uint32_t reg = 0; reg < 4; ++reg)
               cu->write_vgpr(vb + 8 + reg, lane, (reg + 1) * 0x11);
             if (d16) {
               cu->write_vgpr(vb + 8, lane, 0x00220011);
               cu->write_vgpr(vb + 9, lane, 0x00440033);
             }
           }
-          const unsigned op = (d16 ? 12 : 4) + count - 1;
+          const uint32_t op = (d16 ? 12 : 4) + count - 1;
           std::unique_ptr<Instruction> inst;
           if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
             const auto words =
@@ -482,6 +480,21 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
                                                               .format = 46,
                                                               .idxen = 1});
             inst.reset(decode_valid(*decoder, words.data()));
+          } else if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+            if (typed) {
+              const auto words = rdna1::build_mtbuf(4 + count - 1, {.idxen = 1,
+                                                                    .format = 60,
+                                                                    .vdata = 8,
+                                                                    .srsrc = 1,
+                                                                    .opm = uint8_t(d16),
+                                                                    .soffset = 128});
+              inst.reset(decode_valid(*decoder, words.data()));
+            } else {
+              const auto words = rdna1::build_mubuf(
+                  4 + count - 1,
+                  {.idxen = 1, .opm = uint8_t(d16), .vdata = 8, .srsrc = 1, .soffset = 128});
+              inst.reset(decode_valid(*decoder, words.data()));
+            }
           } else if (typed && arch_is_cdna_4_or_lower(arch)) {
             const auto words = cdna4::build_mtbuf(
                 op, {.idxen = 1, .dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128});
@@ -490,8 +503,7 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
             const auto words = rdna3::build_mtbuf(
                 op, {.format = 46, .vdata = 8, .srsrc = 1, .idxen = 1, .soffset = 128});
             inst.reset(decode_valid(*decoder, words.data()));
-          } else if (arch_is_cdna_4_or_lower(arch) || arch == ROCJITSU_CODE_ARCH_RDNA1 ||
-                     arch == ROCJITSU_CODE_ARCH_RDNA2) {
+          } else if (arch_is_cdna_4_or_lower(arch)) {
             const auto words =
                 cdna4::build_mubuf(op, {.idxen = 1, .vdata = 8, .srsrc = 1, .soffset = 128});
             inst.reset(decode_valid(*decoder, words.data()));
@@ -507,8 +519,8 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
           cu->l1_vector().flush_all();
           l2.flush_all();
           uint32_t expected = 0;
-          for (unsigned component = 0; component < 4; ++component) {
-            const unsigned shader = reverse && !typed ? 3 - component : component;
+          for (uint32_t component = 0; component < 4; ++component) {
+            const uint32_t shader = reverse && !typed ? 3 - component : component;
             const uint32_t value = shader < count ? (shader + 1) * 0x11 : replicate ? 0x11 : 0;
             expected |= value << (component * 8);
           }
@@ -517,6 +529,34 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
           EXPECT_EQ(memory.read32(0x1008), expected);
         }
     }
+}
+
+TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemoryIssue) {
+  auto decoder = Decoder::create(GetParam());
+  descriptor(46, 4, 4 | (4 << 3) | (4 << 6) | (4 << 9));
+  memory.write32(0x1000, 0xa5a5a5a5u);
+  std::unique_ptr<Instruction> inst;
+  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+    const auto words =
+        rdna4::build_vbuffer(rdna4::kBufferStoreFormatXVbuffer,
+                             {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
+    inst.reset(decode_valid(*decoder, words.data()));
+  } else {
+    const auto words = cdna4::build_mubuf(4, {.vdata = 8, .srsrc = 1, .soffset = 128});
+    inst.reset(decode_valid(*decoder, words.data()));
+  }
+  ASSERT_NE(inst, nullptr);
+  EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+  EXPECT_EQ(inst->data(), nullptr);
+  EXPECT_EQ(memory.read32(0x1000), 0xa5a5a5a5u);
+  for (uint32_t selectors :
+       {4u | (5u << 3) | (0u << 6) | (1u << 9), 7u | (7u << 3) | (5u << 6) | (5u << 9),
+        4u | (6u << 3) | (7u << 6) | (5u << 9)}) {
+    descriptor(46, 4, selectors);
+    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+    state.is_load = false;
+    EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 1).failed());
+  }
 }
 
 TEST_P(BufferFormatExecutionTest, NormalizedLoadsIgnoreAndRestoreHostRoundingMode) {

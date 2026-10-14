@@ -233,13 +233,13 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
     if (!width)
       continue;
     // Stores invert the descriptor's load mapping: an A8 view maps shader
-    // W to physical R. Only RDNA4/CDNA5 replicate X for missing shader values.
+    // W to physical R. The caller supplies the missing-channel policy.
     uint32_t component = 0;
     for (uint32_t shader = 0; shader < 4; ++shader) {
       if (((selectors >> (3 * shader)) & 7) == i + 4) {
         if (shader < components.size())
           component = components[shader];
-        else if (missing == BufferStoreMissingChannel::ReplicateFirst && !components.empty())
+        else if (missing == BufferStoreMissingChannel::ReplicateFirst)
           component = components[0];
         break;
       }
@@ -267,7 +267,7 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
                                 BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed())
+  if (decoded.failed() || components.empty())
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
   pack_format(decoded.value(), selectors, components, bytes, missing);
@@ -305,6 +305,19 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (decoded.failed())
     return util::Result::failure();
   d.decoded_buffer_format = decoded.value();
+  if (!d.is_load && format < 0) {
+    // Arbitrary DST_SEL permutations are not an inverse swizzle on hardware.
+    // Qualify the common straight and reversed channel orders; constants for
+    // components absent from the memory format do not affect a straight store.
+    bool straight = true;
+    for (unsigned channel = 0; channel < 4; ++channel)
+      if (d.decoded_buffer_format.widths[channel] &&
+          ((d.buffer_selectors >> (channel * 3)) & 7) != channel + 4)
+        straight = false;
+    constexpr unsigned reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
+    if (!straight && d.buffer_selectors != reversed)
+      return util::Result::failure();
+  }
   uint32_t bits = 0;
   for (uint32_t width : d.decoded_buffer_format.widths)
     bits += width;
@@ -315,7 +328,10 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
-  const auto cu_arch = wf.cu().arch();
+  // RDNA4 replicates X; earlier formatted-buffer targets zero missing channels.
+  const auto missing = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4
+                           ? BufferStoreMissingChannel::ReplicateFirst
+                           : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
@@ -340,9 +356,6 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
                     : half
               : std::bit_cast<uint32_t>(util::f16_to_f32(half));
     }
-    const auto missing = cu_arch == ROCJITSU_CODE_ARCH_RDNA4 || cu_arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? BufferStoreMissingChannel::ReplicateFirst
-                             : BufferStoreMissingChannel::Zero;
     pack_format(format, d.buffer_selectors, std::span(components).first(d.buffer_components),
                 std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing);
   }
