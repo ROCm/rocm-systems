@@ -17,7 +17,7 @@
  * what keeps the Catch2 tests and the matrix reporter from drifting into
  * disagreeing about what an API is supposed to do at replay.
  *
- * Generated from 556 HIP APIs.
+ * Generated from 557 HIP APIs.
  */
 
 #pragma once
@@ -393,6 +393,7 @@ inline constexpr HrrApiExpectation kHrrApiMatrix[] = {
     {"hipKernelNameRef", "T4", 1, false, true, false, false},
     {"hipKernelNameRefByPtr", "T4", 1, false, true, false, false},
     {"hipKernelSetAttribute", "T4", 1, false, true, false, false},
+    {"hipKernelSetAttributeForDevice", "T4", 1, false, true, false, false},
     {"hipLaunchCooperativeKernel_spt", "T4", 0, false, true, false, false},
     {"hipLaunchHostFunc_spt", "T4", 5, false, true, false, false},
     {"hipLaunchKernel_spt", "T4", 0, false, true, false, false},
