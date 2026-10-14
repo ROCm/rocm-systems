@@ -44,3 +44,22 @@ foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
         PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
         ENVIRONMENT "${rocpd-env}")
 endforeach()
+
+#########################################################################################
+#
+# PC-sampling post-processing on synthetic databases (no GPU required)
+#
+#########################################################################################
+
+rocprofiler_add_integration_validate_test(
+    rocpd-pc-sampling-postprocess
+    TEST_PATHS pc_sampling_postprocess.py
+    CONFIG pytest.ini
+    TIMEOUT 300
+    LABELS "integration-tests;rocpd"
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    DEPENDS
+        rocprofiler-sdk-rocpd-python-bindings-${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
+    )

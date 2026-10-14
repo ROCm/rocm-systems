@@ -866,13 +866,12 @@ For attachment profiling of running processes:
         isa_decode_options,
         "--complete-isa-decode",
         help=(
-            "Persist the instruction text and comments resolved during ISA decode "
-            "(e.g. PC sample decode, thread trace decode) directly in ROCPD output. "
-            "Default: off (ROCPD post-processing attempts lazy disassembly from trusted "
-            "local code-object paths when no text is stored). "
-            "WARNING: "
-            "enabling this can drastically increase the database size, especially for "
-            "applications with large code objects."
+            "Persist the instruction text and comments resolved during PC sampling "
+            "ISA decode directly in ROCPD output. "
+            "Default: off (ROCPD post-processing lazily disassembles local code objects "
+            "whose bytes still match their recorded content hash when no text is "
+            "stored). For PC sampling this adds one row per distinct sampled program "
+            "counter to the database."
         ),
     )
 

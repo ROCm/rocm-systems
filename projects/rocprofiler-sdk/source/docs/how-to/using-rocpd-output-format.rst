@@ -353,6 +353,13 @@ rocpd2csv - CSV export tool
     # Apply time window filtering (export middle 70% of execution)
     rocpd2csv -i large_profile.db --start 15% --end 85%
 
+    # Keep the input read-only while disassembling PC samples
+    rocpd2csv -i pc_profile.db --no-cache-disassembly
+
+``rocpd2csv`` accepts the same ISA decode options as ``rocpd convert``
+(``--no-cache-disassembly`` and ``--codeobj-path-prefix-map``). See
+:ref:`rocpd-pc-sampling`.
+
 **Common output files:**
 
 - ``out_hip_api_trace.csv``: HIP API call trace data.
@@ -360,6 +367,10 @@ rocpd2csv - CSV export tool
 - ``out_kernel_trace.csv``: GPU kernel execution information.
 
 - ``out_counter_collection.csv``: Hardware performance counter data.
+
+- ``out_pc_sampling_host_trap_trace.csv`` and ``out_pc_sampling_stochastic_trace.csv``:
+  PC samples, one row per sample. The leading ``Guid`` column identifies the
+  recording, because local IDs such as ``Dispatch_Id`` repeat across merged recordings.
 
 rocpd2otf2 - OTF2 export tool
 ++++++++++++++++++++++++++++++
@@ -1866,7 +1877,12 @@ One row per collected PC sample. Key columns:
   * - ``exec_mask``
     - TEXT
     - Bitmask of active SIMD lanes at sample time. Stored as a decimal string so
-      the full 64-bit mask is preserved without integer overflow.
+      the full 64-bit mask is preserved without integer overflow. Because the
+      column is TEXT, ``<``, ``>``, ``ORDER BY``, ``MIN``, and ``MAX`` compare
+      masks as text (``'255' > '1000'``), while ``=`` with an integer still
+      matches. ``CAST(exec_mask AS INTEGER)`` orders masks below 2^63
+      numerically but clamps larger masks, including a full 64-lane mask, to
+      9223372036854775807.
   * - ``code_object_id``
     - INTEGER
     - Identifies the loaded code object containing the sampled instruction.
@@ -1900,8 +1916,10 @@ packed binary blob of architecture-specific hardware state. The blob layout is
 self-describing through two metadata tables:
 
 - ``rocpd_info_blob_schema``: Describes the overall layout (name
-  ``pc_sample_extdata_hosttrap`` or ``pc_sample_extdata_stochastic`` depending on the
-  sampling method, total byte size, byte order ``little``, alignment ``1``).
+  ``pc_sample_extdata_hosttrap`` for host-trap, or ``pc_sample_extdata_stochastic``
+  with an optional ``_gfx12`` or ``_gfx1250`` suffix for stochastic sampling,
+  followed by ``_no_memory_counters`` when those samples carry no memory counters;
+  total byte size, byte order ``little``, alignment ``1``).
 - ``rocpd_info_blob_field``: One row per field with name, byte offset, size, and
   data type. Consumers can decode the binary without hard-coding struct offsets.
 
@@ -1923,9 +1941,14 @@ columns from ``rocpd_gpu_pc_sample``. The view is created when a
 ``rocpd_info_blob_schema`` and, for each registered blob schema (keyed by its
 ``(guid, schema_id)``), builds a generic decoded view over the schema's
 ``source_table`` (``rocpd_gpu_pc_sample`` here), which ``setup_isa_decode_views``
-then enriches with the instruction and enum-name columns. The packed blob bytes are only unpacked when the decoded view
-is queried; queries against ``rocpd_gpu_pc_sample`` directly incur no blob
-unpacking.
+then enriches with the instruction and enum-name columns. The packed blob bytes
+are only unpacked when the decoded view is queried. Reading
+``rocpd_gpu_pc_sample`` directly (for example, through ``sqlite3``) does not
+unpack them, but ``rocpd query`` rewrites references to ``rocpd_gpu_pc_sample``
+to the decoded view (see below). If the PC-sampling layer cannot be set up,
+``rocpd`` prints a warning, does not create ``rocpd_gpu_pc_sample_decoded``, and
+skips the PC-sampling CSV files; the blob fields remain available through
+``rocpd_gpu_pc_sample_blob_decoded``.
 
 The decoded view exposes every column from ``rocpd_gpu_pc_sample`` plus one
 additional column per blob field, including ``hw_id_chiplet``,
@@ -1935,8 +1958,13 @@ additional column per blob field, including ``hw_id_chiplet``,
 ``hw_id_queue_id``, ``hw_id_microengine_id``, ``wave_in_group``,
 ``workgroup_id_x``, ``workgroup_id_y``, ``workgroup_id_z``,
 ``dual_issue_valu``, and the ``arb_state_issue_*`` and ``arb_state_stall_*``
-fields recorded by the gfx9 blob (which omits the ``*_lds_direct`` and
-``*_brmsg`` arbiter variants that appear in the SDK JSON). It additionally
+fields. GFX12 adds the ``*_lds_direct`` and ``*_brmsg`` arbiter variants and,
+when supplied by the sample, the ``memory_counter_load``, ``memory_counter_store``,
+``memory_counter_bvh``, ``memory_counter_sample``, ``memory_counter_ds``, and
+``memory_counter_km`` fields. GFX1250 additionally exposes
+``sampling_lock_error``, ``memory_counter_async``, ``memory_counter_tensor``, and
+``memory_counter_xnack``. Architecture-specific or unavailable memory-counter fields
+are NULL for rows whose blob schema does not contain them. The view additionally
 exposes the disassembled ``instruction`` and
 ``instruction_comment`` text for the sampled program counter and the
 human-readable ``inst_type_name`` and ``stall_reason_name`` columns.
@@ -1950,10 +1978,21 @@ disassembles the sampled program counters on demand from the referenced code
 objects and returns the instruction text in the query result. By default this
 lazily decoded text is also written back into the database when the process
 exits, so it is reused on the next open instead of being re-disassembled (described below).
-Pass ``--no-cache-disassembly`` to the ``rocpd`` subcommands (or ``cache_disassembly=False``
-to the ``RocpdImportData`` API) to keep the input database read-only, in which case the
-decoded text is cached only in memory for the lifetime of the process and the ``.db`` file
-is left unchanged.
+Pass ``--no-cache-disassembly`` to ``rocpd convert``, ``rocpd query``,
+``rocpd summary``, ``rocpd2csv``, or ``python -m rocpd.query`` (or
+``cache_disassembly=False`` to the ``RocpdImportData`` API) to keep the input
+database read-only, in which case the decoded text is cached only in memory for
+the lifetime of the process and the ``.db`` file is left unchanged.
+
+A code object on disk can change after profiling, for example when the
+application is rebuilt or ``--codeobj-path-prefix-map`` points at a different
+file. When ``rocprofv3`` decodes a code object during PC sampling, it records a
+hash of the code object's bytes in the ``content_hash`` field of
+``rocpd_info_code_object.extdata``. Before decoding lazily, ``rocpd`` compares the
+bytes it reads against that hash and reports ``Decode unavailable`` for a
+mismatch rather than returning instructions from a different binary. Code
+objects without a recorded hash are still decoded, but their instructions are
+never written back.
 
 Passing ``--complete-isa-decode`` to ``rocprofv3`` instead persists
 the disassembly at collection time into the ``rocpd_disassembly_data`` table
@@ -1969,10 +2008,9 @@ only for those absent program counters. Because the fallback decodes from the
 same code objects, a query still returns instruction text for those program
 counters as long as the code objects remain accessible.
 
-By default (unless ``--no-cache-disassembly`` is passed to ``rocpd convert``,
-``rocpd query``, or ``rocpd summary``, or ``cache_disassembly=False`` is passed
-to the ``RocpdImportData`` API), the ``rocpd`` post-processing tools persist
-instructions that are decoded *lazily*. Program counters
+By default (unless ``--no-cache-disassembly`` or ``cache_disassembly=False`` is
+passed), the ``rocpd`` post-processing tools persist instructions that are
+decoded *lazily* from code objects that match their recorded hash. Program counters
 that are disassembled on demand while
 a query is served (for example by ``rocpd query`` or ``rocpd convert``) are
 written into the same ``rocpd_disassembly_data`` table when the process exits,
@@ -1985,19 +2023,22 @@ only those that resolved to an instruction.
 
    Disassembly write-back is on by default and best-effort:
 
-   - It writes to the input database(s) unless disabled with
+   - It writes to the database(s) that were opened unless disabled with
      ``--no-cache-disassembly`` (or ``cache_disassembly=False`` via the API),
-     which keeps the input read-only.
-   - Rows are written to the input database(s) at process exit (routed to each
-     recording by ``guid``), so the cache benefits the *next* open rather than
-     the current run.
+     which keeps the input read-only. When several inputs are merged
+     automatically, the merged copy is the database that was opened.
+   - Rows are written at process exit and routed to each recording's table by
+     ``guid``, including every recording of a merged database, so the cache
+     benefits the *next* open rather than the current run.
    - Only program counters that a query actually decodes are cached: the query
      must project the ``instruction`` or ``instruction_comment`` columns, the
-     program counter must not already be stored, and it must decode
-     successfully. Memory-resident code objects that cannot be decoded (see the
-     note below) are therefore not cached.
+     program counter must not already be stored, it must decode successfully,
+     and its code object must match its recorded content hash. Memory-resident
+     code objects that cannot be decoded (see the note below) are therefore not
+     cached.
    - It is skipped silently when the database cannot be written (a read-only
-     file or filesystem, lock contention, or a pre-3.0.6 database without the
+     file or filesystem, lock contention, a database deleted or replaced after
+     it was opened, or a pre-3.0.6 database without the
      ``rocpd_disassembly_data`` table); the database is left untouched.
    - Writes are de-duplicated per ``guid``, ``code_object_id``, and
      ``code_object_offset``, so the cache never changes query results.

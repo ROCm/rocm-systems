@@ -263,12 +263,16 @@ def merge_sqlite_dbs(
                 continue
 
             # Some rocpd_ views are derived from other views and have no
-            # direct backing tables with the "<view>_" prefix.
+            # direct backing tables with the "<view>_" prefix.  A definition that
+            # names one recording's tables would hide every other recording.
             sql_view = rocpd_views_sql.get(vitr)
-            if sql_view:
+            if sql_view and not any(uuid in sql_view for uuid in uuids):
                 conn.execute(sql_view)
             else:
-                log(f"Skipping view {vitr}: no matching tables and no SQL definition")
+                log(
+                    f"Skipping view {vitr}: no matching tables and no "
+                    "recording-independent SQL definition"
+                )
         conn.commit()
 
         # Now that the rocpd_ views are created, re-create the data-views using all the data
