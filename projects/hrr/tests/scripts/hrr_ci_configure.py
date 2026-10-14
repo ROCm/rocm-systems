@@ -8,6 +8,8 @@ Writes these GitHub Actions outputs:
   run_cpu           "true" when the generated-source, script and unit jobs run.
   run_gpu           "true" when the capture-enabled build and the GPU suite run.
   families          JSON list of {"family", "runner"} for the GPU suite.
+  skipped_families  JSON list of {"family", "reason"}: the other ci.yaml
+                    families, when the GPU suite runs.
   reason            One line explaining the decision, shown in the summary.
   rocm_sdk_version  The ROCm SDK the unit job installs.
 
@@ -47,6 +49,8 @@ EVENTS = ("pull_request", "push", "schedule", "workflow_dispatch")
 # is treated as touching everything rather than guessed at.
 MAX_LISTED_FILES = 3000
 
+NO_RUNNER = "no runner label in TheRock's runner config"
+
 
 class ConfigError(ValueError):
     pass
@@ -76,6 +80,7 @@ class Decision:
     run_gpu: bool
     reason: str
     families: list[dict] = field(default_factory=list)
+    skipped: list[dict] = field(default_factory=list)
 
 
 def _mapping(where: str, value, required: Iterable[str], optional: Iterable[str] = ()) -> dict:
@@ -272,8 +277,9 @@ def select_families(
     labels: list[str],
     matrix: dict,
     pick_weighted: Callable[[list, str], str],
-) -> tuple[list[dict], list[str]]:
-    """GPU families to test, in ci.yaml order, and the chosen ones without a runner."""
+) -> tuple[list[dict], list[dict]]:
+    """GPU families to test and the other ci.yaml families with the reason, in
+    ci.yaml order."""
     if requested:
         unknown = [key for key in requested if key not in config.families]
         if unknown:
@@ -289,18 +295,25 @@ def select_families(
         }
     chosen |= set(labelled_families(labels, matrix)) & set(config.families)
 
-    families, no_runner = [], []
+    families, skipped = [], []
     for key, family in config.families.items():
         if key not in chosen:
+            if requested:
+                reason = "not requested"
+            elif not family.enabled:
+                reason = "disabled in ci.yaml"
+            else:
+                reason = f"not run on {event} (ci.yaml triggers)"
+            skipped.append({"family": key, "reason": reason})
             continue
         linux = matrix.get(key, {}).get("linux", {})
         multi_gpu = event in family.multi_gpu_triggers
         runner = family.runner or runner_for(linux, pick_weighted, multi_gpu)
         if not runner:
-            no_runner.append(key)
+            skipped.append({"family": key, "reason": NO_RUNNER})
             continue
         families.append({"family": key, "runner": runner})
-    return families, no_runner
+    return families, skipped
 
 
 def decide(
@@ -344,12 +357,13 @@ def decide(
     if is_fork:
         return Decision(run_cpu, False, why + "; GPU suite skipped for a fork pull request")
 
-    families, no_runner = select_families(event, config, requested, labels, matrix, pick_weighted)
+    families, skipped = select_families(event, config, requested, labels, matrix, pick_weighted)
+    no_runner = [s["family"] for s in skipped if s["reason"] == NO_RUNNER]
     if no_runner:
         why += f"; no runner for {', '.join(no_runner)}"
     if not families:
         return Decision(run_cpu, False, why + "; no GPU family with a runner was selected")
-    return Decision(run_cpu, True, why, families)
+    return Decision(run_cpu, True, why, families, skipped)
 
 
 def is_fork(event: str, head_repo: str, repo: str) -> bool:
@@ -397,6 +411,7 @@ def write_outputs(decision: Decision, rocm_sdk_version: str, output_path: str | 
         f"run_cpu={'true' if decision.run_cpu else 'false'}",
         f"run_gpu={'true' if decision.run_gpu else 'false'}",
         f"families={json.dumps(decision.families, separators=(',', ':'))}",
+        f"skipped_families={json.dumps(decision.skipped, separators=(',', ':'))}",
         f"reason={decision.reason}",
         f"rocm_sdk_version={rocm_sdk_version}",
     ]

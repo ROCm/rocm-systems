@@ -8,7 +8,8 @@ The summary has three parts:
   * why this run tested what it did, and which base build the GPU suite used;
   * the conclusion of every unit, build and GPU job, so a job that never
     produced results (cancelled, timed out, still queued) still has a row;
-  * the per-suite results table from summarize_junit.py.
+  * the per-suite results table from summarize_junit.py, with a row for every
+    ci.yaml family, saying why when one did not run.
 
 Exits 1 when the configure job did not succeed, any HRR job failed or was
 cancelled, or a results file could not be read.
@@ -71,8 +72,11 @@ def render_header(
         )
     lines = ["## HRR CI", "", f"- Scope: {reason}."]
     if run_gpu:
-        names = ", ".join(f["family"] for f in families) or "none"
-        lines.append(f"- GPU families: {names}.")
+        names = ", ".join(
+            f"{f['family']} (`{f['runner']}`)" if f.get("runner") else f["family"]
+            for f in families
+        ) or "none"
+        lines.append(f"- GPU families and runners: {names}.")
         if base:
             lines.append(
                 f"- Base ROCm artifacts: [{base['repo']} run {base['run_id']}]({base['run_url']})"
@@ -126,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reason", default="")
     parser.add_argument("--run-gpu", default="false")
     parser.add_argument("--families", default="[]")
+    parser.add_argument("--skipped-families", default="[]")
     parser.add_argument("--results-dir", type=Path, default=Path("results"))
     parser.add_argument("--base-json", type=Path)
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -135,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_gpu = args.run_gpu == "true"
     families = json.loads(args.families or "[]") if run_gpu else []
+    skipped = json.loads(args.skipped_families or "[]") if run_gpu else []
     base = None
     if args.base_json and args.base_json.is_file():
         base = json.loads(args.base_json.read_text())
@@ -147,7 +153,9 @@ def main(argv: list[str] | None = None) -> int:
     markdown += render_jobs(rows, missing)
     errors: list[str] = []
     args.results_dir.mkdir(parents=True, exist_ok=True)
-    markdown += summarize_junit.render(args.results_dir, errors)
+    table_families = [(f["family"], "") for f in families]
+    table_families += [(s["family"], s["reason"]) for s in skipped]
+    markdown += summarize_junit.render(args.results_dir, errors, table_families)
 
     sys.stdout.write(markdown)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

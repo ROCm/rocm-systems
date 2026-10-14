@@ -69,8 +69,9 @@ class OverallTest(unittest.TestCase):
 class RenderTest(unittest.TestCase):
     def test_header_names_base(self):
         base = {"repo": "ROCm/rocm-systems", "run_id": "7", "run_url": "https://r/7", "commit": "0123456789abcdef"}
-        text = rpt.render_header("the change touches capture or replay", True, FAMILIES, base)
-        self.assertIn("GPU families: gfx94x, gfx950, gfx110x.", text)
+        families = [{"family": "gfx94x", "runner": "linux-gfx942-1gpu"}, {"family": "gfx950"}]
+        text = rpt.render_header("the change touches capture or replay", True, families, base)
+        self.assertIn("GPU families and runners: gfx94x (`linux-gfx942-1gpu`), gfx950.", text)
         self.assertIn("[ROCm/rocm-systems run 7](https://r/7) at `0123456789ab`", text)
 
     def test_header_without_gpu(self):
@@ -90,6 +91,21 @@ class RenderTest(unittest.TestCase):
             rc = rpt.main(["--reason", "why", "--results-dir", tmp])
         self.assertEqual(rc, 0)
         self.assertIn("## HRR results by platform", out.getvalue())
+
+    def test_main_gives_skipped_families_a_row(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", return_value=JOBS[5:6]), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main([
+                "--run-gpu", "true", "--results-dir", tmp,
+                "--families", '[{"family":"gfx94x","runner":"r"}]',
+                "--skipped-families", '[{"family":"gfx125x","reason":"disabled in ci.yaml"}]',
+            ])
+        self.assertEqual(rc, 0)
+        self.assertIn("| Integration | gfx94x | — | — | — | — | _no results_ |", out.getvalue())
+        self.assertIn("| Integration | gfx125x | — | — | — | — | _not run: disabled in ci.yaml_ |",
+                      out.getvalue())
 
     def test_main_fails_when_configure_did_not_succeed(self):
         for result in ("failure", "cancelled"):

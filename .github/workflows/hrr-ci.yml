@@ -56,6 +56,7 @@ jobs:
       run_cpu: ${{ steps.decide.outputs.run_cpu }}
       run_gpu: ${{ steps.decide.outputs.run_gpu }}
       families: ${{ steps.decide.outputs.families }}
+      skipped_families: ${{ steps.decide.outputs.skipped_families }}
       reason: ${{ steps.decide.outputs.reason }}
       rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
     steps:
@@ -332,8 +333,10 @@ jobs:
           REASON: ${{ needs.configure.outputs.reason }}
           RUN_GPU: ${{ needs.configure.outputs.run_gpu }}
           FAMILIES: ${{ needs.configure.outputs.families }}
+          SKIPPED: ${{ needs.configure.outputs.skipped_families }}
         run: >-
           python3 projects/hrr/tests/scripts/hrr_ci_report.py
           --configure-result "${CONFIGURE_RESULT}"
           --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
+          --skipped-families "${SKIPPED}"
           --results-dir results --base-json base/base.json

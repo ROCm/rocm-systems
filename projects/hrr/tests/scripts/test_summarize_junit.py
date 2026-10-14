@@ -130,18 +130,31 @@ class SummarizeTest(ScratchDir):
         self.write("integration-gfx90a.xml", "<broken")
         self.write("integration-extra.xml", junit(record("Z")))
         errors: list[str] = []
-        text = summarize_junit.render(self.dir, errors)
+        text = summarize_junit.render(self.dir, errors, [("gfx90a", ""), ("gfx94x", "")])
         self.assertIn("| Unit | Linux | 1 | 1 | 0 | 0 | `B` |", text)
         self.assertIn("| Unit | Windows | — | — | — | — | _no results_ |", text)
         self.assertIn("| Integration | gfx90a | — | — | — | — | _unreadable XML:", text)
+        self.assertIn("| Integration | gfx94x | — | — | — | — | _no results_ |", text)
         self.assertIn("| Other | integration-extra.xml | 1 | 0 | 0 | 0 |  |", text)
         self.assertIn("### Counts grid", text)
         self.assertEqual(len(errors), 1)
 
-    def test_render_with_no_files_lists_every_column(self):
+    def test_render_rows_follow_the_families(self):
+        self.write("integration-gfx950.xml", junit(record("A"), record("T3", "skipped")))
+        families = [("gfx950", ""), ("gfx125x", "disabled in ci.yaml"),
+                    ("gfx1150", "no runner label in TheRock's runner config")]
+        text = summarize_junit.render(self.dir, [], families)
+        self.assertIn("| Integration | gfx950 | 1 | 0 | 1 | 0 |  |", text)
+        self.assertIn("| Integration | gfx125x | — | — | — | — | _not run: disabled in ci.yaml_ |", text)
+        self.assertIn("| gfx1150 | — | — | — | — | _not run: no runner label", text)
+        self.assertIn("|  | Linux | Windows | gfx950 | gfx125x | gfx1150 |", text)
+
+    def test_render_without_families_uses_the_files(self):
+        self.write("integration-gfx110x.xml", junit(record("A")))
         text = summarize_junit.render(self.dir, [])
-        for _, _, platform in summarize_junit.COLUMNS:
-            self.assertIn(f"| {platform} |", text)
+        self.assertIn("| Unit | Linux | — | — | — | — | _no results_ |", text)
+        self.assertIn("| Integration | gfx110x | 1 | 0 | 0 | 0 |  |", text)
+        self.assertNotIn("Other", text)
 
 
 class MainTest(ScratchDir):

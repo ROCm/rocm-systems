@@ -273,6 +273,14 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
         self.assertEqual(d.families[1], {"family": "gfx94x", "runner": "gpu-94x-a"})
         self.assertIn("no runner for gfx1150", d.reason)
+        self.assertEqual(
+            d.skipped,
+            [
+                {"family": "gfx110x", "reason": "not run on pull_request (ci.yaml triggers)"},
+                {"family": "gfx1150", "reason": cfg.NO_RUNNER},
+                {"family": "gfx125x", "reason": "disabled in ci.yaml"},
+            ],
+        )
 
     def test_rename_out_of_capture_counts(self):
         # The files API lists previous_filename alongside filename.
@@ -331,6 +339,7 @@ class DecideTest(unittest.TestCase):
         d = decide("workflow_dispatch", [], requested=["gfx125x", "gfx1150"])
         self.assertEqual(family_keys(d), ["gfx125x"])
         self.assertIn("no runner for gfx1150", d.reason)
+        self.assertIn({"family": "gfx94x", "reason": "not requested"}, d.skipped)
 
     def test_dispatch_unknown_family(self):
         with self.assertRaises(cfg.ConfigError) as caught:
@@ -413,7 +422,10 @@ class ForkTest(unittest.TestCase):
 
 class OutputTest(unittest.TestCase):
     def test_write_outputs(self):
-        d = cfg.Decision(True, True, "why", [{"family": "gfx94x", "runner": "r"}])
+        d = cfg.Decision(
+            True, True, "why", [{"family": "gfx94x", "runner": "r"}],
+            [{"family": "gfx125x", "reason": "disabled in ci.yaml"}],
+        )
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "out"
             with redirect_stdout(io.StringIO()):
@@ -421,6 +433,7 @@ class OutputTest(unittest.TestCase):
             text = out.read_text()
         self.assertIn("run_cpu=true\n", text)
         self.assertIn('families=[{"family":"gfx94x","runner":"r"}]\n', text)
+        self.assertIn('skipped_families=[{"family":"gfx125x","reason":"disabled in ci.yaml"}]\n', text)
         self.assertIn("reason=why\n", text)
         self.assertIn("rocm_sdk_version=1.2.3\n", text)
 
