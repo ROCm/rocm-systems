@@ -2444,6 +2444,33 @@ TEST_F(SymMemoryObtainRollbackTest, RmaRegisterFails_ReturnsSpaceWithoutLinking)
   EXPECT_EQ(comm->devrState.memHead, nullptr);
 }
 
+// Label fail_mem: AICOMRCCL-2428. GIN succeeding then RMA failing is the only way to reach
+// free(mem->ginSegmentInfos) with a live array; the sibling cases never build one that survives.
+// ginDereg is the witness that symMemoryUnregister saw it, since mem is gone before Obtain returns.
+TEST_F(SymMemoryObtainRollbackTest, GinSucceedsThenRmaFails_UnregistersGinAndUnlinks) {
+  PushTeam();
+  comm->devrState.ginEnabled = true;
+  RmaProxyTerms(comm, true);
+  ScopedHook gather(g_devrBootstrapAllGather, agreeing);
+  ScopedHook alloc(g_devrSpaceAlloc, AllocAt(0));
+  ScopedHook spaceFree(g_devrSpaceFree, [](ncclSpace*, int64_t, int64_t) { return ncclSuccess; });
+  ScopedHook ginReg(g_devrGinRegister,
+                    [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) {
+                      return ncclSuccess;
+                    });
+  ScopedHook ginDereg(g_devrGinDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+  ScopedHook rmaReg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSystemError; });
+  ScopedHook rmaDereg(g_devrRmaProxyDeregister, [](ncclComm*, void*[]) { return ncclSuccess; });
+
+  EXPECT_NE(Obtain(), ncclSuccess);
+  EXPECT_EQ(ginReg.calls, 1);
+  EXPECT_EQ(rmaReg.calls, 1);
+  EXPECT_EQ(ginDereg.calls, 1);   // symMemoryUnregister GIN arm
+  EXPECT_EQ(rmaDereg.calls, 0);  // rmaHostWins[0] witness never set
+  EXPECT_EQ(spaceFree.calls, 1);
+  EXPECT_EQ(comm->devrState.memHead, nullptr);
+}
+
 // Label fail_mem: a failure before the reservation must not free space that was
 // never taken.
 TEST_F(SymMemoryObtainRollbackTest, EarlyFailure_DoesNotFreeUnreservedSpace) {
@@ -4890,6 +4917,38 @@ TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesResourceListNodes) {
   ASSERT_NE(dst->resourceRequirementsList->next, nullptr);
   EXPECT_EQ(dst->resourceRequirementsList->next->bufferSize, 256u);
   EXPECT_EQ(dst->resourceRequirementsList->next->next, nullptr);  // list terminated
+}
+
+// Each node's GIN signal and counter requests, and the pointers that receive
+// their start indices, survive the copy: the deferred create sizes the devComm
+// and writes those start indices from the copy alone.
+TEST_F(DeepCopyDevCommRequirementsTest, CopiesResourceNodeGinFields) {
+  ncclGinSignal_t signalStart1 = 0, signalStart2 = 0;
+  ncclGinCounter_t counterStart1 = 0, counterStart2 = 0;
+  res1.ginSignalCount = 8;
+  res1.ginCounterCount = 2;
+  res1.outGinSignalStart = &signalStart1;
+  res1.outGinCounterStart = &counterStart1;
+  res2.ginSignalCount = 4;
+  res2.ginCounterCount = 1;
+  res2.outGinSignalStart = &signalStart2;
+  res2.outGinCounterStart = &counterStart2;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ncclDevResourceRequirements* copy1 = dst->resourceRequirementsList;
+  ASSERT_NE(copy1, nullptr);
+  EXPECT_EQ(copy1->ginSignalCount, 8);
+  EXPECT_EQ(copy1->ginCounterCount, 2);
+  EXPECT_EQ(copy1->outGinSignalStart, &signalStart1);
+  EXPECT_EQ(copy1->outGinCounterStart, &counterStart1);
+  ncclDevResourceRequirements* copy2 = copy1->next;
+  ASSERT_NE(copy2, nullptr);
+  EXPECT_EQ(copy2->ginSignalCount, 4);
+  EXPECT_EQ(copy2->ginCounterCount, 1);
+  EXPECT_EQ(copy2->outGinSignalStart, &signalStart2);
+  EXPECT_EQ(copy2->outGinCounterStart, &counterStart2);
 }
 
 // The team list likewise.

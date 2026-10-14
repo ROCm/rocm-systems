@@ -1235,6 +1235,44 @@ TEST_F(EnqueueMicrotest, PackedChannels_TinyTransfer_PacksIntoOneChannel) {
                                         ncclFloat32, NCCL_PROTO_SIMPLE, 32));
 }
 
+TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
+  // nChannels == 0 skips the cap. Count 10240 / max 32 packs to 5.
+  {
+    RankComm rc(8);
+    EXPECT_EQ(0, rc.get()->nChannels);
+    EXPECT_EQ(5, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels > nChannels: the cap is applied before the packer arithmetic.
+  // 3 with the cap, 5 without it, 4 if the cap were applied after the arithmetic.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 4;
+    EXPECT_EQ(3, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels <= nChannels: the cap does not change the answer.
+  {
+    RankComm uncapped(8);
+    RankComm capped(8);
+    capped.get()->nChannels = 16;
+    const size_t count = size_t(1) << 24;
+    int plain = rcclKernelPackedChannels(uncapped.get(), ncclFuncAllReduce, count,
+                                         ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    int limited = rcclKernelPackedChannels(capped.get(), ncclFuncAllReduce, count,
+                                           ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    EXPECT_EQ(8, plain);
+    EXPECT_EQ(plain, limited);
+  }
+  // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 1;
+    EXPECT_EQ(1, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+}
+
 TEST_F(EnqueueMicrotest, PackedChannels_LargeTransfer_SaturatesToMaxChannels) {
   // Far above the floor, the divUp(cells, cellsPerChannel) term exceeds
   // nMaxChannels and the final min() clamps it.
@@ -3506,6 +3544,10 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ConsultsEveryRcclTuningHookExactlyOnce)
   // a lie: deleting either call site was invisible.
   EXPECT_EQ(1, g_rcclOverrideAlgorithmCalls) << "rcclOverrideAlgorithm (:2733)";
   EXPECT_EQ(1, g_rcclOverrideProtocolCalls) << "rcclOverrideProtocol (:2734)";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveAlgorithmCalls) << "rcclUpdateCollectiveAlgorithm";
+  EXPECT_TRUE(g_rcclUpdateCollectiveAlgorithmBeforeProtocol)
+      << "rcclUpdateCollectiveAlgorithm must run before rcclUpdateCollectiveProtocol picks the Tree protocol";
+  EXPECT_EQ(1, g_rcclUpdateCollectiveChannelsCalls) << "rcclUpdateCollectiveChannels";
 }
 
 // LATENT BUG (enqueue.cc:2659): rcclOverrideChannels returns ncclResult_t, but
@@ -3745,6 +3787,66 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
   ASSERT_NE(nullptr, t);
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
+}
+
+// ===========================================================================
+// ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
+// ===========================================================================
+
+// Comm ready for ceCollTaskAppend: CE initialized, out of every group; leaves the thread's group heads clean.
+struct CeAppendScene {
+  CollTaskComm cc;
+  CeAppendScene() {
+    ClearGroupHeads();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      cc.get()->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
+    }
+    cc.get()->ceColl.initialized = true;
+  }
+  ~CeAppendScene() { ClearGroupHeads(); }
+  static void ClearGroupHeads() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+      ncclGroupCommHead[type] = nullptr;
+    }
+  }
+  ncclResult_t Append(ncclFunc_t func) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/true, RCCL_CE_REGISTERED);
+    info.coll = func;
+    return ceCollTaskAppend(cc.get(), &info, nullptr, nullptr, nullptr, nullptr, ncclDevRedOpFull{});
+  }
+  bool JoinedSymRegister() { return ncclGroupCommHead[ncclGroupTaskTypeSymRegister] == cc.get(); }
+};
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithoutStaging_MarksPendingAndJoinsSymRegister) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+  EXPECT_FALSE(ncclIntruQueueEmpty(&scene.cc.get()->planner.collCeTaskQueue));
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceAlreadyPending_StillJoinsSymRegister) {
+  CeAppendScene scene;
+  scene.cc.get()->ceColl.stagingPending = true;  // left by a group that failed before its SymRegister job ran
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_TRUE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_TRUE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllReduceWithStaging_QueuesNoSetup) {
+  CeAppendScene scene;
+  uint8_t staging = 0;
+  scene.cc.get()->ceColl.ceARTmpBuf = &staging;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllReduce));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
+}
+
+TEST_F(EnqueueMicrotest, CeCollTaskAppend_AllGather_QueuesNoSetup) {
+  CeAppendScene scene;
+  ASSERT_EQ(ncclSuccess, scene.Append(ncclFuncAllGather));
+  EXPECT_FALSE(scene.cc.get()->ceColl.stagingPending);
+  EXPECT_FALSE(scene.JoinedSymRegister());
 }
 
 // ===========================================================================

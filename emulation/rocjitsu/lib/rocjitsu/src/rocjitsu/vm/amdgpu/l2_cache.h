@@ -319,12 +319,19 @@ private:
 
   static constexpr uint64_t MAX_INVALIDATE_RANGE_SET_LOCKS = 64;
 
-  std::mutex &set_mutex(uint64_t addr) const { return set_mutexes_[CacheStore::set_index(addr)]; }
+  // Different sets can be accessed concurrently without sharing a host cache line.
+  struct alignas(64) SetMutex {
+    std::mutex mutex;
+  };
+  using SetMutexes = std::array<SetMutex, NUM_SETS>;
+
+  std::mutex &set_mutex(uint64_t addr) const {
+    return set_mutexes_[CacheStore::set_index(addr)].mutex;
+  }
 
   class SetRangeLocks {
   public:
-    SetRangeLocks(std::array<std::mutex, NUM_SETS> &mutexes, uint64_t line_start,
-                  uint64_t line_count)
+    SetRangeLocks(SetMutexes &mutexes, uint64_t line_start, uint64_t line_count)
         : mutexes_(mutexes) {
       std::array<bool, NUM_SETS> seen{};
       for (uint64_t i = 0; i < line_count; ++i) {
@@ -339,7 +346,7 @@ private:
       std::ranges::sort(sets_.begin(), sets_.begin() + count_);
       try {
         for (size_t i = 0; i < count_; ++i) {
-          mutexes_[sets_[i]].lock();
+          mutexes_[sets_[i]].mutex.lock();
           ++locked_;
         }
       } catch (...) {
@@ -357,11 +364,11 @@ private:
     void unlock_all() {
       while (locked_ > 0) {
         --locked_;
-        mutexes_[sets_[locked_]].unlock();
+        mutexes_[sets_[locked_]].mutex.unlock();
       }
     }
 
-    std::array<std::mutex, NUM_SETS> &mutexes_;
+    SetMutexes &mutexes_;
     std::array<uint32_t, NUM_SETS> sets_{};
     size_t count_ = 0;
     size_t locked_ = 0;
@@ -405,7 +412,7 @@ private:
   CacheStore cache_;
   mutable MaintenanceMutex maintenance_mutex_;
   std::mutex epoch_reconcile_mutex_;
-  mutable std::array<std::mutex, NUM_SETS> set_mutexes_;
+  mutable SetMutexes set_mutexes_;
   simdojo::Port *req_port_ = nullptr;
   GpuMemory *backing_memory_ = nullptr; ///< Direct writeback path (functional mode).
   GpuMemory *legacy_maintenance_memory_ = nullptr;

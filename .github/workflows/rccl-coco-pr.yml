@@ -12,7 +12,7 @@ name: RCCL coco PR
 on:
   # No `paths:` filter: a path-skipped workflow reports no checks, so a required check would never pass.
   pull_request:
-    branches: [develop, main, rccl-develop, rccl_develop]
+    branches: [develop, main, rccl-develop, rccl_develop, rocprofiler-compute-develop]
   workflow_dispatch:
     inputs:
       coco_ref:
