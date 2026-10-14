@@ -8,6 +8,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- `rocsys` unified CLI entry point. `rocsys -- ./app` and `rocsys profile -- ./app`
+  produce a full trace profile. `rocsys rewrite` runs `rocprof-sys-instrument`
+  in binary-rewrite mode (`-o`). Other subcommands (`instrument`, `causal`,
+  `avail`, `python`, `attach`) forward to the existing tools. The
+  `rocprof-sys-*` binaries are unchanged.
 - AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
   the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
   `ROCPROFSYS_HIPFILE_METRICS`. See
@@ -164,6 +169,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Introduced the new `profiler-hub` writer backend for trace persistence, as a
   replacement for the existing SQLite3/rocpd backend.
+
+- Output Summary now renders a process tree distinguishing multiple processes
+  in a single run by size and role, replacing the old flat per-process
+  listing that repeated identical blocks for fork-heavy workloads.
 
 ### Removed
 
