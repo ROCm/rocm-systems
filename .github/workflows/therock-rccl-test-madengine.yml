@@ -90,7 +90,9 @@ jobs:
     name: 'Test MADEngine ${{ inputs.workload }} (${{ inputs.nodes }}N)'
     runs-on: ${{ inputs.test_runs_on }}
     # Without this GitHub applies its 360-minute default and kills the job
-    # before a longer workload step can finish.
+    # before a longer workload step can finish. This is the only timeout the
+    # workload step needs: a step-level one could only disagree with it, so
+    # the step below carries none and inherits this.
     timeout-minutes: ${{ fromJSON(inputs.job_timeout_minutes) }}
     defaults:
       run:
