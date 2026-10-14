@@ -33,7 +33,7 @@ permissions:
 # not cancel the run in progress; configure then runs nothing for it.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}${{
+    ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}${{
     github.event.action == 'labeled'
     && github.event.label.name != 'ci:hrr-capture'
     && !startsWith(github.event.label.name, 'ci:gfx')
@@ -76,12 +76,13 @@ jobs:
           persist-credentials: false
           repository: ROCm/TheRock
           # Keep in sync with the TheRock ref in therock-multi-arch-ci.yml.
-          ref: 05add1921fd03b0649f054ec2a7c54d162c0cd99 # 2026-10-08
+          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
           path: therock
           sparse-checkout: build_tools/github_actions
 
       # Current runner labels, as TheRock's setup_multi_arch.yml loads them.
       - name: Checkout TheRock CI runner config
+        id: ci_config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         continue-on-error: true
         with:
@@ -89,6 +90,10 @@ jobs:
           repository: ROCm/therock-ci-config
           ref: main
           path: ci-config
+
+      - name: Warn when runner config is unavailable
+        if: ${{ steps.ci_config.outcome == 'failure' }}
+        run: echo "::warning::could not check out ROCm/therock-ci-config; runner labels may be out of date"
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
