@@ -1561,19 +1561,9 @@ template <typename Tin, typename Inst, typename CvtOp>
   return false;
 }
 
-/// VOP3 mixed-width f64-source -> 32-bit-fp-dst fast path: the 64-bit-in /
-/// 32-bit-out counterpart of the f64 unary FP glue, for v_frexp_exp_i32_f64
-/// (the lone f64 VOP3 cvt whose body keeps the modifiers around an
-/// f64 -> float(exp) -> bit_cast tail). Reads src0 as native<double>
-/// (native_width64 lanes), applies src0 abs/neg in the f64 domain, runs cvt_op
-/// (native<double> -> narrow32<float> = the exponent as float), then applies the
-/// result omod/clamp INLINE at narrow32 width (apply_vop3_dst_mod_f32 is
-/// native<float>-wide — a different width than narrow32<float>), and stores the
-/// 32-bit results. All steps bit-exact: frexp_exp_f64_simd is the proven VOP1
-/// helper (op 48), apply_vop3_src_mod_f64 is the same helper the tested f64
-/// unary ops use, and the (float)(uint32) cast + power-of-two omod + ordered
-/// clamp mirror the scalar tail (the exp is always finite, so NaN handling is
-/// moot).
+/// VOP3 F64-source conversion to a floating F32 destination, including
+/// source ABS/NEG and floating destination OMOD/CLAMP. Integer-result
+/// operations such as FREXP exponents must use integer output glue instead.
 template <typename Inst, typename CvtOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &inst, Wavefront &wf,

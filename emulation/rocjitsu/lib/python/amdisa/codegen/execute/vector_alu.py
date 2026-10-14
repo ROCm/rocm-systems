@@ -314,9 +314,8 @@ def gen_vector_unary(
         )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
-        L.append('    int exp = 0;')
         L.append(
-            '    if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+            '    const int32_t exp = amdgpu::frexp_f64(s, wf.fp_denorm_mode_f16_f64()).exponent;'
         )
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(exp));'
@@ -328,8 +327,9 @@ def gen_vector_unary(
         )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
-        L.append('    int exp = 0;')
-        L.append('    double result = std::frexp(s, &exp);')
+        L.append(
+            '    double result = amdgpu::frexp_f64(s, wf.fp_denorm_mode_f16_f64()).mantissa;'
+        )
         if is_vop3:
             L.extend(vop3_dst_mod_f64('result'))
         L.append(
@@ -353,12 +353,11 @@ def gen_vector_unary(
         )
         if is_vop3:
             L.extend(vop3_src_mod('s', 0, has_abs))
-        L.append('    int exp = 0;')
         L.append(
-            '    if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+            '    const int32_t exp = amdgpu::frexp_f16(s, wf.fp_denorm_mode_f16_f64()).exponent;'
         )
         L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint32_t>(exp));'
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, static_cast<uint16_t>(exp));'
         )
     elif op == 'frexp_mant_f32':
         L.append(
@@ -1002,7 +1001,7 @@ def gen_vector_ternary(
             'maximumminimum': 'util::minimum(util::maximum(a, b), c)',
             'minmax_num': 'util::max_num(util::min_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
             'maxmin_num': 'util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
-            'med3': 'util::max_num(util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy()), util::min_num(a, b, wf.minmax_policy()), wf.minmax_policy())',
+            'med3': 'util::med3(a, b, c, wf.minmax_policy())',
         }
         # Cube selection and MODE policy match the typed semantics path.
         if op in CUBE_OPERATIONS:
@@ -1060,7 +1059,7 @@ def gen_vector_ternary(
             'maximumminimum': 'util::minimum(util::maximum(a, b), c)',
             'minmax_num': 'util::max_num(util::min_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
             'maxmin_num': 'util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
-            'med3': 'util::max_num(util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy()), util::min_num(a, b, wf.minmax_policy()), wf.minmax_policy())',
+            'med3': 'util::med3(a, b, c, wf.minmax_policy())',
         }
         expr = f_map.get(op, f'a /* unhandled: {op} */')
         if is_vop3:
@@ -1115,7 +1114,7 @@ def gen_vector_ternary(
             'maximumminimum': 'util::minimum(util::maximum(a, b), c)',
             'minmax_num': 'util::max_num(util::min_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
             'maxmin_num': 'util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy())',
-            'med3': 'util::max_num(util::min_num(util::max_num(a, b, wf.minmax_policy()), c, wf.minmax_policy()), util::min_num(a, b, wf.minmax_policy()), wf.minmax_policy())',
+            'med3': 'util::med3(a, b, c, wf.minmax_policy())',
         }
         expr = f_map.get(op, f'a /* unhandled: {op} */')
         if is_vop3:

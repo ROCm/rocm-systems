@@ -2,12 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -15,12 +21,12 @@
 #include "util/data_types.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
-#include <bit>
-#include <cstdint>
+
 #include <gtest/gtest.h>
-#include <iomanip>
 
 #include <array>
+#include <bit>
+#include <cstdint>
 #include <memory>
 #include <tuple>
 
@@ -239,10 +245,62 @@ TEST_P(NumericInstructionRegression, MedianNanThirdSourceUsesMinimum) {
   }
 }
 
+TEST_P(NumericInstructionRegression, PackedHalfMinMaxSelectNanPayloads) {
+  for (bool ieee : {false, true}) {
+    wave_->set_mode_raw((3u << 6) | (ieee ? amdgpu::Wavefront::IEEE_BIT : 0));
+    for (auto opcode : {cdna4::kVPkMinF16Vop3p, cdna4::kVPkMaxF16Vop3p}) {
+      for (const auto &input :
+           std::array<std::array<uint16_t, 4>, 4>{{{0x7e01, 0x7e02, 0x7e02, 0x7e02},
+                                                   {0x7e01, 0x7c02, 0x7c02, 0x7e02},
+                                                   {0x7c01, 0x3c00, 0x3c00, 0x7e01},
+                                                   {0x7c01, 0x7c02, 0x7c02, 0x7e01}}}) {
+        put(0, uint32_t(input[0]) * 0x10001u);
+        put(1, uint32_t(input[1]) * 0x10001u);
+        check(cdna4::build_vop3p(opcode, {.vdst = 4, .src0 = 256, .src1 = 257, .op_sel_hi = 3}),
+              uint32_t(input[ieee ? 3 : 2]) * 0x10001u);
+      }
+    }
+  }
+}
+
+class ScalarFloatMinMaxRegression : public NumericInstructionRegression {};
+TEST_P(ScalarFloatMinMaxRegression, HalfAndFloatUseArchitecturePolicy) {
+  for (bool half : {false, true}) {
+    for (bool ieee : {false, true}) {
+      wave_->set_mode_raw(ieee ? amdgpu::Wavefront::IEEE_BIT : 0);
+      for (bool maximum : {false, true}) {
+        const uint32_t opcode = half ? (maximum ? rdna3_5::kSMaxF16Sop2 : rdna3_5::kSMinF16Sop2)
+                                     : (maximum ? rdna3_5::kSMaxF32Sop2 : rdna3_5::kSMinF32Sop2);
+        for (const auto &input : std::array<std::array<uint32_t, 4>, 4>{
+                 {{0x80000000, 0, 0x80000000, 0},
+                  {0x7fc02000, 0x3f800000, 0x3f800000, 0x3f800000},
+                  {0x3f800000, 0x7fc02000, 0x3f800000, 0x3f800000},
+                  {0x7fc02000, 0x7fc04000, 0x7fc02000, 0x7fc02000}}}) {
+          const auto bits = [half](uint32_t value) {
+            return half ? uint32_t(util::f32_to_f16(std::bit_cast<float>(value))) : value;
+          };
+          cu_->write_sgpr(wave_->sgpr_alloc().base, bits(input[0]));
+          cu_->write_sgpr(wave_->sgpr_alloc().base + 1, bits(input[1]));
+          auto words = rdna3_5::build_sop2(opcode, {.ssrc0 = 0, .ssrc1 = 1, .sdst = 4});
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+          EXPECT_EQ(cu_->read_sgpr(wave_->sgpr_alloc().base + 4), bits(input[maximum ? 3 : 2]));
+        }
+      }
+    }
+  }
+}
+INSTANTIATE_TEST_SUITE_P(Rdna35, ScalarFloatMinMaxRegression,
+                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5),
+                                          testing::Bool()));
+
 class RdnaMinMaxRegression : public NumericInstructionRegression {};
 
 TEST_P(RdnaMinMaxRegression, NanSelectionAcrossScalarSimdAndDualIssue) {
-  const bool number = std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto arch = std::get<0>(GetParam());
+  const bool number = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool legacy = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
   // Independent bit-pattern expectations from the RDNA3 MIN/MAX and RDNA4
   // MIN_NUM/MAX_NUM pseudocode; all cases run in both input orders.
   constexpr std::array<std::array<uint32_t, 2>, 5> inputs{{
@@ -269,7 +327,7 @@ TEST_P(RdnaMinMaxRegression, NanSelectionAcrossScalarSimdAndDualIssue) {
           else if (!number && ieee && nan_b && !(b & 0x400000u))
             expected = b | 0x400000u;
           else if (nan_a && nan_b)
-            expected = number ? a | 0x400000u : a;
+            expected = number ? a | 0x400000u : (legacy ? b : a);
           else if (nan_a)
             expected = b;
           else if (nan_b)
@@ -278,9 +336,12 @@ TEST_P(RdnaMinMaxRegression, NanSelectionAcrossScalarSimdAndDualIssue) {
             expected = maximum ? 0 : 0x80000000u;
           const uint32_t op = (number ? rdna4::kVMinNumF32Vop2 : rdna3::kVMinF32Vop2) + maximum;
           check({(op << 25) | (4u << 17) | (1u << 9) | 256u, 0}, expected);
-          check(number ? rdna4::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257})
-                       : rdna3::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257}),
+          check(number   ? rdna4::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257})
+                : legacy ? rdna2::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257})
+                         : rdna3::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257}),
                 expected);
+          if (legacy)
+            continue; // Dual issue starts with RDNA3.
           // VOPD X is MIN/MAX, Y is MOV. Destinations v4/v5 are disjoint.
           const uint32_t dual_op = maximum ? 10u : 11u;
           check({(0x32u << 26) | (dual_op << 22) | (8u << 17) | (1u << 9) | 256u,
@@ -292,10 +353,12 @@ TEST_P(RdnaMinMaxRegression, NanSelectionAcrossScalarSimdAndDualIssue) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Rdna, RdnaMinMaxRegression,
-                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA3,
-                                                          ROCJITSU_CODE_ARCH_RDNA4),
-                                          testing::Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    Rdna, RdnaMinMaxRegression,
+    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                                     ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                                     ROCJITSU_CODE_ARCH_RDNA4),
+                     testing::Bool()));
 
 // Golden cases: CDNA non-IEEE, CDNA IEEE, RDNA non-IEEE, RDNA IEEE,
 // IEEE-2019 Number, and IEEE-2019 propagating forms, in that order.
@@ -311,8 +374,8 @@ template <typename Float> void check_minmax_nan_cases() {
       return std::bit_cast<uint64_t>(double(std::bit_cast<float>(bits)));
     }
   };
-  constexpr std::array policies{util::MinMaxPolicy::Cdna,   util::MinMaxPolicy::CdnaIeee,
-                                util::MinMaxPolicy::Rdna,   util::MinMaxPolicy::RdnaIeee,
+  constexpr std::array policies{util::MinMaxPolicy::Legacy, util::MinMaxPolicy::LegacyIeee,
+                                util::MinMaxPolicy::Rdna3,  util::MinMaxPolicy::Rdna3Ieee,
                                 util::MinMaxPolicy::Number, util::MinMaxPolicy::Propagate};
   constexpr std::array<std::array<uint32_t, 8>, 6> cases{{
       {0x7f800123, 0x3f800000, 0x3f800000, 0x7fc00123, 0x3f800000, 0x7fc00123, 0x3f800000,
@@ -365,7 +428,7 @@ TEST(NumericMinMaxHelpers, PackedDoubleNumberPolicyKeepsSelectedNanPayload) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Cdna, NumericLegacyRegression,
+    Legacy, NumericLegacyRegression,
     testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
                                      ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
                      testing::Bool()));

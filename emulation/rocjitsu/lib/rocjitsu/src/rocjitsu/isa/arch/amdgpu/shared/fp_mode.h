@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
 #include <type_traits>
 
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
@@ -237,6 +238,27 @@ inline uint16_t round_exact_to_bf16(ExactF64Sum sum, uint32_t round_mode) {
 
 } // namespace detail
 
+/// @brief Select the architecture's numeric min/max NaN priority.
+inline util::MinMaxPolicy minmax_policy(rj_code_arch_t arch, bool ieee_mode) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return util::MinMaxPolicy::Number;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return ieee_mode ? util::MinMaxPolicy::Rdna3Ieee : util::MinMaxPolicy::Rdna3;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return ieee_mode ? util::MinMaxPolicy::LegacyIeee : util::MinMaxPolicy::Legacy;
+  default:
+    throw std::invalid_argument("min/max policy requires an AMDGPU architecture");
+  }
+}
+
 /// @brief Whether floating operations with exception support quiet signaling NaNs.
 inline bool quiets_nan(rj_code_arch_t arch, bool ieee_mode) {
   return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || ieee_mode;
@@ -395,52 +417,40 @@ inline uint16_t packed_binary_f16(PackedBinaryOp operation, uint16_t a_bits, uin
   b_bits = detail::flush_input_f16(b_bits, denorm_mode);
   const bool a_nan = (a_bits & 0x7fffu) > 0x7c00u;
   const bool b_nan = (b_bits & 0x7fffu) > 0x7c00u;
-  const bool select = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MAX;
-  const bool arithmetic = operation == PackedBinaryOp::ADD || operation == PackedBinaryOp::MUL;
-  if ((select || arithmetic) && (a_nan || b_nan)) {
-    const bool a_signaling = a_nan && !(a_bits & 0x0200u);
-    const bool b_signaling = b_nan && !(b_bits & 0x0200u);
-    const bool signaling_select = select && ieee_mode && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
-                                  arch != ROCJITSU_CODE_ARCH_CDNA5 && (a_signaling || b_signaling);
-    if (arithmetic || (a_nan && b_nan) || signaling_select) {
-      // Select before host arithmetic: host NaN payload priority can change
-      // with inlining or sanitizer instrumentation. Legacy IEEE min/max gives
-      // signaling inputs priority; arithmetic and newer min/max prefer src0.
-      const uint16_t selected = (signaling_select ? a_signaling : a_nan) ? a_bits : b_bits;
-      return clamp && clamp_nan_to_zero ? 0
-                                        : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
+  const bool minimum = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MINIMUM;
+  const bool maximum = operation == PackedBinaryOp::MAX || operation == PackedBinaryOp::MAXIMUM;
+  if (minimum || maximum) {
+    const auto policy = operation == PackedBinaryOp::MINIMUM || operation == PackedBinaryOp::MAXIMUM
+                            ? util::MinMaxPolicy::Propagate
+                            : minmax_policy(arch, ieee_mode);
+    const float a = util::f16_to_f32(a_bits);
+    const float b = util::f16_to_f32(b_bits);
+    uint16_t result =
+        util::f32_to_f16(minimum ? util::min_num(a, b, policy) : util::max_num(a, b, policy));
+    if (clamp) {
+      const uint16_t magnitude = result & 0x7fff;
+      if (magnitude > 0x7c00)
+        return clamp_nan_to_zero ? 0 : result;
+      if (result & 0x8000)
+        result = 0;
+      else if (result > 0x3c00)
+        result = 0x3c00;
     }
+    if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
+      result &= 0x8000u;
+    return result;
+  }
+  if (a_nan || b_nan) {
+    const uint16_t selected = a_nan ? a_bits : b_bits;
+    return clamp && clamp_nan_to_zero ? 0 : selected | (quiets_nan(arch, ieee_mode) ? 0x0200u : 0u);
   }
   const double first = util::f16_to_f32(a_bits);
   const double second = util::f16_to_f32(b_bits);
-  double value = std::numeric_limits<double>::quiet_NaN();
-  switch (operation) {
-  case PackedBinaryOp::ADD:
-    value = first + second;
-    // Exact cancellation follows the destination's directed rounding mode.
-    if (value == 0.0 && std::signbit(first) != std::signbit(second))
-      value = round_mode == 2 ? -0.0 : 0.0;
-    break;
-  case PackedBinaryOp::MUL:
-    value = first * second;
-    break;
-  case PackedBinaryOp::MIN:
-  case PackedBinaryOp::MAX:
-  case PackedBinaryOp::MINIMUM:
-  case PackedBinaryOp::MAXIMUM: {
-    const bool minimum = operation == PackedBinaryOp::MIN || operation == PackedBinaryOp::MINIMUM;
-    const bool propagate_nan =
-        operation == PackedBinaryOp::MINIMUM || operation == PackedBinaryOp::MAXIMUM;
-    if (propagate_nan && (std::isnan(first) || std::isnan(second)))
-      value = std::numeric_limits<double>::quiet_NaN();
-    else if (first == second)
-      value =
-          minimum ? (std::signbit(first) ? first : second) : (std::signbit(first) ? second : first);
-    else
-      value = minimum ? std::fmin(first, second) : std::fmax(first, second);
-    break;
-  }
-  }
+  double value = operation == PackedBinaryOp::ADD ? first + second : first * second;
+  // Exact cancellation follows the destination's directed rounding mode.
+  if (operation == PackedBinaryOp::ADD && value == 0.0 &&
+      std::signbit(first) != std::signbit(second))
+    value = round_mode == 2 ? -0.0 : 0.0;
   uint16_t result =
       pseudo_scalar::round_f16_result(value, round_mode, 0, clamp, fp16_ovfl, clamp_nan_to_zero);
   if (!(denorm_mode & 2u) && (result & 0x7c00u) == 0)
@@ -1179,8 +1189,8 @@ inline FrexpF32Result frexp_f32(float value, uint32_t denorm) {
           exponent ? exponent - 126 : -125 - shift};
 }
 
-// The F16 argument has already been widened exactly, but the denormal threshold
-// and mode belong to the original half-precision format.
+/// @brief Decompose F16 using its original denormal threshold and MODE controls.
+/// @details The argument has already been widened exactly to F32.
 inline FrexpF32Result frexp_f16(float value, uint32_t denorm) {
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   if (!(denorm & 1u) && (bits & 0x7fffffffu) < 0x38800000u)
@@ -1188,11 +1198,13 @@ inline FrexpF32Result frexp_f16(float value, uint32_t denorm) {
   return frexp_f32(value, 3);
 }
 
+/// @brief F64 mantissa and integer exponent from architectural FREXP.
 struct FrexpF64Result {
   double mantissa;
   int32_t exponent;
 };
 
+/// @brief Decompose F64 while honoring the guest input-denormal mode.
 inline FrexpF64Result frexp_f64(double value, uint32_t denorm) {
   const uint64_t bits = std::bit_cast<uint64_t>(value);
   const uint64_t magnitude = bits & 0x7fffffffffffffffull;

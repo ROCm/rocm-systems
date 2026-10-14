@@ -486,7 +486,15 @@ class _ScalarBinop(_ScalarDeriver):
                 ),
             )
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
-            fn = f'std::{op}' if op in ('min', 'max') else op
+            fn = (
+                (
+                    f'{op}_num'
+                    if sem.data_type in ('f16', 'f32', 'f64')
+                    else f'std::{op}'
+                )
+                if op in ('min', 'max')
+                else op
+            )
             result = SemaNode(
                 SemaNodeKind.CALL, ty=ty, call_name=fn, children=(_id(fn), src0, src1)
             )

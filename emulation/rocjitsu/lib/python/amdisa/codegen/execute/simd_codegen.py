@@ -207,7 +207,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         '[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }',
     ),
     # Floating min/max share bit-exact NaN selection and signed-zero ordering
-    # with scalar execution, including the guest IEEE mode.
+    # with scalar execution, including the architecture selection policy.
     'v_max_f32_vop2': (
         'float32_t',
         '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
@@ -228,7 +228,7 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         ' return util::f32_to_f16_simd('
         'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy())); }',
     ),
-    # IEEE-2019 number forms use the same guest-mode helpers.
+    # IEEE-2019 number forms use the architecture policy helpers independently of MODE.IEEE.
     'v_max_num_f32_vop2': (
         'float32_t',
         '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
@@ -488,9 +488,8 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     # frexp_mant returns the significand m with |m| in [0.5,1) (±0/Inf/NaN pass
     # through); read as float so the VOP3 twin reuses the f32 unary FP glue for
     # abs/neg/omod/clamp (added to _VOP3_UNARY_FP_F32 below). frexp_exp returns
-    # the raw int32 exponent bits; its VOP3 twin applies float omod/clamp to
-    # float(exp) and bit-casts (a different output encoding than the VOP1 int),
-    # so the VOP3 form stays scalar (_VOP3_UNARY_SKIP).
+    # raw int32 exponent bits. Its VOP3 twin uses integer output glue and
+    # ignores OMOD/CLAMP; source ABS/NEG cannot change the exponent.
     'v_frexp_mant_f32_vop1': (
         'float32_t',
         'float32_t',
@@ -1929,7 +1928,7 @@ SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
     'v_max_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
     'v_min_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
-    # IEEE-2019 number forms use the same guest-mode helpers.
+    # IEEE-2019 number forms use the architecture policy helpers independently of MODE.IEEE.
     'v_max_num_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
     'v_min_num_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
     # IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered).
@@ -2045,8 +2044,7 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
     'v_minmax_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_maxmin_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
-    # IEEE-2019 num twins (gfx1250/rdna4): identical fmax/fmin compositions as
-    # the legacy max3/min3/minmax/maxmin bodies above.
+    # IEEE-2019 number forms compose the same policy helpers as the legacy forms.
     'v_max3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_min3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_minmax_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
@@ -2080,14 +2078,13 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
 SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_mad_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
-    # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
+    # F16 selection widens exactly and uses the same policy helpers as F32.
     'v_max3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_min3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_med3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::med3_simd(a, b, c, wf.minmax_policy()); }',
     'v_minmax_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_maxmin_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
-    # IEEE-2019 num twins (f16): same fmax/fmin compositions, widened by the glue.
+    # IEEE-2019 num twins (f16): the same policy helpers, widened by the glue.
     'v_max3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_min3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     'v_minmax_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
@@ -3103,9 +3100,8 @@ def _simd_probe_line(
         # present in the plain VOP1 functors.)
         speccvtoutv3 = SIMD_CVT_F64_TO_B32.get(base + '_vop1')
         if speccvtoutv3 is not None:
-            # Unlike the plain cvt ops, v_frexp_exp_i32_f64's VOP3 body keeps the
-            # modifiers (float omod/clamp on float(exp) + bit_cast) — a different
-            # output encoding than the VOP1 int. Keep that twin scalar.
+            # FREXP needs mixed-width integer output with source modifiers;
+            # this generic conversion glue does not provide that combination.
             if base in _VOP3_UNARY_SKIP:
                 return None
             out_t, cpp_op = speccvtoutv3

@@ -1517,10 +1517,10 @@ inline uint32_t prng_advance(uint32_t seed) { return (seed << 1) ^ ((seed >> 31)
 
 // Explicit NaN selection rules keep host fmin/fmax behavior out of the ISA.
 enum class MinMaxPolicy : uint8_t {
-  Cdna,
-  CdnaIeee,
-  Rdna,
-  RdnaIeee,
+  Legacy,
+  LegacyIeee,
+  Rdna3,
+  Rdna3Ieee,
   Number,
   Propagate,
 };
@@ -1542,7 +1542,7 @@ inline Float floating_minmax(Float a, Float b, bool maximum, MinMaxPolicy policy
   const bool nan_b = (ub & ~sign) > infinity;
   const bool propagate = policy == MinMaxPolicy::Propagate;
   const bool ieee =
-      propagate || policy == MinMaxPolicy::CdnaIeee || policy == MinMaxPolicy::RdnaIeee;
+      propagate || policy == MinMaxPolicy::LegacyIeee || policy == MinMaxPolicy::Rdna3Ieee;
   if (ieee && nan_a && !(ua & quiet))
     return std::bit_cast<Float>(ua | quiet);
   if (ieee && nan_b && !(ub & quiet))
@@ -1554,7 +1554,7 @@ inline Float floating_minmax(Float a, Float b, bool maximum, MinMaxPolicy policy
   if (nan_a && nan_b) {
     if (policy == MinMaxPolicy::Number)
       return std::bit_cast<Float>(ua | quiet);
-    return policy == MinMaxPolicy::Rdna || policy == MinMaxPolicy::RdnaIeee ? a : b;
+    return policy == MinMaxPolicy::Rdna3 || policy == MinMaxPolicy::Rdna3Ieee ? a : b;
   }
   if (nan_a)
     return b;
