@@ -55,7 +55,7 @@ namespace AMD {
 /// @brief Encapsulates HW AIE AQL Command Processor functionality. It
 /// provides the interface for things such as doorbells, queue read and
 /// write pointers, and a buffer.
-class AieAqlQueue : public core::Queue,
+class AieKmqQueue : public core::Queue,
                     private core::LocalSignal,
                     core::DoorbellSignal {
  public:
@@ -67,9 +67,9 @@ class AieAqlQueue : public core::Queue,
     return queue->IsType(&rtti_id());
   }
 
-  AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
+  AieKmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
               uint32_t node_id, core::HsaEventCallback callback, void* err_data, uint64_t flags);
-  ~AieAqlQueue();
+  ~AieKmqQueue();
 
   hsa_status_t Inactivate() override;
   hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
