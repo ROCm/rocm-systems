@@ -22,6 +22,11 @@ downstream consumer of the library.
 
 ### Added
 
+- `reader_t::get_histogram()` and `ph_get_histogram()` return one histogram per
+  track on a shared time grid. Duration tracks count events that overlap each
+  bucket and sum that overlap. PMC tracks average the samples in each bucket
+  and hold the previous value across empty buckets between samples. Bucket 0
+  starts at the earliest track timestamp.
 - `probe_database()` and the C equivalent `ph_probe_database()` detect a SQLite
   database, its `rocpd_metadata_<uuid>` table, and the schema version before a
   reader is opened. A trace that only has the `schema_version` tag is accepted

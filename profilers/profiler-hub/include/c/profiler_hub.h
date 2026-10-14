@@ -228,6 +228,24 @@ extern "C"
                                      ph_future_t       future);
 
     /**
+     * @brief Builds one histogram per track on a shared time grid.
+     * @param ctx Context to query.
+     * @param desired_bins Approximate number of buckets. Must be non-zero.
+     * @param histogram Out parameter. It is cleared before any other work.
+     * @param future Null to run the call before returning. Otherwise a future
+     *        from ph_future_create() that was not passed to an operation yet.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p histogram is
+     *         null or @p desired_bins is 0, PH_RESULT_INTERNAL_ERROR on failure.
+     * @note Returned arrays are owned by @p ctx, remain valid until @p ctx is
+     *       freed, and are not invalidated by a later call.
+     */
+    ph_result_t ph_get_histogram(ph_ctx_t        ctx,
+                                 uint32_t        desired_bins,
+                                 ph_histogram_t* histogram,
+                                 ph_future_t     future);
+
+    /**
      * @brief Creates a future that can be passed to an API call to run it
      *        asynchronously.
      * @param on_progress Called with the fraction completed and a description of

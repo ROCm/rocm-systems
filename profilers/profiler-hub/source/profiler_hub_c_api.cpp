@@ -325,6 +325,37 @@ ph_get_track_samples(ph_ctx_t          ctx,
 }
 
 ph_result_t
+ph_get_histogram(ph_ctx_t        ctx,
+                 uint32_t        desired_bins,
+                 ph_histogram_t* histogram,
+                 ph_future_t     future)
+{
+    if(histogram != nullptr)
+    {
+        *histogram = {};
+    }
+
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(histogram == nullptr || desired_bins == 0)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return run_operation(ctx, future, [ctx, desired_bins, histogram]() -> ph_result_t {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        ctx->build_histogram(desired_bins, *histogram);
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_future_create(ph_progress_fn on_progress,
                  ph_finished_fn on_finished,
                  ph_future_t*   future)

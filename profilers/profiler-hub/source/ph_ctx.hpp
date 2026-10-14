@@ -70,6 +70,7 @@ struct ph_ctx
     [[nodiscard]] ph_sample_list_t get_track_samples(uint32_t track_id,
                                                      uint64_t start_ts,
                                                      uint64_t end_ts);
+    void build_histogram(uint32_t desired_bins, ph_histogram_t& histogram);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 
@@ -148,6 +149,16 @@ private:
     std::vector<ph_pmc_info_t>                  m_c_pmc_infos;
 
     std::vector<ph_stream_hardware_link_t> m_c_stream_hardware_links;
+
+    struct c_histogram_storage_t
+    {
+        ph_histogram_t                                  histogram{};
+        std::vector<ph_track_histogram_t>               tracks;
+        std::vector<std::vector<ph_histogram_bucket_t>> buckets;
+    };
+
+    std::mutex                                          m_histogram_mutex;
+    std::vector<std::unique_ptr<c_histogram_storage_t>> m_histograms;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;

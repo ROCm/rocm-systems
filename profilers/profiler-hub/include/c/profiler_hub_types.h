@@ -421,6 +421,43 @@ extern "C"
         ph_sample_t* samples;
     } ph_sample_list_t;
 
+    /**
+     * @brief One histogram bucket.
+     *        For a duration track, event_count is the number of overlapping
+     *        events and value is their overlap in nanoseconds. For a PMC
+     *        track, event_count is the sample count and value is the average
+     *        sample value. A PMC gap has event_count 0 and the previous value.
+     */
+    typedef struct
+    {
+        uint32_t bucket_index;
+        uint64_t event_count;
+        double   value;
+    } ph_histogram_bucket_t;
+
+    /** @brief Histogram buckets for one track. buckets may be null when
+     *         list_size is 0. */
+    typedef struct
+    {
+        uint32_t               track_id;
+        uint32_t               list_size;
+        ph_histogram_bucket_t* buckets;
+    } ph_track_histogram_t;
+
+    /**
+     * @brief Histograms for every track, aligned to one time grid.
+     *        Bucket 0 begins at origin_ts and each bucket is bucket_size
+     *        nanoseconds wide. Missing duration buckets read as zero.
+     */
+    typedef struct
+    {
+        uint64_t              origin_ts;
+        uint64_t              bucket_size;
+        uint32_t              bucket_count;
+        uint32_t              track_count;
+        ph_track_histogram_t* tracks;
+    } ph_histogram_t;
+
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;
 

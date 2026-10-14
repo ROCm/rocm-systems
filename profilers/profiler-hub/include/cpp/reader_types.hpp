@@ -577,4 +577,29 @@ struct counter_timeline_event_t
 
 using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
 
+struct histogram_bucket_t
+{
+    size_t bucket_index{};
+    size_t event_count{};
+    double value{};
+};
+
+using histogram_bucket_list_t = std::vector<histogram_bucket_t>;
+
+struct track_histogram_t
+{
+    track_info_ptr_t        track;
+    histogram_bucket_list_t buckets;
+};
+
+using track_histogram_list_t = std::vector<track_histogram_t>;
+
+struct histogram_t
+{
+    timestamp_ns_t         origin_ts{};
+    timestamp_ns_t         bucket_size{};
+    size_t                 bucket_count{};
+    track_histogram_list_t tracks;
+};
+
 }  // namespace profiler_hub::reader_types

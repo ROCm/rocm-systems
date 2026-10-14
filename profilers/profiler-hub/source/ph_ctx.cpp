@@ -309,6 +309,61 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     return m_track_reader.samples(track_it->second, start_ts, end_ts);
 }
 
+namespace
+{
+std::uint32_t
+narrow_histogram_count(std::size_t value)
+{
+    if(value > std::numeric_limits<std::uint32_t>::max())
+    {
+        throw std::overflow_error{ "histogram value does not fit uint32_t" };
+    }
+    return static_cast<std::uint32_t>(value);
+}
+}  // namespace
+
+void
+ph_ctx::build_histogram(uint32_t desired_bins, ph_histogram_t& output)
+{
+    const auto source = m_connection_pool.with_connection(
+        [desired_bins](profiler_hub::common::connection& connection) {
+            return connection.reader().get_histogram(desired_bins);
+        });
+
+    auto storage = std::make_unique<c_histogram_storage_t>();
+    storage->tracks.resize(source.tracks.size());
+    storage->buckets.resize(source.tracks.size());
+
+    for(std::size_t track_index = 0; track_index < source.tracks.size(); ++track_index)
+    {
+        const auto& source_track = source.tracks[track_index];
+        auto&       destination  = storage->buckets[track_index];
+        destination.reserve(source_track.buckets.size());
+        for(const auto& bucket : source_track.buckets)
+        {
+            destination.push_back(
+                ph_histogram_bucket_t{ narrow_histogram_count(bucket.bucket_index),
+                                       static_cast<std::uint64_t>(bucket.event_count),
+                                       bucket.value });
+        }
+        storage->tracks[track_index] =
+            ph_track_histogram_t{ narrow_histogram_count(source_track.track->id),
+                                  narrow_histogram_count(destination.size()),
+                                  destination.empty() ? nullptr : destination.data() };
+    }
+
+    storage->histogram =
+        ph_histogram_t{ static_cast<std::uint64_t>(source.origin_ts),
+                        static_cast<std::uint64_t>(source.bucket_size),
+                        narrow_histogram_count(source.bucket_count),
+                        narrow_histogram_count(storage->tracks.size()),
+                        storage->tracks.empty() ? nullptr : storage->tracks.data() };
+    output = storage->histogram;
+
+    const std::lock_guard<std::mutex> lock{ m_histogram_mutex };
+    m_histograms.push_back(std::move(storage));
+}
+
 void
 ph_ctx::initialize_track_list()
 {

@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 #include "queries/select/table_select_query.hpp"
 
@@ -364,6 +365,13 @@ struct pmc_sample_result
     double value{};
 };
 
+struct interval_row_t
+{
+    size_t event_id{};
+    size_t start_ts{};
+    size_t end_ts{};
+};
+
 struct pmc_track_result
 {
     size_t                nid{};
@@ -447,6 +455,19 @@ struct read_statements
                           err.what());
             }
         }
+    }
+
+    [[nodiscard]] const std::string& trace_uuid() const { return m_uuid; }
+
+    [[nodiscard]] std::vector<interval_row_t> query_intervals(
+        const std::string& sql) const
+    {
+        return m_backend
+            ->create_read_statement_executor<interval_row_t>(sql,
+                                                             &interval_row_t::event_id,
+                                                             &interval_row_t::start_ts,
+                                                             &interval_row_t::end_ts)()
+            .to_vector();
     }
 
     template <typename Row, typename... Args>
