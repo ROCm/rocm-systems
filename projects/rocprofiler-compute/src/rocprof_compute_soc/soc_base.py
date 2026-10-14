@@ -470,17 +470,15 @@ class OmniSoC_Base:
         filter_blocks = args.filter_blocks
         if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
-            if args.set_selected not in set(sets_info.keys()):
+            if args.set_selected not in sets_info:
                 console_error(
                     f'argument --set: invalid choice: "{args.set_selected}" '
-                    f"(choose from {sets_info.keys()})"
+                    f"(choose from {', '.join(sets_info)})"
                 )
             filter_blocks = [
                 next(iter(metric.keys()))
                 for metric in sets_info[args.set_selected]["metric"]
             ]
-        elif args.roof_only:
-            filter_blocks = ["4"]
 
         texts: list[str] = []
         if not filter_blocks:

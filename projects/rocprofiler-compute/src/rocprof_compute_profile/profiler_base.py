@@ -223,6 +223,10 @@ class RocProfCompute_Base:
                         "--experimental --pc-sampling"
                     )
 
+        # --set replaces filter_blocks, which would drop the PC sampling block
+        if getattr(args, "pc_sampling", False) and args.set_selected:
+            console_error("--pc-sampling cannot be used with --set.")
+
         # When --pc-sampling is set, inject "21" into filter_blocks so the
         # profiling config yaml records it and downstream code is unchanged.
         if getattr(args, "pc_sampling", False):
@@ -249,19 +253,6 @@ class RocProfCompute_Base:
                 "collect counters. Remove the tracing option(s) or add a counter block."
             )
         self._selected_frameworks: set[str] = selected_frameworks
-
-        if (
-            sum((
-                bool(args.filter_blocks),
-                bool(args.set_selected),
-                bool(args.roof_only),
-            ))
-            > 1
-        ):
-            console_error(
-                "--block, --set, and --roofline are mutually exclusive options. "
-                "Please use only one of them."
-            )
 
         if args.no_native_tool and args.iteration_multiplexing is not None:
             console_error(
@@ -367,7 +358,7 @@ class RocProfCompute_Base:
             args.remaining = ""
 
         self._filter_blocks = self._soc.profiling_setup()
-        # --set and --roofline resolve to block ids here, so store them back on
+        # --set resolves to block ids here, so store them back on
         # the args every later stage reads.
         self.__args.filter_blocks = self._filter_blocks
 

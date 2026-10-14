@@ -13,6 +13,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
 
+* Added `--speed-of-light`, `--memory-chart`, and `--roofline` options to profile and analyze modes.
+  * They are short forms of `-b 2`, `-b 3`, and `-b 4`.
+  * They can be combined with each other and with `-b`. For example, `--speed-of-light --roofline` is the same as `-b 2 4`.
+
 ### Changed
 
 * Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
@@ -30,6 +34,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * `--sort` is now `--roofline-sort`
     * `--mem-level` is now `--roofline-mem-level` (`-m` still works)
     * `--roofline-data-type` is now `--roofline-data-types` (`-R` still works)
+
+* In profile mode, `--roofline` now works the same as `-b 4`:
+  * It can be combined with `-b`. For example, `-b 2 --roofline` profiles blocks 2 and 4.
+  * On gfx908, it collects the roofline counters and skips the roofline benchmark, which gfx908 does not support.
 
 * The profile and analyze help is easier to read. Each option shows what value it takes, the values it accepts, and its default.
 
