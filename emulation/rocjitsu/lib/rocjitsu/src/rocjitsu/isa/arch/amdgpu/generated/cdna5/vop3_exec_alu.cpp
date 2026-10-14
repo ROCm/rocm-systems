@@ -4215,13 +4215,13 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (wf.fp16_ovfl()) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_ovfl_simd(util::min_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   } else {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_simd(util::min_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   }
   uint64_t exec = wf.exec();
@@ -4257,7 +4257,7 @@ void VMinNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -4303,13 +4303,13 @@ RJ_NOINLINE void VMinNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (wf.fp16_ovfl()) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_ovfl_simd(util::min_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   } else {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_simd(util::min_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   }
   uint64_t exec = wf.exec();
@@ -4345,7 +4345,7 @@ RJ_NOINLINE void VMinNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -4379,13 +4379,13 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (wf.fp16_ovfl()) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_ovfl_simd(util::max_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   } else {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_simd(util::max_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   }
   uint64_t exec = wf.exec();
@@ -4421,7 +4421,7 @@ void VMaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -4467,13 +4467,13 @@ RJ_NOINLINE void VMaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   if (wf.fp16_ovfl()) {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_ovfl_simd(
-          util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_ovfl_simd(util::max_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   } else {
     ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16(uint32_t, [&wf](auto a, auto b) {
-      return util::f32_to_f16_simd(
-          util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode()));
+      return util::f32_to_f16_simd(util::max_num_simd(
+          util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy()));
     });
   }
   uint64_t exec = wf.exec();
@@ -4509,7 +4509,7 @@ RJ_NOINLINE void VMaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);

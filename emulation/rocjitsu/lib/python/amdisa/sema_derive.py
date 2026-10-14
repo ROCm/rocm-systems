@@ -1085,15 +1085,15 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0), SemaType.U32), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
-        if op == 'frexp_mant_f32' and dtype == 'f64':
-            src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
+        if op == 'frexp_mant_f32' and dtype in ('f16', 'f64'):
+            src0 = _cast(_src(0, ty), ty)
             result = SemaNode(
                 SemaNodeKind.CALL,
-                ty=SemaType.F64,
-                call_name='frexp_mant_f64',
-                children=(_id('frexp_mant_f64'), src0),
+                ty=ty,
+                call_name=f'frexp_mant_{dtype}',
+                children=(_id(f'frexp_mant_{dtype}'), src0),
             )
-            body = _assign(_cast(_dst(0, SemaType.F64), SemaType.F64), result)
+            body = _assign(_cast(_dst(0, ty), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
         _f64_transcendentals = {'rcp': 'rcp_f64', 'rsq': 'rsq_f64', 'sqrt': 'sqrt_f64'}
@@ -2981,3 +2981,26 @@ class _ImageAtomic(_ScalarDeriver):
     @staticmethod
     def derive(sem: InstructionSemantics) -> SemaBlock:
         return _derive_image(sem, is_store=False)
+
+
+def has_integer_destination(sem: InstructionSemantics) -> bool:
+    """Recognize integer results from typed destination assignments."""
+    block = derive_sema_block(sem)
+    if block is None:
+        return False
+    destinations = []
+    for node in block.body.walk():
+        if node.kind != SemaNodeKind.ASSIGN:
+            continue
+        lhs = node.children[0]
+        operand = lhs
+        while operand.kind == SemaNodeKind.CAST:
+            operand = operand.children[0]
+        if (
+            operand.kind == SemaNodeKind.INSTOPERAND
+            and operand.children
+            and operand.children[0].id_name == 'D'
+            and lhs.ty is not None
+        ):
+            destinations.append(lhs.ty)
+    return bool(destinations) and all(ty.base in ('U', 'I', 'B') for ty in destinations)

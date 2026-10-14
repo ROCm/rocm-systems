@@ -26,6 +26,10 @@
 #include <string_view>
 #include <vector>
 
+namespace util {
+enum class MinMaxPolicy : uint8_t;
+}
+
 namespace rocjitsu {
 class ExecutionPluginGroup;
 
@@ -454,6 +458,7 @@ public:
   static constexpr uint32_t kStatusHaltMask = 1u << 13;
 
   bool dx10_clamp() const { return (mode_raw_ & DX10_CLAMP_BIT) != 0; }
+  util::MinMaxPolicy minmax_policy() const;
   bool ieee_mode() const { return (mode_raw_ & IEEE_BIT) != 0; }
   bool gpr_idx_en() const { return mode_has_gpr_idx_en_ && ((mode_raw_ & GPR_IDX_EN_BIT) != 0); }
   bool fp16_ovfl() const { return (mode_raw_ & FP16_OVFL_BIT) != 0; }

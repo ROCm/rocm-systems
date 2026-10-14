@@ -79,8 +79,9 @@ Activate a Python virtual environment containing the generator dependencies and
 ```
 
 Use the lower-level CLI only for focused generator development. Preserve the
-CDNA3/4 legacy math additions and CDNA5 `--isa-additions` and `--isa-variants` inputs shown in the detailed
-`docs/codegen.md` documentation when generating CDNA5 output.
+CDNA1-4 legacy math additions and CDNA5 `--isa-additions` and
+`--isa-variants` inputs shown in the detailed
+`docs/codegen.md` documentation for the corresponding CDNA output.
 
 ## Workflow for modifying ISA semantics
 

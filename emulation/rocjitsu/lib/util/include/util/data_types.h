@@ -1515,11 +1515,20 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {
 
 inline uint32_t prng_advance(uint32_t seed) { return (seed << 1) ^ ((seed >> 31) ? 197u : 0u); }
 
-// Floating min/max must not inherit the host library's signed-zero or NaN
-// selection. Compare IEEE encodings, which also preserves denormal inputs when
-// the host has DAZ enabled. Source/output modifiers remain the caller's job.
+// Explicit NaN selection rules keep host fmin/fmax behavior out of the ISA.
+enum class MinMaxPolicy : uint8_t {
+  Cdna,
+  CdnaIeee,
+  Rdna,
+  RdnaIeee,
+  Number,
+  Propagate,
+};
+
+namespace detail {
+// Compare IEEE encodings so preserved denormals survive host DAZ as well.
 template <typename Float>
-inline Float floating_minmax(Float a, Float b, bool maximum, bool propagate_nan, bool ieee = true) {
+inline Float floating_minmax(Float a, Float b, bool maximum, MinMaxPolicy policy) {
   static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
   using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
   constexpr unsigned fraction = sizeof(Float) == 4 ? 23 : 52;
@@ -1527,16 +1536,26 @@ inline Float floating_minmax(Float a, Float b, bool maximum, bool propagate_nan,
   constexpr Bits infinity =
       static_cast<Bits>(sizeof(Float) == 4 ? 0x7f800000ull : 0x7ff0000000000000ull);
   constexpr Bits quiet = Bits{1} << (fraction - 1);
-  const Bits ua = std::bit_cast<Bits>(a), ub = std::bit_cast<Bits>(b);
-  const bool nan_a = (ua & ~sign) > infinity, nan_b = (ub & ~sign) > infinity;
+  const Bits ua = std::bit_cast<Bits>(a);
+  const Bits ub = std::bit_cast<Bits>(b);
+  const bool nan_a = (ua & ~sign) > infinity;
+  const bool nan_b = (ub & ~sign) > infinity;
+  const bool propagate = policy == MinMaxPolicy::Propagate;
+  const bool ieee =
+      propagate || policy == MinMaxPolicy::CdnaIeee || policy == MinMaxPolicy::RdnaIeee;
   if (ieee && nan_a && !(ua & quiet))
     return std::bit_cast<Float>(ua | quiet);
   if (ieee && nan_b && !(ub & quiet))
     return std::bit_cast<Float>(ub | quiet);
-  if (propagate_nan && nan_a)
+  if (propagate && nan_a)
     return std::bit_cast<Float>(ua | quiet);
-  if (propagate_nan && nan_b)
+  if (propagate && nan_b)
     return std::bit_cast<Float>(ub | quiet);
+  if (nan_a && nan_b) {
+    if (policy == MinMaxPolicy::Number)
+      return std::bit_cast<Float>(ua | quiet);
+    return policy == MinMaxPolicy::Rdna || policy == MinMaxPolicy::RdnaIeee ? a : b;
+  }
   if (nan_a)
     return b;
   if (nan_b)
@@ -1545,18 +1564,39 @@ inline Float floating_minmax(Float a, Float b, bool maximum, bool propagate_nan,
   const Bits order_b = ub & sign ? ~ub : ub ^ sign;
   return (maximum ? order_a > order_b : order_a < order_b) ? a : b;
 }
+} // namespace detail
 
 template <typename Float> inline Float minimum(Float a, Float b) {
-  return floating_minmax(a, b, false, true);
+  return detail::floating_minmax(a, b, false, MinMaxPolicy::Propagate);
 }
 template <typename Float> inline Float maximum(Float a, Float b) {
-  return floating_minmax(a, b, true, true);
+  return detail::floating_minmax(a, b, true, MinMaxPolicy::Propagate);
 }
-template <typename Float> inline Float min_num(Float a, Float b, bool ieee) {
-  return floating_minmax(a, b, false, false, ieee);
+template <typename Float> inline Float min_num(Float a, Float b, MinMaxPolicy policy) {
+  return detail::floating_minmax(a, b, false, policy);
 }
-template <typename Float> inline Float max_num(Float a, Float b, bool ieee) {
-  return floating_minmax(a, b, true, false, ieee);
+template <typename Float> inline Float max_num(Float a, Float b, MinMaxPolicy policy) {
+  return detail::floating_minmax(a, b, true, policy);
+}
+
+template <typename Float> inline Float med3(Float a, Float b, Float c, MinMaxPolicy policy) {
+  // CDNA and RDNA define the NaN case as MIN3, followed by MAX3/equality
+  // selection for ordered inputs. Equality intentionally treats signed zeros alike.
+  if (std::isnan(a) || std::isnan(b) || std::isnan(c))
+    return min_num(min_num(a, b, policy), c, policy);
+  const Float largest = max_num(max_num(a, b, policy), c, policy);
+  const auto equal = [](Float x, Float y) {
+    using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+    constexpr Bits sign = Bits{1} << (sizeof(Float) * 8 - 1);
+    const Bits ux = std::bit_cast<Bits>(x);
+    const Bits uy = std::bit_cast<Bits>(y);
+    return ux == uy || ((ux | uy) & ~sign) == 0;
+  };
+  if (equal(largest, a))
+    return max_num(b, c, policy);
+  if (equal(largest, b))
+    return max_num(a, c, policy);
+  return max_num(a, b, policy);
 }
 
 } // namespace util

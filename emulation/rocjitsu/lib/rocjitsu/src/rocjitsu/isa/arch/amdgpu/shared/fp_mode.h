@@ -1081,21 +1081,9 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
       case BinaryF64Op::Multiply:
         return lhs * rhs;
       case BinaryF64Op::MaximumNumber:
-        if (std::isnan(lhs))
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        if (std::isnan(rhs))
-          return lhs;
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0)
-          return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
-        return std::fmax(lhs, rhs);
+        return util::max_num(lhs, rhs, util::MinMaxPolicy::Number);
       case BinaryF64Op::MinimumNumber:
-        if (std::isnan(lhs))
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        if (std::isnan(rhs))
-          return lhs;
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0)
-          return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
-        return std::fmin(lhs, rhs);
+        return util::min_num(lhs, rhs, util::MinMaxPolicy::Number);
       }
       return std::numeric_limits<double>::quiet_NaN();
     }();
@@ -1189,6 +1177,36 @@ inline FrexpF32Result frexp_f32(float value, uint32_t denorm) {
   return {std::bit_cast<float>((bits & 0x80000000u) | 0x3f000000u |
                                ((magnitude << shift) & 0x007fffffu)),
           exponent ? exponent - 126 : -125 - shift};
+}
+
+// The F16 argument has already been widened exactly, but the denormal threshold
+// and mode belong to the original half-precision format.
+inline FrexpF32Result frexp_f16(float value, uint32_t denorm) {
+  const uint32_t bits = std::bit_cast<uint32_t>(value);
+  if (!(denorm & 1u) && (bits & 0x7fffffffu) < 0x38800000u)
+    return {std::bit_cast<float>(bits & 0x80000000u), 0};
+  return frexp_f32(value, 3);
+}
+
+struct FrexpF64Result {
+  double mantissa;
+  int32_t exponent;
+};
+
+inline FrexpF64Result frexp_f64(double value, uint32_t denorm) {
+  const uint64_t bits = std::bit_cast<uint64_t>(value);
+  const uint64_t magnitude = bits & 0x7fffffffffffffffull;
+  const int exponent = static_cast<int>(magnitude >> 52);
+  if (exponent == 2047)
+    return {std::bit_cast<double>(
+                bits | (magnitude > 0x7ff0000000000000ull ? 0x0008000000000000ull : 0ull)),
+            0};
+  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u)))
+    return {std::bit_cast<double>(bits & 0x8000000000000000ull), 0};
+  const int shift = exponent ? 0 : std::countl_zero(magnitude) - 11;
+  return {std::bit_cast<double>((bits & 0x8000000000000000ull) | 0x3fe0000000000000ull |
+                                ((magnitude << shift) & 0x000fffffffffffffull)),
+          exponent ? exponent - 1022 : -1021 - shift};
 }
 
 } // namespace rocjitsu::amdgpu

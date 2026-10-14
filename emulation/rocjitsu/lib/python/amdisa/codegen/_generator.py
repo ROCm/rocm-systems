@@ -1020,24 +1020,21 @@ class CodeGenerator:
         format. Integer-destination conversions can use CLAMP for an exception
         control, so the floating source type must not enable output modifiers.
         """
+        from amdisa.sema_derive import has_integer_destination
+
         # FP8/BF8 expansion uses SDWA only for source register/byte selection.
         # CDNA3 section 7.2 and CDNA4 section 7.3 ignore the other SDWA fields.
         if sem and sem.name in ('V_CVT_F32_FP8', 'V_CVT_F32_BF8'):
             return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (conversion := re.match(r'^V_CVT_(F16|F32)_', sem.name)):
             return f'amdgpu::sdwa::ResultFormat::{conversion.group(1)}'
-        if sem and sem.operation in (
-            'frexp_exp_f32',
-            'frexp_exp_f16',
-            'cvt_norm_i16_f16',
-            'cvt_norm_u16_f16',
-        ):
-            return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (
             sem.name == 'V_PK_FMAC_F16'
             or sem.semantic_class == 'vector_cvt_pkrtz_f16_f32'
         ):
             return 'amdgpu::sdwa::ResultFormat::PK_F16'
+        if sem and has_integer_destination(sem):
+            return 'amdgpu::sdwa::ResultFormat::NONE'
         suffix = {'f16': 'F16', 'f32': 'F32'}.get(
             sem.data_type if sem else None, 'NONE'
         )
@@ -2212,7 +2209,7 @@ class CodeGenerator:
                     '''
                     {
                       float result = util::max_num(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1), wf.ieee_mode());
+                                               std::bit_cast<float>(src1), wf.minmax_policy());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2222,7 +2219,7 @@ class CodeGenerator:
                     '''
                     {
                       float result = util::min_num(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1), wf.ieee_mode());
+                                               std::bit_cast<float>(src1), wf.minmax_policy());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2518,12 +2515,12 @@ class CodeGenerator:
               }
               case kVopdMinNumF64: {
                 double result = util::min_num(std::bit_cast<double>(src0),
-                                          std::bit_cast<double>(src1), wf.ieee_mode());
+                                          std::bit_cast<double>(src1), wf.minmax_policy());
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdMaxNumF64: {
                 double result = util::max_num(std::bit_cast<double>(src0),
-                                          std::bit_cast<double>(src1), wf.ieee_mode());
+                                          std::bit_cast<double>(src1), wf.minmax_policy());
                 return std::bit_cast<uint64_t>(result);
               }
               default:
@@ -6447,7 +6444,7 @@ class CodeGenerator:
         self._enc_name = enc_name
 
         # Try SemaAST pipeline for validated classes.
-        from amdisa.sema_derive import derive_sema_block
+        from amdisa.sema_derive import derive_sema_block, has_integer_destination
         from amdisa.codegen.execute.sema_lower import (
             lower_sema_block,
             LoweringContext,
@@ -6524,10 +6521,7 @@ class CodeGenerator:
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
                 )
-                has_integer_result = is_f32_to_integer or sem.operation in (
-                    'frexp_exp_f16',
-                    'frexp_exp_f32',
-                )
+                is_integer_result = has_integer_destination(sem)
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
                 )
@@ -6548,9 +6542,9 @@ class CodeGenerator:
                     if has_abs and not is_integer_to_f32:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields and not has_integer_result:
+                    if 'clamp' in inst_fields and not is_integer_result:
                         ef.add('clamp')
-                    if 'omod' in inst_fields and not has_integer_result:
+                    if 'omod' in inst_fields and not is_integer_result:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand

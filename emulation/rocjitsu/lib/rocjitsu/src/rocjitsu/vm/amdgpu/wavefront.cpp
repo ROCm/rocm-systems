@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -37,6 +38,21 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
 Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 
 const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
+util::MinMaxPolicy Wavefront::minmax_policy() const {
+  switch (cu_.arch()) {
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return util::MinMaxPolicy::Number;
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return ieee_mode() ? util::MinMaxPolicy::RdnaIeee : util::MinMaxPolicy::Rdna;
+  default:
+    return ieee_mode() ? util::MinMaxPolicy::CdnaIeee : util::MinMaxPolicy::Cdna;
+  }
+}
 
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;

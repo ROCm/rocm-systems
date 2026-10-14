@@ -328,13 +328,11 @@ template <bool Extended, typename Slot>
           case 34:
             result = av * bv;
             break;
-          // The host's signed-zero and NaN selection is also used by the scalar
-          // executor. Keep it for selection ops on hosts with broken F64 masks.
           case 35:
-            result = D([&](auto i) { return std::fmax(double(av[i]), double(bv[i])); });
+            result = util::max_num_simd(av, bv, wf.minmax_policy());
             break;
           case 36:
-            result = D([&](auto i) { return std::fmin(double(av[i]), double(bv[i])); });
+            result = util::min_num_simd(av, bv, wf.minmax_policy());
             break;
           default:
             return false;
@@ -419,8 +417,9 @@ template <bool Extended, typename Slot>
           util::stdx::where(af < bf, selected) = af;
         for (uint32_t i = 0; i < W; ++i)
           if (std::isnan(af[i]) || std::isnan(bf[i]) || (af[i] == 0 && bf[i] == 0))
-            selected[i] = slot.op == 10 ? std::fmax(float(af[i]), float(bf[i]))
-                                        : std::fmin(float(af[i]), float(bf[i]));
+            selected[i] = slot.op == 10
+                              ? util::max_num(float(af[i]), float(bf[i]), wf.minmax_policy())
+                              : util::min_num(float(af[i]), float(bf[i]), wf.minmax_policy());
         result = std::bit_cast<U>(selected);
         break;
       }

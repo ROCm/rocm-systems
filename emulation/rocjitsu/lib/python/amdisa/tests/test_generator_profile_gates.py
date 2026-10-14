@@ -8685,11 +8685,18 @@ def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
 
 
 @pytest.mark.parametrize(
-    'operation',
-    ['frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'],
+    'name',
+    [
+        'V_FREXP_EXP_I32_F32',
+        'V_FREXP_EXP_I16_F16',
+        'V_CVT_NORM_I16_F16',
+        'V_CVT_NORM_U16_F16',
+    ],
 )
-def test_sdwa_integer_results_ignore_float_modifiers(operation):
-    sem = SimpleNamespace(name='V_INTEGER_RESULT', operation=operation, data_type='f16')
+def test_sdwa_integer_results_ignore_float_modifiers(name):
+    from amdisa.semantics import derive_semantics
+
+    sem = derive_semantics(name, 'ENC_VOP3')
     assert CodeGenerator._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::NONE'
 
 

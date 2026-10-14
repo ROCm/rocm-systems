@@ -805,7 +805,7 @@ _VOP1_OP_MAP = {
     'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
     'V_EXP_LEGACY': ('vector_unary', 'exp2'),
-    'V_PRNG': ('vector_unary', 'util::prng_advance'),
+    'V_PRNG': ('vector_unary', 'prng_advance'),
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
     'V_SWAPREL': ('vector_swaprel', None),
@@ -1493,9 +1493,6 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     }
     if name in _CVT_FP8_MAP:
         return InstructionSemantics(name, 'cvt_fp8', operation=_CVT_FP8_MAP[name])
-
-    if name in ('V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16'):
-        return InstructionSemantics(name, 'nop')
 
     # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
     # mappings above still need per-encoding validation.

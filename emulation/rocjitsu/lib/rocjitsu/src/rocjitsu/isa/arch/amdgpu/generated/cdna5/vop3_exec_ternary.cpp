@@ -758,7 +758,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -794,7 +794,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -805,7 +805,7 @@ void VMin3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -850,7 +850,7 @@ RJ_NOINLINE void VMin3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -886,7 +886,7 @@ RJ_NOINLINE void VMin3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -897,7 +897,7 @@ RJ_NOINLINE void VMin3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -930,7 +930,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -966,7 +966,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -977,7 +977,7 @@ void VMax3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -1022,7 +1022,7 @@ RJ_NOINLINE void VMax3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -1058,7 +1058,7 @@ RJ_NOINLINE void VMax3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -1069,7 +1069,7 @@ RJ_NOINLINE void VMax3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -1532,38 +1532,38 @@ void VMed3NumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = [&]() {
-                        auto a = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                          if (inst_.abs & (1u << 0))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 0))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        auto b = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                          if (inst_.abs & (1u << 1))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 1))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        auto c = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                          if (inst_.abs & (1u << 2))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 2))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        return util::max_num(
-                            util::min_num(util::max_num(a, b, wf.ieee_mode()), c, wf.ieee_mode()),
-                            util::min_num(a, b, wf.ieee_mode()), wf.ieee_mode());
-                      }();
+                      float v = util::med3(
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src0, wf, lane, opsel, 0)));
+                            if (inst_.abs & (1u << 0))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 0))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src1, wf, lane, opsel, 1)));
+                            if (inst_.abs & (1u << 1))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 1))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src2, wf, lane, opsel, 2)));
+                            if (inst_.abs & (1u << 2))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 2))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -1618,38 +1618,38 @@ RJ_NOINLINE void VMed3NumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
                   *this, wf,
                   [&]() {
                     float v = [&]() {
-                      float v = [&]() {
-                        auto a = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                          if (inst_.abs & (1u << 0))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 0))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        auto b = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1)));
-                          if (inst_.abs & (1u << 1))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 1))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        auto c = [&]() {
-                          float sv = util::f16_to_f32(static_cast<uint16_t>(
-                              ::rocjitsu::amdgpu::read_vop3_true16_src(src2, wf, lane, opsel, 2)));
-                          if (inst_.abs & (1u << 2))
-                            sv = std::fabs(sv);
-                          if (inst_.neg & (1u << 2))
-                            sv = -sv;
-                          return sv;
-                        }();
-                        return util::max_num(
-                            util::min_num(util::max_num(a, b, wf.ieee_mode()), c, wf.ieee_mode()),
-                            util::min_num(a, b, wf.ieee_mode()), wf.ieee_mode());
-                      }();
+                      float v = util::med3(
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src0, wf, lane, opsel, 0)));
+                            if (inst_.abs & (1u << 0))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 0))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src1, wf, lane, opsel, 1)));
+                            if (inst_.abs & (1u << 1))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 1))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          [&]() {
+                            float sv = util::f16_to_f32(
+                                static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
+                                    src2, wf, lane, opsel, 2)));
+                            if (inst_.abs & (1u << 2))
+                              sv = std::fabs(sv);
+                            if (inst_.neg & (1u << 2))
+                              sv = -sv;
+                            return sv;
+                          }(),
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -3151,7 +3151,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -3187,7 +3187,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -3198,7 +3198,7 @@ void VMinmaxNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -3243,7 +3243,7 @@ RJ_NOINLINE void VMinmaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -3279,7 +3279,7 @@ RJ_NOINLINE void VMinmaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -3290,7 +3290,7 @@ RJ_NOINLINE void VMinmaxNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -3323,7 +3323,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -3359,7 +3359,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -3370,7 +3370,7 @@ void VMaxminNumF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);
@@ -3415,7 +3415,7 @@ RJ_NOINLINE void VMaxminNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16([&wf](auto a, auto b, auto c) {
-    return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode());
+    return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy());
   });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
@@ -3451,7 +3451,7 @@ RJ_NOINLINE void VMaxminNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                                   sv = -sv;
                                 return sv;
                               }(),
-                              wf.ieee_mode()),
+                              wf.minmax_policy()),
                           [&]() {
                             float sv = util::f16_to_f32(
                                 static_cast<uint16_t>(::rocjitsu::amdgpu::read_vop3_true16_src(
@@ -3462,7 +3462,7 @@ RJ_NOINLINE void VMaxminNumF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
                               sv = -sv;
                             return sv;
                           }(),
-                          wf.ieee_mode());
+                          wf.minmax_policy());
                       const uint32_t effective_omod = amdgpu::fp_mode::effective_f16_omod(
                           wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), false,
                           inst_.omod);

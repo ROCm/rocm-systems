@@ -1364,7 +1364,7 @@ void VMaxF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
                               amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
                           util::f16_to_f32(static_cast<uint16_t>(
                               amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                          wf.ieee_mode()),
+                          wf.minmax_policy()),
             wf.fp16_ovfl()));
   }
 }
@@ -1401,7 +1401,7 @@ RJ_NOINLINE void VMaxF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
                           util::f16_to_f32(static_cast<uint16_t>(
                               amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                          wf.ieee_mode()),
+                          wf.minmax_policy()),
             wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -1424,7 +1424,7 @@ void VMinF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
                               amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
                           util::f16_to_f32(static_cast<uint16_t>(
                               amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                          wf.ieee_mode()),
+                          wf.minmax_policy()),
             wf.fp16_ovfl()));
   }
 }
@@ -1461,7 +1461,7 @@ RJ_NOINLINE void VMinF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
                               amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
                           util::f16_to_f32(static_cast<uint16_t>(
                               amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                          wf.ieee_mode()),
+                          wf.minmax_policy()),
             wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();

@@ -1039,8 +1039,8 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
-/// Apply the scalar IEEE selection rules to every SIMD lane. In particular,
-/// keep signaling NaN payloads and order -0 before +0 on every host compiler.
+/// Apply the selected scalar NaN policy to each SIMD lane. All policies
+/// order -0 before +0 independently of the host compiler.
 template <typename V> V ieee_maximum_simd(V a, V b) {
   using Float = typename V::value_type;
   return V([&](auto i) { return maximum(Float(a[i]), Float(b[i])); });
@@ -1049,13 +1049,18 @@ template <typename V> V ieee_minimum_simd(V a, V b) {
   using Float = typename V::value_type;
   return V([&](auto i) { return minimum(Float(a[i]), Float(b[i])); });
 }
-template <typename V> V min_num_simd(V a, V b, bool ieee) {
+template <typename V> V min_num_simd(V a, V b, MinMaxPolicy policy) {
   using Float = typename V::value_type;
-  return V([&](auto i) { return min_num(Float(a[i]), Float(b[i]), ieee); });
+  return V([&](auto i) { return min_num(Float(a[i]), Float(b[i]), policy); });
 }
-template <typename V> V max_num_simd(V a, V b, bool ieee) {
+template <typename V> V max_num_simd(V a, V b, MinMaxPolicy policy) {
   using Float = typename V::value_type;
-  return V([&](auto i) { return max_num(Float(a[i]), Float(b[i]), ieee); });
+  return V([&](auto i) { return max_num(Float(a[i]), Float(b[i]), policy); });
+}
+
+template <typename V> V med3_simd(V a, V b, V c, MinMaxPolicy policy) {
+  using Float = typename V::value_type;
+  return V([&](auto i) { return med3(Float(a[i]), Float(b[i]), Float(c[i]), policy); });
 }
 
 /// Round an in-range finite float to the nearest integer, with halfway values

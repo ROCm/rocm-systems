@@ -18,8 +18,8 @@ from amdisa.isa_additions import (
 )
 from amdisa.isa_profile import (
     Cdna1Profile,
-    CdnaProfile,
     Cdna4Profile,
+    CdnaProfile,
     Cdna5Profile,
     Rdna4Profile,
 )
@@ -1541,7 +1541,13 @@ def test_nonempty_additions_document_generates_decoder_dispatch(tmp_path):
 
 
 @pytest.mark.parametrize(
-    'arch,profile', [('cdna3', CdnaProfile()), ('cdna4', Cdna4Profile())]
+    'arch,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', CdnaProfile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+    ],
 )
 def test_legacy_math_additions_match_llvm_encodings(arch, profile):
     isa_dir = (

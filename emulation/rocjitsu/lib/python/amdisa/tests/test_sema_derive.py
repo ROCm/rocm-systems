@@ -3345,3 +3345,23 @@ def test_conditional_exchange_has_one_qword_payload(encoding):
     assert semantics.operation == 'condxchg32'
     assert semantics.elem_size == 8
     assert semantics.num_elems == 2
+
+
+@pytest.mark.parametrize(
+    'name,expected',
+    [
+        ('V_FREXP_EXP_I16_F16', True),
+        ('V_FREXP_EXP_I32_F32', True),
+        ('V_FREXP_EXP_I32_F64', True),
+        ('V_CVT_I32_F32', True),
+        ('V_CVT_NORM_I16_F16', True),
+        ('V_ADD_F32', False),
+        ('V_FREXP_MANT_F16', False),
+        ('V_CVT_F32_I32', False),
+    ],
+)
+def test_integer_destination_is_derived_from_typed_assignment(name, expected):
+    from amdisa.sema_derive import has_integer_destination
+
+    sem = derive_semantics(name, 'ENC_VOP3')
+    assert has_integer_destination(sem) == expected

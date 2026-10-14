@@ -210,44 +210,44 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # with scalar execution, including the guest IEEE mode.
     'v_max_f32_vop2': (
         'float32_t',
-        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
+        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
     ),
     'v_min_f32_vop2': (
         'float32_t',
-        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
     ),
     'v_max_f16_vop2': (
         'uint32_t',
         '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
+        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy())); }',
     ),
     'v_min_f16_vop2': (
         'uint32_t',
         '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
+        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy())); }',
     ),
     # IEEE-2019 number forms use the same guest-mode helpers.
     'v_max_num_f32_vop2': (
         'float32_t',
-        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
+        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
     ),
     'v_min_num_f32_vop2': (
         'float32_t',
-        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
     ),
     'v_max_num_f16_vop2': (
         'uint32_t',
         '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
+        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy())); }',
     ),
     'v_min_num_f16_vop2': (
         'uint32_t',
         '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
+        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.minmax_policy())); }',
     ),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
     # round-toward-zero narrowing; proven bit-identical to the scalar helper.
@@ -508,17 +508,16 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_frexp_mant_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::frexp_mant_f32_simd('
-        'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))); }',
+        '[&wf](auto a) { return decltype(a)([&](auto i) {'
+        ' return static_cast<uint32_t>(util::f32_to_f16(amdgpu::frexp_f16('
+        'util::f16_to_f32(static_cast<uint16_t>(a[i])), wf.fp_denorm_mode_f16_f64()).mantissa)); }); }',
     ),
     'v_frexp_exp_i16_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' auto e = util::frexp_exp_f32_simd('
-        'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));'
-        ' return e & 0xFFFFu; }',
+        '[&wf](auto a) { return decltype(a)([&](auto i) {'
+        ' return static_cast<uint32_t>(amdgpu::frexp_f16('
+        'util::f16_to_f32(static_cast<uint16_t>(a[i])), wf.fp_denorm_mode_f16_f64()).exponent) & 0xffffu; }); }',
     ),
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /
@@ -973,8 +972,8 @@ SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
 SIMD_VOP2_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop2': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop2': '[](auto a, auto b) { return a * b; }',
-    'v_max_num_f64_vop2': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
-    'v_min_num_f64_vop2': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+    'v_max_num_f64_vop2': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
+    'v_min_num_f64_vop2': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
 }
 
 
@@ -1009,7 +1008,7 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
     'v_frexp_mant_f64_vop1': (
         'double',
-        '[](auto a) { return util::frexp_mant_f64_simd(a); }',
+        '[&wf](auto a) { return decltype(a)([&](auto i) { return amdgpu::frexp_f64(static_cast<double>(a[i]), wf.fp_denorm_mode_f16_f64()).mantissa; }); }',
     ),
 }
 
@@ -1047,15 +1046,12 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
         ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
     ),
-    # frexp exponent (f64 -> int32). util::frexp_exp_f64_simd returns the int32 in
-    # the low 32 bits of each 64-bit lane; the narrowing cast keeps them. The VOP3
-    # twin applies float omod/clamp to float(exp) + bit-casts (a different output
-    # encoding), so it stays scalar (_VOP3_UNARY_SKIP gates the cvt auto-route).
+    # FREXP exponents are integer bits. The mixed-width VOP1 path narrows
+    # those bits; VOP3 uses scalar lowering to avoid floating output glue.
     'v_frexp_exp_i32_f64_vop1': (
-        'int32_t',
-        '[](auto s) {'
-        ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>('
-        'util::frexp_exp_f64_simd(s)); }',
+        'uint32_t',
+        '[&wf](auto a) { return util::narrow32<uint32_t>([&](auto i) {'
+        ' return static_cast<uint32_t>(amdgpu::frexp_f64(static_cast<double>(a[i]), wf.fp_denorm_mode_f16_f64()).exponent); }); }',
     ),
 }
 
@@ -1931,11 +1927,11 @@ SIMD_VOP3_BINARY_FP32: dict[str, str] = {
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
-    'v_max_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
-    'v_min_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+    'v_max_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
+    'v_min_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
     # IEEE-2019 number forms use the same guest-mode helpers.
-    'v_max_num_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
-    'v_min_num_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+    'v_max_num_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.minmax_policy()); }',
+    'v_min_num_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.minmax_policy()); }',
     # IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered).
     'v_maximum_f64_vop3': '[](auto a, auto b) { return util::ieee_maximum_simd(a, b); }',
     'v_minimum_f64_vop3': '[](auto a, auto b) { return util::ieee_minimum_simd(a, b); }',
@@ -1962,7 +1958,7 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     'v_fract_f64_vop3': '[](auto a) { return a - util::floor_simd(a); }',
     # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
     # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
-    'v_frexp_mant_f64_vop3': '[](auto a) { return util::frexp_mant_f64_simd(a); }',
+    'v_frexp_mant_f64_vop3': '[&wf](auto a) { return decltype(a)([&](auto i) { return amdgpu::frexp_f64(static_cast<double>(a[i]), wf.fp_denorm_mode_f16_f64()).mantissa; }); }',
     # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
     # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
     # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
@@ -2025,7 +2021,7 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
 SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
     'v_frexp_mant_f16_vop3': (
         'fp16',
-        '[](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); }',
+        '[&wf](auto a) { return decltype(a)([&](auto i) { return amdgpu::frexp_f16(static_cast<float>(a[i]), wf.fp_denorm_mode_f16_f64()).mantissa; }); }',
     ),
 }
 
@@ -2038,23 +2034,23 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # Nested min/max operations use the same bit-level rules as scalar execution.
     # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
     'v_fma_dx9_zero_f32_vop3': (
         '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); }'
     ),
-    'v_max3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_min3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_med3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()), util::min_num_simd(a, b, wf.ieee_mode()), wf.ieee_mode()); }',
+    # Min/max and median use the same architecture-specific rules as scalar execution.
+    'v_max3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_min3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_med3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::med3_simd(a, b, c, wf.minmax_policy()); }',
     # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
-    'v_minmax_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_maxmin_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_minmax_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_maxmin_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     # IEEE-2019 num twins (gfx1250/rdna4): identical fmax/fmin compositions as
     # the legacy max3/min3/minmax/maxmin bodies above.
-    'v_max3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_min3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_minmax_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_maxmin_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_max3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_min3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_minmax_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_maxmin_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     # IEEE-2019 maximum/minimum 3-input + combined forms. The scalar bodies are
     # the exact nested composition of the binary maximum/minimum (NaN-propagating,
     # signed-zero-ordered) — see util::ieee_{maximum,minimum}_simd.
@@ -2086,16 +2082,16 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
     # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
-    'v_max3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_min3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_med3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()), util::min_num_simd(a, b, wf.ieee_mode()), wf.ieee_mode()); }',
-    'v_minmax_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_maxmin_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_max3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_min3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_med3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::med3_simd(a, b, c, wf.minmax_policy()); }',
+    'v_minmax_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_maxmin_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     # IEEE-2019 num twins (f16): same fmax/fmin compositions, widened by the glue.
-    'v_max3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_min3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_minmax_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
-    'v_maxmin_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_max3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_min3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_minmax_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
+    'v_maxmin_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.minmax_policy()), c, wf.minmax_policy()); }',
     # IEEE-2019 maximum/minimum 3-input + combined (f16; widened to f32 by glue).
     'v_maximum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',
@@ -2271,11 +2267,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b, auto c) { return util::perm_b32_simd(a, b, c); }',
     ),
-    # min3/max3/med3 (integer). The scalar body uses std::max/std::min for the
-    # 16/32-bit forms (and the minmax/maxmin scalar bodies use std::fmax/fmin on
-    # *integers* — order-preserving and exactly representable, so the integer
-    # min/max here matches for every input; this is the correct SIMD form, NOT
-    # the std::fmin-on-int pattern flagged in project_pr6470_review_findings).
+    # Integer min3/max3/med3 use integer comparisons in scalar and SIMD execution.
     # 32-bit: signed lane type for i32 (signed compare), unsigned for u32.
     # max3 = max(max(a,b),c); min3 = min(min(a,b),c);
     # med3 = max(min(max(a,b),c), min(a,b)).
@@ -2307,12 +2299,7 @@ SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
         ' return util::stdx::max(util::stdx::min(util::stdx::max(a, b), c),'
         ' util::stdx::min(a, b)); }',
     ),
-    # NOTE: integer v_minmax/v_maxmin i32/u32 are intentionally NOT wired. Unlike
-    # min3/max3 (whose scalar uses std::max/std::min), the minmax/maxmin scalar
-    # bodies use std::fmax/std::fmin on *ints* and write the double result back
-    # through a double->uint32 conversion that saturates negatives to 0xFFFFFFFF
-    # (x86 cvttsd2si overflow). That scalar is UB and the integer SIMD min/max
-    # cannot match it — left scalar-authoritative (see project_pr6470 findings).
+    # Integer MINMAX/MAXMIN currently use scalar lowering.
     # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the
     # min/max, then truncates to uint16 and zero-extends to uint32. SIMD lane is
     # the raw uint32; i16 sign-extends via (cast<int32> << 16) >> 16 (same

@@ -1350,17 +1350,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' uint32_t a = s < 0 ? ~static_cast<uint32_t>(s) : static_cast<uint32_t>(s);'
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
+    'prng_advance': 'util::prng_advance({0})',
     'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
-    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_exp_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_mant_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' return std::frexp(s, &exp); }}()',
+    'frexp_exp_f16': 'static_cast<uint32_t>(amdgpu::frexp_f16({0}, wf.fp_denorm_mode_f16_f64()).exponent)',
+    'frexp_exp_f64': 'static_cast<uint32_t>(amdgpu::frexp_f64({0}, wf.fp_denorm_mode_f16_f64()).exponent)',
+    'frexp_mant_f16': 'amdgpu::frexp_f16({0}, wf.fp_denorm_mode_f16_f64()).mantissa',
+    'frexp_mant_f64': 'amdgpu::frexp_f64({0}, wf.fp_denorm_mode_f16_f64()).mantissa',
     'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
@@ -1494,10 +1489,10 @@ _INLINE_BINARY_OPS: dict[str, str | InlineBinaryOp] = {
     'static_cast<uint32_t>(static_cast<uint16_t>({1}))))',
     'std::min': 'std::min({0}, {1})',
     'std::max': 'std::max({0}, {1})',
-    'std::fmin': 'util::min_num({0}, {1}, wf.ieee_mode())',
-    'std::fmax': 'util::max_num({0}, {1}, wf.ieee_mode())',
-    'min_num': 'util::min_num({0}, {1}, wf.ieee_mode())',
-    'max_num': 'util::max_num({0}, {1}, wf.ieee_mode())',
+    'std::fmin': 'util::min_num({0}, {1}, wf.minmax_policy())',
+    'std::fmax': 'util::max_num({0}, {1}, wf.minmax_policy())',
+    'min_num': 'util::min_num({0}, {1}, wf.minmax_policy())',
+    'max_num': 'util::max_num({0}, {1}, wf.minmax_policy())',
     'minimum': 'util::minimum({0}, {1})',
     'maximum': 'util::maximum({0}, {1})',
     'is_ordered': '(!std::isnan({0}) && !std::isnan({1}))',
@@ -1635,10 +1630,9 @@ _INLINE_BINARY_OPS: dict[str, str | InlineBinaryOp] = {
     'v_readlane': '{0}',
 }
 _INLINE_TERNARY_OPS: dict[str, str] = {
-    'min3_f': 'util::min_num(util::min_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
-    'max3_f': 'util::max_num(util::max_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
-    'med3_f': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
-    ' return util::max_num(util::min_num(util::max_num(a, b, wf.ieee_mode()), c, wf.ieee_mode()), util::min_num(a, b, wf.ieee_mode()), wf.ieee_mode()); }}()',
+    'min3_f': 'util::min_num(util::min_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
+    'max3_f': 'util::max_num(util::max_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
+    'med3_f': 'util::med3({0}, {1}, {2}, wf.minmax_policy())',
     'min3_i': 'std::min(std::min({0}, {1}), {2})',
     'max3_i': 'std::max(std::max({0}, {1}), {2})',
     'med3_i': '[&]() {{ auto a={0}; auto b={1}; auto c={2};'
@@ -1729,10 +1723,10 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     'maximum3': 'util::maximum(util::maximum({0}, {1}), {2})',
     'maxmin_i': 'std::min(std::max({0}, {1}), {2})',
     'minmax_i': 'std::max(std::min({0}, {1}), {2})',
-    'maxmin': 'util::min_num(util::max_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
-    'minmax': 'util::max_num(util::min_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
-    'maxmin_num': 'util::min_num(util::max_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
-    'minmax_num': 'util::max_num(util::min_num({0}, {1}, wf.ieee_mode()), {2}, wf.ieee_mode())',
+    'maxmin': 'util::min_num(util::max_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
+    'minmax': 'util::max_num(util::min_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
+    'maxmin_num': 'util::min_num(util::max_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
+    'minmax_num': 'util::max_num(util::min_num({0}, {1}, wf.minmax_policy()), {2}, wf.minmax_policy())',
     'maximumminimum': 'util::minimum(util::maximum({0}, {1}), {2})',
     'minimummaximum': 'util::maximum(util::minimum({0}, {1}), {2})',
     'add_max_i32': '[&]() {{ uint32_t sum_bits = static_cast<uint32_t>({0}) + static_cast<uint32_t>({1});'
