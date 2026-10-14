@@ -219,13 +219,17 @@ void TestFrequenciesReadWrite::Run(void) {
 
         // Negative case: a mask entirely above the settable range must be
         // rejected with INVAL, regardless of how many levels are settable.
+        // Use the first level no device can have: a clock with fine-grained
+        // DPM lists only its minimum and maximum, plus its current frequency
+        // while that is in between, so the level count read above can grow
+        // before the write.
         if (settable > 0) {
-          uint64_t invalid_bitmask = 1ULL << settable;
+          uint64_t invalid_bitmask = 1ULL << AMDSMI_MAX_NUM_FREQUENCIES;
           std::string invalid_bm_str = to_bit_string(invalid_bitmask);
 
           IF_VERB(STANDARD) {
             std::cout << "Setting frequency mask for " << FreqEnumToStr(amdsmi_clk) << " to 0b"
-                      << invalid_bm_str << " (level " << settable
+                      << invalid_bm_str << " (level " << AMDSMI_MAX_NUM_FREQUENCIES
                       << ", out-of-range, expect AMDSMI_STATUS_INVAL) ..." << std::endl;
           }
           DISPLAY_AMDSMI_API(set_api_str("0b" + invalid_bm_str), gpu_tag_str(false),
