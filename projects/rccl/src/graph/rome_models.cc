@@ -3888,6 +3888,13 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           status = 3;
           break;
         case 3:
+          // Held biased by 'N', so the widest NET number that fits is INT_MAX - 'N'.
+          // Overflowing here is undefined, and the wrapped result was then quietly
+          // discarded as "not a NET this system has", losing the channel silently.
+          if (nets[net_offset] - 'N' > (INT_MAX - 'N' - digit) / 10) {
+            WARN("NET number too large in user-defined rings (NCCL_RINGS); initialization will fail");
+            return ncclInvalidUsage;
+          }
           nets[net_offset] = (nets[net_offset] - 'N') * 10 + digit + 'N';
           break;
         }

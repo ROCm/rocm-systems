@@ -525,6 +525,31 @@ TEST_F(RomeModelsParseGraphMicrotest, NetInTheLastSlotOfTheNetsArray_IsAccepted)
   ResetNcclFakes();
 }
 
+// NET numbers are held biased by 'N', so the widest one that still fits an int is
+// INT_MAX - 'N' rather than INT_MAX.
+constexpr int kWidestNetNumber = INT_MAX - 'N';
+
+TEST_F(RomeModelsParseGraphMicrotest, NetNumberWiderThanIntRange_IsRejected) {
+  system()->nodes[NET].count = 2;
+
+  // One past the widest NET number that can be held. Accumulating it overflowed
+  // a signed int, which is undefined; the result was then quietly discarded by
+  // the "not a NET this system has" test and the ring silently lost a channel.
+  const std::string tooWide = "N" + std::to_string(kWidestNetNumber + 1) + " 0 1 2 3 N1";
+
+  EXPECT_EQ(parseGraph(tooWide.c_str(), system(), graph(), nullptr, nullptr, 0), ncclInvalidUsage);
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, NetNumberAtTheWidestThatFits_IsNotRejected) {
+  system()->nodes[NET].count = 2;
+
+  // Exactly the widest NET number that fits. It names no NET this system has, so
+  // the channel is ignored -- but a bound tightened by one would make it an error.
+  const std::string widest = "N" + std::to_string(kWidestNetNumber) + " 0 1 2 3 N1";
+
+  EXPECT_EQ(parseGraph(widest.c_str(), system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
   // Callers test graph->nChannels after calling, so a ring list that matches
   // nothing is not an error -- but it must not leave a bandwidth behind either.
