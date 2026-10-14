@@ -1237,8 +1237,9 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   switch (decision.algo) {
   case RCCL_CE_2SHOT: {
     if (recvcount == 0) return ncclSuccess;
-    INFO(NCCL_COLL, "CE 2-shot ReduceScatter: recvcount=%zu datatype=%d op=%d rank=%d/%d", recvcount, (int)datatype,
-         (int)op, comm->rank, comm->nRanks);
+    INFO(NCCL_COLL, "CE ReduceScatter: recvcount=%zu datatype=%d op=%d rank=%d/%d", recvcount, (int)datatype, (int)op,
+         comm->rank, comm->nRanks);
+    // This path bypasses ncclLaunchCeColl, so start the CeColl event here instead.
     struct ncclCeCollArgs ceArgs = {};
     ceArgs.func = ncclFuncReduceScatter;
     ceArgs.datatype = datatype;
@@ -1247,9 +1248,12 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     ceArgs.eltSize = ncclTypeSize(datatype);
     ceArgs.sendBuff = (uint8_t*)sendbuff;
     ceArgs.recvBuff = (uint8_t*)recvbuff;
+    // No CollApi parent: this path returns before ncclEnqueueCheck, so the
+    // thread-local handle still names a previous collective.
     NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet =
-      ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
+    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
+      return ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
+    });
     ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
     return ceRet;
   }

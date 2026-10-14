@@ -4703,11 +4703,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         if (!ceArGraphAllowed || !ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) {
           ceAvailable = false;
         } else if (ceReduceScatterOpSupported) {
-          size_t totalBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
-              !rcclParamForceCeReduceScatter() ||
-              !comm->symmetricSupport || comm->nNodes > 1) {
+          // Unregistered CE ReduceScatter. Staging is always used and pipelined,
+          // so there is no message-size cap and user-buffer registration is not
+          // required. CTA_POLICY_ZERO + single-node symmetricSupport still apply.
+          if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || !comm->symmetricSupport ||
+              comm->nNodes > 1) {
             ceReduceScatterFits = false;
           } else {
             ceReduceScatterFits = true;
@@ -4718,11 +4718,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      // Uncapped sym-window CE AllReduce / ReduceScatter (-R 2), without flipping whole comm to CE mode
+      // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode.
+      // CE ReduceScatter always stages through ceARTmpBuf, so it does not use this path.
       bool ceArSymRegistered =
-        (info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment) ||
-        (info->coll == ncclFuncReduceScatter && rcclParamForceCeReduceScatter() && ceAvailable &&
-         !hasSysmemSegment);
+        (info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
       // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
       // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the

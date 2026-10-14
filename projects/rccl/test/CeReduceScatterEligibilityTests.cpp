@@ -539,11 +539,9 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        // msgBytes is recvcount * sizeof(datatype) * nRanks, not recvcount alone.
-        {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (kCeRsMaxMsgBytesDefault / (sizeof(float) * 4)) + 1, ncclSum, ncclFloat32, false, baseEnv},
-        {"MessageAtCapAccepted_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         kCeRsMaxMsgBytesDefault / (sizeof(float) * 4), ncclSum, ncclFloat32, true, baseEnv},
+        // No message-size cap: a former AllReduce 2-shot window size must still be accepted.
+        {"LargeMessageAccepted_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
+         (kCeRsMaxMsgBytesDefault / (sizeof(float) * 4)) + 1, ncclSum, ncclFloat32, true, baseEnv},
     };
 
     for(const auto& tc : cases)

@@ -200,9 +200,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
-// Single source of truth for ReduceScatter selection: symmetric -> CE 2-shot ->
-// DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> CE registered
-// -> symmetric -> native ring/pat kernel.
+// Single source of truth for ReduceScatter selection: symmetric -> CE (eager /
+// enqueue-init) -> DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct
+// -> CE registered -> symmetric -> native ring/pat kernel.
 // Live enqueue carries the decision so taskAppend honors RCCL_SYMMETRIC / CE
 // vs ring (symkExtract) instead of re-deriving it.
 // graphCapturingHint is used only when query=true (rcclGetCollImplInfo). The live
@@ -248,10 +248,11 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
-// Opt-in CE ReduceScatter 2-shot gate (RCCL_CE_REDUCESCATTER=1). Size cap is the
-// same 2-shot window as CE AllReduce (rcclCeAr2ShotMax). Pipeline chunks are
-// rounded to 16 bytes in ncclCeAllReduceChooseChunkBytes, and the reduce kernel
-// scalar-reduces the tail, so a shard that is not a multiple of 16 still runs.
+// Opt-in CE ReduceScatter gate (RCCL_CE_REDUCESCATTER=1). Staging path (scatter
+// into ceARTmpBuf, then local reduce). No message-size cap: large messages are
+// pipelined through staging slots. Pipeline chunks are rounded to 16 bytes in
+// ncclCeAllReduceChooseChunkBytes, and the reduce kernel scalar-reduces the
+// tail, so a shard that is not a multiple of 16 still runs.
 bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
@@ -264,7 +265,6 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeReduceScatter);
-RCCL_PARAM_DECLARE(ForceCeReduceScatter);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.

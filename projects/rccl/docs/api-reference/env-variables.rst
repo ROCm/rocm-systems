@@ -903,18 +903,12 @@ threshold table introduced for gfx1250.
 
     * - | ``RCCL_CE_REDUCESCATTER``
         | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
-          the CE AllReduce staging buffer (``ceARTmpBuf``). Single-node symmetric
-          communicators only. The message cap is the same 2-shot window as CE
-          AllReduce (``RCCL_CE_AR_MAX_MSG_BYTES`` or the arch table).
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
       - | ``0``: Disabled (default).
         | ``1``: Enabled, subject to the other eligibility checks.
-
-    * - | ``RCCL_FORCE_CE_REDUCESCATTER``
-        | Runs CE ReduceScatter without ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``)
-          and without a symmetric window on the user buffer. Does not raise the
-          2-shot size cap. Requires ``RCCL_CE_REDUCESCATTER=1``.
-      - | ``0``: Disabled (default).
-        | ``1``: Force-enabled (CTA_POLICY check bypassed; unregistered buffers allowed).
 
     * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
