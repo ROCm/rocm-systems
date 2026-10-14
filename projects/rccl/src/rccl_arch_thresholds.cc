@@ -581,7 +581,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .ceRegMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    kThreshUnlimited,     // [2] AllGather
+    0,                    // [2] AllGather       -- not yet measured
     0,                    // [3] ReduceScatter   -- not used
     256ULL*1024*1024,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used
@@ -730,7 +730,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .ceRegMax = {
     0,                    // [0] Broadcast      -- not used
     0,                    // [1] Reduce          -- not used
-    kThreshUnlimited,     // [2] AllGather
+    0,                    // [2] AllGather       -- not yet measured
     0,                    // [3] ReduceScatter   -- not used
     256ULL*1024*1024,     // [4] AllReduce
     0,                    // [5] SendRecv        -- not used
