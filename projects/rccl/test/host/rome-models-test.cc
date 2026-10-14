@@ -247,4 +247,85 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetTreeBase_IsAccepted) {
   ResetNcclFakes();
 }
 
+// ---------------------------------------------------------------------------
+// parseGraph (NCCL_RINGS) -- tests to be written, see ROCM-31973.
+//
+// parseGraph is the NCCL_RINGS counterpart of parseGraphLight above: search.cc
+// hands it getenv("NCCL_RINGS") directly, with gpu_map and net_map both NULL and
+// reverse set from the host index. Every quantity the string drives is listed
+// here, named for the behaviour wanted rather than the bug's mechanism. One
+// test, one fix, one commit each.
+//
+// Rejections and silently-wrong output:
+//
+//   NullRingString_IsRejected
+//     str is dereferenced before it is checked. Not reachable from search.cc,
+//     which guarantees non-NULL, so this is defensive only -- but parseGraphLight
+//     already rejects NULL and the two should not disagree.
+//
+//   MoreGpusInOneChannelThanMaxNodes_IsRejected
+//     gpus[gpu] is written before gpu is bounded, and the bound that follows
+//     uses > rather than >=, so a 145th number writes one int past gpus[144].
+//     The same off-by-one lets net_offset reach 289 against nets[288].
+//
+//   GpuNumberWiderThanIntRange_IsRejected
+//     gpus[gpu]*10 + digit accumulates with no range check; signed overflow is
+//     undefined, and the wrapped negative is then quietly swallowed by the
+//     g < 0 test, so the channel vanishes instead of being reported.
+//
+//   NetNumberWiderThanIntRange_IsRejected
+//     the same unchecked accumulation for NET numbers.
+//
+//   MoreNetsInOneChannelThanNetsArrayHolds_IsRejected
+//     net_offset is bounded by the runtime ngpus*2, not by the size of nets[],
+//     and again with > rather than >=, so a system reporting 144 GPUs writes one
+//     int past nets[288].
+//
+//   UnparsedNetSlots_AreNotTranslated
+//     the net_map translation loop runs the full ngpus*2 slots however few NET
+//     tokens were actually parsed, reading uninitialised nets[] entries and
+//     writing the result back.
+//
+//   ChannelWithNetsButNoGpus_IsRejected
+//     with ngpus == 0 the reverse swap indexes nets[-1], writing before the
+//     array.
+//
+//   MoreChannelsThanMaxChannels_IsRejected
+//     nChannels is never bounded by MAXCHANNELS, so enough '|' segments walk
+//     graph->intra, graph->intraNets and graph->inter off their ends with an
+//     attacker-chosen offset. This is the headline defect. Surplus channels are
+//     refused rather than truncated, matching parseGraphLight's handling of too
+//     many trees; EveryPresetRingBase_IsAccepted below is what proves no
+//     shipping topology literal is caught by the new bound.
+//
+//   NoMatchingChannel_LeavesBandwidthAtZero
+//     when no segment matches, nChannels is 0 and totalBw / nChannels makes
+//     bwIntra and bwInter inf while still returning ncclSuccess. Callers already
+//     test graph->nChannels afterwards, so success with no channels stays the
+//     contract and only the division is skipped.
+//
+//   TreeGraphWithNoGpus_DoesNotReadIntra
+//     the graph->id == 1 tail indexes intra[i*ngpus + 1] with ngpus == 0.
+//
+//   GioToposWithMoreGpusThanTheModel_IsIgnored
+//     not parseGraph itself but its caller: parseGIOTopos guards ngpus < NGPUS
+//     rather than ngpus == NGPUS while sizing rdm, g_hives and devids at 16, so
+//     a 17-GPU system overruns rdm and then parseGraph's g < ngpus bound reads
+//     gpu_map past its end. The only call site whose map is shorter than ngpus.
+//
+// Accepted-input contracts. Without these nothing stops a bound above being
+// tightened into rejecting a valid configuration, and no rejection test can
+// ever catch that:
+//
+//   WellFormedRings_AreTranscribedToIntra
+//   ReversedRing_IsTranscribedBackwards
+//   GpuNumbersAreTranslatedThroughGpuMap
+//   NetTokens_PopulateInterAndIntraNets
+//   NetNumbersAreTranslatedThroughNetMap
+//   ChannelWithWrongGpuCount_IsIgnored
+//   DuplicateGpuInChannel_IsIgnored
+//   ExactlyMaxChannels_IsAccepted
+//   EveryPresetRingBase_IsAccepted
+// ---------------------------------------------------------------------------
+
 }  // namespace
