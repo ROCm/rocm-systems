@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "throwing_instruction_test_util.h"
-#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
@@ -212,11 +211,8 @@ struct VmFixture {
                        R"({"name":"l2","type":"l2_cache"},)"
                        R"({"name":"cp","type":"command_processor"},)" +
                        shader_engines + R"(]}]},"links":[)" + links + R"(]}})";
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                         loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     soc_ptr = loaded.soc();
     gpu_mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -4372,11 +4368,8 @@ TEST(VmLifecycleTest, CreateAndDestroy) {
       ]
     }
   })";
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
 
   auto *xcd = soc->xcd(0);
@@ -6955,11 +6948,8 @@ TEST(AqlDispatchTest, PoolContinuationLetsPeerCommandProcessorSatisfyPollingWave
       {"src":"xcd1.se0.cu0.req","dst":"xcd1.l2.cpl_0","latency":1,"weight":10},
       {"src":"xcd1.se0.cu1.req","dst":"xcd1.l2.cpl_1","latency":1,"weight":10}
     ]}})";
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc_ptr = loaded.soc();
   auto *memory = loaded.memory();
   simdojo::SimulationEngine engine(loaded.engine_config);

@@ -4,11 +4,10 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
-#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/config/config_loader.h"
@@ -118,20 +117,12 @@ struct Gfx1250Sim {
   test::HaltSnapshotPlugin *snapshot = nullptr;
 
   void initialize() {
-    util::StringDiagnostic diagnostic;
-    auto loaded_result =
-        config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded = std::move(loaded_result).value();
+    ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
     build();
   }
 
   void initialize(const std::string &config_json) {
-    util::StringDiagnostic diagnostic;
-    auto loaded_result = config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema,
-                                                         diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded = std::move(loaded_result).value();
+    ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
     build();
   }
 

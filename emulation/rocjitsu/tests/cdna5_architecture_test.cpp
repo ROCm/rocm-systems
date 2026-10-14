@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "util/data_types.h"
-#include "util/diagnostic.h"
 
 #include <gtest/gtest-spi.h>
 
@@ -235,11 +235,8 @@ std::vector<uint8_t> make_minimal_cdna5_elf(uint32_t elf_machine, std::span<cons
 }
 
 TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema,
-                                           loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(kGfx1250ConfigPath, loaded));
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);

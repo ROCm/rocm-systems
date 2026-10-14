@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "test_paths.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
@@ -48,11 +48,8 @@ constexpr uint32_t kWorkgroupSize = 64;
 class Gfx1251CompiledKernelTest : public testing::Test {
 protected:
   void SetUp() override {
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config(test::config_path("gfx1251_synthetic.json"),
-                                             kEmbeddedSchema, loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(test::config_path("gfx1251_synthetic.json"), loaded));
     ASSERT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1251);
     soc_ = loaded.soc();
     memory_ = loaded.memory();

@@ -9,6 +9,7 @@
 /// CPU golden reference.
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "test_paths.h"
 #include "util/diagnostic.h"
@@ -84,11 +85,8 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   ASSERT_NE(co, nullptr);
 
   // Build the simulation engine with CDNA4 topology.
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Vary only the CPU-side dispatch pool: pin a single engine worker so the
@@ -218,11 +216,8 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
@@ -306,11 +301,8 @@ void run_fanout_golden_reference(uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;
@@ -564,11 +556,8 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;

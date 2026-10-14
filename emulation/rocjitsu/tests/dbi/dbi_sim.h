@@ -36,9 +36,8 @@
 #pragma once
 
 #include "../aql_queue.h"
+#include "../config_test_util.h"
 #include "../halt_snapshot_plugin.h"
-#include "embedded_schema.h"
-#include "util/diagnostic.h"
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -93,11 +92,7 @@ public:
         R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
         R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
         R"(]}})";
-    util::StringDiagnostic diagnostic;
-    auto loaded_result =
-        config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded_ = std::move(loaded_result).value();
+    ASSERT_TRUE(load_valid_config_from_string(json, loaded_));
     soc_ = loaded_.soc();
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);

@@ -10,6 +10,7 @@
 /// architecture-specific "precise" debug bits are gated correctly. Also checks
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
+#include "config_test_util.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "util/diagnostic.h"
 
@@ -416,11 +417,8 @@ TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
 }
 
 TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/gfx1250_mi455x.json", loaded));
   ASSERT_TRUE(loaded.device.present);
   ASSERT_EQ(loaded.device.revision_id, 1u);
 
@@ -486,11 +484,8 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
   for (const char *cfg : kMi300xConfigs) {
     SCOPED_TRACE(cfg);
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
-                                             loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
     ASSERT_EQ(num_xcc, 8u);
@@ -539,11 +534,8 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
-                                             loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
     ASSERT_NE(loaded.soc(), nullptr);
     const uint32_t num_xcc = loaded.soc()->num_xcds();
@@ -590,11 +582,8 @@ TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) 
 // must not be treated as exact rocminfo parity.
 TEST(SysfsTopologyIdentityTest, Mi455xUsesPublishedPhysicalDeviceId) {
   const std::string config_dir = CONFIG_DIR;
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(config_dir + "/gfx1250_mi455x.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(config_dir + "/gfx1250_mi455x.json", loaded));
   ASSERT_TRUE(loaded.device.present);
   ASSERT_NE(loaded.soc(), nullptr);
 
@@ -652,11 +641,8 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
       continue;
     SCOPED_TRACE(name);
 
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
-                                             loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
     if (!loaded.device.present || loaded.soc() == nullptr)
       continue;
     ++checked;
@@ -748,11 +734,8 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   for (const char *cfg : kConfigs) {
     SCOPED_TRACE(cfg);
 
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config(config_dir + "/" + cfg, rocjitsu::kEmbeddedSchema,
-                                             loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(config_dir + "/" + cfg, loaded));
     ASSERT_TRUE(loaded.device.present);
 
     const DebugCapExpectation *e = find_expectation(loaded.device.gfx_target_version);

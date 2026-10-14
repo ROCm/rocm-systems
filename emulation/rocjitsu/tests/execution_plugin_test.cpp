@@ -10,11 +10,11 @@
 /// Machine-level preservation below RegisterAccess must not add callbacks.
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
@@ -1255,11 +1255,8 @@ struct PluginFixture {
     )",
                                    async_helpers, arch, wavefront_size, cu_range, num_wf_slots,
                                    sgprs_per_wf, vgprs_per_wf, links);
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                         loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     soc = loaded.soc();
     mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);

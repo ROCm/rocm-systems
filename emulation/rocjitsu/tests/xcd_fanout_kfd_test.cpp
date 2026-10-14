@@ -22,10 +22,9 @@
 /// guest's addresses are not the daemon's and passthrough stays off. Covering it
 /// needs a daemon-mode regression, not this fixture.
 
+#include "config_test_util.h"
 #include "test_paths.h"
-#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -92,11 +91,7 @@ struct KfdFanoutFixture {
   std::thread sim_thread;
 
   void initialize() {
-    util::StringDiagnostic diagnostic;
-    auto loaded_result =
-        config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded = std::move(loaded_result).value();
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
     soc = loaded.soc();

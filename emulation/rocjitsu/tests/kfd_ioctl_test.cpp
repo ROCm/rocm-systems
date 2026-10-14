@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
@@ -337,11 +338,7 @@ protected:
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path) {
     setenv("RJ_CONFIG", config_path.c_str(), 1);
-    util::StringDiagnostic diagnostic;
-    auto loaded_result = rocjitsu::config::load_config(
-        config_path.c_str(), rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded_ = std::move(loaded_result).value();
+    ASSERT_TRUE(rocjitsu::test::load_valid_config(config_path.c_str(), loaded_));
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);

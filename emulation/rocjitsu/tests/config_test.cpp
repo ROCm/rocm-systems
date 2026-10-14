@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "long_path_handoff.h"
@@ -126,11 +127,8 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
 }
 
 TEST(ConfigLoaderTest, LoadCdna2Config) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx90a_mi210_kmd.json", loaded));
   auto *soc = loaded.soc();
 
   EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA2);
@@ -243,11 +241,8 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
 
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi355x.json";
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(json, loaded));
   auto *soc = loaded.soc();
 
   // MI350X physical geometry: 8 XCDs, 4 SEs per XCD, 9 CUs per SE, 2 IODs.
@@ -279,11 +274,8 @@ TEST(ConfigLoaderTest, LoadsThePciSectionThroughBothEntryPoints) {
   EXPECT_EQ(identity.device.vendor_id, 0x1002u)
       << "the identity must come from the same file as the bus shape";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  const auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", loaded));
   EXPECT_EQ(loaded.pci.vram_aperture_bytes, identity.pci.vram_aperture_bytes)
       << "the two entry points disagree about the same file";
 }
@@ -317,15 +309,13 @@ TEST(ConfigLoaderTest, ResolvesGenerationTopologyThroughBothFileEntryPoints) {
                                                       identity_diagnostic.emitter());
   ASSERT_TRUE(identity_result.succeeded()) << identity_diagnostic.message();
   const auto identity = std::move(identity_result).value();
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(file.path(), rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  const auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(file.path(), loaded));
   const auto identity_spec = gpu_pci_spec_from_config(identity.device, identity.pci);
   const auto loaded_spec = gpu_pci_spec_from_config(loaded.device, loaded.pci);
 
-  for (const auto *device : {&identity.device, &loaded.device}) {
+  for (const auto *device :
+       std::array<const config::KfdDeviceConfig *, 2>{&identity.device, &loaded.device}) {
     EXPECT_EQ(device->num_shader_engines, 2u);
     EXPECT_EQ(device->num_shader_arrays_per_engine, 2u);
     EXPECT_EQ(device->num_cu_per_sh, 8u);
@@ -380,17 +370,10 @@ TEST(ConfigLoaderTest, DefaultsThePciSectionWhenTheFileOmitsIt) {
 }
 
 TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
-  util::StringDiagnostic standalone_diagnostic;
-  auto standalone_result =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema,
-                          standalone_diagnostic.emitter());
-  ASSERT_TRUE(standalone_result.succeeded()) << standalone_diagnostic.message();
-  auto standalone = std::move(standalone_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json", loaded));
+  config::LoadedConfig standalone;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", standalone));
 
   EXPECT_EQ(loaded.num_gpus, 4u);
   ASSERT_EQ(loaded.devices.size(), 4u);
@@ -424,11 +407,8 @@ TEST(ConfigLoaderTest, LoadFourGpuMi455xKmdConfig) {
 }
 
 TEST(ConfigLoaderTest, Gfx1250WgpIdsAreLocalToShaderArray) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x_kmd_4gpu.json", loaded));
   ASSERT_EQ(loaded.device.num_cu_per_sh, 8u);
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 3u);
   auto check_build = [](const config::TopologyBuildResult &build) {
@@ -472,11 +452,8 @@ TEST(ConfigLoaderTest, MismatchedShaderArrayGeometryKeepsWgpIdUnsupported) {
       SCOPED_TRACE(to);
       std::string json = original;
       ASSERT_TRUE(replace_exactly_once(json, from, to));
-      util::StringDiagnostic loaded_diagnostic;
-      auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                           loaded_diagnostic.emitter());
-      ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-      auto loaded = std::move(loaded_result).value();
+      config::LoadedConfig loaded;
+      ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
       auto check_build = [](const config::TopologyBuildResult &build) {
         for (auto *xcd : build.xcds) {
           for (auto *se : xcd->shader_engines()) {
@@ -529,11 +506,8 @@ TEST(ConfigLoaderTest, LaterShaderEngineMismatchInvalidatesAllShaderArrayWidths)
     }
 
     testing::internal::CaptureStderr();
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                         loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     const std::string warning = testing::internal::GetCapturedStderr();
     EXPECT_THAT(warning,
                 testing::HasSubstr("soc.xcd0.se1 has " + std::to_string(second_engine_cus) +
@@ -570,11 +544,8 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
     })";
     ASSERT_TRUE(replace_exactly_once(json, "CU_COUNT", std::to_string(num_cus)));
     testing::internal::CaptureStderr();
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                         loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     const std::string warning = testing::internal::GetCapturedStderr();
     if (num_cus == 4) {
       EXPECT_TRUE(warning.empty());
@@ -596,11 +567,8 @@ TEST(ConfigLoaderTest, DirectCuShaderArrayGeometryRequiresMatchingCount) {
 }
 
 TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
   auto *soc = loaded.soc();
 
   soc->set_dispatch_threads(8);
@@ -613,11 +581,8 @@ TEST(ConfigLoaderTest, DispatchPoolBudgetIsSharedAcrossProductionTopology) {
 }
 
 TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTopology) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx950_mi355x.json", loaded));
   auto *soc = loaded.soc();
   soc->set_dispatch_threads(8);
   const auto *pool = test::SoCTestAccess::dispatch_pool(*soc);
@@ -634,11 +599,8 @@ TEST(ConfigLoaderTest, SerializedHotHookPluginKeepsSharedPoolAcrossProductionTop
 }
 
 TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
-  util::StringDiagnostic rdna4_diagnostic;
-  auto rdna4_result = config::load_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json",
-                                          rocjitsu::kEmbeddedSchema, rdna4_diagnostic.emitter());
-  ASSERT_TRUE(rdna4_result.succeeded()) << rdna4_diagnostic.message();
-  auto rdna4 = std::move(rdna4_result).value();
+  config::LoadedConfig rdna4;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1201_r9700.json", rdna4));
   EXPECT_EQ(rdna4.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ(rdna4.device.gpu_id, 8716u);
   EXPECT_EQ(rdna4.device.device_id, 0x7551u);
@@ -686,11 +648,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
-  util::StringDiagnostic rdna3_diagnostic;
-  auto rdna3_result = config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json",
-                                          rocjitsu::kEmbeddedSchema, rdna3_diagnostic.emitter());
-  ASSERT_TRUE(rdna3_result.succeeded()) << rdna3_diagnostic.message();
-  auto rdna3 = std::move(rdna3_result).value();
+  config::LoadedConfig rdna3;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rdna3));
   EXPECT_EQ(rdna3.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3);
   EXPECT_EQ(rdna3.device.gpu_id, 7019u);
   EXPECT_EQ(rdna3.device.device_id, 0x7448u);
@@ -725,11 +684,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna3.soc()->sdma_queue_scheduler().packet_dialect(),
             amdgpu::SdmaPacketDialect::Gfx11Plus);
 
-  util::StringDiagnostic rdna35_diagnostic;
-  auto rdna35_result = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json",
-                                           rocjitsu::kEmbeddedSchema, rdna35_diagnostic.emitter());
-  ASSERT_TRUE(rdna35_result.succeeded()) << rdna35_diagnostic.message();
-  auto rdna35 = std::move(rdna35_result).value();
+  config::LoadedConfig rdna35;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", rdna35));
   EXPECT_EQ(rdna35.soc()->arch(), ROCJITSU_CODE_ARCH_RDNA3_5);
   EXPECT_EQ(rdna35.device.gpu_id, 5510u);
   EXPECT_EQ(rdna35.device.device_id, 0x1586u);
@@ -766,11 +722,8 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
 }
 
 TEST(ConfigLoaderTest, Gfx1151HighSgprsAndVccStayWithinTheirWave) {
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result = config::load_config(CONFIG_DIR_PATH + "/gfx1151.json",
-                                           rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1151.json", loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   // RDNA3.5 ISA section 3.3.1: s0-s105 are general-purpose registers;
@@ -884,11 +837,8 @@ TEST(ConfigLoaderTest, BuildFromJsonString) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
 
   // 1 XCD, 2 SEs, each with 3 CUs.
@@ -915,11 +865,8 @@ TEST(ConfigLoaderTest, ExecModeClockedStringSelectsClockedMode) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   EXPECT_EQ(loaded.exec_mode, simdojo::ExecMode::CLOCKED);
 }
@@ -953,11 +900,8 @@ TEST(ConfigLoaderTest, ComputeUnitFunctionalQuantumUsesDeclarativeValue) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->functional_quantum(), 37u);
@@ -994,11 +938,8 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsDefaultToAutoCompute) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   // Not specified in JSON: 0 means "auto-compute" (see
   // rocjitsu::default_non_debug_capability()/debug_topology_for()).
@@ -1041,11 +982,8 @@ TEST(ConfigLoaderTest, DeviceCapabilityFieldsRoundTripFromJson) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   EXPECT_EQ(loaded.device.capability, 268468354u);
   EXPECT_EQ(loaded.device.capability2, 3u);
@@ -1217,11 +1155,8 @@ TEST(ConfigLoaderTest, ShippedDevicesDeclareSdmaQueues) {
       ASSERT_NE(dbt.guest_device.num_sdma_engines, 0u);
       EXPECT_NE(dbt.guest_device.num_sdma_queues_per_engine, 0u);
     } else {
-      util::StringDiagnostic loaded_diagnostic;
-      auto loaded_result = config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
-                                               loaded_diagnostic.emitter());
-      ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-      auto loaded = std::move(loaded_result).value();
+      config::LoadedConfig loaded;
+      ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
       ASSERT_TRUE(loaded.device.present);
       ASSERT_NE(loaded.device.num_sdma_engines, 0u);
       EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
@@ -1243,11 +1178,8 @@ TEST(ConfigLoaderTest, GeneratedDeviceConfigsDeclareSdmaQueues) {
 
   for (const std::string &path : paths) {
     SCOPED_TRACE(path);
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result =
-        config::load_config(path, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(path, loaded));
     ASSERT_TRUE(loaded.device.present);
     ASSERT_NE(loaded.device.num_sdma_engines, 0u);
     EXPECT_NE(loaded.device.num_sdma_queues_per_engine, 0u);
@@ -1365,11 +1297,8 @@ TEST(ConfigLoaderTest, LoadsDbtGuestThroughFullConfigLoader) {
   )");
 
   const auto file = write_temp_config(json);
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(file.path(), rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(file.path(), loaded));
 
   EXPECT_TRUE(loaded.dbt_guest.enabled);
   EXPECT_EQ(loaded.dbt_guest.guest_isa, "gfx950");
@@ -1437,9 +1366,8 @@ TEST(ConfigHelperTest, ParserFailuresDoNotInvokeCallback) {
     const char *schema;
     const char *message;
   };
-  for (const auto &test_case :
-       {Case{"{}", "invalid schema", "Failed to parse schema:"},
-        Case{"{", rocjitsu::kEmbeddedSchema, "Failed to parse JSON config:"}}) {
+  for (const auto &test_case : {Case{"{}", "invalid schema", "Failed to parse schema:"},
+                                Case{"{", kEmbeddedSchema, "Failed to parse JSON config:"}}) {
     SCOPED_TRACE(test_case.message);
     util::StringDiagnostic diagnostic;
     unsigned calls = 0;
@@ -1459,7 +1387,7 @@ TEST(ConfigHelperTest, ParserReturnsCallbackValue) {
   util::StringDiagnostic diagnostic;
   unsigned calls = 0;
   auto result = config::with_parsed_simulation_config_json(
-      "{}", rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+      "{}", kEmbeddedSchema, diagnostic.emitter(),
       [&](const fb::SimulationConfig *parsed) -> util::FailureOr<uint32_t> {
         ++calls;
         return parsed->cpu_dispatch_threads();
@@ -1475,7 +1403,7 @@ TEST(ConfigHelperTest, ParserPropagatesCallbackFailureWithoutRepeatingDiagnostic
   auto sink = [&](std::string_view message) { messages.emplace_back(message); };
   util::DiagnosticEmitter emit_error(sink);
   auto result = config::with_parsed_simulation_config_json(
-      "{}", rocjitsu::kEmbeddedSchema, emit_error,
+      "{}", kEmbeddedSchema, emit_error,
       [&](const fb::SimulationConfig *) -> util::FailureOr<uint32_t> {
         return emit_error.emit() << "callback failed";
       });
@@ -1497,7 +1425,7 @@ TEST(ConfigHelperTest, NullKfdDeviceSuccessfullyReturnsDefaults) {
 TEST(ConfigLoaderTest, RuntimeConfigDistinguishesAbsentHandoffFromMissingConfig) {
   const test::ScopedTempDirectory runtime("rocjitsu-runtime-missing-config-");
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", runtime.path());
-  test::ScopedEnvironmentVariable invocation_dir(rocjitsu::kRpcInvocationDirEnv, runtime.path());
+  test::ScopedEnvironmentVariable invocation_dir(kRpcInvocationDirEnv, runtime.path());
   util::StringDiagnostic diagnostic;
   auto absent = config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
   ASSERT_TRUE(absent.succeeded()) << diagnostic.message();
@@ -1768,11 +1696,8 @@ TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
       SCOPED_TRACE(mode ? static_cast<int>(*mode) : -1);
       auto json = config::json_with_launch_overrides(source, {.wait_checking = mode});
       ASSERT_TRUE(json.succeeded());
-      util::StringDiagnostic loaded_diagnostic;
-      auto loaded_result = config::load_config_from_string(json.value(), kEmbeddedSchema,
-                                                           loaded_diagnostic.emitter());
-      ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-      auto loaded = std::move(loaded_result).value();
+      config::LoadedConfig loaded;
+      ASSERT_TRUE(test::load_valid_config_from_string(json.value(), loaded));
       std::vector<simdojo::Component *> components;
       loaded.build_result.root->collect_components(components);
       for (auto &build : loaded.extra_gpu_builds)
@@ -1922,10 +1847,8 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
   const auto effective_settings = std::move(effective_settings_result).value();
 
   EXPECT_EQ(effective_settings.request.budget, 4u);
-  auto loaded_result =
-      config::load_config(effective_path, kEmbeddedSchema, config_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << config_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(effective_path, loaded));
   std::vector<simdojo::Component *> components;
   loaded.build_result.root->collect_components(components);
   unsigned cus = 0;
@@ -2217,11 +2140,8 @@ TEST(ConfigLoaderTest, Gfx1250ComputeUnitDefaultsCoverTtmpAndHighVgprs) {
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
     ]}})";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
@@ -2304,11 +2224,8 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
 
   simdojo::SimulationEngine engine(loaded.engine_config);
@@ -2453,12 +2370,8 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
 }
 
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
-  util::StringDiagnostic source_diagnostic;
-  auto source_result =
-      config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", rocjitsu::kEmbeddedSchema,
-                          source_diagnostic.emitter(), 48);
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source, 48));
   ASSERT_EQ(source.execution_threads.dispatch, (std::vector<uint32_t>{33}));
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(15);
   ASSERT_EQ(source_cu->num_wf_slots(), 64u);
@@ -2502,11 +2415,8 @@ TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
 }
 
 TEST(CheckpointTest, RoundTripsCdna5WgpIds) {
-  util::StringDiagnostic source_diagnostic;
-  auto source_result = config::load_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json",
-                                           rocjitsu::kEmbeddedSchema, source_diagnostic.emitter());
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_DIR_PATH + "/gfx1250_mi455x.json", source));
   ASSERT_EQ(source.device.num_cu_per_sh, 8u);
   constexpr uint16_t kWgpId = 23 | (10 << 6) | ((4 - 1) << 11);
   constexpr std::array<uint32_t, 6> kCuIndices{0, 5, 7, 8, 13, 15};
@@ -2677,12 +2587,9 @@ TEST(CApiTest, CheckpointRoundTripPreservesAsyncHelperPolicy) {
 }
 
 TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
-  util::StringDiagnostic source_diagnostic;
-  auto source_result =
-      config::load_config_from_string(functional_quantum_checkpoint_config(0, 0),
-                                      rocjitsu::kEmbeddedSchema, source_diagnostic.emitter());
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(0, 0), source));
   test::ScopedTempFile checkpoint_file("rocjitsu-empty-allocations-");
   config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
                           /*cpu_dispatch_threads=*/0);
@@ -2697,11 +2604,8 @@ TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
 
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(0, 0);
-  util::StringDiagnostic source_diagnostic;
-  auto source_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, source_diagnostic.emitter());
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   auto *source_se = source.soc()->xcd(0)->shader_engine(0);
   ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 0u);
 
@@ -2733,11 +2637,8 @@ TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
 
 TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(7, 37);
-  util::StringDiagnostic source_diagnostic;
-  auto source_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, source_diagnostic.emitter());
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   auto *source_se = source.soc()->xcd(0)->shader_engine(0);
   ASSERT_EQ(source_se->compute_unit(0)->config().functional_quantum, 7u);
   ASSERT_EQ(source_se->compute_unit(1)->config().functional_quantum, 37u);
@@ -2763,11 +2664,8 @@ TEST(CheckpointTest, RoundTripsWaitCheckingModes) {
     ASSERT_TRUE(source_json.succeeded()) << config_diagnostic.message();
     auto json = config::json_with_launch_overrides(source_json.value(), {.wait_checking = mode});
     ASSERT_TRUE(json.succeeded());
-    util::StringDiagnostic source_diagnostic;
-    auto source_result =
-        config::load_config_from_string(json.value(), kEmbeddedSchema, source_diagnostic.emitter());
-    ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-    auto source = std::move(source_result).value();
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json.value(), source));
     auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
     ASSERT_NE(source_cu->dispatch_wf(0, 0, 32, 32), nullptr);
     test::ScopedTempFile checkpoint("rocjitsu-wait-mode-checkpoint-");
@@ -2798,11 +2696,8 @@ TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
   ASSERT_TRUE(replace_exactly_once(json, R"({"key":"functional_quantum","value":"7"})",
                                    R"({"key":"memory_wait_diagnostics","value":"off"},
          {"key":"xcnt_diagnostics","value":"warn"})"));
-  util::StringDiagnostic source_diagnostic;
-  auto source_result =
-      config::load_config_from_string(json, kEmbeddedSchema, source_diagnostic.emitter());
-  ASSERT_TRUE(source_result.succeeded()) << source_diagnostic.message();
-  auto source = std::move(source_result).value();
+  config::LoadedConfig source;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
   test::ScopedTempFile checkpoint("rocjitsu-per-cu-wait-checkpoint-");
   config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
                           source.cpu_dispatch_threads);
@@ -2845,11 +2740,8 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *soc = loaded.soc();
   auto *source_cp = soc->xcd(0)->command_processor();
   ASSERT_NE(source_cp, nullptr);
@@ -2874,12 +2766,9 @@ TEST(CheckpointTest, SaveAndRestoreMemory) {
 
 TEST(CheckpointTest, SaveAndRestoreLazySgprs) {
   constexpr uint32_t regs_per_wave = 112;
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(functional_quantum_checkpoint_config(0, 0),
-                                      rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(
+      test::load_valid_config_from_string(functional_quantum_checkpoint_config(0, 0), loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_EQ(cu->config().sgprs_per_wf, regs_per_wave);
   ASSERT_EQ(cu->num_wf_slots(), 10u);
@@ -2946,11 +2835,8 @@ TEST(CheckpointTest, SaveAndRestoreAccVgprs) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -3052,11 +2938,8 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -3145,11 +3028,8 @@ TEST(CheckpointTest, SaveAndRestoreHwregState) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
 
@@ -3232,11 +3112,8 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
@@ -3309,11 +3186,8 @@ TEST(CheckpointTest, RoundTripsWorkgroupCoordinates) {
     }
   })";
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(cu, nullptr);
   // A flat id that is not any of the coordinates, so restoring wg_id into them
@@ -3388,12 +3262,8 @@ TEST(CApiTest, FunctionalDispatchThreadsPropagateExplicitAndAutoValues) {
   // The shared pool must be wider than either individual XCD when requested.
   run_case(/*configured=*/11, /*expected=*/11);
   run_case(/*configured=*/99, /*expected=*/13);
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config_from_string(functional_dispatch_threads_config(0),
-                                      rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  const auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(functional_dispatch_threads_config(0), loaded));
   run_case(/*configured=*/0, /*expected=*/loaded.execution_threads.dispatch.front());
 }
 
@@ -3446,11 +3316,9 @@ TEST(CApiTest, AutoFunctionalDispatchBudgetAppliesToEveryGpu) {
 
   ASSERT_NE(handle->vm, nullptr);
   ASSERT_EQ(handle->vm->num_socs(), 4u);
-  util::StringDiagnostic expected_diagnostic;
-  auto expected_result = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema,
-                                                         expected_diagnostic.emitter());
-  ASSERT_TRUE(expected_result.succeeded()) << expected_diagnostic.message();
-  const auto expected = std::move(expected_result).value().execution_threads.dispatch;
+  config::LoadedConfig expected_config;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, expected_config));
+  const auto expected = expected_config.execution_threads.dispatch;
   ASSERT_EQ(expected.size(), handle->vm->num_socs());
   for (uint32_t i = 0; i < handle->vm->num_socs(); ++i)
     EXPECT_EQ(handle->vm->soc(i)->dispatch_threads(), expected[i]) << "SoC " << i;
@@ -3741,6 +3609,70 @@ TEST(CApiTest, InvalidArguments) {
   EXPECT_EQ(rj_vm_create_from_string(nullptr, RJ_VM_MODE_DEFAULT, &handle),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(rj_vm_step(nullptr, nullptr), ROCJITSU_STATUS_INVALID_ARGUMENT);
+}
+
+TEST(ConfigTestUtilTest, FileAndStringHelpersPreserveHostWidthSelection) {
+  std::string json = functional_dispatch_threads_config(0);
+  json.insert(json.find('{') + 1, R"(
+    "thread_allocations":[
+      {"num_threads":1,"cpu_dispatch_threads":1},
+      {"num_threads":1,"cpu_dispatch_threads":4}
+    ],)");
+  const auto file = write_temp_config(json);
+  util::StringDiagnostic diagnostic;
+  const auto settings = config::load_execution_thread_settings_from_string(json, kEmbeddedSchema,
+                                                                           diagnostic.emitter());
+  ASSERT_TRUE(settings.succeeded()) << diagnostic.message();
+
+  for (const auto width :
+       {std::optional<uint32_t>{}, std::optional<uint32_t>{0}, std::optional<uint32_t>{4}}) {
+    SCOPED_TRACE(width ? std::to_string(*width) : "automatic");
+    const auto expected =
+        settings.value().resolve(width.value_or(amdgpu::available_host_threads()));
+    config::LoadedConfig from_file;
+    config::LoadedConfig from_string;
+    ASSERT_TRUE(test::load_valid_config(file.path(), from_file, width));
+    ASSERT_TRUE(test::load_valid_config_from_string(json, from_string, width));
+    for (const auto *loaded : {&from_file, &from_string}) {
+      ASSERT_NE(loaded->build_result.root, nullptr);
+      EXPECT_EQ(loaded->execution_threads.engines, expected.engines);
+      EXPECT_EQ(loaded->execution_threads.dispatch, expected.dispatch);
+      EXPECT_EQ(loaded->execution_threads.helpers, expected.helpers);
+    }
+    if (width) {
+      EXPECT_EQ(from_file.execution_threads.dispatch, std::vector<uint32_t>{*width ? 4u : 1u});
+    }
+  }
+}
+
+TEST(ConfigTestUtilTest, FailurePreservesLoadedOutputAndDiagnostic) {
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(functional_dispatch_threads_config(7), loaded));
+  const auto *root = loaded.build_result.root.get();
+  const auto threads = loaded.execution_threads.dispatch;
+  const auto engine_threads = loaded.engine_config.num_threads;
+  const auto target = loaded.target;
+  const test::ScopedTempDirectory directory("rocjitsu-test-config-missing-");
+  const std::string missing_path = directory.path() + "/missing.json";
+  const auto malformed_file = write_temp_config("{");
+
+  const auto missing = test::load_valid_config(missing_path, loaded);
+  EXPECT_FALSE(missing);
+  EXPECT_EQ(std::string(missing.message()), "Cannot open file: " + missing_path);
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+
+  const auto malformed_string = test::load_valid_config_from_string("{", loaded);
+  EXPECT_FALSE(malformed_string);
+  EXPECT_THAT(malformed_string.message(), testing::HasSubstr("Failed to parse JSON config:"));
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+
+  const auto malformed_path = test::load_valid_config(malformed_file.path(), loaded);
+  EXPECT_FALSE(malformed_path);
+  EXPECT_EQ(std::string(malformed_path.message()), malformed_string.message());
+  EXPECT_EQ(loaded.build_result.root.get(), root);
+  EXPECT_EQ(loaded.execution_threads.dispatch, threads);
+  EXPECT_EQ(loaded.engine_config.num_threads, engine_threads);
+  EXPECT_EQ(loaded.target, target);
 }
 
 } // namespace

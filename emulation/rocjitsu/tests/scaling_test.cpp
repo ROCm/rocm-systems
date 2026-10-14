@@ -66,19 +66,23 @@ KD read_kd(const CodeObject &co) {
   return {};
 }
 
-double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
+util::FailureOr<double> run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   Executable exec(kernel_path(kernel_name));
-  if (!exec.is_valid())
-    return -1;
+  if (!exec.is_valid()) {
+    std::cerr << "Cannot load kernel executable: " << kernel_path(kernel_name) << '\n';
+    return util::Result::failure();
+  }
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
-  if (!co)
-    return -1;
+  if (!co) {
+    std::cerr << "Kernel executable has no gfx950 code object\n";
+    return util::Result::failure();
+  }
   util::StringDiagnostic loaded_diagnostic;
   auto loaded_result =
       config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
   if (loaded_result.failed()) {
     std::cerr << loaded_diagnostic.message() << '\n';
-    return -1;
+    return util::Result::failure();
   }
   auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
@@ -88,15 +92,20 @@ double run_kernel(const char *kernel_name, uint32_t N, uint32_t num_threads) {
   engine->topology().set_root(loaded.take_root());
   loaded.wire_links(engine->topology());
 
-  if (num_threads > 1 && !amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads))
-    return -1;
+  if (num_threads > 1 &&
+      !amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads)) {
+    std::cerr << "Cannot partition topology across XCDs\n";
+    return util::Result::failure();
+  }
   engine->create();
 
   memory->load_image(reinterpret_cast<const uint8_t *>(co->image_data()), co->image_size(),
                      KD_ADDR);
   uint64_t kernel_object = KD_ADDR + co->kernel_descriptor_offset(kernel_name);
-  if (kernel_object == KD_ADDR)
-    return -1;
+  if (kernel_object == KD_ADDR) {
+    std::cerr << "Cannot find kernel descriptor\n";
+    return util::Result::failure();
+  }
 
   // Setup data.
   size_t elems = static_cast<size_t>(N) * N;
@@ -170,17 +179,24 @@ int main(int argc, char **argv) {
   constexpr int RUNS = 3;
 
   for (uint32_t t : *thread_counts) {
-    std::cout << t;
+    std::vector<double> medians;
     for (auto &k : kernels) {
       // Take the median of RUNS.
       std::vector<double> times;
       for (int r = 0; r < RUNS; ++r) {
-        double ms = run_kernel(k.name, k.N, t);
-        times.push_back(ms);
+        util::FailureOr<double> ms = run_kernel(k.name, k.N, t);
+        if (ms.failed()) {
+          std::cerr << "Failed to run kernel " << k.name << " with " << t << " thread(s)\n";
+          return 1;
+        }
+        times.push_back(ms.value());
       }
       std::ranges::sort(times);
-      std::cout << "," << times[RUNS / 2];
+      medians.push_back(times[RUNS / 2]);
     }
+    std::cout << t;
+    for (double median : medians)
+      std::cout << "," << median;
     std::cout << "\n";
     std::cout.flush();
   }

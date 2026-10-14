@@ -52,6 +52,9 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   return value;
 }
 
+/// @brief Read a config file into a string.
+/// @returns File contents on success, or failure after emitting a diagnostic
+/// containing @p path when the file cannot be opened.
 inline util::FailureOr<std::string> read_config_file(const std::string &path,
                                                      util::DiagnosticEmitter emit_error) {
   std::ifstream file(path);

@@ -5,10 +5,9 @@
 /// @brief How a single AQL dispatch is spread across the XCDs of a multi-XCD SoC.
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "test_paths.h"
-#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
@@ -90,11 +89,7 @@ struct XcdDistributionFixture {
 
   void initialize(Threading threading = Threading::Single, uint32_t dispatch_threads = 1,
                   const std::string &config_path = CONFIG_PATH) {
-    util::StringDiagnostic diagnostic;
-    auto loaded_result =
-        config::load_config(config_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded = std::move(loaded_result).value();
+    ASSERT_TRUE(test::load_valid_config(config_path, loaded));
     soc = loaded.soc();
     memory = loaded.memory();
     soc->set_dispatch_threads(dispatch_threads);
@@ -136,11 +131,7 @@ struct Cdna5ScratchTopologyFixture {
   amdgpu::GpuMemory *memory = nullptr;
 
   void initialize() {
-    util::StringDiagnostic diagnostic;
-    auto loaded_result =
-        config::load_config(CDNA5_CONFIG_PATH, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
-    loaded = std::move(loaded_result).value();
+    ASSERT_TRUE(test::load_valid_config(CDNA5_CONFIG_PATH, loaded));
     soc = loaded.soc();
     memory = loaded.memory();
     loaded.engine_config.num_threads = 1;

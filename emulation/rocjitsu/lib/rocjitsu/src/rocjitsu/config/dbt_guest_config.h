@@ -96,8 +96,12 @@ void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
 ///
 /// @details Shared by the DBT-only loader and the full simulation config
 /// loader so both paths interpret `dbt_guest` identically.
-/// @returns Failure with a diagnostic when guest-device conversion fails.
-/// @throws std::runtime_error on other invalid guest settings.
+/// @returns Converted config (defaults when @p guest is null), or failure with
+/// a diagnostic for guest-device validation errors from kfd_device_from_fb,
+/// including invalid SDMA queue and IP-version fields.
+/// @throws std::runtime_error for inconsistent guest CU/SIMD geometry, invalid
+/// execution-backend or guest/host silicon-revision enum values, or an enabled
+/// hardware backend that specifies simulator_config.
 util::FailureOr<DbtGuestConfig> dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
                                                   util::DiagnosticEmitter emit_error);
 
@@ -107,8 +111,12 @@ util::FailureOr<DbtGuestConfig> dbt_guest_from_fb(const fb::DbtGuestConfig *gues
 /// intentionally accepts configs that contain only the top-level `dbt_guest`
 /// table, so guest discovery configs do not need unused `vm` or `topology`
 /// sections.
-/// @returns Failure with a diagnostic on file-open, parse, or guest-device conversion errors.
-/// @throws std::runtime_error on other invalid guest settings.
+/// @returns Loaded config (defaults when dbt_guest is absent), or failure with
+/// a diagnostic on file-open, parse, or guest-device validation errors from
+/// kfd_device_from_fb. Invalid execution-backend names in JSON are parse errors.
+/// @throws std::runtime_error for inconsistent guest CU/SIMD geometry, invalid
+/// execution-backend or guest/host silicon-revision enum values, or an enabled
+/// hardware backend that specifies simulator_config, as in dbt_guest_from_fb.
 util::FailureOr<DbtGuestConfig> load_dbt_guest_config_from_file(const std::string &path,
                                                                 util::DiagnosticEmitter emit_error);
 

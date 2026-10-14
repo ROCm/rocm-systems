@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "test_paths.h"
-#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/config/config_loader.h"
@@ -115,11 +114,8 @@ struct KernelExecFixture {
   uint64_t kernel_object = 0;
 
   void setup(const char *kernel_name, uint32_t num_threads = 1) {
-    util::StringDiagnostic loaded_diagnostic;
-    auto loaded_result =
-        config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-    ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-    auto loaded = std::move(loaded_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     soc = loaded.soc();
     gpu_mem = loaded.memory();
     loaded.engine_config.num_threads = num_threads;
@@ -319,7 +315,7 @@ void run_matmul_stress(const char *kernel_name, unsigned N, uint32_t num_threads
   cpu_matmul(A.data(), B.data(), C_expected.data(), N);
 
   KernelExecFixture fx;
-  fx.setup(kernel_name, num_threads);
+  ASSERT_NO_FATAL_FAILURE(fx.setup(kernel_name, num_threads));
   fx.load_matrices(A.data(), B.data(), N);
   fx.write_kernargs(N);
 
@@ -371,11 +367,8 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Single-threaded counterpart to the _MultiThreaded test below; pin one worker
@@ -429,11 +422,8 @@ TEST(MatmulStressTest, Cdna4TopologyDispatchAndHalt_MultiThreaded) {
   constexpr uint32_t total_wgs = TOTAL_CUS;
   constexpr uint32_t SOPP_S_ENDPGM = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
 
-  util::StringDiagnostic loaded_diagnostic;
-  auto loaded_result =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, loaded_diagnostic.emitter());
-  ASSERT_TRUE(loaded_result.succeeded()) << loaded_diagnostic.message();
-  auto loaded = std::move(loaded_result).value();
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
