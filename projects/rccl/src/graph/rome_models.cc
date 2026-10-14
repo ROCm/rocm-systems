@@ -4029,7 +4029,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
             start_offset++;
           } else {
             if (r >= gpu) {
-              WARN("Malformed tree in user-defined trees (RCCL_TREES); initialization will fail");
+              WARN("More tokens than GPU numbers in a user-defined tree (RCCL_TREES); initialization will fail");
               return ncclInvalidUsage;
             }
             int g = gpus[r];
@@ -4050,7 +4050,7 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
               while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')')
                 start_offset++;
               if (start_offset >= offset) {
-                WARN("Malformed tree in user-defined trees (RCCL_TREES); initialization will fail");
+                WARN("GPU number not closed by ')' in a user-defined tree (RCCL_TREES); initialization will fail");
                 return ncclInvalidUsage;
               }
               // Wide enough for any int, including "-2147483648", plus its terminator.
