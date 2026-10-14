@@ -13,5 +13,4 @@ Preset: `${1:-debug}` (one of `ci`, `debug`, `debug-optimized`, `release`, `cove
 4. Report: configure success/failure, build success/failure, warnings, build
    directory path.
 
-See the `rocprofsys` skill for dependency options, troubleshooting, and the
-`cmake-conventions` rule for the whole-project-build hard rule.
+See the `cmake-conventions` rule for preset and whole-project-build guidance.
