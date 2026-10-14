@@ -93,6 +93,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -110,6 +111,7 @@
 #include <optional>
 #include <shared_mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -156,8 +158,14 @@ using sigaction_func_t = int (*)(int signum,
                                  const struct sigaction* __restrict__ act,
                                  struct sigaction* __restrict__ oldact);
 
-constexpr auto rocprofv3_num_signals     = NSIG;
-constexpr auto rocprofv3_handled_signals = std::array<int, 4>{SIGINT, SIGQUIT, SIGABRT, SIGTERM};
+constexpr auto rocprofv3_num_signals = NSIG;
+// The signals the tool installs a handler for, each with the spelling accepted in
+// ROCPROF_SIGNAL_HANDLERS_DISABLED.
+constexpr auto rocprofv3_handled_signals =
+    std::array{std::pair<std::string_view, int>{"SIGINT", SIGINT},
+               std::pair<std::string_view, int>{"SIGQUIT", SIGQUIT},
+               std::pair<std::string_view, int>{"SIGABRT", SIGABRT},
+               std::pair<std::string_view, int>{"SIGTERM", SIGTERM}};
 
 auto destructors = new std::vector<std::function<void()>>{};
 
@@ -208,11 +216,45 @@ get_chained_signals()
     return *CHECK_NOTNULL(_v);
 }
 
-bool
-is_handled_signal(int signum)
+// Signals named in ROCPROF_SIGNAL_HANDLERS_DISABLED, which the tool leaves to the
+// application. Parsed once on first use. Read from the signal and sigaction interposers,
+// and destroyed at static teardown.
+const std::unordered_set<int>&
+get_disabled_signals()
 {
-    for(auto itr : rocprofv3_handled_signals)
-        if(itr == signum) return true;
+    using data_type = std::unordered_set<int>;
+
+    static auto*& _v = common::static_object<data_type>::construct([]() {
+        auto _result = data_type{};
+        for(const auto& itr :
+            rocprofiler::sdk::parse::tokenize(tool::get_config().signal_handlers_disabled, ", "))
+        {
+            auto sig = std::find_if(rocprofv3_handled_signals.begin(),
+                                    rocprofv3_handled_signals.end(),
+                                    [&itr](const auto& val) { return val.first == itr; });
+
+            if(sig == rocprofv3_handled_signals.end())
+                ROCP_WARNING << "ignoring '" << itr
+                             << "' in ROCPROF_SIGNAL_HANDLERS_DISABLED: rocprofv3 installs no "
+                                "handler for it";
+            else
+                _result.emplace(sig->second);
+        }
+        return _result;
+    }());
+
+    return *CHECK_NOTNULL(_v);
+}
+
+// Whether the tool installs a handler for this signal and interposes on the
+// application's attempts to replace it: one of the handled signals, and not named in
+// ROCPROF_SIGNAL_HANDLERS_DISABLED.
+bool
+tool_owns_signal(int signum)
+{
+    if(get_disabled_signals().count(signum) > 0) return false;
+    for(const auto& itr : rocprofv3_handled_signals)
+        if(itr.second == signum) return true;
     return false;
 }
 
@@ -2361,11 +2403,13 @@ initialize_rocprofv3()
         << "nullptr to client finalizer!";  // exception for listing metrics
 }
 
+// Installs the tool's handler for each signal it owns. enable_signal_handlers governs
+// whether the interposers keep that handler in front of one the application installs
+// later, not whether the handler exists. Signals named in
+// ROCPROF_SIGNAL_HANDLERS_DISABLED are reported false by tool_owns_signal.
 void
 initialize_signal_handler(sigaction_func_t sigaction_func)
 {
-    if(!tool::get_config().enable_signal_handlers) return;
-
     if(sigaction_func == nullptr) sigaction_func = &sigaction;
 
     struct sigaction sig_act = {};
@@ -2378,20 +2422,27 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
     // guaranteed by the worker restoring the real disposition and re-raising once the flush done.
     sig_act.sa_flags     = (SA_SIGINFO | SA_NOCLDSTOP);
     sig_act.sa_sigaction = &rocprofv3_error_signal_handler;
-    for(auto signal_v : rocprofv3_handled_signals)
+    for(const auto& [signal_name, signal_v] : rocprofv3_handled_signals)
     {
+        if(!tool_owns_signal(signal_v))
+        {
+            ROCP_INFO << "Skipping install of signal handler for " << signal_name
+                      << " (named in ROCPROF_SIGNAL_HANDLERS_DISABLED)";
+            continue;
+        }
+
         if(get_chained_signals().at(signal_v))
         {
-            ROCP_INFO << "Skipping install of signal handler for signal " << signal_v
+            ROCP_INFO << "Skipping install of signal handler for " << signal_name
                       << " (already wrapped)";
             continue;
         }
 
-        ROCP_INFO << "Installing signal handler for signal " << signal_v;
+        ROCP_INFO << "Installing signal handler for " << signal_name;
         if(sigaction_func(signal_v, &sig_act, nullptr) != 0)
         {
             auto _errno_v = errno;
-            ROCP_ERROR << "error setting signal handler for " << signal_v
+            ROCP_ERROR << "error setting signal handler for " << signal_name
                        << " :: " << strerror(_errno_v);
         }
     }
@@ -4650,8 +4701,8 @@ signal_finalization_worker()
 
     sigset_t mask;
     sigemptyset(&mask);
-    for(auto sig : rocprofv3_handled_signals)
-        sigaddset(&mask, sig);
+    for(const auto& itr : rocprofv3_handled_signals)
+        sigaddset(&mask, itr.second);
     pthread_sigmask(SIG_BLOCK, &mask, nullptr);
 
     // Retry across EINTR: the worker blocks only the handled signals, so any other signal delivered
@@ -4957,7 +5008,7 @@ rocprofv3_signal(int signum, sighandler_t handler)
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_signal_function()(signum, handler);
 
-    if(!is_handled_signal(signum) || !tool::get_config().enable_signal_handlers)
+    if(!tool_owns_signal(signum) || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_signal_function())(signum, handler);
 
     // Save the app's disposition (first install only; keep SIG_IGN, skip SIG_DFL). See the detailed
@@ -4980,7 +5031,7 @@ rocprofv3_sigaction(int signum,
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_sigaction_function()(signum, act, oldact);
 
-    if(!is_handled_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
+    if(!tool_owns_signal(signum) || !act || !tool::get_config().enable_signal_handlers)
         return CHECK_NOTNULL(get_sigaction_function())(signum, act, oldact);
 
     // Save the app's disposition so we can restore it on signal delivery.
