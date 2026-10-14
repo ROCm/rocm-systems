@@ -81,7 +81,7 @@ The 75 are metrics the old allocator split that now fit one pass. They are SPP l
 
 ### Terms
 
-A **single-pass packable (SPP)** metric is a metric whose counters fit in one pass and are read from that pass. Collection may also copy one of its counters into other passes. Each pass writes its own result file (`results_pmc_perf_3.csv.gz` for pass `pmc_perf_3`). When a counter appears in more than one pass, analyze keeps one column per pass. When several passes hold the whole set, analyze uses the lowest-numbered one (`pmc_perf_2` before `pmc_perf_10`).
+A **single-pass packable (SPP)** metric is a metric whose counters fit in one pass and are read from that pass. Collection may also copy one of its counters into other passes. The pass name, and which pass is used when several hold the whole set, are in [Reading each metric from one pass](lld-metrics-grouping-algorithm.md#3-reading-each-metric-from-one-pass).
 
 A **single-pass unpackable (SPU)** metric is one whose counters cannot fit one empty pass under each block's counter limit. Phase 2 splits it into parts that each fit one pass, and combines parts from different passes only by addition, or by scaling by a non-negative constant.
 
@@ -164,7 +164,7 @@ Priority is the order of delivery. Phase 1 is the packable set. Phase 2 is only 
 
 **Collection.** Replace the shipping allocator. Place each SPP PMC set into one pass. The grouping note calls that pass a bucket. The normative steps are in the grouping note: prefer a pass that already holds some of the set, and extend it only when every hardware block the new counters touch still has room.
 
-**Analyze.** When a counter is copied across passes, analyze keeps one column per pass, named from that pass's result file, and reads each SPP expression from one pass that holds its whole PMC set. If that pass does not hold every counter the expression needs, the metric stays unset. Analyze does not fall back to a value taken from another pass. A duration in a bound expression (`End_Timestamp - Start_Timestamp`) is the duration of that expression's pass. Timestamps do not choose the pass. The column naming and pass selection are in the grouping note.
+**Analyze.** When a counter is copied across passes, analyze keeps one column per pass, named from that pass's result file, and reads each SPP expression from one pass that holds its whole PMC set. If that pass does not hold every counter the expression needs, the metric stays unset. Analyze does not fall back to a value taken from another pass. A duration in a bound expression (`End_Timestamp - Start_Timestamp`) is the duration of that expression's pass. Timestamps do not choose the pass. The column naming and pass selection are in [Reading each metric from one pass](lld-metrics-grouping-algorithm.md#3-reading-each-metric-from-one-pass).
 
 `$denom` is replaced at analyze time from `--normal-unit`, before the pass is chosen. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE`. Packing does not add those counters because an expression contains `$denom`. `per_wave` and `per_cycle` stay unset unless the selected pass already holds the counter.
 
