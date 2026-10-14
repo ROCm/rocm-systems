@@ -1020,6 +1020,13 @@ struct kvDict kvDictLinkType[] = {{"LOC", PATH_LOC}, {"NVL", PATH_NVL}, {"NVB", 
 ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, struct ncclTopoSystem* system,
                                        struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
+  // The caller indexes channels by XML sub position, which is bounded only by
+  // MAX_SUBS, so an untrusted NCCL_GRAPH_FILE can push c past the number of
+  // channels graph->intra and graph->inter are sized for.
+  if (c < 0 || c >= MAXCHANNELS) {
+    WARN("XML Import Channel : channel %d out of range (max %d).", c, MAXCHANNELS - 1);
+    return ncclInvalidUsage;
+  }
   int64_t* inter = graph->inter + 2 * c;
   int* intra = graph->intra + ngpus * c;
   int n = 0, g = 0;
