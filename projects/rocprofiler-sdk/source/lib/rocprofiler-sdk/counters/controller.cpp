@@ -82,7 +82,7 @@ check_power_performance_level()
         std::getline(perf_file, perf_level);
         ROCP_WARNING_IF(perf_level.empty())
             << fmt::format("Could not get power_dpm_force_performance_level for Agent {} "
-                           "(renderD{}). Set it to 'profile_standard' (e.g. via rocm-smi) for "
+                           "(renderD{}). Set it to 'profile_standard' (e.g. via amd-smi) for "
                            "stable GPU counter collection. Please refer to the rocprofv3 "
                            "documentation, 'Setting GPU performance level for PMC profiling' "
                            "section, for more information.",
@@ -91,7 +91,7 @@ check_power_performance_level()
 
         ROCP_WARNING_IF(!perf_level.empty() && perf_level != "profile_standard")
             << fmt::format("Agent {} (renderD{}) has power_dpm_force_performance_level='{}'. Set "
-                           "it to 'profile_standard' (e.g. via rocm-smi) for stable GPU counter "
+                           "it to 'profile_standard' (e.g. via amd-smi) for stable GPU counter "
                            "collection. Please refer to the rocprofv3 documentation, 'Setting "
                            "GPU performance level for PMC profiling' section, for more "
                            "information.",
