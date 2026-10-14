@@ -4047,8 +4047,9 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
             for (j = 0; j < ngpus; j++)
               if (g == system->nodes[GPU].nodes[j].gpu.dev) break;
             if (j < ngpus) {
-              while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')')
+              while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')') {
                 start_offset++;
+              }
               if (start_offset >= offset) {
                 WARN("GPU number not closed by ')' in a user-defined tree (RCCL_TREES); initialization will fail");
                 return ncclInvalidUsage;
