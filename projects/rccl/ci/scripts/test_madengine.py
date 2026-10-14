@@ -55,24 +55,15 @@ PERF_DATASTORE = "madengine_results.jsonl"
 # from our canonical workload-config keys.  Map each config key to the
 # set of madengine metric names we accept as a match.
 #
-# The ``_avg`` rows hold Megatron's running average over the measured
-# iterations; the plain rows hold the final iteration alone.  Two reasons to
-# score on the average: a single iteration is a one-sample estimate that
-# sporadically dips below the 2% regression gate on its own, and
-# parse_live_log_metrics() already reads the average from the live log, so
-# until now the structured and fallback paths could score one run differently.
+# Score the ``_avg`` rows (Megatron's running mean over measured iterations),
+# matching parse_live_log_metrics(); the plain rows are one noisy sample.
 _METRIC_ALIASES: dict[str, set[str]] = {
     "tokens_per_second_per_gpu": {"tok_per_s_per_gpu_avg"},
 }
 _TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
-# Applied to the candidate/baseline ratio of a single A/B pair, not to a
-# rolling mean of absolute throughput.  The absolute number is dominated by
-# which node pair the scheduler picked: over four weeks of history it varies
-# by 2.2% (BF16) and 2.7% (FP8) across pairs, while the one pair that repeated
-# reproduced to 0.02% and 0.25% on two different RCCL builds.  Comparing two
-# runs on the same nodes divides that term out, so 2% is well clear of the
-# noise floor rather than below it (AICOMNET-420).
+# Applied to the candidate/baseline ratio of one same-node A/B pair, which
+# repeats to within 0.25% (AICOMNET-420).
 REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
@@ -1134,9 +1125,7 @@ def check_ab_regression(
 ) -> tuple[bool, str]:
     """Score the candidate against the baseline measured on the same nodes.
 
-    This replaces the rolling mean of absolute throughput, which could not
-    separate an RCCL change from a change of node pair.  Returns
-    (is_regression, message).
+    Returns (is_regression, message).
     """
     if baseline <= 0:
         return False, "Baseline is not a positive number — cannot compare"
@@ -1427,12 +1416,8 @@ def main() -> None:
 
     # Step 4: Generate one manifest per A/B phase
     #
-    # The baseline is the untouched base image, and that is forced rather than
-    # chosen: the overlay is tagged {base_image}-rccl-{gpu_target}-{commit} and
-    # with no --registry it never leaves the node that built it, so "yesterday's
-    # overlay" is not a baseline this job can reach. Scoring the CI RCCL against
-    # the RCCL already shipping in the image answers the same question and uses
-    # an image every node can pull.
+    # The baseline is the untouched base image: with no --registry an overlay
+    # never leaves the node that built it, so no earlier overlay is reachable.
     #
     # When no registry is configured, the overlay image only exists on the
     # node that built it. Pin the allocation to that node so madengine can
