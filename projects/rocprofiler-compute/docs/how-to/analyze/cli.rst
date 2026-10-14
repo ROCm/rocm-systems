@@ -149,7 +149,8 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
    :align: left
    :alt: Roofline
 
-.. deprecated::
+.. deprecated:: 3.11.0
+
    The block 4 terminal roofline plot (section 4.3) is deprecated and will be removed in a future release. The metric tables (4.1 and 4.2) remain. Use the interactive HTML roofline file generated alongside your workload directory for roofline visualization.
 
 .. note::
