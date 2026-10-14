@@ -9488,8 +9488,8 @@ class CodeGenerator:
         # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
         # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
-            'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
-            'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
+            'ds_read_tr_b4': (4, 2, self.isa_spec.profile.ds_b4_transpose_kind),
+            'ds_read_tr_b6': (4, 3, self.isa_spec.profile.ds_b6_transpose_kind),
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
             'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }

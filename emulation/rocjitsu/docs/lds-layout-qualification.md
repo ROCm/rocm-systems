@@ -17,8 +17,9 @@ available for a separate measurement.
 ADDTID's pre-CDNA5 M0-plus-instruction-offset addition wraps to sixteen bits
 before the lane offset is added, measured on gfx1100 and gfx1201 in wave32 and
 wave64. CDNA5 extracts twenty M0 bits and then adds the instruction and lane
-offsets without wrapping, per its ISA pseudocode. Earlier-family behavior is
-qualified by the published formula and the available RDNA measurements.
+offsets without wrapping, per its ISA pseudocode. CDNA3/4 use the same published cast formula, but are unmeasured. RDNA1/2
+and CDNA1/2 manuals describe a flat sum; applying the sixteen-bit wrap on
+those families is an unqualified extrapolation from RDNA3/4 measurements.
 
 MFMA partial-EXEC tests apply only to CDNA3/4, whose manuals explicitly force
 all lanes active. CDNA1/2 accumulator-bank tests use full EXEC.

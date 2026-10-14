@@ -793,9 +793,15 @@ class IsaProfile(ABC):
         """
         return False
 
-    def ds_subbyte_transpose_kind(self, bits: int) -> int:
-        """CDNA4 contiguous sixteen-lane transpose layout for B4/B6."""
-        return 8 if bits == 4 else 9
+    @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B4 transpose layout."""
+        return 8
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B6 transpose layout."""
+        return 9
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -2942,9 +2948,15 @@ class Cdna5Profile(Rdna4Profile):
     def cpp_namespace(self) -> str | None:
         return 'cdna5'
 
-    def ds_subbyte_transpose_kind(self, bits: int) -> int:
-        """CDNA5 interleaved source-lane layout for B4/B6."""
-        return 1 if bits == 4 else 2
+    @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B4 layout."""
+        return 1
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B6 layout."""
+        return 2
 
     @property
     def ds_b8_transpose_kind(self) -> int:

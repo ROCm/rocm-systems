@@ -18,6 +18,8 @@
 /// transposes 16-bit elements within groups of 8 consecutive lanes.
 /// B64_TR_B16 (CDNA4 ds_read_b64_tr_b16) is a 4x16-lane halfword transpose
 /// with stride-4 source lanes.
+/// CDNA4 B4/B6 transpose contiguous sixteen-lane matrices; CDNA5 interleaves
+/// the source groups. See docs/lds-layout-qualification.md for source evidence.
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 

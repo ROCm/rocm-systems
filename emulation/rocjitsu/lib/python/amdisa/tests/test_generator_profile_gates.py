@@ -434,6 +434,38 @@ def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> N
 
 
 @pytest.mark.parametrize(
+    ('profile', 'arch', 'encoding', 'name', 'class_name', 'expected_kind'),
+    [
+        (Cdna4Profile(), 'cdna4', 'ds', 'DS_READ_B64_TR_B4', 'DsReadB64TrB4Ds', 8),
+        (Cdna4Profile(), 'cdna4', 'ds', 'DS_READ_B96_TR_B6', 'DsReadB96TrB6Ds', 9),
+        (Cdna5Profile(), 'cdna5', 'vds', 'DS_LOAD_TR4_B64', 'DsLoadTr4B64Vds', 1),
+        (Cdna5Profile(), 'cdna5', 'vds', 'DS_LOAD_TR6_B96', 'DsLoadTr6B96Vds', 2),
+    ],
+)
+def test_subbyte_transpose_selects_architecture_layout(
+    profile, arch, encoding, name, class_name, expected_kind
+) -> None:
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name=f'ENC_{encoding.upper()}',
+                insts=[SimpleNamespace(name=name)],
+            )
+        ],
+    )
+    assert derive_all_semantics(spec)[name].transpose_kind == expected_kind
+
+    generated = (
+        _repo_root()
+        / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    cpp = (generated / arch / f'{encoding}_exec.cpp').read_text()
+    body = cpp.split(f'void {class_name}::execute_impl(', 1)[1].split('\n}', 1)[0]
+    assert f'd->transpose = {expected_kind};' in body
+
+
+@pytest.mark.parametrize(
     ('profile', 'expected_kind'),
     [
         (Cdna4Profile(), 6),

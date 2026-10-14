@@ -245,7 +245,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
                   translation.target_sgpr_granulated);
 
   // LLVM's GFX6-GFX9 descriptor ABI reserves RSRC3; CDNA1 has no ACCUM_OFFSET.
-  if (target_arch == ROCJITSU_CODE_ARCH_CDNA1)
+  if (rsrc3_layout(target_arch) == Rsrc3Layout::Reserved)
     desc.compute_pgm_rsrc3 = 0;
 
   if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {

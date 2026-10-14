@@ -647,6 +647,37 @@ TEST(TransposeLoadTest, Cdna4SubbyteTransposesEveryBitWithinSixteenLaneMatrices)
   }
 }
 
+// Preserve the CDNA5 register/lane bit basis when adding the CDNA4 routing.
+TEST(TransposeLoadTest, Cdna5SubbyteTransposesEveryBitAcrossInterleavedGroups) {
+  for (uint32_t bits : {4u, 6u}) {
+    const uint32_t lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::TR_B4
+                                                     : amdgpu::TransposeKind::TR_B6);
+    for (uint32_t input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const uint32_t source_lane = input_bit / (16 * bits);
+      const uint32_t source_element = (input_bit / bits) % 16;
+      const uint32_t matrix_lane_bit = bits == 4 ? 3 : 2;
+      const uint32_t dest_lane =
+          (source_lane & 32) | (((source_lane >> matrix_lane_bit) & 1) << 4) | source_element;
+      // Remove the lane bit selecting the other sixteen-lane matrix.
+      const uint32_t low_mask = (1u << matrix_lane_bit) - 1;
+      const uint32_t dest_element =
+          (source_lane & low_mask) |
+          (((source_lane & 31) >> (matrix_lane_bit + 1)) << matrix_lane_bit);
+      const uint32_t output_bit = (dest_lane * 16 + dest_element) * bits + input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
+  }
+}
+
 TEST(TransposeLoadTest, Cdna5DsTrB8MatchesMatrixLayout) {
   amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
   state.wf_size = 32;
