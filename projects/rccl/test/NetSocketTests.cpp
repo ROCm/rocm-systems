@@ -1713,7 +1713,12 @@ TEST(BcmLinksTest, EnvFallback) {
     if (entry->d_name[0] == '.') continue;
     if (strlen(entry->d_name) != 12) continue;  // "0000:00:00.0"
     if (bdfA.empty())      bdfA = entry->d_name;
-    else if (bdfB.empty()) { bdfB = entry->d_name; break; }
+    if (bdfA.empty()) {
+      bdfA = entry->d_name;
+    } else if (bdfB.empty()) {
+      bdfB = entry->d_name;
+      break;
+    }
   }
   closedir(pciDir);
 
