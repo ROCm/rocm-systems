@@ -120,6 +120,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--no-roof` is deprecated and will be removed in a future release. To skip roofline, select blocks with `-b` or `--set` that do not include block 4.
 
+* `--config-dir` is deprecated and will be removed in a future release. Custom panel configs will be replaced by user-defined metric sets and views.
+
 ### Known issues
 
 ## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
