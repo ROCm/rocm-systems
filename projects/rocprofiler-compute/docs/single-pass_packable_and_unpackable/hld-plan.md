@@ -176,7 +176,7 @@ Only addition, or scaling by a non-negative constant, may combine values from di
 
 An SPU parent cannot fit one pass. Split it. Each part is an ordinary SPP row read from its own pass. Analyze computes the parent from its parts, and shows a value only when the parts are combined by addition across passes, or by scaling by a non-negative constant.
 
-- `COLLECT_SUM` adds parts. When every part is added, the parts may come from different passes. That covers absolute counts, bytes, and rates that are only added: VALU FLOPs, HBM bandwidth bytes, IPC issued pieces, Performance GFLOPs. When any part is subtracted, all parts in that sum must come from one pass, or the parent stays unset. The sum is not a ratio, so there is no denominator to take from another pass.
+- `COLLECT_SUM` adds parts. When every part is added, the parts may come from different passes. That covers absolute counts, bytes, and rates that are only added: VALU FLOPs, HBM bandwidth rates, IPC issued ratios, Performance GFLOPs. When any part is subtracted, all parts in that sum must come from one pass, or the parent stays unset. The sum is not a ratio, so there is no denominator to take from another pass.
 - `WEIGHTED_AVG` rebuilds one ratio whose weights were split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset.
 - `COLLECT_RATIO` divides summed numerator pieces by summed denominator pieces. A quotient whose numerator and denominator come from different passes is not the ratio of one kernel execution. The parent stays unset unless every divided counter shares a pass.
 
@@ -200,9 +200,9 @@ gfx942 has **16** SPU parents and **10** unique PMC sets. Some metrics appear in
 | Unique set | Parent | Result |
 |------------|--------|--------|
 | VALU FLOPs | `COLLECT_SUM` F16/F32/F64 rates | Shown |
-| HBM Bandwidth | `COLLECT_SUM` read/write bytes | Shown |
+| HBM Bandwidth | `COLLECT_SUM` read and write rates | Shown. Each piece is `SUM(bytes) / SUM(duration)` from its own pass, and the parent adds those rates. That matches the shipping GB/s when both passes have the same summed duration over the same dispatch filter. A missing or zero duration leaves the parent unset |
 | Performance GFLOPs | `COLLECT_SUM` VALU+MFMA rates | Shown |
-| IPC Issued | `COLLECT_SUM` two issued slices | Shown |
+| IPC Issued | `COLLECT_SUM` two issued ratios | Shown. Each piece is `SUM(instructions) / SUM(cycles)`, and the parent adds those ratios. That matches the shipping value when both pieces use the same cycle total over the same dispatch filter. A missing or zero cycle count leaves the parent unset |
 | AI HBM/L2/L1/LDS | `COLLECT_RATIO` FLOP pieces over bytes | Unset unless every divided counter shares a pass. FLOP counts from one pass over bytes from another are not the ratio of one kernel execution |
 | vL1D hit | `COLLECT_SUM` non-RW hit + atom correction | Unset unless the subtracted pieces share one pass. A correction subtracted across passes can fall outside 0–100% |
 | Read Instructions | `COLLECT_SUM` load + (−store−atomic) | Unset unless the subtracted pieces share one pass. Load from one pass plus −(store+atomic) from another can go negative |
