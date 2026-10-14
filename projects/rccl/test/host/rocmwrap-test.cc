@@ -657,6 +657,9 @@ TEST_F(RocmwrapMicrotest, Init_RecordsTheCuMemCapability) {
 
 TEST_F(RocmwrapMicrotest, Init_DmaBufDisabledByParamStopsBeforeHsaInit) {
   g_params["DMABUF_ENABLE"] = 0;
+  // Pin cuMem off: in-window builds would otherwise auto-enable it on this gfx1250 fixture, and
+  // ncclCuMemEnable() force-enables DMA-BUF ahead of the NCCL_DMABUF_ENABLE=0 arm under test.
+  g_params["CUMEM_ENABLE"] = 0;
   initOnceFunc();
   EXPECT_EQ(initResult, ncclSystemError);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Dmabuf feature disabled"));
@@ -687,6 +690,8 @@ TEST_F(RocmwrapMicrotest, Init_RocrWithoutDmaBufSupportStopsBeforeHsaInit) {
     EXPECT_EQ(initResult, ncclSystemError);
     EXPECT_TRUE(Logged(NCCL_LOG_INFO, "does not support dmabuf"));
     EXPECT_EQ(g_hsaInitCalls, 0);
+    // net.cc and coll_net.cc gate on the pointer itself, not on initResult.
+    EXPECT_EQ(pfn_hsa_amd_portable_export_dmabuf, nullptr);
   }
 }
 
