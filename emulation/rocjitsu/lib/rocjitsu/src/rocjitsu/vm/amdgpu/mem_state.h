@@ -96,8 +96,16 @@ public:
   TranslatedMemoryProgress translated;
 
   /// Atomics use elem_size for the entire RMW; ordinary accesses count DWORDs.
-  uint32_t access_size() const {
-    return discard_lines ? 0 : atomic_op != AtomicOp::NONE ? elem_size : num_dwords * elem_size;
+  [[nodiscard]] uint32_t access_size() const {
+    if (discard_lines)
+      return 0;
+    return atomic_op != AtomicOp::NONE ? elem_size : num_dwords * elem_size;
+  }
+
+  /// Scalar-buffer atomics access memory only when the entire RMW is in bounds.
+  [[nodiscard]] bool atomic_in_bounds() const {
+    const uint32_t mask = (1u << num_dwords) - 1;
+    return (load_dword_mask & mask) == mask;
   }
 };
 

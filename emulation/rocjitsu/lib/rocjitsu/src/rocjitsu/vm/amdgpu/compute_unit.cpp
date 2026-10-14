@@ -1961,7 +1961,7 @@ template <bool EnableAsync>
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
       dbg_is_write = !d.is_load || dbg_is_atomic;
       dbg_bytes = d.access_size();
-      if (dbg_bytes)
+      if (dbg_bytes && (!dbg_is_atomic || d.atomic_in_bounds()))
         dbg_addrs.push_back(d.addr);
     } else {
       auto &d = *inst->data_as<VectorMemState>();

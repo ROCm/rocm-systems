@@ -8467,6 +8467,10 @@ class CodeGenerator:
         return f'wf.vgpr_alloc().base + inst_.{field}'
 
     def _gen_flat_load_lds(self, sem: InstructionSemantics) -> str:
+        # CDNA1/2 Table 44: a 16-bit LDS byte offset. CDNA3/4 10.3: M0[17:2] * 4.
+        m0_mask = (
+            '0xffffu' if self.isa_spec.arch_name in ('cdna1', 'cdna2') else '0x3fffcu'
+        )
         L = [
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
             f'  d->elem_size = {sem.elem_size};',
@@ -8486,7 +8490,7 @@ class CodeGenerator:
                 '  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;',
                 '  flat_calculate_addresses(inst_, wf, *d);',
                 '  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
-                ' static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset,'
+                f' static_cast<int64_t>(wf.m0() & {m0_mask}) + offset,'
                 f' {sem.num_elems * 4}, {16 if sem.num_elems >= 3 else sem.num_elems * 4});',
                 '  set_data(std::move(d));',
             ]
@@ -8500,8 +8504,11 @@ class CodeGenerator:
         if self.isa_spec.arch_name in ('cdna1', 'cdna2'):
             L.extend(
                 [
-                    '  if (inst_.lds && inst_.seg != 0) {',
-                    self._gen_flat_load_lds(sem),
+                    '  if (inst_.lds) {',
+                    *(
+                        '  ' + line
+                        for line in self._gen_flat_load_lds(sem).splitlines()
+                    ),
                     '    return;',
                     '  }',
                 ]
@@ -9199,7 +9206,8 @@ class CodeGenerator:
         encoding = self.isa_spec.encoding_map.get(inst.enc_name)
         if is_load and encoding and any(f.name == 'lds' for f in encoding.ucode_fields):
             L.append('  d->lds_dst = inst_.lds;')
-            L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name not in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
         if sem.elem_size == 2:
             L.append('  d->buffer_d16 = true;')
             L.append(f'  d->d16_hi = {str(sem.d16_hi).lower()};')
@@ -11425,6 +11433,26 @@ class CodeGenerator:
                             'OpSelSdstExec::OPR_SDST_EXEC_EXEC_LO) '
                             f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid '
                             'SReg_32_XEXEC destination";'
+                        )
+
+                    if (
+                        self.isa_spec.arch_name in ('cdna1', 'cdna2')
+                        and inst_sem is not None
+                        and inst_sem.semantic_class == 'flat_load'
+                    ):
+                        raw = f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        # LLVM FLAT_Real_AllAddr_LDS only defines U8/I8/U16/I16/B32.
+                        valid_load = inst.name in (
+                            'FLAT_LOAD_UBYTE',
+                            'FLAT_LOAD_SBYTE',
+                            'FLAT_LOAD_USHORT',
+                            'FLAT_LOAD_SSHORT',
+                            'FLAT_LOAD_DWORD',
+                        )
+                        invalid = f'{raw}->seg == 0u' if valid_load else 'true'
+                        factory_validation_parts.append(
+                            f'if ({raw}->lds && ({invalid})) [[unlikely]] '
+                            f'return emit_error.emit() << "{inst.name} has an invalid LDS form";'
                         )
 
                     if inst.required_flat_segment is not None:

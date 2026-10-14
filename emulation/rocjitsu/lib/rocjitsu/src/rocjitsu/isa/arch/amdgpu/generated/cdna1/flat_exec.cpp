@@ -26,7 +26,7 @@ namespace rocjitsu {
 namespace cdna1 {
 
 void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -42,7 +42,7 @@ void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -59,7 +59,7 @@ void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -75,7 +75,7 @@ void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -93,7 +93,7 @@ void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 2;
     d->num_elems = 1;
@@ -109,7 +109,7 @@ void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -126,7 +126,7 @@ void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 2;
     d->num_elems = 1;
@@ -142,7 +142,7 @@ void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -160,7 +160,7 @@ void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 4;
     d->num_elems = 1;
@@ -176,7 +176,7 @@ void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -193,7 +193,7 @@ void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 4;
     d->num_elems = 2;
@@ -209,7 +209,7 @@ void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 8, 8);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 8, 8);
     set_data(std::move(d));
     return;
   }
@@ -226,7 +226,7 @@ void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 4;
     d->num_elems = 3;
@@ -242,7 +242,7 @@ void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 12, 16);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 12, 16);
     set_data(std::move(d));
     return;
   }
@@ -259,7 +259,7 @@ void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 4;
     d->num_elems = 4;
@@ -275,7 +275,7 @@ void FlatLoadDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 16, 16);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 16, 16);
     set_data(std::move(d));
     return;
   }
@@ -450,7 +450,7 @@ void FlatStoreDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -466,7 +466,7 @@ void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -484,7 +484,7 @@ void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -500,7 +500,7 @@ void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -518,7 +518,7 @@ void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -534,7 +534,7 @@ void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -553,7 +553,7 @@ void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 1;
     d->num_elems = 1;
@@ -569,7 +569,7 @@ void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -588,7 +588,7 @@ void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 2;
     d->num_elems = 1;
@@ -604,7 +604,7 @@ void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -622,7 +622,7 @@ void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.lds && inst_.seg != 0) {
+  if (inst_.lds) {
     auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->elem_size = 2;
     d->num_elems = 1;
@@ -638,7 +638,7 @@ void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
     int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
     flat_calculate_addresses(inst_, wf, *d);
     amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
-                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+                                    static_cast<int64_t>(wf.m0() & 0xffffu) + offset, 4, 4);
     set_data(std::move(d));
     return;
   }

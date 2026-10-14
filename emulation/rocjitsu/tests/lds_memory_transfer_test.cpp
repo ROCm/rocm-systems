@@ -245,7 +245,7 @@ TEST_P(LdsMemoryTransfer, OlderFlatLdsBitRedirectsGlobalAndScratchLoads) {
   for (unsigned segment : {1u, 2u}) {
     clear_lds();
     wave_->set_exec(3);
-    wave_->set_m0(0xfffc0043); // Global/Scratch ignore the low two M0 bits.
+    wave_->set_m0(0xffff0040); // CDNA1/2 use only the low 16-bit byte offset.
     scalar(0, segment == 1 ? 8 : 0x4000);
     scalar(1, 0);
     for (unsigned lane = 0; lane < 2; ++lane) {
@@ -263,6 +263,18 @@ TEST_P(LdsMemoryTransfer, OlderFlatLdsBitRedirectsGlobalAndScratchLoads) {
       EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 8, lane), 0x11111111u);
     }
   }
+}
+
+TEST_P(LdsMemoryTransfer, OlderLdsBitRejectsFlatAndUnsupportedWidths) {
+  if (GetParam() >= ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "LDS bit forms are CDNA1/2";
+  for (unsigned op : {16u, 17u, 18u, 19u, 20u, 21u, 22u, 23u, 36u})
+    for (unsigned segment : {0u, 1u, 2u}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << op << " segment=" << segment);
+      auto words = flat(op, segment, 0);
+      words[0] |= 1u << 13;
+      EXPECT_EQ(decode_fails(*decoder_, words.data()), segment == 0 || op > 20);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, LdsMemoryTransfer,

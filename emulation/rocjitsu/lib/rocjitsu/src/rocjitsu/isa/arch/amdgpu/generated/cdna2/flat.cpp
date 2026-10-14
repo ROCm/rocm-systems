@@ -63,10 +63,14 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadUbyteFlat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds &&
+      (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg == 0u)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_UBYTE has an invalid LDS form";
   return std::make_unique<FlatLoadUbyteFlat>(opcode);
 }
 } // namespace detail
@@ -122,10 +126,14 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadSbyteFlat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds &&
+      (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg == 0u)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SBYTE has an invalid LDS form";
   return std::make_unique<FlatLoadSbyteFlat>(opcode);
 }
 } // namespace detail
@@ -181,10 +189,14 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadUshortFlat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds &&
+      (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg == 0u)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_USHORT has an invalid LDS form";
   return std::make_unique<FlatLoadUshortFlat>(opcode);
 }
 } // namespace detail
@@ -240,10 +252,14 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadSshortFlat(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds &&
+      (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg == 0u)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SSHORT has an invalid LDS form";
   return std::make_unique<FlatLoadSshortFlat>(opcode);
 }
 } // namespace detail
@@ -299,10 +315,14 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadDwordFlat(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds &&
+      (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg == 0u)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_DWORD has an invalid LDS form";
   return std::make_unique<FlatLoadDwordFlat>(opcode);
 }
 } // namespace detail
@@ -358,10 +378,13 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadDwordx2Flat(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_dwordx2", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_DWORDX2 has an invalid LDS form";
   return std::make_unique<FlatLoadDwordx2Flat>(opcode);
 }
 } // namespace detail
@@ -417,10 +440,13 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadDwordx3Flat(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_dwordx3", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_DWORDX3 has an invalid LDS form";
   return std::make_unique<FlatLoadDwordx3Flat>(opcode);
 }
 } // namespace detail
@@ -476,10 +502,13 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadDwordx4Flat(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_dwordx4", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_DWORDX4 has an invalid LDS form";
   return std::make_unique<FlatLoadDwordx4Flat>(opcode);
 }
 } // namespace detail
@@ -987,10 +1016,13 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadUbyteD16Flat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_ubyte_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_UBYTE_D16 has an invalid LDS form";
   return std::make_unique<FlatLoadUbyteD16Flat>(opcode);
 }
 } // namespace detail
@@ -1046,10 +1078,13 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadUbyteD16HiFlat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_ubyte_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_UBYTE_D16_HI has an invalid LDS form";
   return std::make_unique<FlatLoadUbyteD16HiFlat>(opcode);
 }
 } // namespace detail
@@ -1105,10 +1140,13 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadSbyteD16Flat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_sbyte_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SBYTE_D16 has an invalid LDS form";
   return std::make_unique<FlatLoadSbyteD16Flat>(opcode);
 }
 } // namespace detail
@@ -1164,10 +1202,13 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadSbyteD16HiFlat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_sbyte_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SBYTE_D16_HI has an invalid LDS form";
   return std::make_unique<FlatLoadSbyteD16HiFlat>(opcode);
 }
 } // namespace detail
@@ -1223,10 +1264,13 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadShortD16Flat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_short_d16", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SHORT_D16 has an invalid LDS form";
   return std::make_unique<FlatLoadShortD16Flat>(opcode);
 }
 } // namespace detail
@@ -1282,10 +1326,13 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
 namespace detail {
 DecodeResult decodeFlatLoadShortD16HiFlat(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
   Result validation = Flat::validate_encoding(
       "flat_load_short_d16_hi", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->lds && (true)) [[unlikely]]
+    return emit_error.emit() << "FLAT_LOAD_SHORT_D16_HI has an invalid LDS form";
   return std::make_unique<FlatLoadShortD16HiFlat>(opcode);
 }
 } // namespace detail

@@ -347,9 +347,10 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     return;
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
-  const uint64_t write_mask = d.lds_dst ? lds_destination_write_mask(d, cu.arch()) : d.exec_mask;
+  const uint64_t lane_write_mask =
+      d.lds_dst ? lds_destination_write_mask(d, cu.arch()) : d.exec_mask;
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(write_mask & (1ULL << lane)))
+    if (!(lane_write_mask & (1ULL << lane)))
       continue;
     const auto bytes = d.lane_mask & (1ULL << lane)
                            ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)

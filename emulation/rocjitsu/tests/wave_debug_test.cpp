@@ -869,6 +869,47 @@ TEST(WaveDebugTest, ScalarAtomicAtPageEndAndDiscardDoNotProbeExtraBytes) {
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+TEST(WaveDebugTest, OutOfBoundsScalarAtomicsDoNotProbeUnmappedMemory) {
+  for (bool debugging : {false, true})
+    for (bool wide : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "debug=" << debugging << " wide=" << wide);
+      WaveDebugFixture fx;
+      constexpr uint32_t process = 9;
+      std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
+      KfdProcess::PageTable table;
+      util::DistributedSharedMutex mutex;
+      table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(), amdgpu::Mtype::RW};
+      fx.gpu_mem.register_process(process, &table, &mutex);
+      const uint32_t opcode = wide ? 98 : 66; // s_buffer_atomic_add[_x2] glc
+      fx.gpu_mem.write32(kKernelAddr, 0xc0030200u | (opcode << 18), process);
+      fx.gpu_mem.write32(kKernelAddr + 4, 0, process);
+      fx.gpu_mem.write32(kKernelAddr + 8, 0xbf800000u, process); // s_nop 0
+      auto *wave = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      wave->set_process_id(process);
+      fx.cu->set_debug_active(debugging);
+      const auto base = wave->sgpr_alloc().base;
+      fx.cu->write_sgpr(base, 0x60000); // Unmapped; the descriptor rejects the whole RMW.
+      fx.cu->write_sgpr(base + 1, 0);
+      fx.cu->write_sgpr(base + 2, wide ? 4 : 0);
+      fx.cu->write_sgpr(base + 3, 0);
+      fx.cu->write_sgpr(base + 8, 0x11111111);
+      fx.cu->write_sgpr(base + 9, 0x22222222);
+      unsigned faults = 0;
+      fx.cu->set_memory_violation_handler([&](amdgpu::Wavefront &faulting_wave, uint64_t, bool) {
+        ++faults;
+        faulting_wave.debug_trap(0);
+        return true;
+      });
+      fx.cu->step();
+      EXPECT_EQ(faults, 0u);
+      EXPECT_FALSE(wave->debug_halted());
+      EXPECT_EQ(fx.cu->read_sgpr(base + 8), 0u);
+      EXPECT_EQ(fx.cu->read_sgpr(base + 9), wide ? 0u : 0x22222222u);
+      fx.gpu_mem.unregister_process(process);
+    }
+}
+
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
 // relocation. The 64-bit sum can have a 0x1ffff high dword even though it
 // denotes an address relative to the loaded code object. SWAPPC must relocate

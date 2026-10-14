@@ -418,10 +418,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.lds_dst) {
       if (obligations.empty())
         return;
-      uint32_t perLaneBytes =
-          d.buffer_components
-              ? 4u * (d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components)
-              : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
+      uint32_t perLaneBytes = d.buffer_components
+                                  ? 4u * d.destination_vgpr_count()
+                                  : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
@@ -461,8 +460,6 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
 
   if (inst.data()->tag() == amdgpu::SCALAR_MEM) {
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
-    if (d.discard_lines)
-      return;
     if (d.is_load) {
       if (const auto reg = d.dst_register.register_ref()) {
         rs->registerScalarLoad(wf.pc, *reg, wf.exec(), obligations, memoryOrder);

@@ -422,9 +422,7 @@ uint64_t scalar_atomic_value(const ScalarMemState &d, uint64_t old_value) {
 }
 
 VmAccessOutcome scalar_atomic(ScalarMemState &d, Wavefront &wf) {
-  const uint32_t mask = (1u << d.num_dwords) - 1;
-  // A scalar-buffer atomic is indivisible: no partial access at the bound.
-  if ((d.load_dword_mask & mask) != mask)
+  if (!d.atomic_in_bounds())
     return VmAccessOutcome::Complete;
   if ((d.addr & (d.elem_size - 1)) != 0)
     return VmAccessOutcome::Malformed;

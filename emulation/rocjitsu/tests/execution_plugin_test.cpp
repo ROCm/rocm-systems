@@ -8506,6 +8506,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
   read->num_elems = 1;
   read->is_load = true;
   read->wf_size = reader->wf_size();
+  read->exec_mask = 0x1u;
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
@@ -8514,6 +8515,7 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
+
 TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
   PluginSinkConfig sink_config;
@@ -8553,6 +8555,7 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
   read->num_elems = 1;
   read->is_load = true;
   read->wf_size = reader->wf_size();
+  read->exec_mask = 0x1u;
   read->lane_mask = 0x1u;
   read->per_lane_addr[0] = 0;
   read->dst_reg_base = reader->vgpr_alloc().base;
