@@ -390,6 +390,7 @@ class CodeGenerator:
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
+        'smem_atomic': 'scalar',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -2208,7 +2209,7 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMaxF32', 'VopdMaxNumF32'),
+                    ('VopdMaxF32',),
                     '''
                     {
                       float result = std::fmax(std::bit_cast<float>(src0),
@@ -2218,12 +2219,30 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMinF32', 'VopdMinNumF32'),
+                    ('VopdMaxNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinF32',),
                     '''
                     {
                       float result = std::fmin(std::bit_cast<float>(src0),
                                                std::bit_cast<float>(src1));
                       return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
@@ -6634,7 +6653,7 @@ class CodeGenerator:
                 )
                 is_true16_vop3 = true16_vop3_info.enabled
                 if is_true16_vop3:
-                    lctx.vector_preamble.append(
+                    lctx.body_preamble.append(
                         '  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);'
                     )
                     vop3_opsel = 'opsel'
@@ -6761,9 +6780,9 @@ class CodeGenerator:
                         for i in range(3)
                     )
                     src_mods = ''.join(
-                        f'    if (inst_.abs & (1u << {i})) src{i}_value = std::fabs(src{i}_value);\n'
-                        f'    if (inst_.neg & (1u << {i})) src{i}_value = -src{i}_value;\n'
+                        line + '\n'
                         for i in range(3)
+                        for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                     )
                     return (
                         '  uint64_t exec = wf.exec();\n'
@@ -6788,11 +6807,10 @@ class CodeGenerator:
                     src_mods = ''
                     finish = ''
                     if is_vop3:
-                        src_mods = (
-                            '    if (inst_.abs & 1u) src0_value = std::fabs(src0_value);\n'
-                            '    if (inst_.abs & 2u) src1_value = std::fabs(src1_value);\n'
-                            '    if (inst_.neg & 1u) src0_value = -src0_value;\n'
-                            '    if (inst_.neg & 2u) src1_value = -src1_value;\n'
+                        src_mods = ''.join(
+                            line + '\n'
+                            for i in range(2)
+                            for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                         )
                         finish = (
                             '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'
@@ -7675,6 +7693,9 @@ class CodeGenerator:
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
 
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(sem)
+
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
@@ -7997,6 +8018,43 @@ class CodeGenerator:
         L.append('  d->addr = *address;')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        # This emitter uses a global pointer and one 32-bit data register.
+        if (
+            sem.name.upper() != 'S_ATOMIC_DEC'
+            or sem.operation != 'dec'
+            or sem.elem_size != 4
+            or sem.num_elems != 1
+        ):
+            raise ValueError(
+                f'{sem.name}: smem_atomic supports only 32-bit S_ATOMIC_DEC '
+                f'(operation={sem.operation!r}, elem_size={sem.elem_size}, '
+                f'num_elems={sem.num_elems})'
+            )
+        L = [
+            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            '  if (!data_register) return;',
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  d->dst_register = *data_register;',
+            '  d->num_dwords = 1;',
+            '  d->elem_size = 4;',
+            f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+            # Scalar atomic GLC selects return data, not cache policy.
+            '  d->is_load = inst_.glc != 0;',
+            '  d->mtype = amdgpu::Mtype::UC;',
+            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
+        ]
+        self._append_wait_counter_type(L, sem)
+        L.extend(
+            [
+                '  auto address = smem_calculate_address(inst_, wf);',
+                '  if (!address) return;',
+                '  d->addr = *address;',
+                '  set_data(std::move(d));',
+            ]
+        )
         return '\n'.join(L)
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
@@ -8416,6 +8474,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
@@ -8423,7 +8482,11 @@ class CodeGenerator:
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'flat_load')
         if sem.sign_extend:
@@ -8451,6 +8514,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -8459,6 +8524,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         data_field = self.isa_spec.profile.flat_store_src_field
@@ -8467,12 +8533,42 @@ class CodeGenerator:
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, sem, 'flat_store')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
+            L.append(f'  uint32_t data_base = {data_base};')
+            L.append(
+                '  constexpr uint32_t block_bytes = amdgpu::kBlockDwordCount * sizeof(uint32_t);'
+            )
+            L.append('  d->store_data.resize(wf.wf_size() * block_bytes);')
+            L.append('  const amdgpu::RegisterAccess registers(wf);')
+            L.append('  for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {')
+            L.append('    if (!d->block_dword_enabled(i)) continue;')
+            L.append(
+                '    const auto source = registers.block_store_source_vgpr(data_base + i);'
+            )
+            L.append(
+                '    auto data = registers.read_vgpr_region(source, 1, d->lane_mask);'
+            )
+            L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('      if (!(d->lane_mask & (uint64_t{1} << lane))) continue;')
+            L.append('      const uint32_t value = data.lane(0, lane);')
+            L.append(
+                '      std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));'
+            )
+            L.append('    }')
+            L.append('  }')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
         data_regs = ne if esz == 4 else 1
@@ -10546,6 +10642,10 @@ class CodeGenerator:
                                     inst_sem.semantic_class == 'buffer_atomic'
                                     and opnd.name == 'vdata'
                                 )
+                                or (
+                                    inst_sem.semantic_class == 'smem_atomic'
+                                    and opnd.name == 'sdata'
+                                )
                             )
                         )
                         # Compare-swap consumes two elements through vdata but
@@ -10571,9 +10671,15 @@ class CodeGenerator:
                             else opnd.name
                         )
                         if _is_optional_atomic_return:
-                            sc0, _, _ = self._coherency_exprs()
+                            if inst_sem.semantic_class == 'smem_atomic':
+                                # SMEM retains GLC on CDNA3/4, whose vector
+                                # atomics use SC0 to select the return value.
+                                returns_data = 'inst_.glc != 0'
+                            else:
+                                sc0, _, _ = self._coherency_exprs()
+                                returns_data = self._atomic_return_expr(sc0)
                             conditional_dst_body.append(
-                                f'if ({self._atomic_return_expr(sc0)}) '
+                                f'if ({returns_data}) '
                                 f'dst_operands_[num_dst_++] = &{atomic_return_operand};'
                             )
                         elif (
@@ -10775,6 +10881,12 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if inst.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
+                            access_conditions.append('modifiers.block_data = &vdst;')
+                        elif inst.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
+                            access_conditions.append(
+                                f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
+                            )
                         if is_smem and inst.name.startswith(
                             ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
                         ):
@@ -12311,6 +12423,7 @@ class CodeGenerator:
                             'global_load_addtid',
                         )
                         and 'FORMAT' not in inst.name
+                        and inst.name not in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
                         and not inst.name.startswith('FLAT_')
                         and not (_mem_sem.d16_hi or _mem_sem.d16_lo)
                     ):

@@ -71,6 +71,34 @@ For example:
 ``rocJpegGetErrorName()`` returns error codes in text format from rocJPEG APIs.
 
 
+Querying decoder capabilities
+===============================
+
+``rocJpegGetDecoderCaps()`` fills a ``RocJpegDecodeCaps`` structure with the decode capabilities of the decoder bound to a ``RocJpegHandle``, such as the number of JPEG cores, the minimum and maximum image dimensions, and the supported chroma subsamplings and output formats. Chroma subsamplings and output formats are reported as bitmasks, where each bit represents the corresponding ``RocJpegChromaSubsampling`` or ``RocJpegOutputFormat`` enum value. For each supported chroma subsampling, ``native_surface_format`` reports the ``RocJpegSurfaceFormat`` layout written for ``ROCJPEG_OUTPUT_NATIVE``, such as ``ROCJPEG_SURFACE_FORMAT_NV12`` for 4:2:0. A chroma subsampling is reported as supported only if the VA-API driver supports its native surface format. The supported JPEG coding processes are reported in ``coding_process_mask``, where each bit represents a ``RocJpegCodingProcess`` enum value; the VCN JPEG decoder supports only baseline JPEG.
+
+.. code:: cpp
+
+    RocJpegStatus rocJpegGetDecoderCaps(
+      RocJpegHandle handle,
+      RocJpegDecodeCaps *decode_caps);
+
+For example:
+
+.. code:: cpp
+
+  RocJpegDecodeCaps decode_caps = {};
+  status = rocJpegGetDecoderCaps(handle, &decode_caps);
+  if (status != ROCJPEG_STATUS_SUCCESS) {
+    std::cerr << "Failed to query the decoder capabilities with error code: " << rocJpegGetErrorName(status) << std::endl;
+    rocJpegDestroy(handle);
+    return EXIT_FAILURE;
+  }
+  bool rgb_supported_for_420 = (decode_caps.subsampling_mask & (1u << ROCJPEG_CSS_420)) &&
+                               (decode_caps.output_format_mask & (1u << ROCJPEG_OUTPUT_RGB));
+
+For a complete example, see the ``jpegDecodeCaps`` sample.
+
+
 Parsing a stream
 =================
 

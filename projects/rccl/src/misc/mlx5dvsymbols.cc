@@ -29,6 +29,7 @@ ncclResult_t buildMlx5dvSymbols(struct ncclMlx5dvSymbols* mlx5dvSymbols) {
 
 #include <dlfcn.h>
 #include "core.h"
+#include "dv_dlopen.h"
 
 // MLX5DV Library versioning
 #define MLX5DV_VERSION "MLX5_1.8"
@@ -38,9 +39,9 @@ ncclResult_t buildMlx5dvSymbols(struct ncclMlx5dvSymbols* mlx5dvSymbols) {
   void* tmp;
   void** cast;
 
-  mlx5dvhandle = dlopen("libmlx5.so", RTLD_NOW);
+  mlx5dvhandle = ncclDvDlopen("libmlx5.so", RTLD_NOW);
   if (!mlx5dvhandle) {
-    mlx5dvhandle = dlopen("libmlx5.so.1", RTLD_NOW);
+    mlx5dvhandle = ncclDvDlopen("libmlx5.so.1", RTLD_NOW);
     if (!mlx5dvhandle) {
       INFO(NCCL_INIT, "Failed to open libmlx5.so[.1]");
       goto teardown;

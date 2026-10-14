@@ -55,10 +55,13 @@ struct TileView {
 // Layout classes for 2D tiles (element strides).
 __device__ __forceinline__ TileLayout tile_classify_2d(
     size_t src_stride0, size_t src_stride1, size_t dst_stride0,
-    size_t dst_stride1, [[maybe_unused]] size_t extent0, size_t extent1) {
+    size_t dst_stride1, size_t extent0, size_t extent1) {
   const bool row_contig = (src_stride1 == 1 && dst_stride1 == 1);
   const bool col_contig = (src_stride0 == 1 && dst_stride0 == 1);
   if (row_contig && src_stride0 == extent1 && dst_stride0 == extent1) {
+    return TileLayout::Contiguous;
+  }
+  if (col_contig && src_stride1 == extent0 && dst_stride1 == extent0) {
     return TileLayout::Contiguous;
   }
   if (row_contig) {
@@ -81,12 +84,10 @@ __device__ __forceinline__ TileLayout tile_classify(const TileView& view) {
   return TileLayout::Strided;
 }
 
-// Put applies start_coord to dest; get applies it to source.
 __device__ __forceinline__ TileView tile_make_view(
     void* dst_data, const void* src_data, const size_t* dst_strides,
     const size_t* src_strides, const size_t* start_coord,
-    const size_t* boundary, int ndim, size_t element_size,
-    bool apply_start_to_dst) {
+    const size_t* boundary, int ndim, size_t element_size) {
   TileView view{};
   view.src_base = static_cast<char*>(const_cast<void*>(src_data));
   view.dst_base = static_cast<char*>(dst_data);
@@ -100,17 +101,12 @@ __device__ __forceinline__ TileView tile_make_view(
     view.dst_s1 = dst_strides[1];
     view.ext0 = boundary[0] - start_coord[0];
     view.ext1 = boundary[1] - start_coord[1];
-    const size_t src_off =
+    view.src_base +=
         (start_coord[0] * view.src_s0 + start_coord[1] * view.src_s1) *
         element_size;
-    const size_t dst_off =
+    view.dst_base +=
         (start_coord[0] * view.dst_s0 + start_coord[1] * view.dst_s1) *
         element_size;
-    if (apply_start_to_dst) {
-      view.dst_base += dst_off;
-    } else {
-      view.src_base += src_off;
-    }
   } else if (ndim == 1) {
     view.src_s0 = src_strides[0];
     view.dst_s0 = dst_strides[0];
@@ -118,11 +114,8 @@ __device__ __forceinline__ TileView tile_make_view(
     view.dst_s1 = 0;
     view.ext0 = boundary[0] - start_coord[0];
     view.ext1 = 0;
-    if (apply_start_to_dst) {
-      view.dst_base += start_coord[0] * view.dst_s0 * element_size;
-    } else {
-      view.src_base += start_coord[0] * view.src_s0 * element_size;
-    }
+    view.src_base += start_coord[0] * view.src_s0 * element_size;
+    view.dst_base += start_coord[0] * view.dst_s0 * element_size;
   }
 
   return view;
