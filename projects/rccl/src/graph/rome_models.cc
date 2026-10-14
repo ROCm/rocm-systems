@@ -5316,7 +5316,11 @@ ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   const int ncpus = system->nodes[CPU].count;
   const int nnets = system->nodes[NET].count;
 
-  if (ngpus < NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
+  // != rather than <: devids, g_hives and rdm below are all sized at NGPUS, and
+  // the model describes exactly that many GPUs, so a wider system overran every
+  // one of them -- and parseGraph's gpu_map bound, which trusts ngpus, then read
+  // past rdm.
+  if (ngpus != NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
 
   struct rcclRomeModel romeTopo;
   char pattern[256];

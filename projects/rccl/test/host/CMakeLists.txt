@@ -405,6 +405,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc                   # src/misc/param.cc + getenv interposition
     fakes/topo_stubs.cc                  # src/graph/*.cc; parseGraph calls ncclTopoGetLocalNet
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch, reached via parseRomeSystem
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
