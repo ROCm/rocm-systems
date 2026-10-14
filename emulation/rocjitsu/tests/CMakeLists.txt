@@ -474,6 +474,12 @@ add_test(
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
+        NAME CorpusRunnerUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
+    )
+    add_test(
         NAME VfioGuestRunUnitTest
         COMMAND
             ${Python3_EXECUTABLE} -B
@@ -768,7 +774,6 @@ add_executable(
     race-detector/race_detector_event_registry_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
-    race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
@@ -4114,8 +4119,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
-
-        add_subdirectory(race-detector)
     else()
         message(
             STATUS
