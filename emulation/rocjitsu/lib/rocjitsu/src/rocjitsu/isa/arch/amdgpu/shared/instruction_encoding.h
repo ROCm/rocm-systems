@@ -134,6 +134,8 @@ struct RegisterModifiers {
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;
   const Operand *wordwise_source1 = nullptr;
+  /// Block load destination or store data, selected per DWORD by issue-time M0.
+  const Operand *block_data = nullptr;
   const Operand *buffer_resource = nullptr;
   const Operand *buffer_address = nullptr;
   const Operand *buffer_offset = nullptr;
