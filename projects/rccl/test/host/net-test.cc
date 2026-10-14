@@ -97,6 +97,7 @@ struct FakeNet {
   };
   std::vector<MrCall> regMrs, regMrDmaBufs;
   ncclResult_t regMrResult = ncclSuccess;
+  ncclResult_t regMrDmaBufResult = ncclSuccess;  // fails only DMA-BUF registration when set
   int getDeviceMrCalls = 0;
   std::vector<std::pair<void*, void*>> deregMrs;  // (comm, mhandle)
   ncclResult_t deregMrResult = ncclSuccess;
@@ -161,7 +162,7 @@ struct FakeNet {
   ncclResult_t regMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
     regMrDmaBufs.push_back({comm, data, size, type, offset, fd});
     *mhandle = data;
-    return regMrResult;
+    return regMrDmaBufResult != ncclSuccess ? regMrDmaBufResult : regMrResult;
   }
   ncclResult_t getDeviceMr(void*, void* mhandle, void** dptr) {
     ++getDeviceMrCalls;
@@ -3372,6 +3373,527 @@ TEST_F(NetRecvProxyFreeMicrotest, DeregistrationFails_ReturnsError) {
   net_.deregMrResult = ncclSystemError;
 
   EXPECT_EQ(Free(), ncclSystemError);
+}
+
+// ---------------------------------------------------------------------------
+// Client-side buffer registration (netRegisterBuffer, ncclNetLocalRegisterBuffer,
+// ncclNetGraphRegisterBuffer, cleanupNet, ncclNetDeregBuffer)
+// ---------------------------------------------------------------------------
+
+class NetRegisterMicrotest : public NetMicrotestBase {
+ protected:
+  static constexpr size_t kSegment = 1 << 16;
+  static constexpr int kPeers = 2;
+
+  ncclComm comm_{};
+  std::vector<char> mem_ = std::vector<char>(4 * kSegment);
+  ncclReg reg_{};
+  ncclReg* slots_[1] = {&reg_};
+  ncclConnector peers_[kPeers]{};
+  ncclConnector* peerConns_[kPeers] = {&peers_[0], &peers_[1]};
+  void* handles_[kPeers] = {};
+  int flag_ = -1;
+  std::vector<netRegInfo> registered_;
+  std::vector<ncclProxyConnector*> registeredOn_;
+  std::deque<ncclRegNetHandles> preexisting_;
+  ncclIntruQueue<ncclCommCallback, &ncclCommCallback::next> cleanup_ = {};
+
+  void SetUp() override {
+    NetMicrotestBase::SetUp();
+    reg_.begAddr = reinterpret_cast<uintptr_t>(mem_.data());
+    reg_.endAddr = reg_.begAddr + mem_.size();
+    comm_.regCache.slots = slots_;
+    comm_.regCache.population = 1;
+    for (auto& p : peers_) p.conn.flags = NCCL_DIRECT_NIC;
+    // Each kSegment-aligned slice of mem_ is its own physical segment.
+    g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+      size_t off = static_cast<char*>(ptr) - mem_.data();
+      *base = mem_.data() + off / kSegment * kSegment;
+      *size = kSegment;
+      return hipSuccess;
+    };
+    g_regLocalIsValid = [](ncclReg*, bool* valid) {
+      *valid = true;
+      return ncclSuccess;
+    };
+    g_proxyCallBlocking = [this](ncclComm*, ncclProxyConnector* conn, int type, void* req, int reqSize, void* resp,
+                                 int respSize) {
+      EXPECT_EQ(type, ncclProxyMsgRegister);
+      EXPECT_EQ(reqSize, (int)sizeof(netRegInfo));
+      EXPECT_EQ(respSize, (int)sizeof(void*));
+      registered_.push_back(*static_cast<netRegInfo*>(req));
+      registeredOn_.push_back(conn);
+      *static_cast<void**>(resp) = reinterpret_cast<void*>(0x1000 + registered_.size());
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    for (ncclRegNetHandles* h = reg_.netHandleHead; h;) {
+      ncclRegNetHandles* next = h->next;
+      bool owned = true;
+      for (auto& p : preexisting_) owned &= (&p != h);
+      if (owned) free(h);
+      h = next;
+    }
+    while (!ncclIntruQueueEmpty(&cleanup_)) free(ncclIntruQueueDequeue(&cleanup_));
+    NetMicrotestBase::TearDown();
+  }
+
+  ncclResult_t LocalRegister(const void* buff, size_t size, int nPeers = kPeers) {
+    return ncclNetLocalRegisterBuffer(&comm_, buff, size, peerConns_, nPeers, &flag_, handles_);
+  }
+  ncclResult_t GraphRegister(const void* buff, size_t size, int* nElts = nullptr) {
+    return ncclNetGraphRegisterBuffer(&comm_, buff, size, peerConns_, kPeers, &flag_, handles_, &cleanup_, nElts);
+  }
+};
+
+TEST_F(NetRegisterMicrotest, LocalRegister_NothingToRegister_LeavesBufferUnregistered) {
+  EXPECT_EQ(ncclNetLocalRegisterBuffer(nullptr, mem_.data(), 64, peerConns_, kPeers, &flag_, handles_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(LocalRegister(nullptr, 64), ncclSuccess);
+  EXPECT_EQ(LocalRegister(mem_.data(), 0), ncclSuccess);
+  EXPECT_EQ(LocalRegister(mem_.data(), 64, /*nPeers=*/0), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_NotLocallyRegistered_LeavesBufferUnregistered) {
+  ScopedHook valid(g_regLocalIsValid, [](ncclReg*, bool* v) {
+    *v = false;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_ValidRecord_RegistersWholeRecordWithEachPeer) {
+  ASSERT_EQ(LocalRegister(mem_.data() + 100, 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  ASSERT_EQ(registered_.size(), 2u);
+  EXPECT_EQ(registeredOn_[0], &peers_[0].proxyConn);
+  EXPECT_EQ(registeredOn_[1], &peers_[1].proxyConn);
+  EXPECT_EQ(registered_[0].buffer, reg_.begAddr);
+  EXPECT_EQ(registered_[0].size, mem_.size());
+  EXPECT_EQ(registered_[0].numSegments, 1);
+  EXPECT_EQ(handles_[0], reinterpret_cast<void*>(0x1001));
+  EXPECT_EQ(handles_[1], reinterpret_cast<void*>(0x1002));
+  EXPECT_TRUE(reg_.state & NET_REG_COMPLETE);
+  std::set<std::pair<ncclProxyConnector*, void*>> remembered;
+  for (ncclRegNetHandles* h = reg_.netHandleHead; h; h = h->next) remembered.insert({h->proxyConn, h->handle});
+  EXPECT_EQ(remembered, (std::set<std::pair<ncclProxyConnector*, void*>>{
+                            {&peers_[0].proxyConn, reinterpret_cast<void*>(0x1001)},
+                            {&peers_[1].proxyConn, reinterpret_cast<void*>(0x1002)}}));
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_PeerAlreadyRegistered_ReusesHandle) {
+  preexisting_.push_back({reinterpret_cast<void*>(0xAB), &peers_[0].proxyConn, nullptr});
+  reg_.netHandleHead = &preexisting_.back();
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  EXPECT_EQ(handles_[0], reinterpret_cast<void*>(0xAB));
+  ASSERT_EQ(registered_.size(), 1u);
+  EXPECT_EQ(registeredOn_[0], &peers_[1].proxyConn);
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_EveryPeerAlreadyRegistered_RegisteredWithoutProxyCalls) {
+  preexisting_.push_back({reinterpret_cast<void*>(0xAB), &peers_[0].proxyConn, nullptr});
+  preexisting_.push_back({reinterpret_cast<void*>(0xCD), &peers_[1].proxyConn, &preexisting_[0]});
+  reg_.netHandleHead = &preexisting_.back();
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  EXPECT_EQ(handles_[1], reinterpret_cast<void*>(0xCD));
+  EXPECT_TRUE(registered_.empty());
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_MissingPeer_Skipped) {
+  peerConns_[0] = nullptr;
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  ASSERT_EQ(registered_.size(), 1u);
+  EXPECT_EQ(registeredOn_[0], &peers_[1].proxyConn);
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_PeerWithoutGdr_LeavesBufferUnregistered) {
+  peers_[0].conn.flags = 0;
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_ProxyDeclines_LeavesBufferUnregistered) {
+  ScopedHook call(g_proxyCallBlocking, [](ncclComm*, ncclProxyConnector*, int, void*, int, void* resp, int) {
+    *static_cast<void**>(resp) = nullptr;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(LocalRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(reg_.netHandleHead, nullptr);
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_DependencyFails_ReturnsErrorUnregistered) {
+  {
+    ScopedHook call(g_proxyCallBlocking, [](auto...) { return ncclSystemError; });
+    EXPECT_EQ(LocalRegister(mem_.data(), 64), ncclSystemError);
+    EXPECT_EQ(flag_, 0);
+  }
+  {
+    ScopedHook valid(g_regLocalIsValid, [](auto...) { return ncclInternalError; });
+    EXPECT_EQ(LocalRegister(mem_.data(), 64), ncclInternalError);
+    EXPECT_EQ(flag_, 0);
+  }
+  {
+    ScopedHook range(g_hipMemGetAddressRange, [](auto...) { return hipErrorInvalidValue; });
+    EXPECT_EQ(LocalRegister(mem_.data(), 64), ncclUnhandledCudaError);
+    EXPECT_EQ(flag_, 0);
+  }
+}
+
+TEST_F(NetRegisterMicrotest, LocalRegister_MultiSegmentBuffer_RegisteredOnlyWhenEnabled) {
+  ASSERT_EQ(LocalRegister(mem_.data(), 2 * kSegment), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+
+  ScopedHook param(g_loadParam, ParamOverride({{"MULTI_SEGMENT_REGISTER", 1}}));
+  ASSERT_EQ(LocalRegister(mem_.data(), 2 * kSegment), ncclSuccess);
+  EXPECT_EQ(flag_, 1);
+  ASSERT_FALSE(registered_.empty());
+  EXPECT_EQ(registered_[0].numSegments, 2);
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_Registered_QueuesCleanupThatDeregisters) {
+  void* graphBase = nullptr;
+  size_t graphSize = 0;
+  ScopedHook graphReg(g_commGraphRegister, [&](ncclComm*, void* buff, size_t size, void** handle) {
+    graphBase = buff;
+    graphSize = size;
+    *handle = &reg_;
+    return ncclSuccess;
+  });
+  ncclReg* deregistered = nullptr;
+  ScopedHook graphDereg(g_commGraphDeregister, [&](ncclComm*, ncclReg* r) {
+    deregistered = r;
+    return ncclSuccess;
+  });
+  int nElts = 0;
+
+  ASSERT_EQ(GraphRegister(mem_.data() + kSegment + 8, 64, &nElts), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  EXPECT_EQ(graphBase, mem_.data() + kSegment);
+  EXPECT_EQ(graphSize, kSegment);
+  EXPECT_EQ(nElts, 1);
+  EXPECT_EQ(graphDereg.calls, 0);
+  ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanup_);
+  ASSERT_NE(cb, nullptr);
+  EXPECT_EQ(cb->fn(&comm_, cb), ncclSuccess);  // frees cb
+  EXPECT_EQ(deregistered, &reg_);
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_NotRegistered_ReleasesGraphRecord) {
+  peers_[1].conn.flags = 0;
+  ScopedHook graphReg(g_commGraphRegister, [this](ncclComm*, void*, size_t, void** handle) {
+    *handle = &reg_;
+    return ncclSuccess;
+  });
+  ScopedHook graphDereg(g_commGraphDeregister, [](ncclComm*, ncclReg*) { return ncclSuccess; });
+
+  ASSERT_EQ(GraphRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(graphDereg.calls, 1);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&cleanup_));
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_NothingToRegisterOrMultiSegment_Skipped) {
+  ScopedHook graphReg(g_commGraphRegister, [](auto...) { return ncclInternalError; });
+
+  EXPECT_EQ(GraphRegister(nullptr, 64), ncclSuccess);
+  EXPECT_EQ(ncclNetGraphRegisterBuffer(&comm_, mem_.data(), 64, peerConns_, 0, &flag_, handles_, &cleanup_, nullptr),
+            ncclSuccess);
+  EXPECT_EQ(GraphRegister(mem_.data(), 2 * kSegment), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(graphReg.calls, 0);
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_NoGraphRecord_LeavesBufferUnregistered) {
+  ScopedHook graphReg(g_commGraphRegister, [](ncclComm*, void*, size_t, void** handle) {
+    *handle = nullptr;
+    return ncclSuccess;
+  });
+  ScopedHook graphDereg(g_commGraphDeregister, [](ncclComm*, ncclReg*) { return ncclSuccess; });
+
+  ASSERT_EQ(GraphRegister(mem_.data(), 64), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_TRUE(registered_.empty());
+}
+
+TEST_F(NetRegisterMicrotest, GraphRegister_GraphRecordFails_ReturnsError) {
+  ScopedHook graphReg(g_commGraphRegister, [](auto...) { return ncclInternalError; });
+
+  EXPECT_EQ(GraphRegister(mem_.data(), 64), ncclInternalError);
+  EXPECT_EQ(flag_, 0);
+}
+
+TEST_F(NetRegisterMicrotest, DeregBuffer_SendsHandleToProxy) {
+  void* sent = nullptr;
+  ScopedHook call(g_proxyCallBlocking, [&](ncclComm*, ncclProxyConnector*, int type, void* req, int reqSize, void*,
+                                           int respSize) {
+    EXPECT_EQ(type, ncclProxyMsgDeregister);
+    EXPECT_EQ(reqSize, (int)sizeof(void*));
+    EXPECT_EQ(respSize, 0);
+    sent = *static_cast<void**>(req);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclNetDeregBuffer(&comm_, &peers_[0].proxyConn, reinterpret_cast<void*>(0x77)), ncclSuccess);
+  EXPECT_EQ(sent, reinterpret_cast<void*>(0x77));
+
+  ScopedHook fail(g_proxyCallBlocking, [](auto...) { return ncclSystemError; });
+  EXPECT_EQ(ncclNetDeregBuffer(&comm_, &peers_[0].proxyConn, nullptr), ncclSystemError);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-side buffer registration (send/recvProxyRegBuffer, send/recvProxyDeregBuffer)
+// ---------------------------------------------------------------------------
+
+class NetProxyRegBufferMicrotest : public NetMicrotestBase {
+ protected:
+  ncclProxyConnection sendConn_{}, recvConn_{};
+  sendNetResources sendRes_{};
+  recvNetResources recvRes_{};
+  netRegInfo info_{0x10000, 4096, 1};
+  void* resp_ = reinterpret_cast<void*>(0x1);
+  int done_ = 0;
+
+  void SetUp() override {
+    NetMicrotestBase::SetUp();
+    sendRes_.netSendComm = &net_.sendComm;
+    recvRes_.netRecvComm = &net_.recvComm;
+    sendConn_.transportResources = &sendRes_;
+    recvConn_.transportResources = &recvRes_;
+    g_exportedFds.clear();
+  }
+
+  void TearDown() override {
+    for (auto* q : {&sendConn_.proxyMemHandleQueue, &recvConn_.proxyMemHandleQueue})
+      while (!ncclIntruQueueEmpty(q)) free(ncclIntruQueueDequeue(q));
+    ResetRocmWrapFakes();
+    NetMicrotestBase::TearDown();
+  }
+
+  ncclResult_t Reg(bool send, int reqSize = sizeof(netRegInfo), int respSize = sizeof(void*)) {
+    done_ = 0;
+    resp_ = reinterpret_cast<void*>(0x1);
+    return send ? sendProxyRegBuffer(&sendConn_, &proxyState_, &info_, reqSize, &resp_, respSize, &done_)
+                : recvProxyRegBuffer(&recvConn_, &proxyState_, &info_, reqSize, &resp_, respSize, &done_);
+  }
+  ncclResult_t Dereg(bool send, void* handle, int reqSize = sizeof(void*)) {
+    done_ = 0;
+    return send ? sendProxyDeregBuffer(&sendConn_, &proxyState_, &handle, reqSize, &done_)
+                : recvProxyDeregBuffer(&recvConn_, &proxyState_, &handle, reqSize, &done_);
+  }
+  ncclProxyConnection& Conn(bool send) { return send ? sendConn_ : recvConn_; }
+  void* Comm(bool send) { return send ? (void*)&net_.sendComm : (void*)&net_.recvComm; }
+};
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_WrongMessageSizes_Rejected) {
+  for (bool send : {true, false}) {
+    EXPECT_EQ(Reg(send, sizeof(netRegInfo) - 1), ncclInternalError);
+    EXPECT_EQ(Reg(send, sizeof(netRegInfo), 4), ncclInternalError);
+  }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_SingleSegment_RegistersAndRemembersHandle) {
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrs.clear();
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    EXPECT_EQ(done_, 1);
+    ASSERT_EQ(net_.regMrs.size(), 1u);
+    EXPECT_EQ(net_.regMrs[0].comm, Comm(send));
+    EXPECT_EQ(net_.regMrs[0].data, reinterpret_cast<void*>(0x10000));
+    EXPECT_EQ(net_.regMrs[0].size, 4096u);
+    EXPECT_EQ(net_.regMrs[0].type, NCCL_PTR_CUDA);
+    EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
+    ASSERT_FALSE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+    EXPECT_EQ(ncclIntruQueueHead(&Conn(send).proxyMemHandleQueue)->handle, resp_);
+  }
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_MultiSegmentWithoutDmaBuf_Declines) {
+  info_.numSegments = 2;
+  for (bool send : {true, false}) {
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    EXPECT_EQ(done_, 1);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_PluginFails_DeclinesWithoutError) {
+  net_.regMrResult = ncclSystemError;
+  for (bool send : {true, false}) {
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    EXPECT_EQ(resp_, nullptr);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+  }
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBuf_RegistersByFdEvenAcrossSegments) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
+  info_.numSegments = 2;
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrDmaBufs.clear();
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+    EXPECT_EQ(net_.regMrDmaBufs[0].comm, Comm(send));
+    EXPECT_EQ(net_.regMrDmaBufs[0].fd, g_exportedFds.back());
+    EXPECT_EQ(fcntl(g_exportedFds.back(), F_GETFD), -1);
+    EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
+  }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_HsaDmaBufFails_FallsBackToRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = [](const void*, size_t, int*, uint64_t*) { return HSA_STATUS_ERROR; };
+  sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
+  for (bool send : {true, false}) ASSERT_EQ(Reg(send), ncclSuccess);
+
+  EXPECT_EQ(net_.regMrs.size(), 2u);
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Reg_DmaBufNotSelected_UsesRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  for (bool send : {true, false}) ASSERT_EQ(Reg(send), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), 2u);
+}
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+class NetProxyRegBufferCuMemMicrotest : public NetProxyRegBufferMicrotest {
+ protected:
+  CuMemExportRecorder exports_;
+
+  void SetUp() override {
+    NetProxyRegBufferMicrotest::SetUp();
+    g_cuMemEnable = [] { return 1; };
+    sendRes_.useDmaBuf = recvRes_.useDmaBuf = 1;
+    exports_.Install();
+  }
+  void TearDown() override {
+    exports_.CloseOpen();
+    NetProxyRegBufferMicrotest::TearDown();
+  }
+};
+
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_RegistersByExportedFdAndClosesIt) {
+  info_.numSegments = 2;  // DMA-BUF handles multi-segment buffers
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.regMrDmaBufs.clear();
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+    EXPECT_EQ(net_.regMrDmaBufs[0].comm, Comm(send));
+    EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_.back().fd);
+    EXPECT_EQ(net_.regMrDmaBufs[0].offset, 0u);
+    EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
+    EXPECT_EQ(fcntl(exports_.back().fd, F_GETFD), -1);
+  }
+  EXPECT_TRUE(net_.regMrs.empty());
+}
+
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_ExportFails_FallsBackToRegMr) {
+  exports_.result = hipErrorNotSupported;
+  for (bool send : {true, false}) ASSERT_EQ(Reg(send), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), 2u);
+}
+
+TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_DmaBufRegistrationFails_ClosesFdAndFallsBackToRegMr) {
+  net_.regMrDmaBufResult = ncclSystemError;
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    EXPECT_EQ(fcntl(exports_.back().fd, F_GETFD), -1);
+    EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
+  }
+  EXPECT_EQ(net_.regMrs.size(), 2u);
+}
+#endif
+
+TEST_F(NetProxyRegBufferMicrotest, Dereg_WrongRequestSize_Rejected) {
+  for (bool send : {true, false}) EXPECT_EQ(Dereg(send, nullptr, 4), ncclInternalError);
+  EXPECT_TRUE(net_.deregMrs.empty());
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Dereg_RegisteredHandle_ForgottenAndDeregistered) {
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    net_.deregMrs.clear();
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    void* handle = resp_;
+
+    ASSERT_EQ(Dereg(send, handle), ncclSuccess);
+
+    EXPECT_EQ(done_, 1);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+    ASSERT_EQ(net_.deregMrs.size(), 1u);
+    EXPECT_EQ(net_.deregMrs[0].first, Comm(send));
+    EXPECT_EQ(net_.deregMrs[0].second, handle);
+  }
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Dereg_OneOfSeveralHandles_ForgetsOnlyThatOne) {
+  for (bool send : {true, false}) {
+    SCOPED_TRACE(send);
+    info_.buffer = 0x10000;
+    ASSERT_EQ(Reg(send), ncclSuccess);
+    void* first = resp_;
+    info_.buffer = 0x20000;
+    ASSERT_EQ(Reg(send), ncclSuccess);
+
+    ASSERT_EQ(Dereg(send, resp_), ncclSuccess);
+
+    ASSERT_FALSE(ncclIntruQueueEmpty(&Conn(send).proxyMemHandleQueue));
+    EXPECT_EQ(ncclIntruQueueHead(&Conn(send).proxyMemHandleQueue)->handle, first);
+    EXPECT_EQ(ncclIntruQueueHead(&Conn(send).proxyMemHandleQueue)->next, nullptr);
+  }
+}
+
+TEST_F(NetProxyRegBufferMicrotest, Dereg_PluginFails_ReturnsError) {
+  net_.deregMrResult = ncclSystemError;
+  for (bool send : {true, false}) EXPECT_EQ(Dereg(send, reinterpret_cast<void*>(0x5)), ncclSystemError);
 }
 
 }  // namespace

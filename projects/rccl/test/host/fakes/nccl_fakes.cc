@@ -566,10 +566,11 @@ ncclResult_t ncclProxyClientBatchQueryFdBlocking(struct ncclComm*           comm
                                              numSegments);
 }
 
-// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol. Return 0 so the
-// `multiSegment && ... ncclParamMultiSegmentRegister()` guard in p2p.cc
-// keeps the single-segment path the microtests exercise.
-int64_t ncclParamMultiSegmentRegister() { return 0; }
+// NCCL_PARAM(MultiSegmentRegister, ...) generated symbol (src/transport/generic.cc).
+// Defaults to 0, not production's 1, so the `multiSegment && ...
+// ncclParamMultiSegmentRegister()` guard in p2p.cc keeps the single-segment
+// path the microtests exercise; a g_loadParam hook can turn it on.
+int64_t ncclParamMultiSegmentRegister() { return g_loadParam("MULTI_SEGMENT_REGISTER", 0); }
 
 // ---------------------------------------------------------------------------
 // Reset
