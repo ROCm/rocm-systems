@@ -3849,6 +3849,14 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
       if (digit >= 0 && digit <= 9) {
         switch (status) {
         case 0:
+          // Bound before the write, not after the increment below: gpus[gpu] is
+          // what overruns, and the check down there both ran too late and used
+          // > where the array needs >=.
+          if (gpu >= NCCL_TOPO_MAX_NODES) {
+            WARN("Too many GPUs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
+                 NCCL_TOPO_MAX_NODES);
+            return ncclInvalidUsage;
+          }
           gpus[gpu] = digit;
           status = 1;
           break;

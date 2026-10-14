@@ -389,6 +389,52 @@ TEST_F(RomeModelsParseGraphMicrotest, MoreChannelsThanMaxChannels_IsRejected) {
   EXPECT_LE(graph()->nChannels, MAXCHANNELS);
 }
 
+// A single channel naming `count` GPU numbers, for a scene with that many GPUs.
+std::string ChannelWithGpuCount(int count) {
+  std::string rings;
+  for (int i = 0; i < count; i++) {
+    if (i) rings += " ";
+    rings += std::to_string(i);
+  }
+  return rings;
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, MoreGpusInOneChannelThanMaxNodes_IsRejected) {
+  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
+  wide.system()->totalBw = kTotalBw;
+  ncclTopoGraph graph;
+  std::memset(&graph, 0, sizeof(graph));
+
+  // Exactly one GPU number too many, so an off-by-one in the bound fails here.
+  // Before the bound, the 145th number was written to gpus[144] -- one int past
+  // the array -- which ASan reports as a stack-buffer-overflow at offset 608.
+  const std::string tooManyGpus = ChannelWithGpuCount(NCCL_TOPO_MAX_NODES + 1);
+
+  EXPECT_EQ(parseGraph(tooManyGpus.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+            ncclInvalidUsage);
+
+  ResetNcclFakes();
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxNodesGpusInOneChannel_IsAccepted) {
+  RomeModelsParseScene wide(NCCL_TOPO_MAX_NODES);
+  wide.system()->totalBw = kTotalBw;
+  ncclTopoGraph graph;
+  std::memset(&graph, 0, sizeof(graph));
+
+  // The widest channel that still fits, so a bound tightened by one breaks here.
+  const std::string exactlyFull = ChannelWithGpuCount(NCCL_TOPO_MAX_NODES);
+
+  ASSERT_EQ(parseGraph(exactlyFull.c_str(), wide.system(), &graph, nullptr, nullptr, 0),
+            ncclSuccess);
+
+  EXPECT_EQ(graph.nChannels, 1);
+  EXPECT_EQ(graph.intra[NCCL_TOPO_MAX_NODES - 1],
+            RomeModelsParseScene::kRankBase + NCCL_TOPO_MAX_NODES - 1);
+
+  ResetNcclFakes();
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
   // Callers test graph->nChannels after calling, so a ring list that matches
   // nothing is not an error -- but it must not leave a bandwidth behind either.
@@ -537,6 +583,7 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetRingBase_IsAccepted) {
 //   ExactlyMaxChannels_IsAccepted
 //   EveryPresetRingBase_IsAccepted
 // ---------------------------------------------------------------------------
+
 
 
 
