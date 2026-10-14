@@ -56,16 +56,6 @@ class CommandTest(unittest.TestCase):
         self.assertIn("-DCMAKE_INSTALL_PREFIX=/d", cmd)
         self.assertIn("-DHIP_COMMON_DIR=/s/projects/hip", cmd)
 
-    def test_rocr_installs_like_therock(self):
-        cmd = [str(c) for c in cb.rocr_configure_command(Path("/s"), Path("/b"), Path("/d"))]
-        self.assertEqual(cmd[:2], ["env", "PKG_CONFIG_PATH=/d/lib/rocm_sysdeps/lib/pkgconfig"])
-        self.assertEqual(cmd[cmd.index("-S") + 1], "/s/projects/rocr-runtime")
-        self.assertIn("-DCMAKE_PREFIX_PATH=/d;/d/lib/rocm_sysdeps", cmd)
-        self.assertIn("-DCMAKE_INSTALL_PREFIX=/d", cmd)
-        self.assertIn("-DCMAKE_INSTALL_LIBDIR=lib", cmd)
-        self.assertIn("-DCMAKE_INSTALL_RPATH=$ORIGIN;$ORIGIN/rocm_sysdeps/lib", cmd)
-        self.assertIn("-DClang_DIR=/d/lib/llvm/lib/cmake/clang", cmd)
-
     def test_hrr_builds_integration_suite_for_archs(self):
         cmd = [str(c) for c in cb.hrr_configure_command(Path("/s"), Path("/b"), Path("/d"), "gfx942;gfx950")]
         self.assertIn("-DGPU_TARGETS=gfx942;gfx950", cmd)
@@ -104,53 +94,34 @@ class LibraryOverlayTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def make_lib(self, directory: Path, stem: str, soname: str, real: str, content: str) -> None:
+    def make_lib(self, directory: Path, real: str, content: str) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / real).write_text(content)
-        os.symlink(real, directory / soname)
-        os.symlink(soname, directory / stem)
+        os.symlink(real, directory / "libamdhip64.so.7")
+        os.symlink("libamdhip64.so.7", directory / "libamdhip64.so")
 
-    def make_runtime(self, directory: Path, version: str, content: str) -> None:
-        self.make_lib(directory, "libamdhip64.so", "libamdhip64.so.7",
-                      f"libamdhip64.so.7.{version}", content)
-        self.make_lib(directory, "libhsa-runtime64.so", "libhsa-runtime64.so.1",
-                      f"libhsa-runtime64.so.1.{version}", content)
-
-    def test_overlay_replaces_base_libraries(self):
-        built = self.tmp / "built"
+    def test_overlay_replaces_release_library_and_keeps_rocr(self):
+        capture = self.tmp / "capture"
         dist = self.tmp / "dist" / "lib"
-        self.make_runtime(built, "2.1", "pr")
-        self.make_runtime(dist, "2.0", "base")
+        self.make_lib(capture, "libamdhip64.so.7.2.1", "capture")
+        self.make_lib(dist, "libamdhip64.so.7.2.0", "release")
         (dist / "libhiprtc.so.7").write_text("keep")
+        (dist / "libhsa-runtime64.so.1").write_text("base")
 
-        cb.remove_runtime_libs(dist)
-        copied = cb.copy_runtime_libs(built, dist)
+        cb.remove_amdhip64(dist)
+        copied = cb.copy_amdhip64(capture, dist)
 
-        self.assertEqual(len(copied), 6)
+        self.assertEqual(sorted(copied), ["libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.7.2.1"])
         self.assertFalse((dist / "libamdhip64.so.7.2.0").exists())
-        self.assertFalse((dist / "libhsa-runtime64.so.1.2.0").exists())
-        self.assertEqual((dist / "libamdhip64.so").read_text(), "pr")
-        self.assertEqual((dist / "libhsa-runtime64.so").read_text(), "pr")
-        self.assertTrue((dist / "libhsa-runtime64.so.1").is_symlink())
+        self.assertEqual((dist / "libamdhip64.so").read_text(), "capture")
+        self.assertTrue((dist / "libamdhip64.so.7").is_symlink())
         self.assertEqual((dist / "libhiprtc.so.7").read_text(), "keep")
+        self.assertEqual((dist / "libhsa-runtime64.so.1").read_text(), "base")
 
-    def test_copy_without_rocr_fails(self):
-        built = self.tmp / "built"
-        self.make_lib(built, "libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.7.2.1", "pr")
+    def test_copy_without_library_fails(self):
+        (self.tmp / "empty").mkdir()
         with self.assertRaises(SystemExit):
-            cb.copy_runtime_libs(built, self.tmp / "out")
-
-    def test_remove_rocr_install(self):
-        dist = self.tmp / "dist"
-        (dist / "include" / "hsa").mkdir(parents=True)
-        (dist / "include" / "hsa" / "hsa.h").write_text("")
-        (dist / "include" / "hip").mkdir(parents=True)
-        self.make_runtime(dist / "lib", "2.0", "base")
-        cb.remove_paths(dist, cb.ROCR_INSTALLED)
-        self.assertFalse((dist / "include" / "hsa").exists())
-        self.assertTrue((dist / "include" / "hip").exists())
-        self.assertFalse(list((dist / "lib").glob("libhsa-runtime64.so*")))
-        self.assertTrue((dist / "lib" / "libamdhip64.so.7").exists())
+            cb.copy_amdhip64(self.tmp / "empty", self.tmp / "out")
 
 
 class LinkageTest(unittest.TestCase):
@@ -184,37 +155,29 @@ class LinkageTest(unittest.TestCase):
 
 
 class BuildTest(unittest.TestCase):
-    def test_rocr_is_installed_before_clr_is_configured(self):
+    def test_builds_clr_and_hrr_over_the_prebuilt_rocr(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             dist = root / "dist"
-            (dist / "include" / "hsa").mkdir(parents=True)
-            (dist / "lib").mkdir()
+            (dist / "lib").mkdir(parents=True)
+            (dist / "lib" / "libhsa-runtime64.so.1").write_text("base")
             calls = []
 
             def runner(cmd):
                 cmd = [str(c) for c in cmd]
                 calls.append(cmd)
-                # The base's ROCr headers are gone before ROCr installs.
-                if cmd[:2] == ["cmake", "--install"] and cmd[2].endswith("rocr"):
-                    self.assertFalse((dist / "include" / "hsa").exists())
-                if cmd[:2] == ["cmake", "--install"] and cmd[2].endswith("clr"):
-                    for name in ("libamdhip64.so.7", "libhsa-runtime64.so.1"):
-                        (dist / "lib" / name).write_text("")
+                if cmd[:2] == ["cmake", "--install"]:
+                    (dist / "lib" / "libamdhip64.so.7").write_text("capture")
 
             args = argparse.Namespace(
                 src=root / "src", build=root / "build", dist=dist,
-                runtime_lib=root / "build" / "runtime-lib", archs="gfx942",
+                capture_lib=root / "build" / "capture-lib", archs="gfx942",
             )
             cb.cmd_build(args, runner=runner)
-            steps = [" ".join(c[c.index("cmake"):c.index("cmake") + 3]) for c in calls]
-            rocr_install = steps.index(f"cmake --install {root}/build/rocr")
-            clr_configure = next(i for i, c in enumerate(calls) if "projects/clr" in " ".join(c))
-            self.assertLess(rocr_install, clr_configure)
-            self.assertEqual(
-                sorted(p.name for p in args.runtime_lib.iterdir()),
-                ["libamdhip64.so.7", "libhsa-runtime64.so.1"],
-            )
+            sources = [c[c.index("-S") + 1] for c in calls if "-S" in c]
+            self.assertEqual(sources, [f"{root}/src/projects/clr", f"{root}/src/projects/hrr"])
+            self.assertEqual([p.name for p in args.capture_lib.iterdir()], ["libamdhip64.so.7"])
+            self.assertEqual((dist / "lib" / "libhsa-runtime64.so.1").read_text(), "base")
 
 
 class ArchsTest(unittest.TestCase):
