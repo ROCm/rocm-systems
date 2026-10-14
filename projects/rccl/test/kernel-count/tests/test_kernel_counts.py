@@ -359,8 +359,9 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
 
     # Counts alone cannot tell this apart from the old flag, which replaced the
     # set with every unroll and cleared the gfx1250 pin: both emit {1,2,4,8,16,32}
-    # at the same per-unroll count. The pin on the unroll-32 shards is the
-    # difference. SendRecv LL128 (reg=1) is a wider guard on purpose.
+    # at the same per-unroll count. The pin catches the cleared-pin half only; at
+    # local_gpu_only=OFF append and replace give the same set. SendRecv LL128
+    # (reg=1) is a wider guard on purpose.
     pin = re.compile(
         r"^\(defined\(__gfx1250__\) \|\| defined\(__gfx1250_strict__\)\)"
         r"(?: && defined\(ENABLE_LL128\))?$"
@@ -380,7 +381,7 @@ def test_all_unrolls_opt_in_adds_the_skipped_unrolls(tmp_path_factory, generated
         elif unroll == "32":
             assert pin.match(guard), "unroll 32 lost the gfx1250 pin: %s guard %r" % (fp, guard)
             pinned_32 += 1
-        elif unroll in ("8", "16"):
+        else:
             assert not pin.match(guard), "unroll %s picked up the gfx1250 pin: %s" % (unroll, fp)
     assert pinned_32 > 0, "--all_unrolls emitted no gfx1250-pinned unroll 32 kernels"
     assert sendrecv_ll128_32 == 1, (
