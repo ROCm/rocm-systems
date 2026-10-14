@@ -312,16 +312,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroAmdsmiWrap`** — `src/misc/amdsmi_wrap.cc` (via
   `AMDSMI_WRAP_CC_PATH`, from `amdsmi-wrap-test.cc`); suite
-  `AmdsmiWrapMicrotest.*`. Covers init/shutdown and their caching, GPU count,
-  PCI bus-id lookups both ways, link info, firmware version, fabric discovery
-  (including the amd_smi fabric ABI probe and its sysfs fallbacks) and
-  telemetry, each across the WSL2, amd_smi_lib and ARSMI backends. Its own
-  binary because `fakes/amdsmi_fakes.cc`, linked by most other targets,
-  defines the `amd_smi_*` wrappers this file compiles for real. The amd_smi
-  library is a scripted `FakeSmi` installed through the file's own `pfn_*`
-  table; `ARSMI_*` (`alt_rsmi.cc`) is defined in the test TU, and `access`,
-  `dlopen`/`dlsym` and `hipDeviceGetByPCIBusId` are seamed inside
-  `amdsmi_wrap.cc` only; `utils.cc` is real for `busIdToInt64`. See
+  `AmdsmiWrapMicrotest.*`. Its own binary because `fakes/amdsmi_fakes.cc`
+  defines the `amd_smi_*` wrappers this file compiles. See
   `test_categories_micro_amdsmi_wrap.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`

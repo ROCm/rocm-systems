@@ -373,10 +373,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     
-  # rccl-UnitTestsMicroAmdsmiWrap -- src/misc/amdsmi_wrap.cc. Its own binary: fakes/amdsmi_fakes.cc,
-  # linked by most other targets, defines the amd_smi_* wrappers this target compiles for real. The
-  # test TU supplies ncclDebugLog, g_loadParam and the ARSMI_* (alt_rsmi.cc) stand-ins itself;
-  # utils.cc is the real thing for busIdToInt64.
+  # rccl-UnitTestsMicroAmdsmiWrap -- src/misc/amdsmi_wrap.cc. Own binary: fakes/amdsmi_fakes.cc
+  # defines the amd_smi_* wrappers this target compiles for real.
   set(TEST_MICRO_AMDSMI_WRAP_SOURCE_FILES
     amdsmi-wrap-test.cc
     fakes/hip_fakes.cc

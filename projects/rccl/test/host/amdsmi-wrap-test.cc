@@ -4,28 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/misc/amdsmi_wrap.cc: RCCL's wrapper over GPU
-// enumeration, PCI bus IDs, link topology, firmware version and UALoE/UALink
-// fabric discovery. Every query has three backends: WSL2 (HIP calls only),
-// amd_smi_lib (dlopen'd, opted into with RCCL_USE_AMD_SMI_LIB=1) and the
-// internal ARSMI sysfs reader (the default).
-//
-// The amd_smi_lib backend is reached through the file's own pfn_* table, which
-// this TU can assign because it #includes the .cc; FakeSmi below stands in for
-// the library as a list of GPUs. ARSMI_* (src/misc/alt_rsmi.cc) is defined
-// here as scriptable stand-ins. access (the WSL2 probe), dlopen/dlsym and
-// hipDeviceGetByPCIBusId are seamed inside amdsmi_wrap.cc's own bodies only;
-// the other HIP calls go through fakes/hip_fakes.cc, and utils.cc's
-// busIdToInt64 is the real code.
-//
-// The file has process-wide state the tests reset by hand (see Reset()): the
-// init/fabric caches, the WSL2 flag, and the dlopen handle. The handle is a
-// function-local static, so the two dlopen tests run in forked children.
-//
-// The fabric ABI probe compares what the loaded library writes against the
-// layout this build was compiled for. FakeSmi writes the compiled layout's
-// extent by default, so the typed path is taken whatever amd_smi header the
-// build found; the mismatch tests write the other extents.
+// Host-only microtests for src/misc/amdsmi_wrap.cc across its WSL2, amd_smi_lib and ARSMI
+// backends. FakeSmi stands in for amd_smi_lib through the file's own pfn_* table; Reset() clears
+// the file's process-wide caches, and the dlopen tests fork because the handle is static.
 
 #include <gtest/gtest.h>
 
@@ -53,8 +34,7 @@
 #include "core.h"
 #include "utils.h"
 
-// --- Logging and params: this binary links no shared nccl fakes. -------------
-
+// --- Logging and params: this binary links no shared nccl fakes.
 uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
 uint64_t ncclDebugMask = ~uint64_t(0);
 thread_local int ncclDebugNoWarn = 0;  // utils.cc reads it
@@ -85,8 +65,7 @@ std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, i
 
 #include "fakes/param_redirect.h"
 
-// --- ARSMI (src/misc/alt_rsmi.cc): scriptable stand-ins. ----------------------
-
+// --- ARSMI (src/misc/alt_rsmi.cc): scriptable stand-ins.
 namespace {
 struct FakeArsmi {
   int initResult = 0;
@@ -133,8 +112,7 @@ int ARSMI_get_fabric_info(uint32_t i, struct ARSMI_fabricInfo* info) {
 }
 const char* ARSMI_fabric_telem_id_to_string(uint64_t) { return "ARSMI_NAME"; }
 
-// --- Seams scoped to amdsmi_wrap.cc's own function bodies. --------------------
-
+// --- Seams scoped to amdsmi_wrap.cc's own function bodies.
 namespace {
 std::function<int(const char*, int)> g_access;
 std::function<void*(const char*, int)> g_dlopen;
@@ -499,9 +477,7 @@ protected:
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
 // amd_smi_init / amd_smi_shutdown
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, Init_Wsl2SkipsEveryBackend) {
   UseWsl2();
@@ -644,9 +620,7 @@ TEST_F(AmdsmiWrapMicrotest, Init_DlopenResolvesEveryEntryPointByName) {
   EXPECT_EXIT(std::exit(DlopenResolvesChild()), ::testing::ExitedWithCode(0), "");
 }
 
-// ---------------------------------------------------------------------------
 // getProcessorHandle (via amd_smi_getFirmwareVersion, its only plain caller)
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_IsAmdSmiLibOnly) {
   amdsmi_processor_handle h = nullptr;
@@ -701,9 +675,7 @@ TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_MissingSymbolFailsQuietly) {
 }
 #endif
 
-// ---------------------------------------------------------------------------
 // amd_smi_getNumDevice
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, NumDevice_Wsl2AsksHip) {
   UseWsl2();
@@ -745,9 +717,7 @@ TEST_F(AmdsmiWrapMicrotest, NumDevice_ArsmiReportsItsCount) {
   EXPECT_EQ(amd_smi_getNumDevice(&n), ncclInternalError);
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_getDevicePciBusIdString
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, PciBusIdString_Wsl2AsksHip) {
   UseWsl2();
@@ -807,9 +777,7 @@ TEST_F(AmdsmiWrapMicrotest, PciBusIdString_HonorsTheBufferLength) {
   EXPECT_STREQ(busId, "002a:");
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_getDeviceIndexByPciBusId
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_Wsl2AsksHip) {
   UseWsl2();
@@ -900,9 +868,7 @@ TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibLookupFailureIsInternalError) {
   EXPECT_EQ(amd_smi_getDeviceIndexByPciBusId("0000:c3:00.0", &idx), ncclInternalError);
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_getLinkInfo
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, LinkInfo_Wsl2IsOnePcieHop) {
   UseWsl2();
@@ -1029,9 +995,7 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibUnknownIndexIsLogged) {
   EXPECT_EQ(g_smi.lastLinkDst, nullptr);
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_getFirmwareVersion
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_InitFailureIsReturned) {
   g_arsmi.initResult = 1;
@@ -1089,9 +1053,7 @@ TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_LibFailures) {
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "amdsmi_get_fw_info symbol not loaded"));
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_ensureFabricInitialized and the fabric accessors
-// ---------------------------------------------------------------------------
 
 namespace {
 ARSMI_fabricInfo ArsmiFabric(int supported, uint32_t accelId, uint32_t bw) {
@@ -1329,9 +1291,7 @@ TEST_F(AmdsmiWrapMicrotest, FabricAccessors_PropagateAnInitFailure) {
   EXPECT_EQ(amd_smi_getFabricBandwidth(0, &bw), ncclInternalError);
 }
 
-// ---------------------------------------------------------------------------
 // Fabric telemetry
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, Telemetry_IsAmdSmiLibOnly) {
   amdsmi_fabric_telemetry_t* t = nullptr;
@@ -1380,9 +1340,7 @@ TEST_F(AmdsmiWrapMicrotest, Telemetry_FailuresAreReturned) {
   EXPECT_EQ(amd_smi_freeFabricTelemetry(0, dummy), ncclInternalError);
 }
 
-// ---------------------------------------------------------------------------
 // amd_smi_fabricTelemIdToString
-// ---------------------------------------------------------------------------
 
 TEST_F(AmdsmiWrapMicrotest, TelemIdToString_WithoutTheSymbolAsksArsmi) {
   pfn_amdsmi_fabric_telem_id_to_string = nullptr;
