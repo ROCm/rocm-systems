@@ -12,6 +12,7 @@
 #include "topo.h"
 #include "transport.h"
 #include "xml.h"
+#include <limits.h>  // INT_MAX, for the rank= range check in ncclTopoGetChannelFromXml
 #include <math.h>
 #include <sys/time.h>
 #include "rome_models.h"
@@ -1024,7 +1025,14 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
       int rankIndex = -1;
       NCCLCHECK(xmlGetAttrIndex(sub, "rank", &rankIndex));
       if (rankIndex != -1) {
-        rank = strtol(sub->attrs[rankIndex].value, NULL, 0);
+        // strtol yields a long; assigning it straight to an int truncates, so
+        // an attribute like rank="4294967296" would silently become rank 0.
+        long rankValue = strtol(sub->attrs[rankIndex].value, NULL, 0);
+        if (rankValue < 0 || rankValue > INT_MAX) {
+          WARN("XML Import Channel : rank %ld out of range.", rankValue);
+          return ncclInvalidUsage;
+        }
+        rank = (int)rankValue;
       } else {
         for (int g = 0; g < ngpus; g++) {
           int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].gpu.parent->id);
