@@ -10,6 +10,7 @@
 
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM defaults this stands in for
+#include "alloc.h"
 #include "comm.h"      // also pulls recorder.h (no include guard)
 #include "utils.h"
 #include "roctx.h"
@@ -44,6 +45,9 @@ void ncclCommPushCudaFree(struct ncclComm*, void*) {}
 // init.cc:231 latches NCCL_CTA_POLICY in a std::call_once; UNDEF is what an unset env yields.
 int g_envCtaPolicy = NCCL_CONFIG_UNDEF_INT;
 int ncclGetEnvCtaPolicy() { return g_envCtaPolicy; }
+
+// alloc.h per-device allocation counters, defined in src/init.cc.
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 void ResetCommFakes() {
   g_commSetAsyncError = DefaultCommSetAsyncError;

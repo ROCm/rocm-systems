@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Mirrors FabricGpuBarrier's private layout so tests can read it.
+// Mirrors FabricGpuBarrier's private layout so tests can read it. sizeof misses a
+// field added after nRanks_: it fills the padding before peerFlags_.
 
 #ifndef RCCL_TEST_HOST_ALGORITHMS_DDA_FABRIC_FABRICGPUBARRIERSTATE_H_
 #define RCCL_TEST_HOST_ALGORITHMS_DDA_FABRIC_FABRICGPUBARRIERSTATE_H_

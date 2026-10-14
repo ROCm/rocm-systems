@@ -706,6 +706,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
+    fakes/comm_fakes.cc                  # allocTracker
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
