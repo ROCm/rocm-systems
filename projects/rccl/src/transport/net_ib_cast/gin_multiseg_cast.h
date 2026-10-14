@@ -466,7 +466,7 @@ static ncclResult_t IbCastRmaPollCq(struct ncclIbNetCommBase* base, struct ncclI
       char* hcaName = devBase->pd->context->device->name;
       WARN("NET/IB-CAST/RMA: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u wr_id=%lu "
            "(%s)%s%s%s%s hca %s",
-           ncclSocketToString(&addr, line), ibvWcStatusStr(wc[i].status), wc[i].status, ibvWcOpcodeStr(wc[i].opcode),
+           ncclSocketToString(&addr, line, sizeof(line)), ibvWcStatusStr(wc[i].status), wc[i].status, ibvWcOpcodeStr(wc[i].opcode),
            wc[i].opcode, wc[i].vendor_err, (unsigned long)wc[i].wr_id, typeStr, localGidStr ? " localGid " : "",
            localGidString, remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
       oneRet = ncclRemoteError;
