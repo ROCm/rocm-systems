@@ -965,6 +965,15 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_ArsmiDirectXgmiWeightsAreOneHop) {
   EXPECT_EQ(amd_smi_getLinkInfo(0, 1, &type, &hops, &count), ncclSuccess);
   EXPECT_EQ(hops, 1);
   EXPECT_EQ(count, 1);
+  // A direct-link weight only counts on XGMI: a PCIe link with weight 15 stays two hops, count 1.
+  g_arsmi.link.type = ARSMI_IOLINK_TYPE_PCIEXPRESS;
+  g_arsmi.link.min_bandwidth = 50;
+  hops = 0;
+  count = 0;
+  EXPECT_EQ(amd_smi_getLinkInfo(0, 1, &type, &hops, &count), ncclSuccess);
+  EXPECT_EQ(type, AMDSMI_LINK_TYPE_PCIE);
+  EXPECT_EQ(hops, 2);
+  EXPECT_EQ(count, 1);
 }
 
 TEST_F(AmdsmiWrapMicrotest, LinkInfo_ArsmiFailureIsInternalError) {
@@ -980,6 +989,8 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibQueriesTheSrcAndDstGpus) {
   TwoGpusBehindACpu();
   g_smi.linkType = AMDSMI_LINK_TYPE_PCIE;
   g_smi.linkHops = 3;
+  g_smi.minBw = 64;  // only XGMI uses the bandwidth ratio, so a PCIe link's count stays 1
+  g_smi.maxBw = 448;
   amdsmi_link_type_t type;
   int hops = 0, count = 0;
   ASSERT_EQ(amd_smi_getLinkInfo(1, 0, &type, &hops, &count), ncclSuccess);
