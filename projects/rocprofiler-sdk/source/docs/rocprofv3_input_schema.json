@@ -194,7 +194,7 @@
                      },
                      "disable-signal-handlers":{
                          "type": "boolean",
-                         "description": "Disables the signal handlers in the rocprofv3 tool. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces"
+                         "description": "Stops rocprofv3 keeping its signal handlers in front of the application's, so an application that installs its own handler for SIGINT, SIGQUIT, SIGABRT or SIGTERM takes precedence. rocprofv3 still installs its handlers, so a signal the application does not handle is still flushed. The command line also accepts a list of signals, which suppresses installation for those signals entirely; a list given here is rejected. Note: the logging failure handler installs its own handlers for SIGABRT and SIGTERM, which this option does not affect"
                      },
                     "process-sync":{
                          "type": "boolean",

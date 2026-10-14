@@ -183,14 +183,15 @@ struct config : output_config
     std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
     rocprofiler_spm_parameter_type_t spm_sample_interval_unit_value =
         ROCPROFILER_SPM_PARAMETER_TYPE_NONE;
-    std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
-    std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
-    std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
-    std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
-    std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
-    std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
-    std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
-    std::string ompt_trace_operations   = get_env("ROCPROF_OMPT_TRACE_OPERATIONS", "");
+    std::string kernel_filter_include    = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
+    std::string kernel_filter_exclude    = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
+    std::string pc_sampling_method       = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
+    std::string pc_sampling_unit         = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
+    std::string extra_counters_contents  = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
+    std::string att_library_path         = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
+    std::string att_gpu_index            = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
+    std::string ompt_trace_operations    = get_env("ROCPROF_OMPT_TRACE_OPERATIONS", "");
+    std::string signal_handlers_disabled = get_env("ROCPROF_SIGNAL_HANDLERS_DISABLED", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
@@ -340,6 +341,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(truncate);
     CFG_SERIALIZE_MEMBER(minimum_output_bytes);
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
+    CFG_SERIALIZE_MEMBER(signal_handlers_disabled);
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
     CFG_SERIALIZE_MEMBER(selected_regions_ref_count);

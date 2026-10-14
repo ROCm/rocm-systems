@@ -25,8 +25,8 @@
 """
 Starts a worker process through multiprocessing's forkserver under the profiler.
 
-The forkserver saves every signal disposition with signal.signal() and restores
-it in each forked child. A disposition the interpreter did not install itself is
+The forkserver saves the dispositions it means to change with signal.signal() and
+restores them in each forked child. A disposition the interpreter did not install itself is
 recorded as None, and None cannot be restored -- so a profiler holding a C
 handler when the interpreter starts breaks the forkserver, and with it every
 worker process launched through it. PyTorch's DataLoader with num_workers > 0 is
@@ -37,8 +37,10 @@ A single Process start mirrors how DataLoader launches a worker: the socket to
 the dead forkserver breaks on the first write, so the failure arrives promptly
 rather than through a pool's respawn loop.
 
-The dispositions are reported first. Under a profiler that installs too early
-they read None, which names the mechanism before the start is attempted.
+Every disposition is reported before the worker starts, and the run fails if SIGINT is
+not something the interpreter can hand back. That is the whole mechanism: the forkserver
+round-trips only SIGCHLD and SIGINT, and SIGCHLD is not a signal the profiler installs.
+The other dispositions are printed for diagnosis and do not fail the run.
 
 No device work -- the processes under test are the forkserver and its children,
 which never touch a GPU.
@@ -49,6 +51,10 @@ import signal
 import sys
 
 WATCHED = ("SIGINT", "SIGQUIT", "SIGABRT", "SIGTERM")
+
+# The forkserver saves and restores only SIGCHLD and SIGINT, and SIGCHLD is not one the
+# profiler installs. The rest are reported without failing the run.
+REQUIRED_RESTORABLE = ("SIGINT",)
 JOIN_TIMEOUT_SEC = 30
 SENTINEL = "worker-ran"
 
@@ -65,9 +71,10 @@ def main():
         if disposition is None:
             unrestorable.append(name)
 
-    # The forkserver round-trips SIGINT; the rest are reported for diagnosis only.
-    if "SIGINT" in unrestorable:
-        print("SIGINT disposition is None, which the forkserver cannot restore")
+    blocking = [name for name in unrestorable if name in REQUIRED_RESTORABLE]
+    if blocking:
+        print(f"dispositions the forkserver cannot restore: {', '.join(blocking)}")
+        return 1
 
     context = multiprocessing.get_context("forkserver")
     queue = context.Queue()

@@ -295,8 +295,8 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
                     <td>Specifies the minimum output data size threshold in KB. Output files are generated only if the collected profiling data exceeds this threshold. This prevents creation of empty or very small output files. Default is 0 (no threshold). <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/advanced-rocprofv3-options.html#minimum-output-data-threshold">Read more...</a></td>
                 </tr>
                 <tr>
-                    <td>--disable-signal-handlers [BOOL]</td>
-                    <td>Controls signal handler prioritization. When set to true, disables rocprofv3 signal handler prioritization, allowing application signal handlers to take precedence. Useful for applications with custom crash handling or when integrating with testing frameworks. Default value is false (rocprofv3 handlers have priority). <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/advanced-rocprofv3-options.html#signal-handler-control">Read more...</a></td>
+                    <td>--disable-signal-handlers [SIGNAL ...]</td>
+                    <td>Controls rocprofv3's signal handling. With no value, rocprofv3 still installs its handlers but stops prioritizing them over application-installed handlers. With a space-separated list of signals, rocprofv3 installs no handler for those signals and keeps its handler in front for the rest; a named signal is left entirely to the application, so if the application does not handle it the process dies without writing profiling output. rocprofv3 handles SIGINT, SIGQUIT, SIGABRT and SIGTERM. Default is for rocprofv3 handlers to have priority. <a href="https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/advanced-rocprofv3-options.html#signal-handler-control">Read more...</a></td>
                 </tr>
                 <tr>
                     <td>--rocm-root PATH</td>

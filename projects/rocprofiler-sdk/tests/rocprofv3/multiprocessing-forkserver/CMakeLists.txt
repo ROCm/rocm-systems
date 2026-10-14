@@ -43,8 +43,10 @@ set(FORKSERVER_APP ${CMAKE_CURRENT_SOURCE_DIR}/forkserver_app.py)
 set(OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/multiprocessing-forkserver)
 
 # The app has no device work; what the run exercises is whether the profiler took the
-# interpreter's signal dispositions. With --disable-signal-handlers the tool installs
-# none, so the forkserver can restore what it saved and the worker starts.
+# SIGINT disposition the forkserver saves and restores. Naming SIGINT leaves it to the
+# interpreter, so the restore succeeds and the worker starts. SIGQUIT is named alongside
+# it, exercising the multi-signal spelling. SIGABRT and SIGTERM stay with the tool, and
+# the logging failure handler claims them regardless.
 rocprofiler_add_integration_cleanup_test(
     multiprocessing-forkserver
     DIRECTORIES ${OUT_DIR}
@@ -55,8 +57,8 @@ rocprofiler_add_integration_execute_test(
     multiprocessing-forkserver
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace --output-format json
-        --disable-signal-handlers -d ${OUT_DIR} -o out_%pid% -- ${Python3_EXECUTABLE}
-        ${FORKSERVER_APP}
+        --disable-signal-handlers SIGINT SIGQUIT -d ${OUT_DIR} -o out_%pid% --
+        ${Python3_EXECUTABLE} ${FORKSERVER_APP}
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 120
     LABELS "integration-tests;multiprocessing-forkserver"

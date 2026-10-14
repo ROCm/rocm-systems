@@ -84,17 +84,27 @@ This feature is especially valuable in automated testing environments where you 
 Signal handler control
 -----------------------
 
-The ``--disable-signal-handlers`` option provides control over signal handling behavior in ``rocprofv3``, allowing you to manage how the profiler responds to system signals like SIGSEGV, SIGTERM, and others.
+The ``--disable-signal-handlers`` option provides control over signal handling behavior in ``rocprofv3``, allowing you to manage how the profiler responds to the signals it handles: SIGINT, SIGQUIT, SIGABRT and SIGTERM.
 
 By default, ``rocprofv3`` installs its own signal handlers to ensure proper cleanup and data collection when the application encounters errors or is terminated. However, in some scenarios, you may want the application's own signal handlers to take precedence.
 
-When ``--disable-signal-handlers`` is set to ``true``, ``rocprofv3`` disables the prioritization of its signal handlers over application-installed signal handlers. This means:
+``rocprofv3`` installs handlers for SIGINT, SIGQUIT, SIGABRT and SIGTERM. The option has two forms, and neither contains the other.
 
-- If your application has custom signal handlers for SIGSEGV, SIGTERM, or similar signals, those handlers will be executed instead of ``rocprofv3``'s handlers
+With no value (or ``true``), ``rocprofv3`` still installs those handlers but disables the prioritization of them over application-installed signal handlers. This means:
+
+- If your application has custom signal handlers for SIGINT, SIGQUIT, SIGABRT or SIGTERM, those handlers will be executed instead of ``rocprofv3``'s handlers
 - The application maintains full control over signal handling behavior
 - ``rocprofv3`` will still attempt to collect and save profiling data when possible
 
-**Important note**: Even with this option enabled, the underlying ``glog`` library may still install signal handlers that provide stack backtraces for debugging purposes.
+With a space-separated list of signals, ``rocprofv3`` installs no handler at all for those signals and keeps its handler in front for the rest:
+
+.. code-block:: shell
+
+    rocprofv3 --disable-signal-handlers SIGINT --hip-trace -- <application_path>
+
+A named signal is left entirely to the application. If the application does not handle it, the process dies on that signal without writing profiling output. Naming a signal ``rocprofv3`` does not install has no effect and is reported as a warning. This form is accepted on the command line only; an input file takes the boolean form, and a list given there is rejected.
+
+**Important note**: Even with this option enabled, the logging failure handler installs its own handlers for SIGABRT and SIGTERM to provide stack backtraces for debugging purposes. Naming those two signals hands them to that handler rather than to the application.
 
 **Basic usage:**
 
@@ -167,23 +177,23 @@ You can also specify this option in YAML or JSON input files:
 - Your application doesn't have custom signal handlers
 - You're doing standard profiling where signal handling isn't a concern
 
-**Example: Application with a custom segmentation fault (SIGSEGV) handler**
+**Example: Application with a custom interrupt (SIGINT) handler**
 
 .. code-block:: cpp
 
     #include <signal.h>
     #include <stdio.h>
 
-    void custom_sigsegv_handler(int sig) {
-        printf("Custom SIGSEGV handler called\n");
-        // Custom crash reporting logic
+    void custom_sigint_handler(int sig) {
+        printf("Custom SIGINT handler called\n");
+        // Custom shutdown logic
         exit(1);
     }
 
     int main() {
-        signal(SIGSEGV, custom_sigsegv_handler);
+        signal(SIGINT, custom_sigint_handler);
 
-        // Application code that might trigger SIGSEGV
+        // Application code that may be interrupted
         return 0;
     }
 
@@ -192,6 +202,9 @@ Use ``--disable-signal-handlers`` to ensure your custom handler executes:
 .. code-block:: bash
 
     rocprofv3 --disable-signal-handlers --hip-trace -- ./app_with_custom_handler
+
+``rocprofv3`` installs no handler for SIGSEGV, SIGILL, SIGFPE or SIGBUS, so this option has no
+bearing on an application's handlers for those. The logging failure handler installs its own.
 
 **Troubleshooting:**
 
