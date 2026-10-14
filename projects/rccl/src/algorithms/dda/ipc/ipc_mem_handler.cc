@@ -18,27 +18,15 @@ ncclIpcMemHandler::ncclIpcMemHandler(void* bootstrap, int rank, int nranks)
     exchanged_(false) {}
 
 ncclIpcMemHandler::~ncclIpcMemHandler() {
-  (void)closePeerMappings();
-}
-
-ncclResult_t ncclIpcMemHandler::closePeerMappings() {
-  // Close every mapping that was opened, including a partial exchange that
-  // returned before exchanged_ could be set.
-  ncclResult_t result = ncclSuccess;
+  if (!exchanged_) {
+    return;
+  }
   for (int i = 0; i < nranks_; ++i) {
-    if (i == rank_ || memPtrs_[static_cast<size_t>(i)] == nullptr) {
+    if (i == rank_) {
       continue;
     }
-    cudaError_t err = cudaIpcCloseMemHandle(memPtrs_[static_cast<size_t>(i)]);
-    if (err != cudaSuccess) {
-      WARN("ncclIpcMemHandler::closePeerMappings: cudaIpcCloseMemHandle(rank %d) failed (%s)", i,
-           cudaGetErrorString(err));
-      result = ncclUnhandledCudaError;
-    }
-    memPtrs_[static_cast<size_t>(i)] = nullptr;
+    CUDACHECKIGNORE(cudaIpcCloseMemHandle(memPtrs_[static_cast<size_t>(i)]));
   }
-  exchanged_ = false;
-  return result;
 }
 
 ncclResult_t ncclIpcMemHandler::addSelfDeviceMemPtr(void* deviceMemPtr) {

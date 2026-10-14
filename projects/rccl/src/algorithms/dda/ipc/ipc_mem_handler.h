@@ -38,7 +38,6 @@ public:
 
   ncclResult_t addSelfDeviceMemPtr(void* deviceMemPtr);
   ncclResult_t exchangeMemPtrs();
-  ncclResult_t closePeerMappings();
   ncclResult_t getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const;
 
 private:
