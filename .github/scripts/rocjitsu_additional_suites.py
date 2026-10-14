@@ -167,6 +167,8 @@ def main() -> int:
         if (root / "bin/mpirun").is_file():
             env.update(OPAL_PREFIX=str(root), PRTE_PREFIX=str(root), PMIX_PREFIX=str(root))
         env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), str(root / "bin"), env.get("PATH", "")))
+        if args.suite == "rccl":
+            env.update(NCCL_DEBUG="INFO", NCCL_DEBUG_SUBSYS="ALL")
         libraries = [root / "lib", root / "lib/rocm_sysdeps/lib",
                      root / "lib/rocprofiler-systems",
                      root / "share/rocprofiler-systems/examples/lib"]
