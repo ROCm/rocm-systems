@@ -1074,7 +1074,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
     GIN_SCRATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_scratch.cc"
     LL_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/ll_a2a.cc"
     LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

@@ -252,7 +252,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc`
   (via `<STEM>_CC_PATH`, from `nccl-device-requirements-test.cc`); suite
   `NcclDeviceRequirementsMicrotest.*`. Its own binary because
-  `fakes/dev_runtime_micro_fakes.cc` fakes three of these builders.
+  `fakes/dev_runtime_micro_fakes.cc` fakes three of these builders. See
+  `test_categories_micro_nccl_device.yaml`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -834,6 +835,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroNcclDevice`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -874,6 +876,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
