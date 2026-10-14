@@ -106,7 +106,7 @@ Build ROCprofiler-SDK
     git sparse-checkout set projects/rocprofiler-sdk shared/sha256
     git checkout develop
     python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
-    cmake                                         \
+    cmake                                       \
         -B rocprofiler-sdk-build                \
         -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
         -DCMAKE_PREFIX_PATH=/opt/rocm           \
@@ -122,21 +122,6 @@ To install ROCprofiler-SDK from the ``rocprofiler-sdk-build`` directory, run:
 .. code-block:: bash
 
     cmake --build rocprofiler-sdk-build --target install
-
-Installing the Python dependencies
-----------------------------------
-
-The ``rocpd`` and ``roctx`` Python packages, and some ``rocprofv3`` output formats, require
-third-party Python packages. The installation ships the list of these packages in
-``share/rocprofiler-sdk/requirements.txt``:
-
-.. code-block:: bash
-
-    python3 -m pip install -r /opt/rocm/share/rocprofiler-sdk/requirements.txt
-
-In the source tree, ``requirements.txt`` installs every Python package used for development.
-It includes ``requirements-runtime.txt`` (runtime), ``requirements-test.txt`` (runtime and testing),
-and ``requirements-dev.txt`` (testing, formatting, and linting).
 
 Testing ROCprofiler-SDK
 ------------------------
