@@ -169,6 +169,8 @@ def main() -> int:
         env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), str(root / "bin"), env.get("PATH", "")))
         if args.suite == "rccl":
             env.update(NCCL_DEBUG="INFO", NCCL_DEBUG_SUBSYS="ALL")
+            asan_opts = env.get("ASAN_OPTIONS", "")
+            env["ASAN_OPTIONS"] = (asan_opts + ":halt_on_error=0") if asan_opts else "halt_on_error=0"
         libraries = [root / "lib", root / "lib/rocm_sysdeps/lib",
                      root / "lib/rocprofiler-systems",
                      root / "share/rocprofiler-systems/examples/lib"]
