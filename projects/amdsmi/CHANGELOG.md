@@ -370,8 +370,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The deep-sleep bitmask validation added previously rejected the entire request when any requested bit fell outside a settable range computed from a prior read, so a supported clock set failed on gfx1201 even though the write is valid. The set is now lenient: out-of-range bits are dropped, and `AMDSMI_STATUS_INVAL` is only returned when no requested level is settable. The read-only check runs after the write, and `TestFrequenciesReadWrite` is re-enabled on Aldebaran (gfx90a / MI210).
 
 - **Fixed several WSL backend metrics reporting a raw driver sentinel or zero instead of `N/A`**.  
-  - `amdsmi_get_clock_info()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel or a zero-filled struct field when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
-  - Affected fields now report `N/A`; `amdsmi_get_gpu_fan_speed()` returns `AMDSMI_STATUS_NOT_SUPPORTED` instead, since it has no downstream `N/A` translation.
+  - `amdsmi_get_clock_info()`, `amdsmi_get_clk_freq()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel, a zero-filled struct field, or (for `amdsmi_get_gpu_busy_percent()`) fell through to the bare-metal-only sysfs path and failed, when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
+  - Affected fields now report `N/A`; `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` instead, since they have no downstream `N/A` translation. `amdsmi_get_gpu_busy_percent()` is now routed through the WSL backend.
 
 ### Upcoming Changes
 
