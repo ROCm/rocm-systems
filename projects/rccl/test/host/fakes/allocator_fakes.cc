@@ -6,9 +6,12 @@
 
 #include "allocator_fakes.h"
 
+#include "alloc.h"
 #include "allocator.h"
 #include "comm.h"
 #include "fail_loud.h"
+
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 static ncclResult_t DefaultShadowPoolToHost(struct ncclShadowPool*, void*, void**) {
   FailLoudUnfaked("allocator_fakes", "ncclShadowPoolToHost");
