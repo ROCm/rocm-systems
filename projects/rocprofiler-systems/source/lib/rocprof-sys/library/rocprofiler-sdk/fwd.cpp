@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/rocprofiler-sdk/fwd.hpp"
+#include "core/agent.hpp"
 #include "core/agent_manager.hpp"
 #include "core/state.hpp"
 
@@ -16,6 +17,7 @@
 #include <fmt/ranges.h>
 
 #include <utility>
+#include <vector>
 
 namespace rocprofsys::rocprofiler_sdk
 {
@@ -70,47 +72,54 @@ counters_supported_callback(rocprofiler_agent_id_t    agent_id,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-agent_counter_info_map_t
-get_agent_counter_info(const agent_vec_t& _agents)
+void
+sort_counter_info(std::vector<rocprofiler_tool_counter_info_t>& counters)
 {
-    auto _data = agent_counter_info_map_t{};
+    std::ranges::sort(counters, [](const auto& lhs, const auto& rhs) {
+        return lhs.id.handle < rhs.id.handle;
+    });
 
-    for(const auto& itr : _agents)
+    for(auto& counter : counters)
     {
-        const auto& _agent_id = rocprofiler_agent_id_t{ itr->handle };
+        std::ranges::sort(counter.dimension_info, [](const auto& lhs, const auto& rhs) {
+            return lhs.id < rhs.id;
+        });
+    }
+}
+
+agent_counter_info_map_t
+get_agent_counter_info(const agent_vec_t& agents)
+{
+    auto data = agent_counter_info_map_t{};
+
+    for(const auto& itr : agents)
+    {
+        const auto agent_id = rocprofiler_agent_id_t{ itr->handle };
 
         auto status = rocprofiler_iterate_agent_supported_counters(
-            _agent_id, counters_supported_callback, &_data);
+            agent_id, counters_supported_callback, &data);
 
         if(status != ROCPROFILER_STATUS_SUCCESS)
         {
             LOG_WARNING(
                 "rocprofiler_iterate_agent_supported_counters failed for agent {} "
                 "with status {} (Agent HW architecture may not be supported)",
-                _agent_id.handle, static_cast<int>(status));
+                agent_id.handle, static_cast<int>(status));
             // Skip processing for this agent if it's not supported
             continue;
         }
 
         // Only process if the agent was successfully added to the map
-        auto const agent_it = _data.find(_agent_id);
-        if(agent_it != _data.end())
+        auto const agent_it = data.find(agent_id);
+        if(agent_it == data.end())
         {
-            std::sort(agent_it->second.begin(), agent_it->second.end(),
-                      [](const auto& lhs, const auto& rhs) {
-                          return (lhs.id.handle < rhs.id.handle);
-                      });
-
-            for(auto& citr : agent_it->second)
-            {
-                std::ranges::sort(
-                    citr.dimension_info,
-                    [](const auto& lhs, const auto& rhs) { return (lhs.id < rhs.id); });
-            }
+            continue;
         }
+
+        sort_counter_info(agent_it->second);
     }
 
-    return _data;
+    return data;
 }
 }  // namespace
 
