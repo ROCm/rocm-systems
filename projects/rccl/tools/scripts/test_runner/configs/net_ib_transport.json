@@ -16,7 +16,7 @@
   },
   "env_variables": {
     "NCCL_DEBUG": "INFO",
-    "NCCL_SOCKET_IFNAME": "^lo,docker,veth,virbr,usb"
+    "NCCL_SOCKET_IFNAME": "^lo,docker,br-,veth,virbr,usb"
   },
   "system_env_variables": {
     "mellanox": {
