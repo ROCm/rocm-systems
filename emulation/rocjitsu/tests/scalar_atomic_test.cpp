@@ -200,7 +200,38 @@ struct ReadModifyWriteCase {
 };
 
 TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
-  constexpr std::array<ReadModifyWriteCase, 15> cases{{
+  constexpr auto cases = std::to_array<ReadModifyWriteCase>({
+      {cdna3::kSAtomicSwapSmem, 1, 0x11111111, 0x22222222, 0x22222222},
+      {cdna3::kSAtomicAddSmem, 1, 5, 7, 12},
+      {cdna3::kSAtomicAddSmem, 1, 0xffffffff, 1, 0},
+      {cdna3::kSAtomicSubSmem, 1, 5, 7, 0xfffffffe},
+      // Signed and unsigned min/max share operands so the two orders disagree.
+      {cdna3::kSAtomicSminSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicUminSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicSmaxSmem, 1, 0xffffffff, 1, 1},
+      {cdna3::kSAtomicUmaxSmem, 1, 0xffffffff, 1, 0xffffffff},
+      {cdna3::kSAtomicAndSmem, 1, 0xff00ff00, 0x0ff00ff0, 0x0f000f00},
+      {cdna3::kSAtomicOrSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xfff0fff0},
+      {cdna3::kSAtomicXorSmem, 1, 0xff00ff00, 0x0ff00ff0, 0xf0f0f0f0},
+      // S_ATOMIC_INC wraps to zero once memory reaches DATA.
+      {cdna3::kSAtomicIncSmem, 1, 6, 7, 7},
+      {cdna3::kSAtomicIncSmem, 1, 7, 7, 0},
+      // X2 forms carry across dwords and take the sign from bit 63.
+      {cdna3::kSAtomicSwapX2Smem, 2, 0x1111'1111'2222'2222, 0x3333'3333'4444'4444,
+       0x3333'3333'4444'4444},
+      {cdna3::kSAtomicAddX2Smem, 2, 0xffff'ffff, 1, 0x1'0000'0000},
+      {cdna3::kSAtomicSubX2Smem, 2, 0x1'0000'0000, 1, 0xffff'ffff},
+      {cdna3::kSAtomicSminX2Smem, 2, 0x8000'0000, 1, 1},
+      {cdna3::kSAtomicSminX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicUminX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicSmaxX2Smem, 2, 0x8000'0000, 1, 0x8000'0000},
+      {cdna3::kSAtomicSmaxX2Smem, 2, ~uint64_t{0}, 1, 1},
+      {cdna3::kSAtomicUmaxX2Smem, 2, ~uint64_t{0}, 1, ~uint64_t{0}},
+      {cdna3::kSAtomicAndX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0x0f000f00'000f000f},
+      {cdna3::kSAtomicOrX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xfff0fff0'f0fff0ff},
+      {cdna3::kSAtomicXorX2Smem, 2, 0xff00ff00'00ff00ff, 0x0ff00ff0'f00ff00f, 0xf0f0f0f0'f0f0f0f0},
+      {cdna3::kSAtomicIncX2Smem, 2, 7, 0x1'0000'0005, 8},
+      {cdna3::kSAtomicIncX2Smem, 2, 0x1'0000'0005, 0x1'0000'0005, 0},
       // MI300 ISA, S_ATOMIC_DEC: zero and values above DATA wrap to DATA.
       {cdna3::kSAtomicDecSmem, 1, 0, 0, 0},
       {cdna3::kSAtomicDecSmem, 1, 1, 0, 0},
@@ -218,7 +249,7 @@ TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
       {cdna3::kSAtomicDecX2Smem, 2, 0x2'0000'0001, 0x1'0000'0005, 0x1'0000'0005},
       {cdna3::kSAtomicDecX2Smem, 2, 0, 0x1'2345'6789, 0x1'2345'6789},
       {cdna3::kSAtomicDecX2Smem, 2, ~uint64_t{0}, ~uint64_t{0}, ~uint64_t{1}},
-  }};
+  });
   for (const auto &[opcode, dwords, old, data, expected] : cases) {
     for (uint8_t glc : {0, 1}) {
       SCOPED_TRACE(testing::Message()
