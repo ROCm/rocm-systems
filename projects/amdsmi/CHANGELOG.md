@@ -175,6 +175,18 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed AMD AI NIC ports reporting the wrong network interface index when the index is above 255**.  
   - The interface index in NIC port information is now 32 bits wide, so programs that read NIC port information must be rebuilt. An unknown index is now `UINT32_MAX` (was 255) and shows as `N/A` in the Python interface and `amd-smi`.
 
+- **Fixed AMD SMI crashing when an AMD AI NIC reports text where a number is expected**.  
+  - `amdsmi_init()` and `amd-smi` ended the process on a value such as `Unknown`. The value now reads as unknown, shown as `N/A` in `amd-smi`.
+
+- **Fixed AMD AI NIC values that can't be read showing as numbers**.  
+  - A port that is down showed carrier and link speed 0, and a NIC with no NUMA node showed node 255. Unknown AI NIC values are now the field's maximum value in the C API and `N/A` in `amd-smi` and the Python interface.
+
+- **Fixed `amd-smi static --json` printing nothing when AI NICs are selected with `-N`**.  
+  - It now prints the same `nic_data` JSON that `amd-smi static --json` prints without `-N`.
+
+- **Fixed AMD AI NIC firmware fields showing the driver name and version**.  
+  - `FW_0` and `FW_HEARTBEAT` in `amd-smi static` and the Python interface now show `N/A`. The NIC firmware version is available as `FW_VER` under `RDMA_DEVICES`.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added

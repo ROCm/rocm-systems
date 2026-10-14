@@ -2536,8 +2536,12 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
         },
         "BUS": {
             "bdf": _format_bdf(ainic_info_struct.bus.bdf),
-            "MAX_PCIE_WIDTH": int(ainic_info_struct.bus.max_pcie_width),
-            "MAX_PCIE_SPEED": ainic_info_struct.bus.max_pcie_speed,
+            "MAX_PCIE_WIDTH": _validate_if_max_uint(
+                ainic_info_struct.bus.max_pcie_width, MaxUIntegerTypes.UINT8_T
+            ),
+            "MAX_PCIE_SPEED": _validate_if_max_uint(
+                ainic_info_struct.bus.max_pcie_speed, MaxUIntegerTypes.UINT32_T
+            ),
             "PCIE_INTERFACE_VERSION": ainic_info_struct.bus.pcie_interface_version.decode("utf-8"),
             "SLOT_TYPE": ainic_info_struct.bus.slot_type.decode("utf-8"),
         },
@@ -2546,13 +2550,11 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "VERSION": ainic_info_struct.driver.version.decode("utf-8"),
         },
         "NUMA": {
-            "NODE": ainic_info_struct.numa.node,
+            "NODE": _validate_if_max_uint(ainic_info_struct.numa.node, MaxUIntegerTypes.UINT8_T),
             "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8"),
         },
-        "FW": {
-            "FW_0": ainic_info_struct.driver.name.decode("utf-8"),
-            "FW_HEARTBEAT": ainic_info_struct.driver.version.decode("utf-8"),
-        },
+        # AI NIC firmware details are not collected yet.
+        "FW": {"FW_0": "N/A", "FW_HEARTBEAT": "N/A"},
         "PORTS": {},
         "RDMA_DEVICES": {},
     }
@@ -2561,17 +2563,20 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
     for port_info in ainic_info_struct.port.ports:
         if port_num == ainic_info_struct.port.num_ports:
             break
+        mtu = _validate_if_max_uint(port_info.mtu, MaxUIntegerTypes.UINT16_T)
+        link_speed = _validate_if_max_uint(port_info.link_speed, MaxUIntegerTypes.UINT32_T)
+        active_fec = _validate_if_max_uint(port_info.active_fec, MaxUIntegerTypes.UINT32_T)
         ainic_info["PORTS"][f"PORT_{port_num}"] = {
             "TYPE": port_info.type.decode("utf-8"),
             "FLAVOUR": port_info.flavour.decode("utf-8"),
             "NETDEV": port_info.netdev.decode("utf-8"),
             "IFINDEX": _validate_if_max_uint(port_info.ifindex, MaxUIntegerTypes.UINT32_T),
             "MAC_ADDRESS": port_info.mac_address.decode("utf-8"),
-            "CARRIER": port_info.carrier,
-            "MTU": f"{port_info.mtu}B",
+            "CARRIER": _validate_if_max_uint(port_info.carrier, MaxUIntegerTypes.UINT8_T),
+            "MTU": mtu if mtu == "N/A" else f"{mtu}B",
             "LINK_STATE": port_info.link_state.decode("utf-8"),
-            "LINK_SPEED": f"{port_info.link_speed} Mb/s",
-            "ACTIVE_FEC": f"{port_info.active_fec}",
+            "LINK_SPEED": link_speed if link_speed == "N/A" else f"{link_speed} Mb/s",
+            "ACTIVE_FEC": f"{active_fec}",
             "AUTONEG": port_info.autoneg.decode("utf-8"),
             "PAUSE_AUTONEG": port_info.pause_autoneg.decode("utf-8"),
             "PAUSE_RX": port_info.pause_rx.decode("utf-8"),
