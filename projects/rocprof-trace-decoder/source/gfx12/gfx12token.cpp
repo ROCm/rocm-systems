@@ -153,12 +153,15 @@ gfx10::Token TokenGenerator::next()
     return Token{0, 0, RdnaType::TIMESTAMP};
 }
 
-TokenGenerator::TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time) :
+TokenGenerator::TokenGenerator(
+    const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time, bool read_header
+) :
 NaviTokenGenerator(_buffer, size, _globaltime, _base_time)
 {
-    if (!_buffer || size < sizeof(header_type)) throw std::runtime_error("invalid sqtt pointer");
+    if (!_buffer || !size || (read_header && size < sizeof(header_type)))
+        throw std::runtime_error("invalid sqtt pointer");
 
-    memcpy(&header, _buffer, sizeof(header_type));
+    if (read_header) memcpy(&header, _buffer, sizeof(header_type));
 }
 
 } // namespace gfx12

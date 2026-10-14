@@ -50,12 +50,12 @@ public:
     {
         if(type != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_GFXIP) return;
         trace.gfxip = reinterpret_cast<uintptr_t>(events);
-        if(trace.gfxip == 12) has_gfx12 = true;
+        if(trace.gfxip >= 12) has_supported_gfxip = true;
     }
 
     void check_wave(const rocprofiler_thread_trace_decoder_wave_t& wave, const Trace& trace)
     {
-        if(!enabled || trace.gfxip != 12) return;
+        if(!enabled || trace.gfxip < 12) return;
 
         // The loaded decoder may predate these fields, regardless of our header version.
         constexpr size_t exec_size =
@@ -80,7 +80,7 @@ public:
 
     void finalize(bool decoder_available) const
     {
-        if(!enabled || !decoder_available || !has_gfx12) return;
+        if(!enabled || !decoder_available || !has_supported_gfxip) return;
 
         if(old_decoder)
             std::cout << "EXEC mask check skipped: decoder wave.size predates execmask fields\n";
@@ -93,7 +93,7 @@ public:
 private:
     bool              enabled{false};
     std::atomic<bool> has_exec_mask{false};
-    std::atomic<bool> has_gfx12{false};
+    std::atomic<bool> has_supported_gfxip{false};
     std::atomic<bool> old_decoder{false};
 };
 }  // namespace Callbacks

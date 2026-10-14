@@ -61,7 +61,10 @@ private:
 class TokenGenerator : public NaviTokenGenerator
 {
 public:
-    TokenGenerator(const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time);
+    // Headerless token streams can opt out of reading the trace configuration.
+    TokenGenerator(
+        const uint8_t* _buffer, size_t size, int64_t _globaltime, int64_t _base_time, bool read_header = true
+    );
     gfx10::Token next() final;
 
     inline uint64_t getBuffer400() { return buffer[byte_ptr]; };

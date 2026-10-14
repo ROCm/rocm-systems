@@ -249,8 +249,8 @@ TEST(thread_trace, exec_mask_configure)
     ASSERT_FALSE(agents.empty());
     for(const auto& [_, agent] : agents)
     {
-        const auto* rocp_agent = agent.get_rocp_agent();
-        const bool  gfx12      = rocp_agent->gfx_target_version / 10000 == 12;
+        const auto* rocp_agent         = agent.get_rocp_agent();
+        const bool  supports_exec_mask = rocp_agent->gfx_target_version / 10000 >= 12;
         for(bool device_mode : {false, true})
         {
             context::push_client(1);
@@ -298,10 +298,11 @@ TEST(thread_trace, exec_mask_configure)
                             shader_cb,
                             nullptr);
 
-                    const auto expected =
-                        enabled && !gfx12      ? ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED
-                        : enabled && no_detail ? ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
-                                               : ROCPROFILER_STATUS_SUCCESS;
+                    const auto expected = enabled && !supports_exec_mask
+                                              ? ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED
+                                          : enabled && no_detail
+                                              ? ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT
+                                              : ROCPROFILER_STATUS_SUCCESS;
                     ASSERT_EQ(status, expected);
                     if(status != ROCPROFILER_STATUS_SUCCESS) continue;
 

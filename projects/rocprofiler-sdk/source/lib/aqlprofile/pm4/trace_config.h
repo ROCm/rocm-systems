@@ -79,7 +79,7 @@ struct TraceConfig
     std::unordered_map<int, uint64_t> se_base_addresses{};
 
     bool enable_rt_timestamp{false};
-    bool texec{false}; // Enable trace exec mask
+    bool texec{false};  // Enable trace exec mask
 
     int      GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
     uint64_t GetSEmask() const { return se_mask; };

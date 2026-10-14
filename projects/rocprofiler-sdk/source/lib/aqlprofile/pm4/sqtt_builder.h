@@ -295,7 +295,7 @@ public:
             // Program the thread trace token mask
             uint32_t token_mask_value = (config->occupancy_mode)
                                             ? Primitives::sqtt_token_mask_occupancy_value()
-                                            : Primitives::sqtt_token_mask_on_value(false,false);
+                                            : Primitives::sqtt_token_mask_on_value(false, false);
             if(config->perfcounters.size()) token_mask_value |= SQTT_PERFCOUNTER_TOKEN;
             if(legacy_mode) token_mask_value = config->deprecated_tokenMask;
 
