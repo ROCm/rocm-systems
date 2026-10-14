@@ -66,12 +66,19 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!base)
     return std::nullopt;
   int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
+  const int64_t immediate = off;
   auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
   *base &= ~align_mask;
   off = (off & ~static_cast<int64_t>(align_mask)) + (*soffset & ~align_mask);
-  if (amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op)) {
+  // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
+  const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
+  if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
+    wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
+                                             : "negative combined scalar-memory offset");
+  if (buffer_load) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
   }

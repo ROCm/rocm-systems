@@ -350,6 +350,10 @@ global override. Checkpoints preserve each CU's effective diagnostic settings;
 older checkpoints without these fields use the defaults. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for coverage and limitations.
 
+Qualified [ISA diagnostics](isa-diagnostics.md) are always enabled, independently
+of memory-wait checking. The checks use decoded fields and existing operands;
+the coverage and legal exceptions are documented separately.
+
 ### KFD device sections
 
 KFD device identity can be defined by `vm.gpu.device` for a simulated GPU and

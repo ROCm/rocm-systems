@@ -25,9 +25,6 @@
 #ifndef LIBRARY_SRC_CONSTANTS_HPP_
 #define LIBRARY_SRC_CONSTANTS_HPP_
 
-#include <cstddef>
-#include <limits>
-
 /**
  * @file constants.hpp
  *
@@ -65,12 +62,6 @@ inline const int WF_SIZE{64};
 #else
 inline const int WF_SIZE{32};
 #endif
-
-/**
- * @brief Sentinel value for ipc_sdma_threshold indicating SDMA is disabled.
- */
-inline constexpr size_t SDMA_THRESHOLD_DISABLED =
-    std::numeric_limits<size_t>::max();
 
 }  // namespace rocshmem
 

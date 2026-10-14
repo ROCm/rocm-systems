@@ -18,14 +18,20 @@ set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON)
 
-# ${CMAKE_CURRENT_SOURCE_DIR}/.. makes the local harness headers
-# (hrr_test_common.hh, hrr_test_process.hh) available. hrr_reader.h,
-# hip_playback.h, and hrr/hrr_api_args.h come transitively from hrr::reader.
-target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+# ../include makes the local harness headers (hrr_test_common.hh,
+# hrr_test_process.hh) available. hrr_reader.h, hip_playback.h, and
+# hrr/hrr_api_args.h come transitively from hrr::reader.
+target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+
+# hrr_test_process.hh (the SpawnProc harness) starts a std::thread watchdog.
+# Before glibc 2.34 the pthread symbols live in libpthread rather than libc, so
+# the link fails unless Threads::Threads (-pthread) is named explicitly.
+find_package(Threads REQUIRED)
 
 target_link_libraries(hrr-unit-tests PRIVATE
   hrr::reader
   hip::host
+  Threads::Threads
   Catch2::Catch2WithMain)
 
 # HRR_API_ARGS_IMPLEMENTATION emits the hrr_api_names[] table with internal

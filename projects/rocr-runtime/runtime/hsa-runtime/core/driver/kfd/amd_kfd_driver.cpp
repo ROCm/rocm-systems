@@ -95,17 +95,16 @@ static_assert(
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return HSA_MEMORY_ACCESS_RO;
-  case HSA_ACCESS_PERMISSION_WO:
-    return HSA_MEMORY_ACCESS_WO;
-  case HSA_ACCESS_PERMISSION_RW:
-    return HSA_MEMORY_ACCESS_RW;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return HSA_MEMORY_ACCESS_NONE;
-  }
+  unsigned flags = HSA_MEMORY_ACCESS_NONE;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= HSA_MEMORY_ACCESS_RO;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= HSA_MEMORY_ACCESS_WO;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= HSA_MEMORY_ACCESS_EX;
+
+  return static_cast<HsaMemoryMapFlags>(flags);
 }
 
 } // namespace
@@ -1004,7 +1003,16 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
+  const bool precise_timestamps =
+      core::Runtime::runtime_singleton_ != nullptr &&
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps() &&
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(
+          hsaKmtGetClockCountersPrecise) != nullptr;
+
+  HSAKMT_STATUS err = precise_timestamps
+      ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))
+      : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
+  if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }

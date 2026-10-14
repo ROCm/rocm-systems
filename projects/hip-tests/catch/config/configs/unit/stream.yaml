@@ -357,10 +357,10 @@ stream:
     tags: [properties, P1]
   Unit_hipExtStreamCreateWithCUMask_Functionality:
     <<: *level_default
-    tags: [properties, P1]
+    tags: [properties, P0]
   Unit_hipExtStreamCreateWithCUMask_AllCUsMasked:
     <<: *level_default
-    tags: [properties, P1]
+    tags: [properties, P0]
   Unit_hipExtStreamCreateWithCUMask_NegTst:
     <<: *level_default
     # Rock_Linux_Failures_on_gfx94X

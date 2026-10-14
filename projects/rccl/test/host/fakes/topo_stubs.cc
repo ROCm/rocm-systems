@@ -16,6 +16,7 @@
 #include <vector>
 #include <sched.h>
 
+#include "fakes/signature-drift.h"
 #include "graph.h"  // PATH_DIS
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
@@ -110,6 +111,21 @@ std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTop
     [](struct ncclTopoSystem*, int, int* count, float* bw) { *count = 0; *bw = 0.0f; return ncclSuccess; };
 ncclResult_t ncclTopoGetLocalNetCountByBw(struct ncclTopoSystem* system, int gpu, int* count, float* bw) {
   return g_ncclTopoGetLocalNetCountByBw(system, gpu, count, bw);
+}
+static ncclResult_t DefaultTopoGetLocalNet(struct ncclTopoSystem*, int, int, int64_t* id, int* dev) {
+  if (id != nullptr) {
+    *id = 0;
+  }
+  if (dev != nullptr) {
+    *dev = 0;
+  }
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet =
+    DefaultTopoGetLocalNet;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
+ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
+  return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
 }
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
@@ -227,6 +243,7 @@ void ResetTopoStubs() {
     *bw = 0.0f;
     return ncclSuccess;
   };
+  g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;

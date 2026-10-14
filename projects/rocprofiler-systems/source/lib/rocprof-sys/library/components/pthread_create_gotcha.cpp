@@ -60,32 +60,29 @@ template <typename... Args>
 inline void
 start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto())
+    if(!get_use_timemory())
     {
         return;
     }
     LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
     if constexpr(sizeof...(Args) > 0)
     {
-        const char* _name = nullptr;
-        if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
+        if(const char* _name = nullptr;
+           tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
                                       std::string_view{ _name }, _args...);
         }
     }
-    if(get_use_timemory())
-    {
-        _bundle.push(_tid);
-        _bundle.start();
-    }
+    _bundle.push(_tid);
+    _bundle.start();
 }
 
 template <typename... Args>
 inline void
 stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
 {
-    if(!get_use_timemory() && !get_use_perfetto())
+    if(!get_use_timemory())
     {
         return;
     }
@@ -99,23 +96,20 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
     }
 
     LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
-    if(get_use_timemory())
-    {
-        auto _wc = *_bundle.get<comp::wall_clock>();
-        _wc.stop();
-        // update data
-        _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
-        // stop all
-        _bundle.stop();
-        // exclude popping wall-clock
-        _bundle.pop(_tid);
-    }
+    auto _wc = *_bundle.get<comp::wall_clock>();
+    _wc.stop();
+    // update data
+    _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
+    // stop all
+    _bundle.stop();
+    // exclude popping wall-clock
+    _bundle.pop(_tid);
     if constexpr(sizeof...(Args) > 0)
     {
-        const char* _name = nullptr;
-        if(tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
+        if(const char* _name = nullptr;
+           tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
         {
-            category_region_t{}.audit(quirk::config<quirk::perfetto>{},
+            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
                                       std::string_view{ _name }, _args...);
         }
     }
