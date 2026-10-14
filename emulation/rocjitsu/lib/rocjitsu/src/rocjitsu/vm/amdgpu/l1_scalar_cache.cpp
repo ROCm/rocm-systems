@@ -151,6 +151,12 @@ void L1ScalarCache::invalidate_all() {
   invalidate_all_lines();
 }
 
+void L1ScalarCache::discard(uint64_t addr, uint32_t lines, uint32_t vmid) {
+  synchronize_epoch();
+  for (uint32_t line = 0; line < lines; ++line)
+    cache_.invalidate(CacheStore::line_address(addr) + line * CacheStore::LINE_SIZE, vmid);
+}
+
 void L1ScalarCache::invalidate_all_lines() { cache_.invalidate_all(); }
 
 void L1ScalarCache::synchronize_epoch() {

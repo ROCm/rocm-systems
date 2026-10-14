@@ -1195,38 +1195,143 @@ void FlatAtomicDecX2Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void GlobalLoadLdsUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 1;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 2;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 4;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 16, 16);
+  set_data(std::move(d));
 }
 
 void GlobalLoadLdsDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 3;
+  d->is_load = true;
+  d->lds_dst = true;
+  d->lds_dword_extend = true;
+  d->sign_extend = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx940(inst_.sc0, inst_.sc1, inst_.nt);
+  d->non_temporal = inst_.nt;
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  // CDNA LDS-destination loads add the signed offset to both addresses.
+  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+  flat_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 12, 16);
+  set_data(std::move(d));
 }
 
 } // namespace cdna4

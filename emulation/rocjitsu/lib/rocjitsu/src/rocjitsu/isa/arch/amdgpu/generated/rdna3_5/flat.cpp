@@ -2837,7 +2837,7 @@ DecodeResult decodeGlobalLoadAddtidB32Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_ADDTID_B32 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_ADDTID_B32 has an invalid memory segment";
   return std::make_unique<GlobalLoadAddtidB32Flat>(opcode);
 }
 } // namespace detail
@@ -2871,7 +2871,7 @@ DecodeResult decodeGlobalStoreAddtidB32Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_STORE_ADDTID_B32 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_STORE_ADDTID_B32 has an invalid memory segment";
   return std::make_unique<GlobalStoreAddtidB32Flat>(opcode);
 }
 } // namespace detail
@@ -2928,7 +2928,7 @@ DecodeResult decodeGlobalAtomicCsubU32Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_ATOMIC_CSUB_U32 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_ATOMIC_CSUB_U32 has an invalid memory segment";
   return std::make_unique<GlobalAtomicCsubU32Flat>(opcode);
 }
 } // namespace detail

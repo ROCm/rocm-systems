@@ -609,6 +609,7 @@ add_executable(
     ds_memory_snapshot_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
+    lds_memory_transfer_test.cpp
     l2_cache_test.cpp
     l2_maintenance_mutex_test.cpp
     l2_shard_epoch_test.cpp
@@ -634,6 +635,7 @@ add_executable(
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
     scalar_buffer_test.cpp
+    scalar_atomic_instruction_test.cpp
     scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp

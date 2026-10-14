@@ -2928,7 +2928,7 @@ DecodeResult decodeGlobalLoadDwordAddtidFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_DWORD_ADDTID requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_DWORD_ADDTID has an invalid memory segment";
   return std::make_unique<GlobalLoadDwordAddtidFlat>(opcode);
 }
 } // namespace detail
@@ -2962,7 +2962,7 @@ DecodeResult decodeGlobalStoreDwordAddtidFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_STORE_DWORD_ADDTID requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_STORE_DWORD_ADDTID has an invalid memory segment";
   return std::make_unique<GlobalStoreDwordAddtidFlat>(opcode);
 }
 } // namespace detail
@@ -3020,7 +3020,7 @@ DecodeResult decodeGlobalAtomicCsubFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_ATOMIC_CSUB requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_ATOMIC_CSUB has an invalid memory segment";
   return std::make_unique<GlobalAtomicCsubFlat>(opcode);
 }
 } // namespace detail

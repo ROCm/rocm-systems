@@ -75,6 +75,10 @@ public:
   /// @brief Invalidate all clean K$ lines (s_dcache_inv).
   void invalidate_all();
 
+  /// @brief Discard one or two addressed K$ lines without publishing their data.
+  /// @details K$ stores already write through; discarded lines are always clean.
+  void discard(uint64_t addr, uint32_t lines, uint32_t vmid);
+
 private:
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);

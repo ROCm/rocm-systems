@@ -2734,7 +2734,7 @@ DecodeResult decodeGlobalAtomicAddF32Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_ATOMIC_ADD_F32 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_ATOMIC_ADD_F32 has an invalid memory segment";
   return std::make_unique<GlobalAtomicAddF32Flat>(opcode);
 }
 } // namespace detail
@@ -2791,7 +2791,7 @@ DecodeResult decodeGlobalAtomicPkAddF16Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_ATOMIC_PK_ADD_F16 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_ATOMIC_PK_ADD_F16 has an invalid memory segment";
   return std::make_unique<GlobalAtomicPkAddF16Flat>(opcode);
 }
 } // namespace detail

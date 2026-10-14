@@ -226,11 +226,24 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
           "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
           data_offset, per_lane_bytes, d.response_data.size()));
     }
+    const uint32_t output_bytes = d.lds_dword_extend ? d.num_elems * 4 : per_lane_bytes;
     uint32_t lds_addr =
-        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * output_bytes;
     if (lds_addr == kInvalidLdsAddress)
       continue;
-    lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    if (d.lds_dword_extend && d.elem_size < 4) {
+      assert(d.num_elems == 1);
+      uint32_t value = 0;
+      std::memcpy(&value, &d.response_data[data_offset], d.elem_size);
+      if (d.sign_extend) {
+        value = d.elem_size == 1
+                    ? static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)))
+                    : static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
+      }
+      lds.write32(lds_addr, value);
+    } else {
+      lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    }
   }
 }
 
@@ -395,11 +408,97 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
 
 } // namespace
 
+namespace {
+
+uint64_t scalar_atomic_value(const ScalarMemState &d, uint64_t old_value) {
+  uint64_t source = 0, compare = 0;
+  std::memcpy(&source, d.store_data, d.elem_size);
+  if (d.atomic_op == AtomicOp::CMPSWAP)
+    std::memcpy(&compare, reinterpret_cast<const uint8_t *>(d.store_data) + d.elem_size,
+                d.elem_size);
+  if (d.elem_size == 4)
+    return apply_int_atomic(d.atomic_op, static_cast<uint32_t>(old_value),
+                            static_cast<uint32_t>(source), static_cast<uint32_t>(compare));
+  return apply_int_atomic(d.atomic_op, old_value, source, compare);
+}
+
+VmAccessOutcome scalar_atomic(ScalarMemState &d, Wavefront &wf) {
+  const uint32_t mask = (1u << d.num_dwords) - 1;
+  // A scalar-buffer atomic is indivisible: no partial access at the bound.
+  if ((d.load_dword_mask & mask) != mask)
+    return VmAccessOutcome::Complete;
+  if ((d.addr & (d.elem_size - 1)) != 0)
+    return VmAccessOutcome::Malformed;
+  if (wf.address_space()) {
+    if (!d.translated.initialized || (d.translated.access && !d.translated.access->info().ready &&
+                                      !d.translated.atomic_loaded)) {
+      d.translated.access = wf.snapshot_vm_access();
+      if (!d.translated.access)
+        return VmAccessOutcome::Faulted;
+      d.translated.initialized = true;
+    }
+    if (!d.translated.access->info().legacy_cache_compatible) {
+      if (!d.translated.atomic_loaded) {
+        const auto loaded = d.translated.access->atomic_load(d.addr, d.elem_size);
+        if (loaded.outcome != VmAccessOutcome::Complete)
+          return loaded.outcome;
+        d.translated.atomic_loaded_value = loaded.value;
+        d.translated.atomic_loaded = true;
+      }
+      for (;;) {
+        const uint64_t old_value = d.translated.atomic_loaded_value;
+        const uint64_t replacement = scalar_atomic_value(d, old_value);
+        if (d.atomic_op == AtomicOp::CMPSWAP) {
+          uint64_t compare = 0;
+          std::memcpy(&compare, reinterpret_cast<const uint8_t *>(d.store_data) + d.elem_size,
+                      d.elem_size);
+          if (old_value != compare) {
+            std::memcpy(d.response_data, &old_value, d.elem_size);
+            d.translated.atomic_loaded = false;
+            return VmAccessOutcome::Complete;
+          }
+        }
+        const auto exchanged =
+            d.translated.access->compare_exchange(d.addr, d.elem_size, old_value, replacement);
+        if (exchanged.outcome != VmAccessOutcome::Complete)
+          return exchanged.outcome;
+        if (exchanged.exchanged) {
+          std::memcpy(d.response_data, &old_value, d.elem_size);
+          d.translated.atomic_loaded = false;
+          return VmAccessOutcome::Complete;
+        }
+        d.translated.atomic_loaded_value = exchanged.observed;
+      }
+    }
+  }
+  auto *l2 = wf.cu().l2();
+  if (!l2)
+    return VmAccessOutcome::Unavailable;
+  return l2->atomic_rmw(
+      d.addr, d.elem_size,
+      [&](uint8_t *bytes, uint32_t offset) {
+        uint64_t old_value = 0;
+        std::memcpy(&old_value, bytes + offset, d.elem_size);
+        const uint64_t replacement = scalar_atomic_value(d, old_value);
+        std::memcpy(bytes + offset, &replacement, d.elem_size);
+        std::memcpy(d.response_data, &old_value, d.elem_size);
+      },
+      wf.process_id());
+}
+
+} // namespace
+
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
+  if (d.discard_lines) {
+    l1_->discard(d.addr, d.discard_lines, wf.process_id());
+    return VmAccessOutcome::Complete;
+  }
+  if (d.atomic_op != AtomicOp::NONE)
+    return scalar_atomic(d, wf);
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
-  if (d.is_load && d.load_dword_mask == 0)
+  if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
   if (wf.address_space()) {
     const bool may_refresh_unready =
@@ -445,6 +544,22 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
       } else {
+        if (d.load_dword_mask != 0xffff) {
+          while (d.translated.request_index < d.num_dwords) {
+            const auto index = d.translated.request_index;
+            if (d.load_dword_mask & (1u << index)) {
+              const auto outcome = d.translated.access->write(
+                  d.addr + index * sizeof(uint32_t),
+                  {reinterpret_cast<const std::byte *>(&d.store_data[index]), sizeof(uint32_t)},
+                  d.translated.completed_bytes);
+              if (outcome != VmAccessOutcome::Complete)
+                return outcome;
+            }
+            ++d.translated.request_index;
+            d.translated.completed_bytes = 0;
+          }
+          return VmAccessOutcome::Complete;
+        }
         const VmAccessOutcome outcome = d.translated.access->write(
             d.addr,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(d.store_data),
@@ -485,6 +600,19 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
         return outcome;
     }
   } else {
+    if (d.load_dword_mask != 0xffff) {
+      while (d.translated.request_index < d.num_dwords) {
+        const auto index = d.translated.request_index;
+        if (d.load_dword_mask & (1u << index)) {
+          const auto outcome =
+              l1_->store(d.addr + index * 4, 1, &d.store_data[index], wf.process_id(), d.mtype);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+        }
+        ++d.translated.request_index;
+      }
+      return VmAccessOutcome::Complete;
+    }
     const VmAccessOutcome outcome =
         l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)

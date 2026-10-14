@@ -352,6 +352,7 @@ public:
   SBufferAtomicCmpswapSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
+  Operand sdata_return;
   Operand sbase;
   Operand soffset;
 };
@@ -469,6 +470,7 @@ public:
   SBufferAtomicCmpswapX2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
+  Operand sdata_return;
   Operand sbase;
   Operand soffset;
 };
@@ -586,6 +588,7 @@ public:
   SAtomicCmpswapSmem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
+  Operand sdata_return;
   Operand sbase;
   Operand soffset;
 };
@@ -703,6 +706,7 @@ public:
   SAtomicCmpswapX2Smem(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand sdata;
+  Operand sdata_return;
   Operand sbase;
   Operand soffset;
 };

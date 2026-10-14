@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -84,6 +85,8 @@ public:
   uint32_t elem_size = 4;
   bool sign_extend = false;
   bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
+  uint8_t discard_lines = 0;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint16_t load_dword_mask = 0xffff;
@@ -232,7 +235,8 @@ public:
   /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
-  bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
+  bool lds_dst = false;          ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG
@@ -285,6 +289,27 @@ public:
     return lds_stack_inputs ? 1u : destination_vgpr_count();
   }
 };
+
+/// Capture ordinary LDS-destination addresses and suppress out-of-allocation reads.
+/// Payload size and lane stride differ for DWORDX3: the fourth DWORD is untouched.
+inline void prepare_lds_destination(VectorMemState &state, uint32_t allocation_base,
+                                    uint32_t allocation_size, int64_t offset,
+                                    uint32_t payload_bytes, uint32_t lane_stride) {
+  state.lds_base = allocation_base;
+  state.lds_per_lane_addr = true;
+  state.per_lane_lds_addr.fill(kInvalidLdsAddress);
+  for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
+    if (!(state.exec_mask & (uint64_t{1} << lane)))
+      continue;
+    const int64_t relative = offset + static_cast<int64_t>(lane) * lane_stride;
+    if (relative < 0 || static_cast<uint64_t>(relative) + payload_bytes > allocation_size ||
+        static_cast<uint64_t>(allocation_base) + relative + payload_bytes > UINT32_MAX) {
+      state.lane_mask &= ~(uint64_t{1} << lane);
+      continue;
+    }
+    state.per_lane_lds_addr[lane] = allocation_base + static_cast<uint32_t>(relative);
+  }
+}
 
 /// @brief Reject a vector-memory instruction before it reaches a memory pipeline.
 /// @details Preserve exec_mask so normal load completion semantics treat every

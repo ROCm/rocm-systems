@@ -811,7 +811,7 @@ __global__ void buffer_load_lds_race_kernel(const int *src, int *out) {
   asm volatile(
       "ds_read_b32 %0, %1\n"
       "s_waitcnt lgkmcnt(0)\n"
-      : "=v"(val) : "v"(tid * 4)
+      : "=v"(val) : "v"(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&lds[tid])))
   );
   int gid = blockIdx.x * blockDim.x + tid;
   out[gid] = val;

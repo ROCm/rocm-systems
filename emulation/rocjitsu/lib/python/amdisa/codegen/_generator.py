@@ -390,6 +390,9 @@ class CodeGenerator:
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
+        'smem_atomic': 'scalar',
+        'smem_discard': 'scalar',
+        'flat_load_lds': 'vmem_load',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -4772,6 +4775,8 @@ class CodeGenerator:
                 '  // seg: 0=FLAT, 1=SCRATCH, 2=GLOBAL\n'
                 '  if (seg == 1 && mnemonic.substr(0, 5) == "flat_")\n'
                 '    return std::string("scratch_").append(mnemonic.substr(5));\n'
+                '  if (seg == 1 && mnemonic.substr(0, 7) == "global_")\n'
+                '    return std::string("scratch_").append(mnemonic.substr(7));\n'
                 '  if (seg == 2 && mnemonic.substr(0, 5) == "flat_")\n'
                 '    return std::string("global_").append(mnemonic.substr(5));\n'
                 '  return std::string(mnemonic);\n'
@@ -7673,6 +7678,25 @@ class CodeGenerator:
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
 
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(sem)
+
+        if cls == 'smem_discard':
+            return '\n'.join(
+                [
+                    '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+                    '  d->is_load = false;',
+                    f'  d->discard_lines = {sem.num_elems};',
+                    f'  d->wait_counter_type = {self._wait_counter_type("smem_discard")};',
+                    '  auto address = smem_calculate_address(inst_, wf);',
+                    '  if (!address) return;',
+                    '  d->addr = *address & ~uint64_t{63};',
+                    '  set_data(std::move(d));',
+                ]
+            )
+
+        if cls == 'flat_load_lds':
+            return self._gen_flat_load_lds(sem)
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
@@ -7987,15 +8011,38 @@ class CodeGenerator:
             '    d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
-            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords, d.get()'
         else:
-            addr_args = 'inst_, wf'
+            addr_args = 'inst_, wf, d.get()'
         L.append(f'  auto address = smem_calculate_address({addr_args});')
         L.append('  if (!address) return;')
         L.append('  d->addr = *address;')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        width = sem.elem_size // 4
+        return '\n'.join(
+            [
+                '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+                f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+                f'  d->elem_size = {sem.elem_size};',
+                f'  d->num_dwords = {width};',
+                '  d->is_load = inst_.glc;',
+                f'  d->wait_counter_type = {self._wait_counter_type("smem_atomic")};',
+                f'  auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {sem.num_elems}u);',
+                '  if (!source) return;',
+                f'  for (uint32_t i = 0; i < {sem.num_elems}; ++i)',
+                '    d->store_data[i] = amdgpu::read_scalar_register(wf, *source, i);',
+                '  d->dst_register = *source;',
+                f'  d->dst_register.width = {width};',
+                '  auto address = smem_calculate_address(inst_, wf, d.get());',
+                '  if (!address) return;',
+                '  d->addr = *address;',
+                '  set_data(std::move(d));',
+            ]
+        )
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
         """Return ``(op_sel_expr, op_sel_hi_expr)`` for VOP3P execute() bodies."""
@@ -8237,7 +8284,10 @@ class CodeGenerator:
         self, sem: InstructionSemantics, sem_class: str
     ) -> int:
         """Return the number of counter tokens contributed by one issue."""
-        if sem_class == 'smem_load' and (getattr(sem, 'num_elems', None) or 1) > 1:
+        if (
+            sem_class in ('smem_load', 'smem_discard')
+            and (getattr(sem, 'num_elems', None) or 1) > 1
+        ):
             return 2
         return 1
 
@@ -8300,6 +8350,8 @@ class CodeGenerator:
         self, sem: InstructionSemantics, sem_class: str
     ) -> str:
         """Return the decoded expression used by returning atomic metadata."""
+        if sem_class == 'smem_atomic':
+            return 'inst_.glc'
         if sem_class in ('flat_atomic', 'buffer_atomic'):
             sc0, _, _ = self._coherency_exprs()
             return self._atomic_return_expr(sc0)
@@ -8408,6 +8460,33 @@ class CodeGenerator:
         if use_acc:
             return f'wf.vgpr_alloc().base + {self._acc_vgpr_expr} + inst_.{field}'
         return f'wf.vgpr_alloc().base + inst_.{field}'
+
+    def _gen_flat_load_lds(self, sem: InstructionSemantics) -> str:
+        L = [
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+            f'  d->elem_size = {sem.elem_size};',
+            f'  d->num_elems = {sem.num_elems};',
+            '  d->is_load = true;',
+            '  d->lds_dst = true;',
+            '  d->lds_dword_extend = true;',
+            f'  d->sign_extend = {str(sem.sign_extend).lower()};',
+            f'  d->mtype = {self._mtype_expr()};',
+            f'  d->non_temporal = {self._coherency_exprs()[2]};',
+        ]
+        self._append_wait_counter_type(L, sem, 'flat_load_lds')
+        L.extend(
+            [
+                '  // CDNA LDS-destination loads add the signed offset to both addresses.',
+                '  uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);',
+                '  int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;',
+                '  flat_calculate_addresses(inst_, wf, *d);',
+                '  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+                ' static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset,'
+                f' {sem.num_elems * 4}, {16 if sem.num_elems >= 3 else sem.num_elems * 4});',
+                '  set_data(std::move(d));',
+            ]
+        )
+        return '\n'.join(L)
 
     def _gen_flat_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9168,10 +9247,20 @@ class CodeGenerator:
             L.append('    d->is_load = true;')
             self._append_wait_counter_type(L, sem, cls, indent='    ')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('    d->lds_dword_extend = true;')
+                L.append(f'    d->sign_extend = {str(sem.sign_extend).lower()};')
+            else:
+                L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append(
+                    '    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+                    ' static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset,'
+                    f' {ne * 4}, {16 if ne >= 3 else ne * 4});'
+                )
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')
@@ -10481,8 +10570,9 @@ class CodeGenerator:
                         # returned.
                         _is_buffer_atomic_payload = (
                             inst_sem is not None
-                            and inst_sem.semantic_class == 'buffer_atomic'
-                            and opnd.name == 'vdata'
+                            and inst_sem.semantic_class
+                            in ('buffer_atomic', 'smem_atomic')
+                            and opnd.name in ('vdata', 'sdata')
                         )
                         _is_optional_vflat_saddr = (
                             enc.enc_name.upper() in ('ENC_VFLAT', 'ENC_VGLOBAL')
@@ -10541,8 +10631,9 @@ class CodeGenerator:
                                     and opnd.name == 'vdst'
                                 )
                                 or (
-                                    inst_sem.semantic_class == 'buffer_atomic'
-                                    and opnd.name == 'vdata'
+                                    inst_sem.semantic_class
+                                    in ('buffer_atomic', 'smem_atomic')
+                                    and opnd.name in ('vdata', 'sdata')
                                 )
                             )
                         )
@@ -10552,16 +10643,19 @@ class CodeGenerator:
                         # liveness does not kill the untouched payload half.
                         _needs_atomic_return_view = (
                             _is_optional_atomic_return
-                            and inst_sem.semantic_class == 'buffer_atomic'
+                            and inst_sem.semantic_class
+                            in ('buffer_atomic', 'smem_atomic')
                             and inst_sem.operation in ('cmpswap', 'fcmpswap')
-                            and opnd.name == 'vdata'
+                            and opnd.name in ('vdata', 'sdata')
                         )
                         _needs_tied_destination_result_view = (
                             opnd.name == tied_destination_name
                             and tied_destination_result_name is not None
                         )
                         atomic_return_operand = (
-                            'vdata_return' if _needs_atomic_return_view else opnd.name
+                            f'{opnd.name}_return'
+                            if _needs_atomic_return_view
+                            else opnd.name
                         )
                         destination_operand = (
                             tied_destination_result_name
@@ -10570,8 +10664,13 @@ class CodeGenerator:
                         )
                         if _is_optional_atomic_return:
                             sc0, _, _ = self._coherency_exprs()
+                            returns = (
+                                'inst_.glc'
+                                if inst_sem.semantic_class == 'smem_atomic'
+                                else self._atomic_return_expr(sc0)
+                            )
                             conditional_dst_body.append(
-                                f'if ({self._atomic_return_expr(sc0)}) '
+                                f'if ({returns}) '
                                 f'dst_operands_[num_dst_++] = &{atomic_return_operand};'
                             )
                         elif (
@@ -10693,15 +10792,15 @@ class CodeGenerator:
                                     )
                             if _needs_atomic_return_view:
                                 private_members.append(
-                                    cgen.Statement('Operand vdata_return')
+                                    cgen.Statement(f'Operand {atomic_return_operand}')
                                 )
                                 opnd_ctor_init.append(
-                                    f'vdata_return({(inst_sem.elem_size or 4) * 8}, '
+                                    f'{atomic_return_operand}({(inst_sem.elem_size or 4) * 8}, '
                                     f'OperandType::{opr_type}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
                                     vgpr_msb_role_body.append(
-                                        'vdata_return.set_vgpr_msb_role('
+                                        f'{atomic_return_operand}.set_vgpr_msb_role('
                                         'amdgpu::VgprMsbRole::Dst);'
                                     )
                         elif opnd.fieldless:
@@ -11289,10 +11388,15 @@ class CodeGenerator:
                         )
 
                     if inst.required_flat_segment is not None:
+                        segment = (
+                            f'reinterpret_cast<const {factory_op_encoding}*>(inst)->seg'
+                        )
+                        invalid = f'{segment} != {inst.required_flat_segment}u'
+                        if inst.has_scratch_alias:
+                            invalid += f' && {segment} != 1u'
                         factory_validation_parts.append(
-                            f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->seg != '
-                            f'{inst.required_flat_segment}u) [[unlikely]] return emit_error.emit() '
-                            f'<< "{inst.name} requires its GLOBAL segment";'
+                            f'if ({invalid}) [[unlikely]] return emit_error.emit() '
+                            f'<< "{inst.name} has an invalid memory segment";'
                         )
 
                     # Public LLVM defines gfx1251's F64 WMMA as a wave32

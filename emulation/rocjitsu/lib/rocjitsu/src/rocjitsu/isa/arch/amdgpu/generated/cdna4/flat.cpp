@@ -3336,18 +3336,18 @@ DecodeResult decodeFlatAtomicDecX2Flat(const MachineInst *opcode,
 GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
     : Flat("global_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUbyteFlat)),
-      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
+      saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -3360,6 +3360,11 @@ GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3371,8 +3376,9 @@ DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
       "global_load_lds_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE requires its GLOBAL segment";
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u &&
+      reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsUbyteFlat>(opcode);
 }
 } // namespace detail
@@ -3380,18 +3386,18 @@ DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
 GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
     : Flat("global_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSbyteFlat)),
-      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
+      saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -3404,6 +3410,11 @@ GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3415,8 +3426,9 @@ DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
       "global_load_lds_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE requires its GLOBAL segment";
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u &&
+      reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsSbyteFlat>(opcode);
 }
 } // namespace detail
@@ -3424,18 +3436,18 @@ DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
 GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
     : Flat("global_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsUshortFlat)),
-      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
+      saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -3448,6 +3460,11 @@ GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3459,8 +3476,9 @@ DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
       "global_load_lds_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT requires its GLOBAL segment";
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u &&
+      reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsUshortFlat>(opcode);
 }
 } // namespace detail
@@ -3468,18 +3486,18 @@ DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
 GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
     : Flat("global_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsSshortFlat)),
-      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
+      saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -3492,6 +3510,11 @@ GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3503,8 +3526,9 @@ DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
       "global_load_lds_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT requires its GLOBAL segment";
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u &&
+      reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsSshortFlat>(opcode);
 }
 } // namespace detail
@@ -3512,18 +3536,18 @@ DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
 GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
     : Flat("global_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordFlat)),
-      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0),
+      dsmem(32, OperandType::OPR_DSMEM, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
+      saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -3536,6 +3560,11 @@ GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3547,8 +3576,9 @@ DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
       "global_load_lds_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
-  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD requires its GLOBAL segment";
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u &&
+      reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsDwordFlat>(opcode);
 }
 } // namespace detail
@@ -3556,17 +3586,14 @@ DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
 GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
     : Flat("global_load_lds_dwordx4", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx4Flat)),
-      vdst(128, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), dsmem(128, OperandType::OPR_DSMEM, 0),
+      gpumem(128, OperandType::OPR_GPUMEM, 0), saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -3580,6 +3607,10 @@ GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3592,7 +3623,7 @@ DecodeResult decodeGlobalLoadLdsDwordx4Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX4 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX4 has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsDwordx4Flat>(opcode);
 }
 } // namespace detail
@@ -3600,17 +3631,14 @@ DecodeResult decodeGlobalLoadLdsDwordx4Flat(const MachineInst *opcode,
 GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
     : Flat("global_load_lds_dwordx3", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::GlobalLoadLdsDwordx3Flat)),
-      vdst(96, OperandType::OPR_VGPR_OR_ACCVGPR,
-           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
-            (reinterpret_cast<const OpEncoding *>(inst)->acc
-                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
-                 : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), dsmem(96, OperandType::OPR_DSMEM, 0),
+      gpumem(96, OperandType::OPR_GPUMEM, 0), saddr(0, OperandType::OPR_SREG, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
-  num_src_ = 2;
+  dst_operands_[0] = &dsmem;
+  src_operands_[2] = &gpumem;
+  num_src_ = 3;
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
@@ -3624,6 +3652,10 @@ GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  dsmem.apply_fieldless_caps(false, false, false);
+  gpumem.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3636,7 +3668,7 @@ DecodeResult decodeGlobalLoadLdsDwordx3Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX3 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX3 has an invalid memory segment";
   return std::make_unique<GlobalLoadLdsDwordx3Flat>(opcode);
 }
 } // namespace detail

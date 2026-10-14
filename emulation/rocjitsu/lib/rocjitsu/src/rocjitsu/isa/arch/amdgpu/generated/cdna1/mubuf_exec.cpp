@@ -354,10 +354,13 @@ void BufferLoadUbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -381,10 +384,13 @@ void BufferLoadSbyteMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -409,10 +415,13 @@ void BufferLoadUshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -436,10 +445,13 @@ void BufferLoadSshortMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -464,10 +476,13 @@ void BufferLoadDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -491,10 +506,13 @@ void BufferLoadDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 8, 8);
     set_data(std::move(d));
     return;
   }
@@ -518,10 +536,14 @@ void BufferLoadDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 12,
+                                    16);
     set_data(std::move(d));
     return;
   }
@@ -545,10 +567,14 @@ void BufferLoadDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 16,
+                                    16);
     set_data(std::move(d));
     return;
   }
@@ -762,10 +788,13 @@ void BufferLoadUbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -790,10 +819,13 @@ void BufferLoadUbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -818,10 +850,13 @@ void BufferLoadSbyteD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -847,10 +882,13 @@ void BufferLoadSbyteD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -876,10 +914,13 @@ void BufferLoadShortD16Mubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }
@@ -904,10 +945,13 @@ void BufferLoadShortD16HiMubuf::execute_impl(amdgpu::Wavefront &wf) {
     d->is_load = true;
     d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
     d->lds_dst = true;
-    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
     d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
     d->non_temporal = 0;
     mubuf_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
     set_data(std::move(d));
     return;
   }

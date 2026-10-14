@@ -952,9 +952,11 @@ class GlobalLoadLdsUbyteFlat : public Flat {
 public:
   GlobalLoadLdsUbyteFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
   Operand addr;
   Operand m0;
+  Operand flat_scratch;
+  Operand dsmem;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -962,9 +964,11 @@ class GlobalLoadLdsSbyteFlat : public Flat {
 public:
   GlobalLoadLdsSbyteFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
   Operand addr;
   Operand m0;
+  Operand flat_scratch;
+  Operand dsmem;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -972,9 +976,11 @@ class GlobalLoadLdsUshortFlat : public Flat {
 public:
   GlobalLoadLdsUshortFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
   Operand addr;
   Operand m0;
+  Operand flat_scratch;
+  Operand dsmem;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -982,9 +988,11 @@ class GlobalLoadLdsSshortFlat : public Flat {
 public:
   GlobalLoadLdsSshortFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
   Operand addr;
   Operand m0;
+  Operand flat_scratch;
+  Operand dsmem;
+  Operand gpumem;
   Operand saddr;
 };
 
@@ -992,9 +1000,11 @@ class GlobalLoadLdsDwordFlat : public Flat {
 public:
   GlobalLoadLdsDwordFlat(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  Operand vdst;
   Operand addr;
   Operand m0;
+  Operand flat_scratch;
+  Operand dsmem;
+  Operand gpumem;
   Operand saddr;
 };
 

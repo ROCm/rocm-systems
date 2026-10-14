@@ -17,6 +17,8 @@ std::string flat_mnemonic(std::string_view mnemonic, int seg) {
   // seg: 0=FLAT, 1=SCRATCH, 2=GLOBAL
   if (seg == 1 && mnemonic.substr(0, 5) == "flat_")
     return std::string("scratch_").append(mnemonic.substr(5));
+  if (seg == 1 && mnemonic.substr(0, 7) == "global_")
+    return std::string("scratch_").append(mnemonic.substr(7));
   if (seg == 2 && mnemonic.substr(0, 5) == "flat_")
     return std::string("global_").append(mnemonic.substr(5));
   return std::string(mnemonic);

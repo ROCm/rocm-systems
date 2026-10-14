@@ -418,7 +418,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.lds_dst) {
       if (obligations.empty())
         return;
-      uint32_t perLaneBytes = d.num_elems * d.elem_size;
+      uint32_t perLaneBytes = d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
@@ -428,7 +428,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           return;
       }
       uint32_t ldsAddrs[64];
-      uint64_t validLaneMask = d.lane_mask;
+      // Buffer bounds suppress the read but still write zeros to legal LDS destinations.
+      uint64_t validLaneMask = d.exec_mask;
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;

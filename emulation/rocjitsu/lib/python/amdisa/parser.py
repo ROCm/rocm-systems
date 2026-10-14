@@ -1232,10 +1232,18 @@ class Parser:
     def _find_unique_flat_segment_opcodes(self) -> dict[str, set[int]]:
         """Retain segment-only opcodes that have no generic FLAT decode entry."""
         opcodes: dict[str, set[int]] = {}
+        self._scratch_segment_forms: set[tuple[int, str]] = set()
         for inst_node in self.insts_node:
             for form in xs.get_node(inst_node, xs.INST_ENCODINGS):
                 name = xs.get_node_text(xs.get_node(form, xs.ENCODING_NAME))
                 condition = xs.get_node_text(xs.get_node(form, xs.ENCODING_COND))
+                if name == 'ENC_FLAT_SCRATCH' and condition == 'default':
+                    self._scratch_segment_forms.add(
+                        (
+                            int(xs.get_node_text(xs.get_node(form, xs.OPCODE))),
+                            xs.get_node_text(xs.get_node(inst_node, xs.INST_NAME)),
+                        )
+                    )
                 if condition == 'default' and name not in self.profile.skip_encodings:
                     opcodes.setdefault(name, set()).add(
                         int(xs.get_node_text(xs.get_node(form, xs.OPCODE)))
@@ -1346,6 +1354,57 @@ class Parser:
                 opnds.sort(key=lambda x: x.order)
                 _uniquify_fieldless_names(opnds)
 
+                has_scratch_alias = (
+                    retain_segment
+                    and (opcode, inst_name.replace('GLOBAL_', 'SCRATCH_', 1))
+                    in self._scratch_segment_forms
+                )
+                if has_scratch_alias:
+                    opnds.append(
+                        Operand(
+                            'flat_scratch',
+                            64,
+                            'OPR_FLAT_SCRATCH',
+                            True,
+                            False,
+                            True,
+                            True,
+                            len(opnds) + 1,
+                            fieldless=True,
+                        )
+                    )
+                if inst_name.startswith(('GLOBAL_LOAD_LDS_', 'SCRATCH_LOAD_LDS_')):
+                    # MR ISA describes a VGPR destination even though the
+                    # instruction writes LDS; VDST is unused by these forms.
+                    width = next(op.size for op in opnds if op.name == 'vdst')
+                    opnds = [op for op in opnds if op.name != 'vdst']
+                    opnds.extend(
+                        [
+                            Operand(
+                                'dsmem',
+                                width,
+                                'OPR_DSMEM',
+                                False,
+                                True,
+                                True,
+                                True,
+                                len(opnds) + 1,
+                                fieldless=True,
+                            ),
+                            Operand(
+                                'gpumem',
+                                width,
+                                'OPR_GPUMEM',
+                                True,
+                                False,
+                                True,
+                                True,
+                                len(opnds) + 2,
+                                fieldless=True,
+                            ),
+                        ]
+                    )
+
                 enc = self.isa_spec.encoding_map[enc_name]
                 if retain_segment:
                     previous = next(
@@ -1382,6 +1441,7 @@ class Parser:
                     # Reuse the FLAT layout and address machinery, retaining the
                     # segment restriction for the generated decoder factory.
                     inst.enc_name = 'ENC_FLAT'
+                    inst.has_scratch_alias = has_scratch_alias
                     inst.required_flat_segment = self.profile.unique_flat_segment(
                         enc_name
                     )

@@ -8719,3 +8719,34 @@ def test_sdwa_conversion_result_formats():
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
         )
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type', [('cdna3', CdnaProfile), ('cdna4', Cdna4Profile)]
+)
+def test_global_lds_forms_keep_scratch_alias_and_memory_dependencies(
+    arch, profile_type
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    instructions = {
+        inst.name: inst for enc in spec.inst_encodings for inst in enc.insts
+    }
+    semantics = derive_all_semantics(spec).instructions
+    for suffix, width, signed in [
+        ('UBYTE', 1, False),
+        ('SBYTE', 1, True),
+        ('USHORT', 2, False),
+        ('SSHORT', 2, True),
+        ('DWORD', 4, False),
+    ]:
+        name = 'GLOBAL_LOAD_LDS_' + suffix
+        inst = instructions[name]
+        assert inst.required_flat_segment == 2
+        assert inst.has_scratch_alias
+        sem = semantics[name]
+        assert sem.semantic_class == 'flat_load_lds'
+        assert sem.elem_size == width
+        assert sem.sign_extend == signed
+    if arch == 'cdna4':
+        for suffix in ('DWORDX3', 'DWORDX4'):
+            assert not instructions['GLOBAL_LOAD_LDS_' + suffix].has_scratch_alias

@@ -1799,6 +1799,10 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     ):
         return InstructionSemantics(name, 'true_nop')
     # Cache invalidation / writeback instructions.
+    if upper in ('S_DCACHE_DISCARD', 'S_DCACHE_DISCARD_X2'):
+        return InstructionSemantics(
+            name, 'smem_discard', num_elems=2 if upper.endswith('_X2') else 1
+        )
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
         return InstructionSemantics(name, 'dcache_inv')
     if upper in ('S_DCACHE_WB', 'S_DCACHE_WB_VOL'):
@@ -1811,8 +1815,19 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
     if '_ATOMIC_' in upper:
+        suffix = upper.split('_ATOMIC_', 1)[1]
+        is_x2 = suffix.endswith('_X2')
+        info = _derive_flat_atomic_info(suffix[:-3] if is_x2 else suffix, is_x2)
+        if info:
+            operation, elem_size, data_dwords = info
+            return InstructionSemantics(
+                name,
+                'smem_atomic',
+                operation=operation,
+                elem_size=elem_size,
+                num_elems=data_dwords,
+            )
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
@@ -2048,6 +2063,15 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                     )
         # FP atomics and other unrecognized patterns.
         return InstructionSemantics(name, 'flat_atomic')
+
+    for prefix in ('GLOBAL_LOAD_LDS_', 'SCRATCH_LOAD_LDS_'):
+        if upper.startswith(prefix):
+            info = _FLAT_DATA_MAP.get(upper[len(prefix) :])
+            if info:
+                esz, ne, se = info
+                return InstructionSemantics(
+                    name, 'flat_load_lds', elem_size=esz, num_elems=ne, sign_extend=se
+                )
 
     for prefix in ('GLOBAL_LOAD_ASYNC_TO_LDS_', 'CLUSTER_LOAD_ASYNC_TO_LDS_'):
         if upper.startswith(prefix):

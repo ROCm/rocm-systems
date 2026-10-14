@@ -167,6 +167,8 @@ public:
                                                        uint64_t desired) override {
     std::lock_guard lock(mutex_);
     ++compare_exchange_calls;
+    if (unavailable_compare_exchange_call == compare_exchange_calls)
+      return {.outcome = amdgpu::VmAccessOutcome::Unavailable};
     if (!valid_atomic(domain, address, width))
       return {.outcome = amdgpu::VmAccessOutcome::Faulted};
     uint64_t observed = 0;
@@ -227,6 +229,7 @@ public:
   uint32_t atomic_store_calls = 0;
   uint32_t unavailable_atomic_store_hits = 0;
   uint32_t compare_exchange_calls = 0;
+  uint32_t unavailable_compare_exchange_call = 0;
   uint32_t forced_compare_exchange_misses = 0;
   std::optional<uint64_t> unavailable_atomic_store_address;
   AccessRecord last_read;
@@ -1470,6 +1473,81 @@ TEST(GpuVmPipeline, AtomicPermissionFaultDoesNotReachPhysicalBacking) {
   EXPECT_EQ(context.external->atomic_load_calls, 0u);
   EXPECT_EQ(context.external->compare_exchange_calls, 0u);
   EXPECT_TRUE(context.wf->wait_counters().empty());
+}
+
+TEST(GpuVmPipeline, ScalarAtomicRetriesPreserveSourceAndObservedValue) {
+  for (uint32_t width : {4u, 8u}) {
+    for (bool retry_load : {false, true}) {
+      TranslatedPipelineContext context;
+      ASSERT_NE(context.wf, nullptr);
+      const uint64_t initial = width == 4 ? 41 : 0x100000029ull;
+      context.external->store<uint64_t>(0x500, initial);
+      context.external->unavailable_atomic_load_call = retry_load ? 1 : 0;
+      context.external->unavailable_compare_exchange_call = retry_load ? 0 : 1;
+      context.external->forced_compare_exchange_misses = 1;
+      auto state = std::make_unique<amdgpu::ScalarMemState>();
+      state->addr = 0x500;
+      state->elem_size = width;
+      state->num_dwords = width / 4;
+      state->atomic_op = amdgpu::AtomicOp::ADD;
+      state->store_data[0] = 7;
+      state->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 16,
+                             static_cast<uint8_t>(width / 4)};
+      context.cu->write_sgpr(context.wf->sgpr_alloc().base + 16, 0xabcdef01);
+      amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+      ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
+                amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+      EXPECT_EQ(context.external->load<uint64_t>(0x500), initial);
+      EXPECT_EQ(context.cu->read_sgpr(context.wf->sgpr_alloc().base + 16), 0xabcdef01u);
+      // The source belongs to the issued operation, not the current SGPR contents.
+      context.cu->write_sgpr(context.wf->sgpr_alloc().base + 16, 100);
+      pipeline.tick();
+      EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+      EXPECT_EQ(context.external->load<uint64_t>(0x500), initial + 8);
+      EXPECT_EQ(context.cu->read_sgpr(context.wf->sgpr_alloc().base + 16), uint32_t(initial + 1));
+      if (width == 8) {
+        EXPECT_EQ(context.cu->read_sgpr(context.wf->sgpr_alloc().base + 17),
+                  uint32_t(initial >> 32));
+      }
+      EXPECT_EQ(context.external->atomic_load_calls, retry_load ? 2u : 1u);
+      EXPECT_EQ(context.external->compare_exchange_calls, retry_load ? 2u : 3u);
+      EXPECT_EQ(context.external->read_calls, 0u);
+      EXPECT_EQ(context.external->write_calls, 0u);
+      EXPECT_TRUE(context.wf->wait_counters().empty());
+    }
+  }
+}
+
+TEST(GpuVmPipeline, ScalarAtomicFaultsAndBoundsNeverPublishResults) {
+  for (uint32_t width : {4u, 8u}) {
+    for (bool out_of_bounds : {false, true}) {
+      TranslatedPipelineContext context;
+      ASSERT_NE(context.wf, nullptr);
+      context.external->store<uint64_t>(0x500, 42);
+      context.external->atomic_allowed_ = false;
+      auto state = std::make_unique<amdgpu::ScalarMemState>();
+      state->addr = 0x500;
+      state->elem_size = width;
+      state->num_dwords = width / 4;
+      state->atomic_op = amdgpu::AtomicOp::ADD;
+      state->store_data[0] = 7;
+      state->load_dword_mask = out_of_bounds ? 0 : 0xffff;
+      state->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 16,
+                             static_cast<uint8_t>(width / 4)};
+      context.cu->write_sgpr(context.wf->sgpr_alloc().base + 16, 0xabcdef01);
+      amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+      EXPECT_EQ(pipeline.issue(new TestMemoryInstruction(std::move(state)), *context.wf),
+                out_of_bounds ? amdgpu::VmAccessOutcome::Complete
+                              : amdgpu::VmAccessOutcome::Faulted);
+      EXPECT_EQ(context.external->load<uint64_t>(0x500), 42u);
+      EXPECT_EQ(context.cu->read_sgpr(context.wf->sgpr_alloc().base + 16),
+                out_of_bounds ? 0u : 0xabcdef01u);
+      EXPECT_EQ(context.external->atomic_load_calls, 0u);
+      EXPECT_EQ(context.external->compare_exchange_calls, 0u);
+      EXPECT_TRUE(context.wf->wait_counters().empty());
+    }
+  }
 }
 
 } // namespace
