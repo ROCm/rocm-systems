@@ -1712,4 +1712,98 @@ TEST_F(SearchXmlChannelMicrotest, ZeroRankAttribute_IsStillAccepted) {
   EXPECT_EQ(graph()->intra[0], 0);
 }
 
+// --- The caller: ncclTopoGetGraphFromXmlSub -------------------------------
+
+class SearchXmlGraphMicrotest : public SearchXmlChannelMicrotest {
+ protected:
+  // A <graph> carrying every attribute the importer requires, with `nSubs`
+  // single-GPU <channel> children and the given nchannels= attribute.
+  ncclXmlNode* MakeGraph(int nchannels, int nSubs, int id = 0) {
+    ncclXmlNode* g = NewNode("graph");
+    SetAttr(g, "id", std::to_string(id).c_str());
+    SetAttr(g, "crossnic", "0");
+    SetAttr(g, "pattern", "4");
+    SetAttr(g, "nchannels", std::to_string(nchannels).c_str());
+    SetAttr(g, "speedintra", "10");
+    SetAttr(g, "speedinter", "10");
+    SetAttr(g, "latencyinter", "0");
+    SetAttr(g, "typeintra", "NVL");
+    SetAttr(g, "typeinter", "PHB");
+    SetAttr(g, "samechannels", "1");
+    for (int i = 0; i < nSubs; i++) {
+      ncclXmlNode* channel = NewNode("channel");
+      channel->parent = g;
+      g->subs[g->nSubs++] = channel;
+      AddChild(channel, "gpu", std::to_string(i % kGpus).c_str());
+    }
+    return g;
+  }
+};
+
+TEST_F(SearchXmlGraphMicrotest, NchannelsClaimingMoreChannelsThanArePresent_IsRejected) {
+  // nchannels is copied straight into graph->nChannels, which downstream code
+  // uses as the loop bound over the MAXCHANNELS-sized intra/inter arrays.
+  int nChannels = -1;
+
+  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1), system(), graph(), &nChannels),
+            ncclInvalidUsage);
+}
+
+TEST_F(SearchXmlGraphMicrotest, NchannelsOneMoreThanThePresentChannels_IsRejected) {
+  // The tightest failing input from above. The 999999 case above catches the
+  // guard being removed, but only this one catches it being loosened to admit
+  // an off-by-one overclaim.
+  int nChannels = -1;
+
+  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(2, 1), system(), graph(), &nChannels),
+            ncclInvalidUsage);
+}
+
+TEST_F(SearchXmlGraphMicrotest, NchannelsOneFewerThanThePresentChannels_IsRejected) {
+  // The tightest failing input from below: a file supplying more channels than
+  // it declares would leave the trailing ones imported but uncounted.
+  int nChannels = -1;
+
+  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(1, 2), system(), graph(), &nChannels),
+            ncclInvalidUsage);
+}
+
+TEST_F(SearchXmlGraphMicrotest, NchannelsMatchingTheChannelsPresent_IsStillAccepted) {
+  int nChannels = -1;
+
+  ASSERT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(3, 3), system(), graph(), &nChannels),
+            ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 3);
+  EXPECT_EQ(nChannels, 3);
+  // The channels really were imported, not merely counted.
+  for (int c = 0; c < 3; c++) {
+    EXPECT_EQ(graph()->intra[kGpus * c], SearchXmlScene::kRankBase + c) << "channel " << c;
+  }
+}
+
+TEST_F(SearchXmlGraphMicrotest, TheLargestPermittedNchannels_IsStillAccepted) {
+  // The tightest accepted input: exactly MAXCHANNELS channels. Tightening the
+  // bound by one has to break this.
+  int nChannels = -1;
+
+  ASSERT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(MAXCHANNELS, MAXCHANNELS), system(), graph(),
+                                       &nChannels),
+            ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, MAXCHANNELS);
+}
+
+TEST_F(SearchXmlGraphMicrotest, GraphForAnotherIdIsIgnoredWithoutBeingValidated) {
+  // The id mismatch returns before any attribute is read, so a <graph> for a
+  // different algorithm must not be rejected on this graph's behalf.
+  int nChannels = -1;
+  graph()->id = 0;
+
+  EXPECT_EQ(ncclTopoGetGraphFromXmlSub(MakeGraph(999999, 1, /*id=*/2), system(), graph(),
+                                       &nChannels),
+            ncclSuccess);
+  EXPECT_EQ(graph()->nChannels, 0);
+}
+
 }  // namespace
