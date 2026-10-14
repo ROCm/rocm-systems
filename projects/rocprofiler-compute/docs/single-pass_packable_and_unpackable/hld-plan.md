@@ -131,7 +131,7 @@ Priority is the order of delivery. Phase 1 is the packable set. Phase 2 is only 
 | FR-4 | Phase 1 | A PMC set that mixes blocks (GRBM and SQ, for example) stays SPP when every block it touches still has room. |
 | FR-5 | Phase 1 | The 75 metrics the old allocator split are fixed by FR-1 and FR-2. They stay one expression. They are not split into parts. |
 | FR-6 | Phase 2 | Each SPU parent is split into parts whose counters each fit one pass. Analyze combines those parts only by addition, or by scaling by a non-negative constant. Otherwise the parent stays unset. |
-| FR-7 | Phase 2 | `WEIGHTED_AVG` is only for a ratio whose weight was split and only when the weight comes from the same pass as its sub-ratio. Sums use `COLLECT_SUM`. A ratio of summed pieces uses `COLLECT_RATIO` only when every divided counter shares a pass. |
+| FR-7 | Phase 2 | `WEIGHTED_AVG` is only for a ratio whose weight was split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset. Sums use `COLLECT_SUM`. A ratio of summed pieces uses `COLLECT_RATIO` only when every divided counter shares a pass. |
 | FR-8 | Phase 2 | An SPU parent leaves its YAML `min` and `max` empty. If they named counters, the allocator would have to place the parent's full PMC set in one pass, which cannot be done. A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. |
 
 ### Non-functional
