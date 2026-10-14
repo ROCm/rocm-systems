@@ -34,8 +34,11 @@ enum class StatsLevel : uint64_t {
 enum class StatsBackend {
     Fastpath,
     Fallback,
+    Host,
     Count,
 };
+
+std::span<StatsBackend> getStatBackends();
 
 struct StatsHistogram {
     static constexpr size_t   MaxBuckets{16};
