@@ -262,5 +262,7 @@ cases:
   Unit_HRR_UncapturedHostWrite_Direct: {}
   Unit_HRR_VMMRoundtrip: {}
   Unit_HRR_VMM_Direct: {}
+  Unit_HRR_VaPlacement_Direct: {}
+  Unit_HRR_VaPlacement_StoredPointer: {}
   Unit_HRR_ZeroInitRead_Direct: {}
   Unit_HRR_ZeroInitRoundtrip: {}
