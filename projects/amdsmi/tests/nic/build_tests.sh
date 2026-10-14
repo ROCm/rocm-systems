@@ -31,6 +31,9 @@ readonly TEST_TARGETS=(
   test_nic_vpd_suite
   test_nic_log_suite
   test_nic_discovery_suite
+  test_nic_stats_suite
+  test_nic_stats_copy_suite
+  test_nic_rdma_resolver_suite
   probe_devlink_health
   probe_devlink_port
 )
@@ -105,6 +108,9 @@ main() {
   local -a cxxflags=(
     -std=c++17 -Wall -Wextra -Werror -fno-rtti
     -I "${INC_DIR}" -I "${SRC_DIR}" -I "${IFACE_DIR}"
+    # The header-only suites include amd_smi/... from the public include root. -isystem keeps
+    # warnings in the public header (amdsmi.h) from tripping -Werror.
+    -isystem "${PROJECT_ROOT}/include"
     "${have_libnl3[@]}" "${libnl_cflags[@]}"
   )
 
@@ -126,6 +132,11 @@ main() {
   log "  # fakes + tmpdir, no interface/root (telemetry also reads the host /sys):"
   log "  ${OUT_DIR}/test_nic_telemetry_suite"
   log "  ${OUT_DIR}/test_nic_discovery_suite"
+  log "  ${OUT_DIR}/test_nic_vpd_suite"
+  log "  ${OUT_DIR}/test_nic_log_suite"
+  log "  ${OUT_DIR}/test_nic_stats_suite"
+  log "  ${OUT_DIR}/test_nic_stats_copy_suite"
+  log "  ${OUT_DIR}/test_nic_rdma_resolver_suite"
   log "  # live devlink probes (need a devlink NIC + root):"
   log "  sudo ${OUT_DIR}/probe_devlink_health <pci-bdf>   # e.g. 0000:63:00.0"
   log "  sudo ${OUT_DIR}/probe_devlink_port   <pci-bdf>   # e.g. 0000:63:00.0"

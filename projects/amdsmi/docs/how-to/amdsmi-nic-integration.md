@@ -87,6 +87,10 @@ Each NIC is represented as a **processor handle** (`amdsmi_processor_handle`).
 You obtain handles from the standard AMD SMI discovery APIs, then pass them to
 device-specific query functions.
 
+A socket owns the processors it holds, NICs included. `amdsmi_shut_down()` frees
+them, so an init, shutdown, init cycle (including a NIC-only one) starts from an
+empty device list.
+
 ```mermaid
 flowchart TD
     System[System] --> Socket0[Socket 0]
@@ -202,6 +206,26 @@ enumerate one vendor's hardware.
    do not add symbols to `amdsmi.h`; all access is through the standard
    `amdsmi_get_nic_*` APIs, which the dispatch layer forwards into the library's
    `smi_nic_*` C interface.
+
+6. **Driver statistics are read with a consistency check.** `ethtool -S` takes
+   three ioctl requests (count, names, values), and a driver's count can change
+   between them. `read_driver_statistics()` (`inc/smi_nic_driver_stats.h`)
+   allocates each buffer with 64 entries of headroom, passes the expected count
+   as the input length, and compares the counts the kernel returns. A mismatch
+   restarts the sequence, up to 3 attempts, and then fails with `EAGAIN`.
+   Kernels that include commit `7b07be1ff1cb` (December 2025) answer 0 when the
+   input count no longer matches; older kernels write their current count
+   whatever size was allocated, so the headroom narrows that window but cannot
+   close it. The three requests are injectable, which is how
+   `tests/amd_smi_test/unit/nic/nic_driver_stats_test.cc` models both kinds of
+   kernel.
+
+7. **Identity VPD is read once per NIC.** `SmiNic` reads the NIC's VPD, and its
+   first port's for the fields the NIC's own image lacks, on the first call to
+   `product_name()`, `part_number()`, `serial_number()` or `is_vpd_readable()`.
+   The four accessors share that read, and `add_nic_port()` drops it because a
+   port's VPD fills in missing fields. The cache has no lock of its own: callers
+   hold the context mutex, as `smi_get_nic_asic_info()` does.
 
 The reference plugin is Pensando/ionic
 (`src/vendors/pensando/pensando_subsystem.{h,cpp}`):
@@ -1011,6 +1035,7 @@ projects/amdsmi/
 │       ├── amd_smi_common.h                  # Internal common definitions
 │       ├── amd_smi_utils.h                   # Utility functions (sysfs readers, helpers)
 │       ├── amd_smi_rdma_port.h               # was_rdma_port_resolved(): flat RDMA index to (port, IB device, RDMA port)
+│       ├── amd_smi_nic_stats.h               # copy_nic_stats() and was_nic_stat_scope_resolved(): the statistics getters' array and scope rules
 │       └── nic/
 │           ├── amd_smi_ainic_device.h        # AMDSmiAINICDevice and the AINICInfo snapshot
 │           └── amdsmi_unified/interface/
@@ -1032,6 +1057,7 @@ projects/amdsmi/
 │       │   ├── smi_nic_log.h                 # Debug-log sink used by the library (RSMI_LOGGING)
 │       │   ├── smi_nic_vpd.h                  # PCI VPD (Vital Product Data) TLV parser interface
 │       │   ├── smi_ethtool_ioctl.h           # ethtool ioctl helpers (ioctl transport)
+│       │   ├── smi_nic_driver_stats.h        # read_driver_statistics(): the ethtool -S read, with injectable requests (not installed)
 │       │   ├── smi_devlink_netlink.h         # devlink-over-netlink helpers
 │       │   ├── netlink_wrapper.h             # NLSocket / NLMessage (libnl-3 RAII wrappers)
 │       │   ├── netlink_generic.h             # GenericNetlinkClient (generic netlink)
@@ -1110,6 +1136,18 @@ projects/amdsmi/
 
 8. **Example** (`example/amd_smi_nic.cc`): Uses the public AMD SMI API and
    exercises every NIC backend.
+
+### Tests
+
+| Suite | Path | Run with | Covers |
+|-------|------|----------|--------|
+| C++ unit (`NicUnit`) | `tests/amd_smi_test/unit/nic/` | `amdsmitst --gtest_filter='NicUnit.*'` | transport parsing, NIC type layout, RDMA status, socket ownership, driver-statistics retry |
+| Standalone C++ suites | `tests/nic/test_nic_*_suite.cpp` | `ctest -R nic`; installed beside `amdsmitst` | telemetry, discovery, statistics, statistics copy, RDMA resolver, log, VPD; no hardware |
+| Python unit | `tests/python/unit/system/` | `unit_tests.py -k nic` | CLI and interface behavior against stubs |
+| Hardware | `tests/amd_smi_test/functional/nic/`, `tests/python/functional/` | `amdsmitst`, `integration_test.py` | need a NIC |
+
+Tools that need a live interface (`test_nic_transport_suite`,
+`benchmark_nic_transport`, `probe_devlink_*`) are run by hand.
 
 ---
 
