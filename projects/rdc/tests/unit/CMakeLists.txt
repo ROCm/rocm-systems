@@ -109,6 +109,31 @@ if(TARGET rdc_client)
     )
 endif()
 
+# rdc_link_status_tests: rdc_link_status_get() against fake amdsmi link-status
+# replies. Compiles RdcTopologyLinkImpl.cc into the test, which defines the
+# amdsmi calls that file makes, so it links neither librdc nor amd_smi and runs
+# on GPU-less CI. librdc_bootstrap provides the logger.
+add_executable(
+    rdc_link_status_tests
+    ${SRC_DIR}/test_link_status.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTopologyLinkImpl.cc
+)
+target_include_directories(
+    rdc_link_status_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_link_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_link_status_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_link_status_tests COMMAND rdc_link_status_tests)
+install(
+    TARGETS rdc_link_status_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
