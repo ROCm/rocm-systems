@@ -103,6 +103,24 @@ struct FakeNet {
   ncclResult_t deregMrResult = ncclSuccess;
   std::vector<void*> closedSends, closedRecvs;
 
+  // isend / test. A request is a token address; isendReady=false models a busy plugin.
+  struct SendCall {
+    void* data;
+    size_t size;
+    int tag;
+    void* mhandle;
+    void* phandle;
+    void* requestIn;  // what *request held on entry (the optional-completion hint)
+  };
+  std::vector<SendCall> isends;
+  bool isendReady = true;
+  ncclResult_t isendResult = ncclSuccess;
+  char requestTokens[64] = {};
+  int nextToken = 0;
+  int testDone = 1;
+  ncclResult_t testResult = ncclSuccess;
+  std::vector<void*> tested;
+
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
     p.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
@@ -169,6 +187,18 @@ struct FakeNet {
     *dptr = static_cast<char*>(mhandle) + 1;
     return ncclSuccess;
   }
+  ncclResult_t isend(void*, void* data, size_t size, int tag, void* mhandle, void* phandle, void** request) {
+    isends.push_back({data, size, tag, mhandle, phandle, *request});
+    *request = isendReady ? &requestTokens[nextToken++ % 64] : nullptr;
+    return isendResult;
+  }
+  ncclResult_t test(void* request, int* done, int* sizes) {
+    tested.push_back(request);
+    *done = testDone;
+    if (sizes) sizes[0] = 0;
+    return testResult;
+  }
+
   ncclResult_t deregMr(void* comm, void* mhandle) {
     deregMrs.push_back({comm, mhandle});
     return deregMrResult;
@@ -201,6 +231,8 @@ struct FakeNet {
     v.regMrDmaBuf = &FakeNet::TrampRegMrDmaBuf;
     v.getDeviceMr = &FakeNet::TrampGetDeviceMr;
     v.deregMr = &FakeNet::TrampDeregMr;
+    v.isend = &FakeNet::TrampIsend;
+    v.test = &FakeNet::TrampTest;
     v.closeSend = &FakeNet::TrampCloseSend;
     v.closeRecv = &FakeNet::TrampCloseRecv;
     v.setNetAttr = &FakeNet::TrampSetNetAttr;
@@ -232,6 +264,13 @@ struct FakeNet {
     return g_activeNet->getDeviceMr(comm, mhandle, dptr);
   }
   static ncclResult_t TrampDeregMr(void* comm, void* mhandle) { return g_activeNet->deregMr(comm, mhandle); }
+  static ncclResult_t TrampIsend(void* comm, void* data, size_t size, int tag, void* mhandle, void* phandle,
+                                 void** request) {
+    return g_activeNet->isend(comm, data, size, tag, mhandle, phandle, request);
+  }
+  static ncclResult_t TrampTest(void* request, int* done, int* sizes) {
+    return g_activeNet->test(request, done, sizes);
+  }
   static ncclResult_t TrampCloseSend(void* comm) { return g_activeNet->closeSend(comm); }
   static ncclResult_t TrampCloseRecv(void* comm) { return g_activeNet->closeRecv(comm); }
   static ncclResult_t TrampSetNetAttr(void* ctx, ncclNetAttr_t* attr) { return g_activeNet->setNetAttr(ctx, attr); }
@@ -3894,6 +3933,499 @@ TEST_F(NetProxyRegBufferMicrotest, Dereg_OneOfSeveralHandles_ForgetsOnlyThatOne)
 TEST_F(NetProxyRegBufferMicrotest, Dereg_PluginFails_ReturnsError) {
   net_.deregMrResult = ncclSystemError;
   for (bool send : {true, false}) EXPECT_EQ(Dereg(send, reinterpret_cast<void*>(0x5)), ncclSystemError);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy send progress (sendProxyProgress)
+// ---------------------------------------------------------------------------
+
+// Hands out one fixed user-buffer slice per step and records its own destruction.
+class FakeRingAlgo : public RingAlgorithm {
+ public:
+  uint8_t* buff = nullptr;
+  size_t size = 0;
+  void* mhandle = nullptr;
+  bool* deleted = nullptr;
+  int lastStep = -1;
+  explicit FakeRingAlgo(int refs) {
+    for (int i = 0; i < refs; i++) incRefCount();
+  }
+  ~FakeRingAlgo() override {
+    if (deleted) *deleted = true;
+  }
+  void getNextSendAddr(int step, uint8_t** out, size_t* sizeOut, void** mh) override { Next(step, out, sizeOut, mh); }
+  void getNextRecvAddr(int step, uint8_t** out, size_t* sizeOut, void** mh) override { Next(step, out, sizeOut, mh); }
+
+ private:
+  void Next(int step, uint8_t** out, size_t* sizeOut, void** mh) {
+    lastStep = step;
+    *out = buff;
+    if (sizeOut) *sizeOut = size;
+    *mh = mhandle;
+  }
+};
+
+// A connected net connection plus one proxy op over it. The GPU side is played by
+// writing connFifo sizes, the tail and the LL/LL128 flags into the host buffers.
+template <typename Res>
+class NetProgressMicrotestBase : public NetMicrotestBase {
+ protected:
+  static constexpr int kStepBytes = 1 << 10;
+
+  Res res_{};
+  ncclProxyConnection conn_{};
+  std::unique_ptr<ncclProxyArgs> args_ = std::make_unique<ncclProxyArgs>();
+  std::vector<char> host_;
+  void* mhandles_[NCCL_NUM_PROTOCOLS] = {(void*)0xA0, (void*)0xA1, (void*)0xA2};
+
+  void SetUp() override {
+    NetMicrotestBase::SetUp();
+    proxyState_.p2pChunkSize = kStepBytes;
+    proxyState_.ll128LineElems = NCCL_LL128_LINEELEMS;
+    proxyState_.ll128DataElems = NCCL_LL128_DATAELEMS;
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+      NCCL_NET_MAP_ADD_POINTER(&res_.map, 0, 0, NCCL_STEPS * kStepBytes, buffs[p]);
+      res_.buffSizes[p] = NCCL_STEPS * kStepBytes;
+      res_.mhandles[p] = mhandles_[p];
+    }
+    // The shared pool, addressed by connFifo offsets; MakeShared() points SIMPLE at it.
+    res_.map.mems[NCCL_NET_MAP_SHARED_HOSTMEM].size = 16 * NCCL_SHARED_STEPS * kStepBytes;
+    NCCL_NET_MAP_ADD_POINTER(&res_.map, 0, 0, sizeof(ncclSendMem), sendMem);
+    NCCL_NET_MAP_ADD_POINTER(&res_.map, 0, 0, sizeof(ncclRecvMem), recvMem);
+    host_.assign(res_.map.mems[NCCL_NET_MAP_HOSTMEM].size + res_.map.mems[NCCL_NET_MAP_SHARED_HOSTMEM].size, 0);
+    res_.map.mems[NCCL_NET_MAP_HOSTMEM].cpuPtr = host_.data();
+    res_.map.mems[NCCL_NET_MAP_SHARED_HOSTMEM].cpuPtr = host_.data() + res_.map.mems[NCCL_NET_MAP_HOSTMEM].size;
+    res_.sendMem = reinterpret_cast<ncclSendMem*>(NCCL_NET_MAP_GET_POINTER(&res_.map, cpu, sendMem));
+    res_.recvMem = reinterpret_cast<ncclRecvMem*>(NCCL_NET_MAP_GET_POINTER(&res_.map, cpu, recvMem));
+    for (auto& f : res_.recvMem->connFifo) f.size = -1;
+    conn_.transportResources = &res_;
+    res_.step = 3;  // a non-zero base, so step arithmetic can't pass by coincidence
+    args_->state = ncclProxyOpReady;
+    args_->protocol = NCCL_PROTO_SIMPLE;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncSend;
+    args_->nPeers = args_->nChannels = 1;
+  }
+
+  void MakeShared() {
+    res_.shared = 1;
+    NCCL_NET_MAP_ADD_POINTER(&res_.map, 1, 0, 0, buffs[NCCL_PROTO_SIMPLE]);
+  }
+
+  ncclProxySubArgs& AddSub(int nsteps) {
+    ncclProxySubArgs& sub = args_->subs[args_->nsubs++];
+    sub.connection = &conn_;
+    sub.nsteps = nsteps;
+    sub.channelId = 1;
+    return sub;
+  }
+
+  char* Local(int p = NCCL_PROTO_SIMPLE) { return NCCL_NET_MAP_GET_POINTER(&res_.map, cpu, buffs[p]); }
+  volatile ncclConnFifo& Fifo(int slot) { return res_.recvMem->connFifo[slot % NCCL_STEPS]; }
+};
+
+class NetSendProgressMicrotest : public NetProgressMicrotestBase<sendNetResources> {
+ protected:
+  void SetUp() override {
+    NetProgressMicrotestBase::SetUp();
+    res_.netSendComm = &net_.sendComm;
+    res_.tpRank = 7;
+  }
+
+  ncclResult_t Progress() { return sendProxyProgress(&proxyState_, args_.get()); }
+
+  // The GPU finished writing step `step` (relative to the sub's base) of `bytes`.
+  void GpuWrote(const ncclProxySubArgs& sub, uint64_t step, int bytes) {
+    Fifo(sub.base + step).size = bytes;
+    res_.recvMem->tail = sub.base + step + 1;
+  }
+};
+
+TEST_F(NetSendProgressMicrotest, Ready_AlignsBaseToChunkAndReservesSteps) {
+  res_.step = 5;
+  args_->chunkSteps = 4;
+  ncclProxySubArgs& sub = AddSub(8);
+  ncclProxySubArgs& regSub = AddSub(8);
+  regSub.reg = 1;
+  regSub.sendMhandle = reinterpret_cast<void*>(0xBEEF);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(sub.base, 8u);
+  EXPECT_EQ(regSub.base, 16u);
+  EXPECT_EQ(res_.step, 24u);
+  EXPECT_EQ(args_->state, ncclProxyOpProgress);
+  EXPECT_EQ(sub.sendMhandle, mhandles_[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(regSub.sendMhandle, reinterpret_cast<void*>(0xBEEF));
+}
+
+TEST_F(NetSendProgressMicrotest, Dedicated_PostsUpToPipelineDepthWithoutCredits) {
+  ncclProxySubArgs& sub = AddSub(20);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(args_->idle, 0);
+  for (int i = 0; i < 11; i++) ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(sub.posted, (uint64_t)NCCL_STEPS);
+  EXPECT_EQ(args_->idle, 1);  // pipeline full and nothing from the GPU
+  EXPECT_EQ(res_.sendMem->head, 0u);
+  EXPECT_TRUE(net_.isends.empty());
+}
+
+TEST_F(NetSendProgressMicrotest, Shared_PostsPoolOffsetsAndCredits) {
+  MakeShared();
+  ncclProxySubArgs& sub = AddSub(4);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(sub.posted, 2u);
+  EXPECT_EQ(Fifo(sub.base).offset, (int64_t)kStepBytes * (1 * NCCL_SHARED_STEPS + 0));
+  EXPECT_EQ(Fifo(sub.base + 1).offset, (int64_t)kStepBytes * (1 * NCCL_SHARED_STEPS + 1));
+  EXPECT_EQ(res_.sendMem->head, sub.base + 2 - NCCL_STEPS);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedSeveralSubs_ShrinkPipelineDepth) {
+  MakeShared();
+  for (int s = 0; s < 4; s++) AddSub(8);
+
+  for (int i = 0; i < 8; i++) ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_->subs[0].posted, (uint64_t)NCCL_SHARED_STEPS / 4);  // depth min(NCCL_STEPS, 16 / nsubs)
+}
+
+TEST_F(NetSendProgressMicrotest, SharedSeveralSubs_InterleavePoolSlots) {
+  MakeShared();
+  AddSub(3);
+  ncclProxySubArgs& second = AddSub(3);  // base 3: its FIFO slots don't overlap the first sub's
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(Fifo(second.base + 1).offset, (int64_t)kStepBytes * (NCCL_SHARED_STEPS + 1 * 2 + 1));
+}
+
+TEST_F(NetSendProgressMicrotest, SharedGdrCopy_PostsCreditsToGdcWord) {
+  MakeShared();
+  uint64_t gdc = 0;
+  res_.gdcSync = &gdc;
+  ncclProxySubArgs& sub = AddSub(4);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(gdc, sub.base + 1 - NCCL_STEPS);
+  EXPECT_EQ(res_.sendMem->head, 0u);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedRegistered_LeavesFifoOffsetAlone) {
+  MakeShared();
+  ncclProxySubArgs& sub = AddSub(4);
+  sub.reg = 1;
+  Fifo(res_.step).offset = -7;  // the slot of the op's first step
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(Fifo(sub.base).offset, -7);
+  EXPECT_EQ(sub.posted, 1u);
+}
+
+TEST_F(NetSendProgressMicrotest, Simple_WaitsForGpuThenSendsStepFromDedicatedSlot) {
+  ncclProxySubArgs& sub = AddSub(4);
+  ASSERT_EQ(Progress(), ncclSuccess);  // post step 0
+  ASSERT_EQ(Progress(), ncclSuccess);  // post step 1
+  Fifo(sub.base).size = 512;           // sized but tail not yet advanced
+  ASSERT_EQ(Progress(), ncclSuccess);  // post step 2
+  ASSERT_EQ(Progress(), ncclSuccess);  // post step 3
+  ASSERT_EQ(Progress(), ncclSuccess);
+  Fifo(sub.base).size = -1;            // tail advanced but the step is not sized yet
+  res_.recvMem->tail = sub.base + 1;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_TRUE(net_.isends.empty());
+
+  GpuWrote(sub, 0, 512);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].data, Local() + (sub.base % NCCL_STEPS) * kStepBytes);
+  EXPECT_EQ(net_.isends[0].size, 512u);
+  EXPECT_EQ(net_.isends[0].tag, 7);
+  EXPECT_EQ(net_.isends[0].mhandle, mhandles_[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(net_.isends[0].phandle, &sub.pHandles[0]);
+  EXPECT_EQ(net_.isends[0].requestIn, nullptr);
+  EXPECT_EQ(sub.transmitted, 1u);
+  EXPECT_EQ(sub.transSize, 512u);
+}
+
+TEST_F(NetSendProgressMicrotest, PluginBusy_RetriesSameStep) {
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  net_.isendReady = false;
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(sub.transmitted, 0u);
+  EXPECT_EQ(args_->idle, 1);
+
+  net_.isendReady = true;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(sub.transmitted, 1u);
+  EXPECT_EQ(net_.isends.size(), 2u);
+}
+
+TEST_F(NetSendProgressMicrotest, Ll_SendsWithCompletionHintOnceEveryLineIsFlagged) {
+  args_->protocol = NCCL_PROTO_LL;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  Fifo(sub.base).size = 2 * sizeof(ncclLLFifoLine);  // no tail needed for LL
+  auto* lines = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  uint32_t flag = NCCL_LL_FLAG(sub.base + 1);
+  lines[0].flag1 = lines[0].flag2 = flag;
+  lines[1].flag1 = flag;
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_TRUE(net_.isends.empty());
+
+  lines[1].flag2 = flag;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].requestIn, reinterpret_cast<void*>(NCCL_NET_OPTIONAL_RECV_COMPLETION));
+}
+
+TEST_F(NetSendProgressMicrotest, Ll_CompletionHintDisabled_NotOffered) {
+  ScopedHook param(g_loadParam, ParamOverride({{"NET_OPTIONAL_RECV_COMPLETION", 0}}));
+  args_->protocol = NCCL_PROTO_LL;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  Fifo(sub.base).size = sizeof(ncclLLFifoLine);
+  auto* line = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  line->flag1 = line->flag2 = NCCL_LL_FLAG(sub.base + 1);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].requestIn, nullptr);
+}
+
+TEST_F(NetSendProgressMicrotest, Ll128InHostMemory_WaitsForLineFlags) {
+  args_->protocol = NCCL_PROTO_LL128;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  int lineBytes = sizeof(uint64_t) * NCCL_LL128_LINEELEMS;
+  GpuWrote(sub, 0, 2 * lineBytes);
+  auto* words = reinterpret_cast<uint64_t*>(Local(NCCL_PROTO_LL128) + (sub.base % NCCL_STEPS) * kStepBytes);
+  words[NCCL_LL128_DATAELEMS] = sub.base + 1;
+  words[NCCL_LL128_LINEELEMS + NCCL_LL128_DATAELEMS] = sub.base;  // previous step's flag
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_TRUE(net_.isends.empty());
+
+  words[NCCL_LL128_LINEELEMS + NCCL_LL128_DATAELEMS] = sub.base + 1;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].requestIn, reinterpret_cast<void*>(NCCL_NET_OPTIONAL_RECV_COMPLETION));
+}
+
+TEST_F(NetSendProgressMicrotest, Ll128InDeviceMemory_SendsWithoutFlagScan) {
+  args_->protocol = NCCL_PROTO_LL128;
+  res_.useGdr = ncclTopoGdrModeDefault;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 256);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(net_.isends.size(), 1u);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedLl_SendsFromDedicatedLlSlot) {
+  MakeShared();
+  args_->protocol = NCCL_PROTO_LL;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);  // posts a pool offset into the FIFO
+  Fifo(sub.base).size = sizeof(ncclLLFifoLine);
+  auto* line = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  line->flag1 = line->flag2 = NCCL_LL_FLAG(sub.base + 1);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].data, line);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedSimple_SendsFromPoolOffset) {
+  MakeShared();
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 128);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].data, Local() + Fifo(sub.base).offset);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedRegistered_SendsStraightFromUserBuffer) {
+  MakeShared();
+  std::vector<uint8_t> user(64);
+  ncclProxySubArgs& sub = AddSub(1);
+  sub.reg = 1;
+  sub.sendbuff = user.data();
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].data, user.data());
+}
+
+TEST_F(NetSendProgressMicrotest, RingRegistered_SendsRingSliceAndChecksSize) {
+  std::vector<uint8_t> user(256);
+  FakeRingAlgo ring(2);  // the op's own reference plus ours
+  ring.buff = user.data();
+  ring.size = 256;
+  ring.mhandle = reinterpret_cast<void*>(0xCAFE);
+  ncclProxySubArgs& sub = AddSub(2);
+  sub.reg = 1;
+  sub.ringAlgo = &ring;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 256);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(net_.isends.size(), 1u);
+  EXPECT_EQ(net_.isends[0].data, user.data());
+  EXPECT_EQ(net_.isends[0].mhandle, reinterpret_cast<void*>(0xCAFE));
+  EXPECT_EQ(ring.lastStep, 0);
+
+  GpuWrote(sub, 1, 100);  // the GPU disagrees with the ring about the slice size
+  EXPECT_EQ(Progress(), ncclInternalError);
+  EXPECT_EQ(ring.lastStep, 1);
+}
+
+TEST_F(NetSendProgressMicrotest, HdpRegister_FlushedOncePerNewTail) {
+  uint32_t hdp = 0;
+  res_.curr_hdp_reg = &hdp;
+  ncclProxySubArgs& sub = AddSub(2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  Fifo(sub.base).size = Fifo(sub.base + 1).size = 64;
+  res_.recvMem->tail = sub.base + 2;
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(hdp, 1u);
+
+  hdp = 0;
+  ASSERT_EQ(Progress(), ncclSuccess);  // second step, same tail
+  EXPECT_EQ(net_.isends.size(), 2u);
+  EXPECT_EQ(hdp, 0u);
+}
+
+TEST_F(NetSendProgressMicrotest, Send_PinsTransferHints) {
+  args_->nPeers = 3;
+  args_->nChannels = 2;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(net_.setNetAttrCalls, 1);
+  EXPECT_EQ(net_.lastAttr.sendCommAttr.maxConcurrentPeers, 3);
+  EXPECT_EQ(net_.lastAttr.sendCommAttr.maxFlowsPerPeer, 2);
+}
+
+TEST_F(NetSendProgressMicrotest, Completion_ReleasesSlotAndReturnsCredit) {
+  ncclProxySubArgs& sub = AddSub(2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  net_.testDone = 0;
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(sub.done, 0u);
+  ASSERT_EQ(net_.tested.size(), 1u);
+  EXPECT_EQ(net_.tested[0], sub.requests[sub.base % NCCL_STEPS]);
+
+  net_.testDone = 1;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(sub.done, 1u);
+  EXPECT_EQ(Fifo(sub.base).size, -1);
+  EXPECT_EQ(res_.sendMem->head, sub.base + 1);
+}
+
+TEST_F(NetSendProgressMicrotest, CompletionWithGdrCopy_ReturnsCreditToGdcWord) {
+  uint64_t gdc = 0;
+  res_.gdcSync = &gdc;
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(gdc, sub.base + 1);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedCompletion_LeavesCreditsToPosting) {
+  MakeShared();
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  uint64_t postedHead = res_.sendMem->head;
+  GpuWrote(sub, 0, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(sub.done, 1u);
+  EXPECT_EQ(res_.sendMem->head, postedHead);
+}
+
+TEST_F(NetSendProgressMicrotest, AllSubsDone_EndsOpAndDropsRingReference) {
+  bool deleted = false;
+  auto* ring = new FakeRingAlgo(1);
+  ring->deleted = &deleted;
+  ncclProxySubArgs& sub = AddSub(1);
+  sub.ringAlgo = ring;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_->done, 1);
+  EXPECT_EQ(args_->state, ncclProxyOpNone);
+  EXPECT_TRUE(deleted);
+  EXPECT_EQ(sub.ringAlgo, nullptr);
+}
+
+TEST_F(NetSendProgressMicrotest, SharedRingStillReferenced_NotDeleted) {
+  bool deleted = false;
+  FakeRingAlgo ring(2);
+  ring.deleted = &deleted;
+  ncclProxySubArgs& sub = AddSub(1);
+  sub.ringAlgo = &ring;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_FALSE(deleted);
+  EXPECT_EQ(sub.ringAlgo, nullptr);
+}
+
+TEST_F(NetSendProgressMicrotest, PluginErrors_Propagate) {
+  ncclProxySubArgs& sub = AddSub(1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 0, 64);
+  net_.isendResult = ncclSystemError;
+  EXPECT_EQ(Progress(), ncclSystemError);
+
+  net_.isendResult = ncclSuccess;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  net_.testResult = ncclRemoteError;
+  EXPECT_EQ(Progress(), ncclRemoteError);
 }
 
 }  // namespace
