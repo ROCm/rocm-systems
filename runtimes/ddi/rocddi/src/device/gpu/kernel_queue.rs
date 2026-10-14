@@ -187,7 +187,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports an unqualified target or a native engine-query failure.
     pub fn available_sdma_engines(&self) -> Result<u32, Error> {
-        self.device.driver_state.available_sdma_engines()
+        self.driver.available_sdma_engines()
     }
 
     /// Creates a kernel-mediated queue with all bounded resources ready.
@@ -197,7 +197,7 @@ impl GpuDevice<'_> {
     /// or resource exhaustion.
     pub fn create_kernel_queue(&self, format: KernelQueueFormat) -> Result<KernelQueue, Error> {
         Ok(KernelQueue {
-            inner: self.device.driver_state.create_kernel_queue(format)?,
+            inner: self.driver.create_kernel_queue(format)?,
             format,
         })
     }

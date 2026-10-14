@@ -22,8 +22,8 @@ pub(crate) mod test_driver;
 mod tests;
 
 pub(crate) use instance::{
-    DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, KfdAllocation,
-    KfdDeviceState, new_driver_instance,
+    DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, GpuDriverRef,
+    KfdAllocation, KfdDeviceState, new_driver_instance,
 };
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
@@ -151,6 +151,9 @@ pub(crate) trait AllocationOperations: Driver {
         device: &Self::DeviceState,
     ) -> Result<u64, Error>;
     fn allocation_is_owned_by(allocation: &Self::Allocation, device: &Self::DeviceState) -> bool;
+    /// A successful release is idempotent. After failure, a later call must
+    /// safely resume cleanup or report terminal uncertainty without replaying
+    /// an ambiguous native operation. The generic owner also calls this on Drop.
     fn free_allocation(allocation: &mut Self::Allocation) -> Result<(), Error>;
     fn allocate_owned(
         &self,
