@@ -8,6 +8,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
+  - Returns link weight, status, type, hop count, and framebuffer-sharing data.
+  - Matches the existing host interface; includes Python and Rust bindings.
+  - Exports `AmdSmiLinkStatus` in Python and `AmdsmiLinkStatusT` in Rust for status interpretation.
+  - Self pair (same GPU): `INTERNAL`, `ENABLED`, zero hops and weight, `fb_sharing=1`.
+  - Migration from component APIs on baremetal:
+    - `amdsmi_topo_get_link_type(gpu, gpu)` reports PCIe and 2 hops instead.
+    - `amdsmi_topo_get_link_weight(gpu, gpu)` reports twice the NUMA node weight (typically 40).
+
 - **Added IFoE fabric RAS CPER API**.
   - `amdsmi_get_fabric_cper_entries()` — retrieve IFoE RAS CPER records from UALoE library
   - CLI: `amd-smi ras --cper` now reports fabric link events alongside GPU errors (fabric-linkdown, fabric-linkup, fabric-fatal)
