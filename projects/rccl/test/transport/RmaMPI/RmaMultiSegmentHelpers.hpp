@@ -16,8 +16,12 @@
 #include <cstdint>
 #include <vector>
 
+#include "MultiSegmentVmmHelpers.hpp"
+
 namespace RCCLRmaTests
 {
+
+using RCCLTestHelpers::ReleaseMappedVmm;
 
 // Contiguous VA range backed by N distinct VMM allocations mapped back-to-back.
 struct MultiSegmentVmmBuffer
@@ -32,28 +36,6 @@ struct MultiSegmentVmmBuffer
 
     bool valid() const { return ptr != nullptr && nSegments > 0; }
 };
-
-// Unmap, release, and free a reserved VA. `segSizes` wins when non-empty;
-// otherwise each mapped handle is `uniformSegSize` bytes.
-inline void ReleaseMappedVmm(hipDeviceptr_t base, size_t totalSize,
-                             const std::vector<hipMemGenericAllocationHandle_t>& handles,
-                             const std::vector<size_t>& segSizes, size_t uniformSegSize)
-{
-    size_t off = 0;
-    for (size_t i = 0; i < handles.size(); ++i)
-    {
-        const size_t len = segSizes.empty() ? uniformSegSize : segSizes[i];
-        if (base != 0 && len != 0)
-        {
-            hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(
-                reinterpret_cast<uintptr_t>(base) + off);
-            (void)hipMemUnmap(segVa, len);
-        }
-        if (handles[i] != 0) (void)hipMemRelease(handles[i]);
-        off += len;
-    }
-    if (base != 0 && totalSize != 0) (void)hipMemAddressFree(base, totalSize);
-}
 
 // Map `nSegments` granularity-rounded segments contiguously on `dev`. Returns
 // false (cleaned up) on any HIP failure so the caller can GTEST_SKIP.
