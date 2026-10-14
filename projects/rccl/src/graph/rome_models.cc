@@ -3939,7 +3939,9 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   } while (str[offset++] != 0);
 end:
   graph->nChannels = nChannels;
-  graph->bwIntra = graph->bwInter = system->totalBw / nChannels;
+  // A ring list that matched nothing is not an error -- callers test nChannels
+  // afterwards -- but dividing by it handed back an infinite bandwidth.
+  graph->bwIntra = graph->bwInter = nChannels ? system->totalBw / nChannels : 0;
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
       int64_t netId;

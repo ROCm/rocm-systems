@@ -389,6 +389,23 @@ TEST_F(RomeModelsParseGraphMicrotest, MoreChannelsThanMaxChannels_IsRejected) {
   EXPECT_LE(graph()->nChannels, MAXCHANNELS);
 }
 
+TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
+  // Callers test graph->nChannels after calling, so a ring list that matches
+  // nothing is not an error -- but it must not leave a bandwidth behind either.
+  // Seeded with a sentinel because the fixture zeroes the graph, and "bw is 0"
+  // would otherwise be true without parseGraph doing anything at all.
+  graph()->bwIntra = 99.0f;
+  graph()->bwInter = 99.0f;
+
+  // Two GPUs on a four-GPU system: no segment matches, so nChannels stays 0 and
+  // totalBw / nChannels used to divide by zero.
+  ASSERT_EQ(parseGraph("0 1", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+
+  EXPECT_EQ(graph()->nChannels, 0);
+  EXPECT_FLOAT_EQ(graph()->bwIntra, 0.0f);
+  EXPECT_FLOAT_EQ(graph()->bwInter, 0.0f);
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxChannels_IsAccepted) {
   system()->nodes[NET].count = 1;
   system()->nodes[NET].nodes[0].id = 77;
