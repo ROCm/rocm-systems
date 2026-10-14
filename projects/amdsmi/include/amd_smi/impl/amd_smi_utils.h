@@ -316,6 +316,14 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
     -> amdsmi_status_t;
 
 /**
+ *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
+ *
+ *  Returns an empty string (N/A) for ``0``, which kernels without a DRM driver
+ *  date report.
+ */
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
+
+/**
  *  @brief Select the DKMS package built for a running kernel.
  *
  *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then

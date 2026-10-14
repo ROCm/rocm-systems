@@ -6006,7 +6006,6 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   }
 
   // Get the driver date
-  std::string driver_date;
   auto version = drm_get_version(drm_fd);
   if (version == nullptr) {
     libdrm.unload();
@@ -6016,12 +6015,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
     return AMDSMI_STATUS_DRM_ERROR;
   }
 
-  driver_date = version->date;
-  // Reformat the driver date from 20150101 to 2015/01/01 00:00
-  if (driver_date.length() == 8) {
-    driver_date = driver_date.substr(0, 4) + "/" + driver_date.substr(4, 2) + "/" +
-                  driver_date.substr(6, 2) + " 00:00";
-  }
+  const auto driver_date = smi_amdgpu_format_driver_date(version->date);
   snprintf(info->driver_date, AMDSMI_MAX_STRING_LENGTH, "%s", driver_date.c_str());
 
   // Get the driver name
