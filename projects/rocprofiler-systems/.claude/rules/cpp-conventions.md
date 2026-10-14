@@ -22,7 +22,8 @@ description: C++ hard rules for rocprofiler-systems — standard, formatting, li
   function's return type sits on its own line.
 - Respect `.clang-tidy`. It enables an explicit list of checks, not entire
   check groups. Do not pass `--checks`, add a NOLINT suppression, or edit
-  `.clang-tidy` to hide a finding.
+  `.clang-tidy` to hide a finding. The one exception is the library-name
+  mirroring case in the naming list below.
 - Name identifiers the way `readability-identifier-naming` is configured.
   Do not copy a trailing underscore or a PascalCase type from an older file.
   - Types, functions, methods, parameters, variables, enumerators, and public
@@ -38,6 +39,13 @@ description: C++ hard rules for rocprofiler-systems — standard, formatting, li
   - Parameters, local variables, bindings, and exception names are at least
     3 characters. A loop counter may be `i`, `j`, or `k`.
   - Keep a library's own names: `SetUp`, `TearDown`, and `is_transparent`.
+  - In `source/lib/backends/<library>/` and its `tests/mock_*.hpp`, a name
+    that mirrors an external library name (a constant like
+    `CALLBACK_PHASE_ENTER`, or a struct field that must match the library
+    struct) keeps the library's spelling. Mark it with
+    `// NOLINTNEXTLINE(readability-identifier-naming)`, or wrap a block in
+    `NOLINTBEGIN`/`NOLINTEND` with a reason. This is the only allowed NOLINT
+    for naming.
 - Mark a function `[[nodiscard]]` when the caller must use the return value.
 - A bare numeric literal other than `0`, `1`, `2`, `3`, or `4` is a named
   constant. The literal belongs in that constant's initializer.
