@@ -18,7 +18,7 @@ class VectorMemState;
 enum class BufferFormatEncoding : uint8_t { Gfx9, Rdna1, Rdna2, Gfx11 };
 
 /// Independent of numeric format encoding: RDNA4 shares Gfx11 formats but
-/// replicates X; earlier formatted-buffer targets use Zero.
+/// replicates X; earlier formatted-buffer targets zero-fill missing channels.
 enum class BufferStoreMissingChannel { Zero, ReplicateFirst };
 
 enum class BufferNumberFormat { Unorm, Snorm, Uscaled, Sscaled, Uint, Sint, Float };

@@ -724,6 +724,22 @@ class LegalizationGenerator:
 # ---------------------------------------------------------------------------
 
 
+# Matches BufferFormatEncoding and BufferStoreMissingChannel in buffer_format.h.
+# RDNA1 and RDNA2 differ for packed formats despite sharing many numeric IDs.
+_BUFFER_FORMAT_FAMILIES = {
+    'cdna1': ('Gfx9', 'Zero'),
+    'cdna2': ('Gfx9', 'Zero'),
+    'cdna3': ('Gfx9', 'Zero'),
+    'cdna4': ('Gfx9', 'Zero'),
+    'rdna1': ('Rdna1', 'Zero'),
+    'rdna2': ('Rdna2', 'Zero'),
+    'rdna3': ('Gfx11', 'Zero'),
+    'rdna3_5': ('Gfx11', 'Zero'),
+    'rdna4': ('Gfx11', 'ReplicateFirst'),
+    'cdna5': ('NoFormattedBuffer', 'Zero'),
+}
+
+
 def _apply_domain_rules(
     entries: list[LegalizationEntry],
     src_isa: str,
@@ -744,26 +760,15 @@ def _apply_domain_rules(
         # when the action is overridden to flag a domain-specific lowering.
         prev_op = entry.action.target_opcode
 
-        # Formatted stores need both compatible descriptor/format encoding and
-        # the same missing-channel policy. A raw re-encoding cannot supply either.
-        format_family = {
-            'cdna1': 'gfx9',
-            'cdna2': 'gfx9',
-            'cdna3': 'gfx9',
-            'cdna4': 'gfx9',
-            'rdna1': 'gfx10',
-            'rdna2': 'gfx10',
-            'rdna3': 'gfx11',
-            'rdna3_5': 'gfx11',
-            'rdna3.5': 'gfx11',
-            'rdna4': 'gfx12',
-            'cdna5': 'no_formatted_buffer',
-        }
+        # Formatted accesses need compatible descriptor/format encoding; stores
+        # also need the same missing-channel policy. Raw re-encoding is insufficient.
         if (
-            name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+            name.startswith(
+                ('BUFFER_LOAD_', 'BUFFER_STORE_', 'TBUFFER_LOAD_', 'TBUFFER_STORE_')
+            )
             and 'FORMAT' in name
-            and format_family.get(src_isa, src_isa)
-            != format_family.get(dst_isa, dst_isa)
+            and _BUFFER_FORMAT_FAMILIES.get(src_isa, src_isa)
+            != _BUFFER_FORMAT_FAMILIES.get(dst_isa, dst_isa)
         ):
             entry.action = LegalizationAction.expand(ExpansionKind.BUFFER_FORMAT_POLICY)
 

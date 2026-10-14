@@ -19,13 +19,19 @@ about a CDNA5 formatted-buffer execution path.
 An exhaustive native sweep of all 24 selector permutations, four store widths,
 and packed/unpacked sources (192 cases per GPU) found that arbitrary DST_SEL
 routing is not the inverse of load routing on either gfx1100 or gfx1201.
-Repeated and constant selectors also diverge. Untyped formatted stores now
-support the measured straight/reversed orders and report an unsupported operand
-for other routing before issuing memory writes. Constants for components absent
-from a narrow memory format do not affect the straight channel order. Typed
-stores use their explicit identity mapping. General store routing remains
-unqualified; reproducing inverse swizzling for arbitrary selectors is incorrect.
+Repeated and constant selectors also diverge. Additional native probes covered
+one-, two-, and three-channel UINT formats (8, 8_8, and 32_32_32), all source
+widths and packed/unpacked sources. Four-channel straight/reversed orders and
+narrow canonical R001/RG01/RGB1 patterns agree with inverse routing. Single-channel
+identity, WZYX and A8 views also agree. In contrast, identity RGBA on an 8_8
+format writes X/W, not X/Y, and narrow WZYX is not generally an inverse.
+Untyped stores and the public packing helper share an exact qualification
+predicate and reject unsupported selectors before writing. Typed stores use
+their explicit identity mapping, separately confirmed on narrow native formats.
+Other numeric formats and older families inherit the same channel-routing rule;
+they were not independently measured. General store routing remains unqualified.
 
-Cross-family formatted stores now require semantic expansion in DBT when format
-encoding or the missing-channel policy differs. Until that expansion exists,
-translation rejects them instead of silently re-encoding an inequivalent store.
+Cross-family formatted loads and stores require semantic expansion in DBT when
+format encoding or the missing-channel policy differs. RDNA1 and RDNA2 have
+distinct format tables. Until expansion exists, translation rejects these
+accesses instead of silently re-encoding an inequivalent descriptor or opcode.

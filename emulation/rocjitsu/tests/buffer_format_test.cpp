@@ -98,10 +98,11 @@ TEST(BufferFormatTest, PacksConvertedComponentsWithExplicitMissingChannelPolicy)
                                          amdgpu::BufferStoreMissingChannel::ReplicateFirst)
                   .failed());
   const std::array<uint32_t, 2> halves{bits(1), bits(-2)};
-  ASSERT_TRUE(amdgpu::pack_buffer_format(29, identity, halves, bytes).succeeded());
+  ASSERT_TRUE(amdgpu::pack_buffer_format(29, 4 | (5 << 3) | (1 << 9), halves, bytes).succeeded());
   EXPECT_EQ(bytes, (std::array<uint8_t, 4>{0, 0x3c, 0, 0xc0}));
   const std::array<uint32_t, 3> floats{bits(1), bits(2), bits(0.5f)};
-  ASSERT_TRUE(amdgpu::pack_buffer_format(30, identity, floats, bytes).succeeded());
+  ASSERT_TRUE(amdgpu::pack_buffer_format(30, 4 | (5 << 3) | (6 << 6) | (1 << 9), floats, bytes)
+                  .succeeded());
   EXPECT_EQ(std::bit_cast<uint32_t>(bytes), (15u << 6) | ((16u << 6) << 11) | ((14u << 5) << 22));
 }
 
@@ -244,6 +245,12 @@ protected:
       switch (modern) {
       case 0:
         return 0;
+      case 5:
+        return 1 | (4 << 4); // 8_UINT.
+      case 18:
+        return 3 | (4 << 4); // 8_8_UINT.
+      case 58:
+        return 13 | (4 << 4); // 32_32_32_UINT.
       case 11:
         return 2 | (4 << 4); // 16_UINT.
       case 20:
@@ -482,17 +489,21 @@ TEST_P(BufferFormatExecutionTest, MissingStoreChannelsFollowArchitectureForAllWi
             inst.reset(decode_valid(*decoder, words.data()));
           } else if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
             if (typed) {
-              const auto words = rdna1::build_mtbuf(4 + count - 1, {.idxen = 1,
-                                                                    .format = 60,
-                                                                    .vdata = 8,
-                                                                    .srsrc = 1,
-                                                                    .opm = uint8_t(d16),
-                                                                    .soffset = 128});
+              const auto words =
+                  rdna1::build_mtbuf(4 + count - 1, {.idxen = 1,
+                                                     .format = 60,
+                                                     .vdata = 8,
+                                                     .srsrc = 1,
+                                                     .opm = static_cast<uint8_t>(d16),
+                                                     .soffset = 128});
               inst.reset(decode_valid(*decoder, words.data()));
             } else {
-              const auto words = rdna1::build_mubuf(
-                  4 + count - 1,
-                  {.idxen = 1, .opm = uint8_t(d16), .vdata = 8, .srsrc = 1, .soffset = 128});
+              const auto words =
+                  rdna1::build_mubuf(4 + count - 1, {.idxen = 1,
+                                                     .opm = static_cast<uint8_t>(d16),
+                                                     .vdata = 8,
+                                                     .srsrc = 1,
+                                                     .soffset = 128});
               inst.reset(decode_valid(*decoder, words.data()));
             }
           } else if (typed && arch_is_cdna_4_or_lower(arch)) {
@@ -556,6 +567,58 @@ TEST_P(BufferFormatExecutionTest, UnqualifiedStoreSelectorsAreRejectedBeforeMemo
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.is_load = false;
     EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 1).failed());
+  }
+}
+
+TEST_P(BufferFormatExecutionTest, NarrowStoreRoutingUsesQualifiedSelectorPatterns) {
+  auto decoder = Decoder::create(GetParam());
+  wf->set_exec(1);
+  for (uint32_t i = 0; i < 4; ++i)
+    cu->write_vgpr(wf->vgpr_alloc().base + 8 + i, 0, 0x11u * (i + 1));
+  for (uint32_t format : {5u, 18u, 58u}) {
+    const uint32_t channels = format == 5 ? 1 : format == 18 ? 2 : 3;
+    uint32_t selectors = 1u << 9;
+    for (uint32_t i = 0; i < channels; ++i)
+      selectors |= (i + 4) << (3 * i);
+    for (bool alpha : {false, true}) {
+      if (alpha && channels != 1)
+        continue;
+      descriptor(format, 16, alpha ? 4u << 9 : selectors);
+      cu->write_sgpr(wf->sgpr_alloc().base + 6, 64);
+      memory.write32(0x1000, 0xa5a5a5a5u);
+      std::unique_ptr<Instruction> inst;
+      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4) {
+        const auto words =
+            rdna4::build_vbuffer(rdna4::kBufferStoreFormatXyzwVbuffer,
+                                 {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = 8, .rsrc = 4});
+        inst.reset(decode_valid(*decoder, words.data()));
+      } else {
+        const auto words = cdna4::build_mubuf(7, {.vdata = 8, .srsrc = 1, .soffset = 128});
+        inst.reset(decode_valid(*decoder, words.data()));
+      }
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      EXPECT_EQ(memory.read32(0x1000), channels == 1   ? (alpha ? 0xa5a5a544u : 0xa5a5a511u)
+                                       : channels == 2 ? 0xa5a52211u
+                                                       : 0x11u);
+      if (channels == 3) {
+        EXPECT_EQ(memory.read32(0x1004), 0x22u);
+        EXPECT_EQ(memory.read32(0x1008), 0x33u);
+      }
+    }
+  }
+  for (uint32_t selectors :
+       {identity, 4u | (5u << 3) | (4u << 6) | (5u << 9), 7u | (6u << 3) | (5u << 6) | (4u << 9)}) {
+    descriptor(18, 16, selectors);
+    amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+    state.is_load = false;
+    EXPECT_TRUE(amdgpu::prepare_buffer_format(*wf, state, 4, -1, 4).failed());
+    std::array<uint8_t, 2> bytes{0xa5, 0xa5};
+    const std::array<uint32_t, 4> components{0x11, 0x22, 0x33, 0x44};
+    EXPECT_TRUE(amdgpu::pack_buffer_format(18, selectors, components, bytes).failed());
+    EXPECT_EQ(bytes, (std::array<uint8_t, 2>{0xa5, 0xa5}));
   }
 }
 
@@ -880,7 +943,7 @@ TEST_P(BufferFormatExecutionTest, RdnaBoundsClampRawDwordsButDropFormattedTransf
   }
   descriptor(60, 16); // 12-byte formatted transfer, only 8 bytes in range.
   cu->write_sgpr(sb + 6, 8);
-  cu->write_sgpr(sb + 7, identity | (60u << 12) | (3u << 28));
+  cu->write_sgpr(sb + 7, 4 | (5 << 3) | (6 << 6) | (60u << 12) | (3u << 28));
   cu->write_vgpr(vb, last, 0);
   issue(true);
   for (uint32_t i = 0; i < 4; ++i)

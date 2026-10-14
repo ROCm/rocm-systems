@@ -224,6 +224,27 @@ std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
   return result;
 }
 
+// Native gfx1100/gfx1201 sweeps qualify exact selector patterns by memory
+// channel count. General DST_SEL routing is not an inverse of load swizzling.
+bool qualified_store_selectors(const Format &f, uint32_t selectors) {
+  constexpr uint32_t identity = 4 | (5 << 3) | (6 << 6) | (7 << 9);
+  constexpr uint32_t reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
+  const uint32_t channels =
+      std::count_if(f.widths.begin(), f.widths.end(), [](uint32_t width) { return width != 0; });
+  if (channels == 4)
+    return selectors == identity || selectors == reversed;
+  if (channels == 1 && (selectors == identity || selectors == reversed || selectors == (4 << 9)))
+    return true; // Single-channel identity, WZYX, and A8 views were measured.
+  if (!channels)
+    return false;
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    const uint32_t selector = (selectors >> (channel * 3)) & 7;
+    if (channel < channels ? selector != channel + 4 : selector > 1)
+      return false;
+  }
+  return true;
+}
+
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
                  std::span<uint8_t> bytes, BufferStoreMissingChannel missing) {
   std::fill(bytes.begin(), bytes.end(), 0);
@@ -233,7 +254,7 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
     if (!width)
       continue;
     // Stores invert the descriptor's load mapping: an A8 view maps shader
-    // W to physical R. The caller supplies the missing-channel policy.
+    // W to physical R. Only qualified selector patterns reach this helper.
     uint32_t component = 0;
     for (uint32_t shader = 0; shader < 4; ++shader) {
       if (((selectors >> (3 * shader)) & 7) == i + 4) {
@@ -267,7 +288,8 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
                                 BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed() || components.empty())
+  if (decoded.failed() || components.empty() ||
+      !qualified_store_selectors(decoded.value(), selectors))
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
   pack_format(decoded.value(), selectors, components, bytes, missing);
@@ -305,19 +327,9 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   if (decoded.failed())
     return util::Result::failure();
   d.decoded_buffer_format = decoded.value();
-  if (!d.is_load && format < 0) {
-    // Arbitrary DST_SEL permutations are not an inverse swizzle on hardware.
-    // Qualify the common straight and reversed channel orders; constants for
-    // components absent from the memory format do not affect a straight store.
-    bool straight = true;
-    for (unsigned channel = 0; channel < 4; ++channel)
-      if (d.decoded_buffer_format.widths[channel] &&
-          ((d.buffer_selectors >> (channel * 3)) & 7) != channel + 4)
-        straight = false;
-    constexpr unsigned reversed = 7 | (6 << 3) | (5 << 6) | (4 << 9);
-    if (!straight && d.buffer_selectors != reversed)
-      return util::Result::failure();
-  }
+  if (!d.is_load && format < 0 &&
+      !qualified_store_selectors(d.decoded_buffer_format, d.buffer_selectors))
+    return util::Result::failure();
   uint32_t bits = 0;
   for (uint32_t width : d.decoded_buffer_format.widths)
     bits += width;

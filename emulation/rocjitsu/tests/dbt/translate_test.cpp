@@ -892,9 +892,11 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
                                    "does not expose a non-empty .text section"));
 }
 
-TEST(BinaryTranslatorE2E, FormattedStoresRequireCrossFamilySemanticExpansion) {
+TEST(BinaryTranslatorE2E, FormattedAccessesRequireCrossFamilySemanticExpansion) {
   for (bool typed : {false, true})
-    for (uint16_t opcode : {4, 5, 6, 7, 12, 13, 14, 15}) {
+    for (uint16_t opcode : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 38, 39}) {
+      if (typed && opcode > 15)
+        continue;
       const auto store =
           typed ? cdna4::build_mtbuf(
                       opcode, {.dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128})
