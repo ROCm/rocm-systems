@@ -19,6 +19,8 @@ Older planning drafts are on branch `users/feizheng10/aiprofcomp-865-docs-backup
 
 `rocprof-compute profile` replays a kernel once per perfmon pass. Each hardware block in a pass has its own counter limit (`perfmon_config` on `CounterFile` in `src/rocprof_compute_soc/soc_base.py`). A pass can hold GRBM and SQ together, because each counter is charged only to its own block. The pass cannot hold more SQ counters than the SQ limit, even when GRBM still has room.
 
+On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` both charge that SQ block. They do not share a pass. The SP FLOP counters return zero when they do, and free SQ slots do not prevent that. The packer rejects the mix before it treats a PMC set as single-pass packable, and again when it places a set, merges passes, and places leftover counters. An extra pass is acceptable.
+
 gfx942, the reference architecture, is one example from `src/utils/mi_gpu_spec.yaml`:
 
 ```yaml
@@ -214,6 +216,7 @@ After Phase 2 YAML, the gfx942 allocator gate is `packable_multi == 0`, passes =
 | Decision | Why | Alternative |
 |----------|-----|-------------|
 | SPP packing replaces the shipping allocator | The shipping pack minimizes passes for all 274 counters, so 75 metrics whose sets fit one pass stay split | The shipping allocator's hand-kept list of metrics to keep together. It covers only a few metric IDs |
+| On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` do not share a pass | Both charge SQ, and the SP FLOP counters return zero when they share a pass. Free SQ slots do not prevent that. The check runs before a set is called single-pass packable, and during placement, merge, and leftover fill. An extra pass is acceptable | Treating free SQ slots as enough to share a pass |
 | Copy a counter into another pass when two PMC sets cannot share a pass | Keeping each counter in only one pass cannot place all 358 SPP sets, and gfx942 stays at 14 passes | One dedicated pass per metric |
 | Reading each metric from one pass ships with packing | A copied counter has several values. Merging them evaluates the ratio on different replays. `CPC Utilization` averages can sit far above 100% | Packing alone, or reading from one pass alone |
 | A metric that cannot be read from one pass stays unset | Values merged across passes are the error this design removes | Falling back to columns merged from several passes |
@@ -251,7 +254,6 @@ No new privilege, network, or credential surface. Profile still launches the exi
 
 ## Open questions
 
-- Pass budgets other than gfx942 are not locked. The impact on gfx1250 was evaluated the same way as the other architectures. Hardware testing of gfx1250 comes in a separate pull request.
 - Filtered `--block` / `--set` profiles allocate only the counters that were requested. There is no separate acceptance count for those subsets.
 - An SPU parent leaves its YAML `min` and `max` empty (FR-8). A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. A later definition of min and max for a split parent is deferred.
 - One replay can still be split into time slices. This design does not cover that. Reading each metric from one pass is about which replay the counters come from.
