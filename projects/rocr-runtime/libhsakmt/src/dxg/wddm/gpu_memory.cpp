@@ -51,16 +51,20 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
   alloc_handles_ptr_ = &alloc_handle_;
   resource_ = 0;
   mem_fd_ = -1;
+  peer_mem_ = nullptr;
 }
 
 GpuMemory::~GpuMemory() {
   // Release the Lock2 pin before tearing down the allocation handles, since
   // DestroyAllocation invalidates the handles Unlock2 needs.
   UnlockSystemMemory();
-  FreeGpuVirtualAddress(GpuAddress(), Size());
+  /* A peer view maps the owner's VA. The owner frees that reservation. */
+  if (!peer_mem_) {
+    FreeGpuVirtualAddress(GpuAddress(), Size());
+    if (desc_.handle_ape_addr > 0)
+      dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
+  }
   FreePhysicalMemory();
-  if (desc_.handle_ape_addr > 0)
-    dxg_runtime->HandleApertureFree(desc_.handle_ape_addr);
 }
 
 ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
@@ -882,6 +886,66 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info
 
   if (create_info.flags.sysmem_ipc_sig_importer) return ImportPhysicalFD(create_info, gpu_addr);
   return ImportPhysicalAllocHandle(create_info, gpu_addr);
+}
+
+ErrorCode GpuMemory::MapFromPeerDev(GpuMemory *peer_mem) {
+  if (peer_mem == nullptr || peer_mem->GetDevice() == device_)
+    return ErrorCode::InvalidateParams;
+
+  if (peer_mem->IsVirtual() || peer_mem->IsPhysicalOnly())
+    return ErrorCode::UnSupported;
+
+  if (peer_mem->IsLocal()) {
+    pr_err("map vram from peer dev not ready\n");
+    return ErrorCode::UnSupported;
+  }
+
+  if (!peer_mem->IsUserMemory() && !peer_mem->IsSystem()) {
+    pr_err("not supported to map from peer device for peer_mem %p\n", peer_mem);
+    return ErrorCode::UnSupported;
+  }
+
+  peer_mem_ = peer_mem;
+  desc_ = peer_mem->desc_;
+  auto code = ErrorCode::Success;
+  num_allocations_ = peer_mem->NumChunks();
+  if (num_allocations_ == 1)
+    alloc_handles_ptr_ = &alloc_handle_;
+  else
+    alloc_handles_ptr_ = new WinAllocationHandle[num_allocations_];
+
+  memset(alloc_handles_ptr_, 0, num_allocations_ * sizeof(WinAllocationHandle));
+  bool physical_created = false;
+
+  auto guard = rocr::MakeScopeGuard([this, &physical_created, &code]() {
+    if (code != ErrorCode::Success) {
+      if (physical_created) {
+        FreePhysicalMemory();
+      } else if (num_allocations_ > 1) {
+        delete[] alloc_handles_ptr_;
+        alloc_handles_ptr_ = &alloc_handle_;
+      }
+    }
+  });
+  (void)guard;
+
+  code = CreatePhysicalMemory();
+  if (code != ErrorCode::Success)
+    return code;
+  physical_created = true;
+
+  code = MapGpuVirtualAddress(GpuAddress(), Size());
+  if (code != ErrorCode::Success)
+    return code;
+
+  code = MakeResident();
+  if (code != ErrorCode::Success)
+    return code;
+
+  if (!GetDevice()->WaitOnPagingFenceFromCpu())
+    code = ErrorCode::Unknown;
+
+  return code;
 }
 
 } // namespace thunk

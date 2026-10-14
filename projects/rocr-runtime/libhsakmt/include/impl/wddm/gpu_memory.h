@@ -281,6 +281,9 @@ public:
                                       gpusize* gpu_addr = nullptr);
   ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo& create_info,
                                  gpusize* gpu_addr = nullptr);
+  /* Map this device's view of peer_mem at the peer's existing GPU VA.
+   * System and user memory only; the peer keeps the VA reservation. */
+  ErrorCode MapFromPeerDev(GpuMemory *peer_mem);
   WinAllocationHandle KmtHandle() const { return alloc_handle_; }
   ~GpuMemory();
 
@@ -302,6 +305,7 @@ private:
   WinResourceHandle resource_;     // Handle to a resource object that wraps the allocation. Used for shared resources
 
   int mem_fd_; // IPC sigal's sys mem fd
+  GpuMemory *peer_mem_; // non-null when this object is a peer view of another GpuMemory
 
   bool is_phymem_created = false; // status of physical memory allocation
   bool is_sysmem_locked_ = false; // kSystem allocation pinned via D3DKMTLock2
