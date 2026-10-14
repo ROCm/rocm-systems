@@ -45,6 +45,7 @@
 
 #include <stdint.h>
 
+#include <atomic>
 #include <vector>
 #include <map>
 #include <string>
@@ -137,6 +138,12 @@ class Flag {
     // Default to false because gpu poll is stuck in KMD
     enable_sdma_gpu_poll_ = (var == "1") ? true : false;
 #endif
+
+    // Opt-in multi-sample GPU/CPU clock correlation. Profiling tools enable this
+    // at runtime through hsa_amd_enable_high_precision_timestamps. Unset or any
+    // value other than "1" leaves the single-query path in place.
+    var = os::GetEnvVar("HSA_ENABLE_HIGH_PRECISION_TIMESTAMPS");
+    enable_high_precision_timestamps_.store(var == "1", std::memory_order_relaxed);
 
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
@@ -458,6 +465,14 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma_recommended_eng() const { return enable_sdma_recommended_eng_; }
 
+  bool enable_high_precision_timestamps() const {
+    return enable_high_precision_timestamps_.load(std::memory_order_relaxed);
+  }
+
+  void set_enable_high_precision_timestamps(bool enable) {
+    enable_high_precision_timestamps_.store(enable, std::memory_order_relaxed);
+  }
+
   std::string visible_gpus() const { return visible_gpus_; }
 
   bool filter_visible_gpus() const { return filter_visible_gpus_; }
@@ -652,6 +667,8 @@ class Flag {
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
   SDMA_OVERRIDE enable_sdma_recommended_eng_;
+
+  std::atomic<bool> enable_high_precision_timestamps_{false};
 
   bool filter_visible_gpus_;
   std::string visible_gpus_;

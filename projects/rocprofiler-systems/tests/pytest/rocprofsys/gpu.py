@@ -245,6 +245,8 @@ def lookup_gpu_category(
         "gfx1151",
         "gfx1152",
         "gfx1153",
+        "gfx1170",
+        "gfx1171",
     ]
 
     categories: list[str] = []

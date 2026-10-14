@@ -25,7 +25,6 @@ typedef __typeof__(((amdf_xdna_device_info_t *)0)->instruction) amdf_xdna_device
 int main(void) {
   printf("type amdf_input_structure_t %zu %zu\n", sizeof(amdf_input_structure_t), _Alignof(amdf_input_structure_t));
   printf("type amdf_output_structure_t %zu %zu\n", sizeof(amdf_output_structure_t), _Alignof(amdf_output_structure_t));
-  printf("type amdf_allocator_t %zu %zu\n", sizeof(amdf_allocator_t), _Alignof(amdf_allocator_t));
   printf("type amdf_instance_create_info_t %zu %zu\n", sizeof(amdf_instance_create_info_t), _Alignof(amdf_instance_create_info_t));
   printf("type amdf_endpoint_id_t %zu %zu\n", sizeof(amdf_endpoint_id_t), _Alignof(amdf_endpoint_id_t));
   printf("type amdf_device_id_t %zu %zu\n", sizeof(amdf_device_id_t), _Alignof(amdf_device_id_t));
@@ -115,9 +114,6 @@ int main(void) {
   printf("type amdf_structure_type_e %zu %zu\n", sizeof(enum amdf_structure_type_e), _Alignof(enum amdf_structure_type_e));
   printf("type amdf_extension_id_t %zu %zu\n", sizeof(amdf_extension_id_t), _Alignof(amdf_extension_id_t));
   printf("type amdf_extension_id_e %zu %zu\n", sizeof(enum amdf_extension_id_e), _Alignof(enum amdf_extension_id_e));
-  printf("type amdf_allocator_allocate_fn_t %zu %zu\n", sizeof(amdf_allocator_allocate_fn_t), _Alignof(amdf_allocator_allocate_fn_t));
-  printf("type amdf_allocator_resize_fn_t %zu %zu\n", sizeof(amdf_allocator_resize_fn_t), _Alignof(amdf_allocator_resize_fn_t));
-  printf("type amdf_allocator_free_fn_t %zu %zu\n", sizeof(amdf_allocator_free_fn_t), _Alignof(amdf_allocator_free_fn_t));
   printf("type amdf_native_lifetime_t %zu %zu\n", sizeof(amdf_native_lifetime_t), _Alignof(amdf_native_lifetime_t));
   printf("type amdf_native_lifetime_e %zu %zu\n", sizeof(enum amdf_native_lifetime_e), _Alignof(enum amdf_native_lifetime_e));
   printf("type amdf_engine_kind_t %zu %zu\n", sizeof(amdf_engine_kind_t), _Alignof(amdf_engine_kind_t));
@@ -214,16 +210,11 @@ int main(void) {
   printf("field amdf_output_structure_t.type %zu %zu %zu\n", offsetof(amdf_output_structure_t, type), sizeof(((amdf_output_structure_t *)0)->type), __alignof__(((amdf_output_structure_t *)0)->type));
   printf("field amdf_output_structure_t.structure_size %zu %zu %zu\n", offsetof(amdf_output_structure_t, structure_size), sizeof(((amdf_output_structure_t *)0)->structure_size), __alignof__(((amdf_output_structure_t *)0)->structure_size));
   printf("field amdf_output_structure_t.next %zu %zu %zu\n", offsetof(amdf_output_structure_t, next), sizeof(((amdf_output_structure_t *)0)->next), __alignof__(((amdf_output_structure_t *)0)->next));
-  printf("field amdf_allocator_t.user_data %zu %zu %zu\n", offsetof(amdf_allocator_t, user_data), sizeof(((amdf_allocator_t *)0)->user_data), __alignof__(((amdf_allocator_t *)0)->user_data));
-  printf("field amdf_allocator_t.allocate %zu %zu %zu\n", offsetof(amdf_allocator_t, allocate), sizeof(((amdf_allocator_t *)0)->allocate), __alignof__(((amdf_allocator_t *)0)->allocate));
-  printf("field amdf_allocator_t.resize %zu %zu %zu\n", offsetof(amdf_allocator_t, resize), sizeof(((amdf_allocator_t *)0)->resize), __alignof__(((amdf_allocator_t *)0)->resize));
-  printf("field amdf_allocator_t.free %zu %zu %zu\n", offsetof(amdf_allocator_t, free), sizeof(((amdf_allocator_t *)0)->free), __alignof__(((amdf_allocator_t *)0)->free));
   printf("field amdf_instance_create_info_t.type %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, type), sizeof(((amdf_instance_create_info_t *)0)->type), __alignof__(((amdf_instance_create_info_t *)0)->type));
   printf("field amdf_instance_create_info_t.structure_size %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, structure_size), sizeof(((amdf_instance_create_info_t *)0)->structure_size), __alignof__(((amdf_instance_create_info_t *)0)->structure_size));
   printf("field amdf_instance_create_info_t.next %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, next), sizeof(((amdf_instance_create_info_t *)0)->next), __alignof__(((amdf_instance_create_info_t *)0)->next));
   printf("field amdf_instance_create_info_t.native_lifetime %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, native_lifetime), sizeof(((amdf_instance_create_info_t *)0)->native_lifetime), __alignof__(((amdf_instance_create_info_t *)0)->native_lifetime));
   printf("field amdf_instance_create_info_t.reserved %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, reserved), sizeof(((amdf_instance_create_info_t *)0)->reserved), __alignof__(((amdf_instance_create_info_t *)0)->reserved));
-  printf("field amdf_instance_create_info_t.host_allocator %zu %zu %zu\n", offsetof(amdf_instance_create_info_t, host_allocator), sizeof(((amdf_instance_create_info_t *)0)->host_allocator), __alignof__(((amdf_instance_create_info_t *)0)->host_allocator));
   printf("field amdf_endpoint_id_t.words %zu %zu %zu\n", offsetof(amdf_endpoint_id_t, words), sizeof(((amdf_endpoint_id_t *)0)->words), __alignof__(((amdf_endpoint_id_t *)0)->words));
   printf("field amdf_device_id_t.words %zu %zu %zu\n", offsetof(amdf_device_id_t, words), sizeof(((amdf_device_id_t *)0)->words), __alignof__(((amdf_device_id_t *)0)->words));
   printf("field amdf_queue_id_t.words %zu %zu %zu\n", offsetof(amdf_queue_id_t, words), sizeof(((amdf_queue_id_t *)0)->words), __alignof__(((amdf_queue_id_t *)0)->words));

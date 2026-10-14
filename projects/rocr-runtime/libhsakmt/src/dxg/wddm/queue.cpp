@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
+#include <algorithm>
 #include <cstring>
 #include <cinttypes>
 #include <cstddef>
@@ -194,8 +195,8 @@ void ComputeQueue::HandleError(hsa_status_t status) {
       {32, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT},
       {64, HSA_STATUS_ERROR_INVALID_ARGUMENT},
       //{128, HSA_STATUS_ERROR_OUT_OF_REGISTERS},
-      //{0x20000000, HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION},
-      //{0x40000000, HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION},
+      {0x20000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION)},
+      {0x40000000, static_cast<hsa_status_t>(HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION)},
       {0x80000000, HSA_STATUS_ERROR_EXCEPTION},
   };
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
@@ -206,11 +207,41 @@ void ComputeQueue::HandleError(hsa_status_t status) {
     }
   }
 
+  // Trigger ROCr's DynamicQueueEventsHandler → callbackQueue(); it decodes this bitmask back.
   if (sig.handle) {
     hsakmt_hsa_signal_store_screlease(sig, val);
   }
-  if (error_code_) {
-    error_code_->store(val, std::memory_order_release);
+}
+
+void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
+  constexpr int kStallTimeoutMs = 30000;
+  uint64_t last_rptr = 0;
+  auto last_progress = std::chrono::steady_clock::now();
+
+  while (!queue->thread_stop_) {
+    // Stall detection: rptr hasn't advanced while work is pending.
+    // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
+    if (!dxg_runtime->disable_wait_timeout_) {
+      uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
+      uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
+      if (current_rptr != last_rptr) {
+        last_rptr = current_rptr;
+        last_progress = std::chrono::steady_clock::now();
+      } else if (current_wptr > current_rptr) {
+        auto stall_duration = std::chrono::steady_clock::now() - last_progress;
+        if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
+          if (queue->thread_stop_.exchange(true)) return;
+          pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
+                 " stalled for %dms — possible device memory fault\n",
+                 current_rptr, current_wptr, kStallTimeoutMs);
+          // error reason is not set. So setting this error as default
+          queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          return;
+        }
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
 
@@ -220,11 +251,21 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
   std::chrono::steady_clock::time_point start_time, time;
   // Set the polling timeout value for 2 seconds
   const std::chrono::milliseconds kMaxElapsed(2000);
+  // Device enqueue bumps the write index from the GPU and rings a software doorbell that is a
+  // plain memory write, so nothing notifies us; poll instead of waiting forever. Back off while
+  // nothing moves so an idle queue does not wake up thousands of times per second.
+  constexpr std::chrono::microseconds kPollMin(50);
+  constexpr std::chrono::microseconds kPollMax(2000);
+  auto poll_interval = kPollMin;
   uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
+  // Last reported {wptr, rptr, gpu fence} so the idle log only fires on real progress.
+  uint64_t last_wait_state[3] = {~0ull, ~0ull, ~0ull};
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
+    if (queue->thread_stop_) break;
+
     if (!queue->IsInvalidPacket()) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
@@ -251,9 +292,20 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
     if (queue->GetRingWptr()->load() <= queue->GetRingRptr()->load() ||
         (sleep && queue->IsInvalidPacket())) {
       if (queue->thread_stop_) break;
-      pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n", queue->ring,
-               queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
-      queue->thread_cond_.wait(lock);
+      // sync_addr stays NULL until Init(), which runs after this thread is spawned.
+      const uint64_t state[3] = {queue->GetRingWptr()->load(), queue->GetRingRptr()->load(),
+                                 queue->sync_addr ? *queue->sync_addr : 0};
+      if (memcmp(state, last_wait_state, sizeof(state))) {
+        pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 " fence=%" PRIx64 "\n", queue->ring,
+                 state[0], state[1], state[2]);
+        memcpy(last_wait_state, state, sizeof(state));
+        poll_interval = kPollMin;
+      } else {
+        poll_interval = std::min(poll_interval * 2, kPollMax);
+      }
+      // Submission still wakes us through notify_one; only thread_stop_ can be delayed by up
+      // to one interval, which the destructor absorbs.
+      queue->thread_cond_.wait_for(lock, poll_interval);
     }
   }
 
@@ -269,7 +321,6 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
           (use_hws && device->IsAqlSupported()) ? ring_size * 64 : cmdbuf_size, engine, use_hws),
       ring(ring),
       ring_size(ring_size),
-      error_code_(reinterpret_cast<volatile std::atomic<int64_t>*>(error_addr)),
       ib_start_addr(0),
       ib_size(0),
       sync_point(0),
@@ -286,6 +337,7 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       scratch_base_(nullptr) {
   ring_wptr = _ring_wptr;
   ring_rptr = _ring_rptr;
+  // Null on WSL: ROCr sets it only under supports_exception_debugging, and nothing writes it.
   error_reason_ = error_addr;
   error_event_id_ = event_id;
   amd_queue_rocr_ = (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
@@ -294,20 +346,26 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
   bool ret = device->CreateQueue(this, !native_aql_ ? reinterpret_cast<uint64_t>(_ring_rptr) : 0);
   assert(ret);
 
+  // Device-side enqueue rings this doorbell with a plain store from the shader, so the address
+  // must be GPU mapped or the store faults. Nothing ever reads the value back: the host rings
+  // through hsaKmtQueueRingDoorbell and submission tracks amd_queue_rocr_->write_dispatch_id.
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
   create_info.domain = Wkmi::kSystem;
-  GpuMemory* gpu_mem = nullptr;
-  auto code = device->CreateGpuMemory(create_info, &gpu_mem);
+  GpuMemory* doorbell_mem = nullptr;
+  auto code = device->CreateGpuMemory(create_info, &doorbell_mem);
   assert(code == ErrorCode::Success);
-  amd_queue_mem_ = gpu_mem->GetGpuMemoryHandle();
-  amd_queue_ = reinterpret_cast<amd_queue_v2_t*>(gpu_mem->GpuAddress());
+  doorbell_mem_ = doorbell_mem->GetGpuMemoryHandle();
+  doorbell_ptr_ = reinterpret_cast<uint64_t*>(doorbell_mem->GpuAddress());
+  *doorbell_ptr_ = 0;
 
-  amd_queue_rocr_ =
-      (amd_queue_v2_t*)((char*)ring_rptr - offsetof(amd_queue_v2_t, read_dispatch_id));
   // Native AQL submission bypasses the PM4 translation thread.
   if (!native_aql_) {
     aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
+  }
+  // trigger thread when no interrupts are available
+  if (error_event_id_ == 0) {
+    fault_monitor_thread_ = std::thread(FaultMonitorThread, this);
   }
 
   if (device->Major() >= 11)
@@ -317,15 +375,18 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
 }
 
 ComputeQueue::~ComputeQueue() {
+  thread_stop_ = true;
+
   if (!native_aql_) {
     thread_cond_lock_.lock();
-    thread_stop_ = true;
     thread_cond_lock_.unlock();
     thread_cond_.notify_one();
     aql_to_pm4_thread_.join();
   }
 
-  // doorbell_signal_->Release();
+  if (fault_monitor_thread_.joinable()) {
+    fault_monitor_thread_.join();
+  }
 
   device->DestroyQueue(this);
 
@@ -334,8 +395,8 @@ ComputeQueue::~ComputeQueue() {
     delete scratch_gpu_mem;
   }
 
-  auto amd_queue_gpu_mem = GpuMemory::Convert(amd_queue_mem_);
-  delete amd_queue_gpu_mem;
+  auto doorbell_gpu_mem = GpuMemory::Convert(doorbell_mem_);
+  delete doorbell_gpu_mem;
 }
 
 void ComputeQueue::InitScratchSRD() {
@@ -444,47 +505,38 @@ void ComputeQueue::InitScratchSRD() {
   }
 
   // Update Queue's Scratch descriptor's property
-  amd_queue_->scratch_resource_descriptor[0] = srd0.u32All;
-  amd_queue_->scratch_resource_descriptor[1] = srd1_u32;
-  amd_queue_->scratch_resource_descriptor[2] = srd2.u32All;
-  amd_queue_->scratch_resource_descriptor[3] = srd3_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[0] = srd0.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[1] = srd1_u32;
+  amd_queue_rocr_->scratch_resource_descriptor[2] = srd2.u32All;
+  amd_queue_rocr_->scratch_resource_descriptor[3] = srd3_u32;
 
-  // Populate flat scratch parameters in amd_queue_.
-  amd_queue_->scratch_backing_memory_location = scratch_base;
+  // Populate flat scratch parameters in amd_queue_rocr_.
+  amd_queue_rocr_->scratch_backing_memory_location = scratch_base;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
-  amd_queue_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
+  amd_queue_rocr_->scratch_wave64_lane_byte_size = scratch_size_per_wave_ / 64;
 
   if (device->Major() < 11) {
     COMPUTE_TMPRING_SIZE tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ / 1024;
     tmpring_size.bits.WAVES = scratch_waves_;
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else if (device->Major() == 11) {
     COMPUTE_TMPRING_SIZE_GFX11 tmpring_size;
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   } else {
     COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
     tmpring_size.bits.WAVESIZE = scratch_size_per_wave_ >> 8;
     tmpring_size.bits.WAVES = scratch_waves_ / device->NumShaderEngine();
 
-    amd_queue_->compute_tmpring_size = tmpring_size.u32All;
+    amd_queue_rocr_->compute_tmpring_size = tmpring_size.u32All;
   }
-
-  // Update the amd_queue_rocr_
-  amd_queue_rocr_->compute_tmpring_size = amd_queue_->compute_tmpring_size;
-  amd_queue_rocr_->scratch_resource_descriptor[0] = amd_queue_->scratch_resource_descriptor[0];
-  amd_queue_rocr_->scratch_resource_descriptor[1] = amd_queue_->scratch_resource_descriptor[1];
-  amd_queue_rocr_->scratch_resource_descriptor[2] = amd_queue_->scratch_resource_descriptor[2];
-  amd_queue_rocr_->scratch_resource_descriptor[3] = amd_queue_->scratch_resource_descriptor[3];
-  amd_queue_rocr_->scratch_backing_memory_location = amd_queue_->scratch_backing_memory_location;
-  amd_queue_rocr_->scratch_wave64_lane_byte_size = amd_queue_->scratch_wave64_lane_byte_size;
 
   return;
 }
@@ -669,6 +721,9 @@ hsa_status_t ComputeQueue::Submit(void) {
   // written and the fence value that retires it cannot drift apart.
   const uint64_t fence_value = CmdbufFrameRing::NextFenceValue(sync_point);
 
+  pr_debug("submit %p ib=%" PRIx64 " size=%" PRIx64 " wi=%" PRIx64 " fence=%" PRIx64 "\n", ring,
+           (uint64_t)ib_start_addr, (uint64_t)ib_size, cmdbuf_aql_frame_write_index, fence_value);
+
   ret = use_hws ? HwsSubmit(ib_start_addr, ib_size, fence_value)
                 : SwsSubmit(ib_start_addr, ib_size, fence_value);
   if (ret) return HSA_STATUS_ERROR;
@@ -745,7 +800,9 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
   info.pEntry = entry;
   info.pKernelObject = kernel_object;
   info.ldsBlks = lds_blks;
-  info.pAmdQueue = amd_queue_;
+  // Must be ROCr's queue header: it is what the QUEUE_PTR SGPR exposes to the kernel, and
+  // device-side enqueue requires host and kernel to share the same header.
+  info.pAmdQueue = amd_queue_rocr_;
   info.wave32 = wave32;
   info.srd = UpdateIndexStride(info.pAmdQueue->scratch_resource_descriptor[3], wave32);
   info.pScratchBase = ScratchBase();
@@ -1037,8 +1094,9 @@ hsa_status_t ComputeQueue::SwitchAql2PM4(void) {
       // 2) The merged packets would no longer fit in the current cmdbuf frame
       // 3) The HW queue is empty now, submit the packet right now.
       // 4) The AQL queue is empty now, submit the packet right now.
+      // sync_point is 0 until the first submission, when the HW queue is trivially empty.
       if (!(aql_packet->completion_signal.handle) &&
-          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) &&
+          (cmdbuf_aql_frame_write_index % device->GetAqlMergeLimit()) && sync_point &&
           (LoadSyncValue(sync_addr) != sync_point) &&
           (cmdbuf_aql_frame_write_index != GetRingWptr()->load()))
         return HSA_STATUS_SUCCESS;
@@ -1114,11 +1172,17 @@ hsa_status_t ComputeQueue::Process(void) {
 
     // CPU wait for GPU fence, and cpu update the signal.
     if (!platform_atomic_support_ && signal_addr_) {
-      // Submit() has advanced sync_point to the fence value it issued, which is
-      // the submission carrying the packet that owns signal_addr_. Copied out
-      // because the wait array belongs to the KMD for the duration of the call.
-      uint64_t fence_value = sync_point;
-      if (!device->CpuWait(&syncobj, &fence_value, 1, false)) return HSA_STATUS_ERROR;
+      constexpr int kFaultTimeoutMs = 30000;
+      auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
+      while (*sync_addr < cmdbuf_aql_frame_write_index) {
+        if (!dxg_runtime->disable_wait_timeout_ &&
+            std::chrono::steady_clock::now() >= deadline) {
+          pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, cmdbuf_aql_frame_write_index);
+          return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
       // CPU update completional signal
       rocr::atomic::Decrement(signal_addr_);
       signal_addr_ = NULL;
