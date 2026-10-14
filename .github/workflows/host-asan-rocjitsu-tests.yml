@@ -37,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.suites == 'all-additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest","hipfile","rccl","rocshmem","rocprofiler-systems"]' || inputs.suites == 'additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest"]' || '["hip-tests","rocrtst"]') }}
+        suite: ${{ fromJSON(inputs.suites == 'all-additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest","hipfile","rccl","rocshmem","rocprofiler-systems"]' || inputs.suites == 'additional' && '["aqlprofile","rocprofiler-sdk","rocprofiler-compute","amdsmi","kfdtest"]' || '["hip-tests","rocrtst","hip-baseline"]') }}
     container:
       image: ubuntu:24.04
       # Use the native CI device allocation; do not override its GPU isolation.
@@ -112,7 +112,7 @@ jobs:
             --artifact-group gfx94X --amdgpu-targets gfx942 \
             --output-dir "$ROCM_ROOT" --flatten \
             '^core-hiptests_test_' '^amd-llvm_dev_' 2>&1 | tee logs/fetch-tests.log
-          if [[ "$SUITE" != hip-tests && "$SUITE" != rocrtst ]]; then
+          if [[ "$SUITE" != hip-tests && "$SUITE" != rocrtst && "$SUITE" != hip-baseline ]]; then
             .venv/bin/python TheRock/build_tools/fetch_artifacts.py \
               --run-id "$ARTIFACTS_RUN_ID" --run-github-repo "$GITHUB_REPOSITORY" \
               --artifact-group gfx94X --amdgpu-targets gfx942 \
@@ -238,6 +238,22 @@ jobs:
               "$ROCM_ROOT/bin/rocrtst64" "--gtest_filter=$ROCRTST_FILTER"
             # GoogleTest exits zero when a stale filter selects no tests.
             grep -Eq '\[ +PASSED +\] [1-9][0-9]* tests?\.' logs/rocrtst.log
+          elif [[ "$SUITE" == hip-baseline ]]; then
+            # ROCM-32154 isolation test: proves HIP staging-buffer leaks/bad-frees
+            # originate in libamdhip64, not RCCL. Compiles and runs a minimal
+            # hipMalloc+hipFree program with the artifact ASAN stack.
+            # halt_on_error=0: lets LSan run to completion even if bad-frees occur
+            # (hardware topology determines whether we see leaks or bad-frees).
+            # The step always passes — output is captured for attribution analysis.
+            "$ROCM_ROOT/llvm/bin/clang++" \
+              -I"$ROCM_ROOT/include" \
+              -L"$ROCM_ROOT/lib" -Wl,-rpath,"$ROCM_ROOT/lib" \
+              -fsanitize=address -shared-libasan \
+              .github/scripts/hip_baseline_ci.cpp \
+              -lamdhip64 -o hip_baseline_ci_bin
+            ASAN_OPTIONS="${ASAN_OPTIONS}:halt_on_error=0" \
+              ./hip_baseline_ci_bin > logs/hip-baseline.log 2>&1 || true
+            cat logs/hip-baseline.log
           else
             .venv/bin/python .github/scripts/rocjitsu_additional_suites.py \
               --suite "$SUITE" --backend "$TEST_BACKEND" --rocm-root "$ROCM_ROOT" \
