@@ -83,7 +83,9 @@ public:
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;
+  /// Loads and returning atomics write response_data to dst_register.
   bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint16_t load_dword_mask = 0xffff;
