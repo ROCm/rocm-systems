@@ -12,8 +12,8 @@ Move work to compile time: zero runtime cost, no dependencies, trivially testabl
 ### constexpr variable
 
 ```cpp
-constexpr int cache_line_bytes = 64;
-constexpr double pi = 3.14159265358979;
+constexpr int    k_cache_line_bytes = 64;
+constexpr double k_pi               = 3.14159265358979;
 ```
 
 ### constexpr function
@@ -21,10 +21,16 @@ constexpr double pi = 3.14159265358979;
 Evaluated at compile time when all arguments are compile-time constants; falls back to runtime otherwise:
 
 ```cpp
-constexpr int square(int x) { return x * x; }
+constexpr int k_demo_input = 8;
 
-constexpr int a = square(8);  // compile time
-int b = square(n);            // runtime — n is not constexpr
+[[nodiscard]] constexpr int
+square(int value)
+{
+    return value * value;
+}
+
+constexpr int k_compiled    = square(k_demo_input);  // compile time
+const int     runtime_value = square(input);         // runtime — input is not constexpr
 ```
 
 ### consteval function (immediate function)
@@ -32,11 +38,17 @@ int b = square(n);            // runtime — n is not constexpr
 `consteval` REQUIRES compile-time evaluation — every call must be a constant expression, or it fails to compile. Use it when running at runtime would be a bug (e.g. validating a literal):
 
 ```cpp
-consteval int factorial(int n) { return n <= 1 ? 1 : n * factorial(n - 1); }
+constexpr int k_factorial_input = 5;
 
-constexpr int f5 = factorial(5);  // OK — compile time
-int n = read();
-int bad = factorial(n);           // ERROR — n is not a constant expression
+[[nodiscard]] consteval int
+factorial(int number)
+{
+    return number <= 1 ? 1 : number * factorial(number - 1);
+}
+
+constexpr int k_factorial_five = factorial(k_factorial_input);  // OK — compile time
+const int     input            = read();
+const int     bad = factorial(input);  // ERROR — input is not a constant expression
 ```
 
 Prefer `consteval` over the old "assign to a `constexpr` variable to force it" trick when the function should *never* run at runtime.
@@ -54,11 +66,19 @@ constinit int g_counter = compute_seed();  // constant-initialized, still mutabl
 Compile-time branch — the non-taken branch is not compiled, not just skipped:
 
 ```cpp
+constexpr int    k_int_scale   = 2;
+constexpr double k_float_scale = 2.0;
+
 template <typename T>
-auto process(T val) {
-    if constexpr (std::is_integral_v<T>)            return val * 2;
-    else if constexpr (std::is_floating_point_v<T>) return val * 2.0;
-    else                                            static_assert(false, "unsupported type");
+[[nodiscard]] auto
+process(T value)
+{
+    if constexpr(std::is_integral_v<T>)
+        return value * k_int_scale;
+    else if constexpr(std::is_floating_point_v<T>)
+        return value * k_float_scale;
+    else
+        static_assert(false, "unsupported type");
 }
 ```
 
@@ -67,27 +87,36 @@ Prefer `if constexpr` over tag dispatch or SFINAE — same result, far more read
 ### Compile-time lookup table
 
 ```cpp
-constexpr auto build_lut() {
-    std::array<int, 256> t{};
-    for (int i = 0; i < 256; ++i) t[i] = i * i;
-    return t;
-}
-constexpr auto lut = build_lut();  // built entirely at compile time
+constexpr int k_lut_size = 256;
 
-int val = lut[x];  // pure array access at runtime — zero computation
+[[nodiscard]] constexpr auto
+build_lut()
+{
+    std::array<int, k_lut_size> table{};
+    for(int i = 0; i < k_lut_size; ++i)
+        table[i] = i * i;
+    return table;
+}
+constexpr auto k_lut = build_lut();  // built entirely at compile time
+
+const int value = k_lut[index];  // pure array access at runtime — zero computation
 ```
 
 In C++20 most standard algorithms are `constexpr`, so you can use them inside a `constexpr` function instead of a hand-written loop:
 
 ```cpp
-constexpr auto build_lut() {
-    std::array<int, 256> t{};
-    std::ranges::generate(t, [i = 0]() mutable {
-        int n = i;
-        ++i;
-        return n * n;
+constexpr int k_lut_size = 256;
+
+[[nodiscard]] constexpr auto
+build_lut()
+{
+    std::array<int, k_lut_size> table{};
+    std::ranges::generate(table, [index = 0]() mutable {
+        const int current = index;
+        ++index;
+        return current * current;
     });
-    return t;
+    return table;
 }
 ```
 
@@ -108,12 +137,17 @@ constexpr auto build_lut() {
 `constexpr` functions are pure — no side effects, no dependencies — so no mocking is ever needed.
 
 ```cpp
+constexpr int k_lut_index = 4;
+
 // Compile-time: catches bugs before the binary exists
-static_assert(square(8) == 64);
-static_assert(lut[4] == 16);
+static_assert(square(k_demo_input) == k_demo_input * k_demo_input);
+static_assert(k_lut[k_lut_index] == k_lut_index * k_lut_index);
 
 // Runtime: works with GTest unchanged
-TEST(Square, PositiveInput) { EXPECT_EQ(square(8), 64); }
+TEST(square_test, positive_input)
+{
+    EXPECT_EQ(square(k_demo_input), k_demo_input * k_demo_input);
+}
 ```
 
 ## Forcing Compile-Time Evaluation
@@ -122,10 +156,15 @@ Two ways, strongest first:
 
 ```cpp
 // 1. consteval — the function itself can only ever run at compile time
-consteval int checked(int x) { return x; }
+[[nodiscard]] consteval int
+checked(int value)
+{
+    return value;
+}
 
 // 2. Assign to a constexpr variable — forces evaluation at this call site
-constexpr int result = expensive_fn(args);  // fails to compile if args are not constexpr
+constexpr int k_result =
+    expensive_fn(args);  // fails to compile if args are not constexpr
 ```
 
 Use `consteval` when *no* call should ever fall back to runtime; use the `constexpr`-variable trick when the same function must also be usable at runtime elsewhere.

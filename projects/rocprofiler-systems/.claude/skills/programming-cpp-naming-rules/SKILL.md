@@ -1,11 +1,17 @@
 ---
 name: programming-cpp-naming-rules
-description: C++ file and class naming conventions - folder structure matches namespaces, no redundant prefixes
+description: C++ naming — folder matches namespace, private members m_, constants k_, abstract types end in _interface
 ---
 
 # C++ Naming Rules
 
 Use this skill when creating new C++ files or refactoring file structure.
+Identifier spelling is the `.clang-tidy` configuration in `cpp-conventions`:
+`lower_case` types and functions, private members `m_mem` (never `mem_`),
+`constexpr` and other constants `k_`, globals `g_`, function-local statics
+`s_`, abstract classes ending in `_interface`, template parameters
+`CamelCase`, macros `UPPER_CASE`. Parameters, locals, bindings, and
+exception names are at least 3 characters.
 
 ## Folder Structure = Namespace
 
@@ -13,14 +19,18 @@ Folder structure should correspond to namespaces. Don't repeat namespace prefixe
 
 ```cpp
 // ❌ BAD: amd_smi/amd_smi_driver.hpp
-namespace amd_smi {
-class amd_smi_driver {};  // Redundant prefix
-}
+namespace amd_smi
+{
+class amd_smi_driver
+{};  // Redundant prefix
+}  // namespace amd_smi
 
 // ✅ GOOD: amd_smi/driver.hpp
-namespace amd_smi {
-class driver {};  // Clean, folder provides context
-}
+namespace amd_smi
+{
+class driver
+{};  // Clean, folder provides context
+}  // namespace amd_smi
 ```
 
 ## Rules
@@ -45,16 +55,21 @@ Use nested namespace syntax (C++17):
 
 ```cpp
 // ✅ GOOD: nested namespace
-namespace network::http {
-class client {
+namespace network::http
+{
+class client
+{
     // ...
 };
 }  // namespace network::http
 
 // ❌ AVOID: Old style (more verbose)
-namespace network {
-namespace http {
-class client {
+namespace network
+{
+namespace http
+{
+class client
+{
     // ...
 };
 }  // namespace http
@@ -72,7 +87,7 @@ Match the full path in include guards:
 
 // OR traditional include guard matching full path:
 #ifndef AMD_SMI_GPU_METRICS_HPP
-#define AMD_SMI_GPU_METRICS_HPP
+#    define AMD_SMI_GPU_METRICS_HPP
 
 // ...
 

@@ -20,10 +20,10 @@ struct real_dependency {
 template <typename Dependency = real_dependency>
 struct my_class {
     result_type do_work(args...) {
-        return dep_.operation(args...);
+        return m_dep.operation(args...);
     }
 private:
-    Dependency dep_{};
+    Dependency m_dep{};
 };
 ```
 
@@ -36,17 +36,17 @@ struct real_dep_a { return_type op_a(args...); };
 struct real_dep_b { return_type op_b(args...); };
 
 struct real_policy {
-    using DepA = real_dep_a;
-    using DepB = real_dep_b;
+    using dep_a = real_dep_a;
+    using dep_b = real_dep_b;
 };
 
 template <typename Policy = real_policy>
 struct my_class {
-    void method_a(args...) { dep_a_.op_a(args...); }
-    void method_b(args...) { dep_b_.op_b(args...); }
+    void method_a(args...) { m_dep_a.op_a(args...); }
+    void method_b(args...) { m_dep_b.op_b(args...); }
 private:
-    typename Policy::DepA dep_a_{};
-    typename Policy::DepB dep_b_{};
+    typename Policy::dep_a m_dep_a{};
+    typename Policy::dep_b m_dep_b{};
 };
 ```
 
@@ -57,15 +57,15 @@ declaration with a clear message instead of deep inside the template body:
 
 ```cpp
 template <typename T>
-concept Dependency = requires(T t, args_t a) {
-    { t.operation(a) } -> std::same_as<return_type>;
+concept Dependency = requires(T object, args_t argument) {
+    { object.operation(argument) } -> std::same_as<return_type>;
 };
 
 template <Dependency Dep = real_dependency>
 struct my_class {
-    result_type do_work(args...) { return dep_.operation(args...); }
+    result_type do_work(args...) { return m_dep.operation(args...); }
 private:
-    Dep dep_{};
+    Dep m_dep{};
 };
 ```
 
@@ -90,9 +90,9 @@ struct mock_dependency {
 
 template <typename Dependency = real_dependency>
 struct my_class {
-    result_type do_work(args...) { return dep_.operation(args...); }
+    result_type do_work(args...) { return m_dep.operation(args...); }
 private:
-    Dependency dep_{};
+    Dependency m_dep{};
 };
 
 class my_class_test : public ::testing::Test {
@@ -124,8 +124,8 @@ struct mock_dep_a { return_type op_a(args...) { return g_mock_a->op_a(args...); 
 struct mock_dep_b { return_type op_b(args...) { return g_mock_b->op_b(args...); } };
 
 struct mock_policy {
-    using DepA = mock_dep_a;
-    using DepB = mock_dep_b;
+    using dep_a = mock_dep_a;
+    using dep_b = mock_dep_b;
 };
 
 class my_class_test : public ::testing::Test {
@@ -177,12 +177,12 @@ TEST_F(my_class_test, method_a_calls_op_a) {
 
 | Mistake | Fix |
 | --- | --- |
-| Storing dep as `Dep& dep_` member | Dangling reference risk — store as value `Dep dep_{}` |
+| Storing dep as `Dep& m_dep` member | Dangling reference risk — store as value `Dep m_dep{}` |
 | Accepting dep in constructor (`my_class(Dep& d)`) | Mixes constructor injection with template DI — pick one style |
 | Passing dep via `shared_ptr`/`unique_ptr` ctor arg | Same mixing problem — let the class construct its own dep |
 | Hand-rolled spy structs in tests | Always use `MOCK_METHOD` |
 | Wrapper calls itself recursively | Qualify the real call explicitly (e.g. `::free_function()`) |
 | Unconstrained `auto` parameter (abbreviated template) | Constrain it with a concept (`void op(std::integral auto x)`) or use explicit `template<typename T>` |
-| Missing `typename` on nested alias | `typename Policy::DepA`, not `Policy::DepA` |
+| Missing `typename` on nested alias | `typename Policy::dep_a`, not `Policy::dep_a` |
 | Calling `g_mock.op()` on `unique_ptr` | Dereference first: `g_mock->op()` |
 | Forgetting `override` on `SetUp`/`TearDown` | Always add `override`; base declares them virtual |

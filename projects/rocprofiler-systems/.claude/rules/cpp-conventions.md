@@ -17,10 +17,30 @@ description: C++ hard rules for rocprofiler-systems — standard, formatting, li
 ## Formatting and linting
 
 - Format C/C++ with clang-format 18 and the repository `.clang-format`
-  (`ColumnLimit: 90`).
+  (`ColumnLimit: 90`). Braces go on the next line, there is no space before
+  `(`, and pointers and references bind left (`int*`, `const T&`). A top-level
+  function's return type sits on its own line.
 - Respect `.clang-tidy`. It enables an explicit list of checks, not entire
   check groups. Do not pass `--checks`, add a NOLINT suppression, or edit
   `.clang-tidy` to hide a finding.
+- Name identifiers the way `readability-identifier-naming` is configured.
+  Do not copy a trailing underscore or a PascalCase type from an older file.
+  - Types, functions, methods, parameters, variables, enumerators, and public
+    members are `lower_case`.
+  - Private and protected data members use an `m_` prefix: `m_mem`, never
+    `mem_`.
+  - Every `constexpr` variable uses a `k_` prefix, in every scope. Static and
+    global constants do too.
+  - A mutable namespace-scope variable, including a file-scope `static`, uses
+    a `g_` prefix. A function-local `static` uses an `s_` prefix.
+  - An abstract class is `lower_case` and ends in `_interface`.
+  - Template parameters are `CamelCase`. Macros are `UPPER_CASE`.
+  - Parameters, local variables, bindings, and exception names are at least
+    3 characters. A loop counter may be `i`, `j`, or `k`.
+  - Keep a library's own names: `SetUp`, `TearDown`, and `is_transparent`.
+- Mark a function `[[nodiscard]]` when the caller must use the return value.
+- A bare numeric literal other than `0`, `1`, `2`, `3`, or `4` is a named
+  constant. The literal belongs in that constant's initializer.
 - Pre-commit runs clang-format but not clang-tidy. After C++ changes, run
   `/clang-tidy`:
 

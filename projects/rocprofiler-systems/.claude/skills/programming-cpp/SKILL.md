@@ -59,8 +59,11 @@ API, the design needs a seam for its dependency, not a wider interface.
   invariant to protect; otherwise a struct.
 - Prefer a check at compile time over the same check at run time, when the
   inputs are already known then.
-- Match the naming, error style, and helpers of the file being edited. Do not
-  copy a local habit that breaks the points above.
+- Name identifiers the way `cpp-conventions` requires, including `m_` members
+  and `k_` constants. Do not copy a trailing underscore or a PascalCase type
+  from an older file.
+- Match the error style and the helpers of the file being edited. Do not copy
+  a local habit that breaks the points above.
 
 ## Load the matching skill
 

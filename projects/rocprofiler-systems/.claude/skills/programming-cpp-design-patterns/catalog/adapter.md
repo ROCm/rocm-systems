@@ -9,7 +9,9 @@ An existing API does not match the call the caller wants to make.
 Translate at the call site.
 
 ```cpp
-void request(const adaptee& object) {
+void
+request(const adaptee& object)
+{
     object.specific_request();
 }
 ```
@@ -17,15 +19,18 @@ void request(const adaptee& object) {
 ## Pattern only if the translation must replace the target type wherever it is used
 
 ```cpp
-class adapter : public target {
+class adapter : public target
+{
 public:
-    explicit adapter(adaptee& object) : adaptee_{object} {}
+    explicit adapter(adaptee& object)
+    : m_adaptee{ object }
+    {}
 
-    void request() override { adaptee_.specific_request(); }
+    void request() override { m_adaptee.specific_request(); }
 
 private:
-    adaptee& adaptee_;
+    adaptee& m_adaptee;
 };
 ```
 
-`adaptee_` is non-owning. The caller keeps the adapted object alive.
+`m_adaptee` is non-owning. The caller keeps the adapted object alive.

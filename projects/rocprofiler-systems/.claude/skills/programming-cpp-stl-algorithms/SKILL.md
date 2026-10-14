@@ -28,7 +28,7 @@ When the change adds a loop over a container, or a new container member:
 
 ## Red flags
 
-- A raw loop whose body is `if (...) out.push_back(...)`, `sum +=`, or `return true`
+- A raw loop whose body is `if(...) output.push_back(...)`, `sum +=`, or `return true`
 - `v.erase(std::remove_if(...), v.end())` or an `erase` call inside a loop
 - `std::sort` of everything to read the first k elements
 - `operator[]` on a map to read a value
@@ -42,7 +42,9 @@ Request: "Return the names of entries newer than the cutoff."
 `catalog: filter | std::views::filter + transform into a vector`
 
 ```cpp
-auto recent = entries | std::views::filter([cutoff](const entry& e) { return e.timestamp >= cutoff; })
-                      | std::views::transform(&entry::name);
+auto recent =
+    entries |
+    std::views::filter([cutoff](const entry& item) { return item.timestamp >= cutoff; }) |
+    std::views::transform(&entry::name);
 std::vector<std::string> names(recent.begin(), recent.end());
 ```

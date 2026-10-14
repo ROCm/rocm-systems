@@ -11,7 +11,10 @@ std::ranges::sort(names);
 auto [first, last] = std::ranges::unique(names);
 names.erase(first, last);
 
-bool has_duplicates(std::vector<std::uint32_t> ids) {  // by value: sorts a copy
+// by value: sorts a copy
+[[nodiscard]] bool
+has_duplicates(std::vector<std::uint32_t> ids)
+{
     std::ranges::sort(ids);
     return std::ranges::adjacent_find(ids) != ids.end();
 }
@@ -21,7 +24,8 @@ bool has_duplicates(std::vector<std::uint32_t> ids) {  // by value: sorts a copy
 
 ```cpp
 std::unordered_set<std::string> seen;
-std::erase_if(names, [&seen](const std::string& n) { return !seen.insert(n).second; });
+std::erase_if(names,
+              [&seen](const std::string& name) { return !seen.insert(name).second; });
 ```
 
 ## Pitfalls

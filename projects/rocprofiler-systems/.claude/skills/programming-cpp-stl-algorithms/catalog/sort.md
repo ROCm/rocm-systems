@@ -7,10 +7,10 @@ Elements are ordered by a key. A projection names the key; a comparator lambda i
 ## Implement this
 
 ```cpp
-std::ranges::sort(records, {}, &record::name);                         // ascending by name
-std::ranges::sort(records, std::ranges::greater{}, &record::time);     // descending by time
-std::ranges::sort(records, [](const record& a, const record& b) {      // compound key
-    return std::tie(a.device, a.time) < std::tie(b.device, b.time);
+std::ranges::sort(records, {}, &record::name);                      // ascending by name
+std::ranges::sort(records, std::ranges::greater{}, &record::time);  // descending by time
+std::ranges::sort(records, [](const record& left, const record& right) {  // compound key
+    return std::tie(left.device, left.time) < std::tie(right.device, right.time);
 });
 ```
 

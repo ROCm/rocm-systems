@@ -625,12 +625,12 @@ int get_rating() {
     return more_than_five_late_deliveries() ? 2 : 1;
 }
 bool more_than_five_late_deliveries() {
-    return late_deliveries_ > 5;
+    return m_late_deliveries > 5;
 }
 
 // AFTER
 int get_rating() {
-    return late_deliveries_ > 5 ? 2 : 1;
+    return m_late_deliveries > 5 ? 2 : 1;
 }
 ```
 
@@ -677,7 +677,7 @@ if (is_mac && is_ie && was_initialized() && was_resized) {
 ```cpp
 // BEFORE
 double calculate_total() {
-    double base_price = quantity_ * item_price_;
+    double base_price = m_quantity * m_item_price;
     if (base_price > 1000) {
         return base_price * 0.95;
     }
@@ -686,7 +686,7 @@ double calculate_total() {
 
 // AFTER
 double base_price() const {
-    return quantity_ * item_price_;
+    return m_quantity * m_item_price;
 }
 
 double calculate_total() {
@@ -710,15 +710,15 @@ double calculate_total() {
 
 ```cpp
 // BEFORE
-double temp = 2 * (height_ + width_);
+double temp = 2 * (m_height + m_width);
 std::cout << "Perimeter: " << temp << "\n";
-temp = height_ * width_;
+temp = m_height * m_width;
 std::cout << "Area: " << temp << "\n";
 
 // AFTER
-double perimeter = 2 * (height_ + width_);
+double perimeter = 2 * (m_height + m_width);
 std::cout << "Perimeter: " << perimeter << "\n";
-double area = height_ * width_;
+double area = m_height * m_width;
 std::cout << "Area: " << area << "\n";
 ```
 
@@ -786,18 +786,18 @@ public:
 
 // AFTER
 class PriceCalculator {
-    Order& order_;
-    double primary_base_;
-    double secondary_;
-    double tertiary_;
+    Order& m_order;
+    double m_primary_base;
+    double m_secondary;
+    double m_tertiary;
 
 public:
-    PriceCalculator(Order& order) : order_(order) {}
+    PriceCalculator(Order& order) : m_order(order) {}
 
     double compute() {
-        primary_base_ = // complex calculation
-        secondary_ = // uses primary_base_
-        tertiary_ = // uses secondary_
+        m_primary_base = // complex calculation
+        m_secondary = // uses m_primary_base
+        m_tertiary = // uses m_secondary
         // Can now Extract Method freely!
         return calculate_final();
     }
@@ -884,17 +884,17 @@ std::string find_person(const std::vector<std::string>& people) {
 ```cpp
 // BEFORE
 class Account {
-    AccountType type_;
+    AccountType m_type;
 public:
     double overdraft_charge() {
-        if (type_.is_premium()) {
+        if (m_type.is_premium()) {
             double result = 10;
-            if (days_overdrawn_ > 7) {
-                result += (days_overdrawn_ - 7) * 0.85;
+            if (m_days_overdrawn > 7) {
+                result += (m_days_overdrawn - 7) * 0.85;
             }
             return result;
         }
-        return days_overdrawn_ * 1.75;
+        return m_days_overdrawn * 1.75;
     }
 };
 
@@ -916,7 +916,7 @@ public:
 class Account {
 public:
     double overdraft_charge() {
-        return type_.overdraft_charge(days_overdrawn_);
+        return m_type.overdraft_charge(m_days_overdrawn);
     }
 };
 ```
@@ -942,22 +942,22 @@ public:
 ```cpp
 // BEFORE
 class Account {
-    AccountType type_;
-    double interest_rate_;
+    AccountType m_type;
+    double m_interest_rate;
 };
 
 // AFTER - interest_rate moved to AccountType
 class AccountType {
-    double interest_rate_;
+    double m_interest_rate;
 public:
-    double interest_rate() const { return interest_rate_; }
-    void set_interest_rate(double rate) { interest_rate_ = rate; }
+    double interest_rate() const { return m_interest_rate; }
+    void set_interest_rate(double rate) { m_interest_rate = rate; }
 };
 
 class Account {
-    AccountType type_;
+    AccountType m_type;
 public:
-    double interest_rate() const { return type_.interest_rate(); }
+    double interest_rate() const { return m_type.interest_rate(); }
 };
 ```
 
@@ -984,31 +984,31 @@ public:
 ```cpp
 // BEFORE
 class Person {
-    std::string name_;
-    std::string office_area_code_;
-    std::string office_number_;
+    std::string m_name;
+    std::string m_office_area_code;
+    std::string m_office_number;
 public:
     std::string telephone_number() {
-        return "(" + office_area_code_ + ") " + office_number_;
+        return "(" + m_office_area_code + ") " + m_office_number;
     }
 };
 
 // AFTER
 class TelephoneNumber {
-    std::string area_code_;
-    std::string number_;
+    std::string m_area_code;
+    std::string m_number;
 public:
     std::string format() const {
-        return "(" + area_code_ + ") " + number_;
+        return "(" + m_area_code + ") " + m_number;
     }
 };
 
 class Person {
-    std::string name_;
-    TelephoneNumber office_telephone_;
+    std::string m_name;
+    TelephoneNumber m_office_telephone;
 public:
     std::string telephone_number() {
-        return office_telephone_.format();
+        return m_office_telephone.format();
     }
 };
 ```
@@ -1027,22 +1027,22 @@ public:
 ```cpp
 // BEFORE - TelephoneNumber is too thin
 class TelephoneNumber {
-    std::string number_;
+    std::string m_number;
 public:
-    std::string number() const { return number_; }
+    std::string number() const { return m_number; }
 };
 
 class Person {
-    TelephoneNumber phone_;
+    TelephoneNumber m_phone;
 public:
-    std::string phone_number() { return phone_.number(); }
+    std::string phone_number() { return m_phone.number(); }
 };
 
 // AFTER
 class Person {
-    std::string phone_number_;
+    std::string m_phone_number;
 public:
-    std::string phone_number() const { return phone_number_; }
+    std::string phone_number() const { return m_phone_number; }
 };
 ```
 
@@ -1060,17 +1060,17 @@ public:
 ```cpp
 // BEFORE - Client knows about Department
 class Person {
-    Department* department_;
+    Department* m_department;
 public:
-    Department* department() { return department_; }
+    Department* department() { return m_department; }
 };
 // Client: manager = john.department()->manager();
 
 // AFTER - Department hidden
 class Person {
-    Department* department_;
+    Department* m_department;
 public:
-    Person* manager() { return department_->manager(); }
+    Person* manager() { return m_department->manager(); }
 };
 // Client: manager = john.manager();
 ```
@@ -1089,19 +1089,19 @@ public:
 ```cpp
 // BEFORE - Person delegates everything
 class Person {
-    Department* department_;
+    Department* m_department;
 public:
-    Person* manager() { return department_->manager(); }
-    std::string budget() { return department_->budget(); }
-    std::string team_size() { return department_->team_size(); }
+    Person* manager() { return m_department->manager(); }
+    std::string budget() { return m_department->budget(); }
+    std::string team_size() { return m_department->team_size(); }
     // ... 10 more delegation methods
 };
 
 // AFTER - Expose delegate
 class Person {
-    Department* department_;
+    Department* m_department;
 public:
-    Department* department() { return department_; }
+    Department* department() { return m_department; }
 };
 // Client: auto budget = john.department()->budget();
 ```
@@ -1154,12 +1154,12 @@ public:
 
 // Wrapper approach (when inheritance not possible)
 class DateWrapper {
-    Date date_;
+    Date m_date;
 public:
-    explicit DateWrapper(const Date& d) : date_(d) {}
-    int year() const { return date_.year(); }
-    int month() const { return date_.month(); }
-    int day() const { return date_.day(); }
+    explicit DateWrapper(const Date& d) : m_date(d) {}
+    int year() const { return m_date.year(); }
+    int month() const { return m_date.month(); }
+    int day() const { return m_date.day(); }
     Date next_day() const {
         return Date(year(), month(), day() + 1);
     }
@@ -1182,19 +1182,19 @@ public:
 ```cpp
 // BEFORE
 class IntRange {
-    int low_, high_;
+    int m_low, m_high;
 public:
     bool includes(int arg) {
-        return arg >= low_ && arg <= high_;  // Direct access
+        return arg >= m_low && arg <= m_high;  // Direct access
     }
 };
 
 // AFTER
 class IntRange {
-    int low_, high_;
+    int m_low, m_high;
 public:
-    int low() const { return low_; }
-    int high() const { return high_; }
+    int low() const { return m_low; }
+    int high() const { return m_high; }
     bool includes(int arg) {
         return arg >= low() && arg <= high();  // Via getters
     }
@@ -1215,23 +1215,23 @@ public:
 ```cpp
 // BEFORE
 class Order {
-    std::string customer_name_;
-    std::string customer_email_;
-    std::string customer_phone_;
+    std::string m_customer_name;
+    std::string m_customer_email;
+    std::string m_customer_phone;
 };
 
 // AFTER
 class Customer {
-    std::string name_;
-    std::string email_;
-    std::string phone_;
+    std::string m_name;
+    std::string m_email;
+    std::string m_phone;
 public:
     bool is_valid_email() const;
     std::string formatted_phone() const;
 };
 
 class Order {
-    Customer customer_;
+    Customer m_customer;
 };
 ```
 
@@ -1250,10 +1250,10 @@ double potential_energy(double mass, double height) {
 }
 
 // AFTER
-constexpr double GRAVITATIONAL_ACCELERATION = 9.81;  // m/s^2
+constexpr double k_gravitational_acceleration = 9.81;  // m/s^2
 
 double potential_energy(double mass, double height) {
-    return mass * GRAVITATIONAL_ACCELERATION * height;
+    return mass * k_gravitational_acceleration * height;
 }
 ```
 
@@ -1274,10 +1274,10 @@ public:
 
 // AFTER
 class Person {
-    std::string name_;
+    std::string m_name;
 public:
-    const std::string& name() const { return name_; }
-    void set_name(const std::string& name) { name_ = name; }
+    const std::string& name() const { return m_name; }
+    void set_name(const std::string& name) { m_name = name; }
 };
 ```
 
@@ -1295,21 +1295,21 @@ public:
 ```cpp
 // BEFORE
 class Person {
-    std::vector<Course> courses_;
+    std::vector<Course> m_courses;
 public:
-    std::vector<Course>& courses() { return courses_; }  // Dangerous!
+    std::vector<Course>& courses() { return m_courses; }  // Dangerous!
 };
 
 // AFTER
 class Person {
-    std::vector<Course> courses_;
+    std::vector<Course> m_courses;
 public:
-    const std::vector<Course>& courses() const { return courses_; }
-    void add_course(const Course& c) { courses_.push_back(c); }
+    const std::vector<Course>& courses() const { return m_courses; }
+    void add_course(const Course& c) { m_courses.push_back(c); }
     void remove_course(const Course& c) {
-        courses_.erase(
-            std::remove(courses_.begin(), courses_.end(), c),
-            courses_.end());
+        m_courses.erase(
+            std::remove(m_courses.begin(), m_courses.end(), c),
+            m_courses.end());
     }
 };
 ```
@@ -1325,27 +1325,27 @@ public:
 ```cpp
 // BEFORE
 class Person {
-    int blood_type_;  // 0=O, 1=A, 2=B, 3=AB
-    static constexpr int O = 0;
-    static constexpr int A = 1;
+    int m_blood_type;  // 0=O, 1=A, 2=B, 3=AB
+    static constexpr int k_o = 0;
+    static constexpr int k_a = 1;
 };
 
 // AFTER
 class BloodType {
-    int code_;
-    BloodType(int code) : code_(code) {}
+    int m_code;
+    BloodType(int code) : m_code(code) {}
 public:
-    static const BloodType O;
-    static const BloodType A;
-    static const BloodType B;
-    static const BloodType AB;
+    static const BloodType k_o;
+    static const BloodType k_a;
+    static const BloodType k_b;
+    static const BloodType k_ab;
     bool operator==(const BloodType& other) const {
-        return code_ == other.code_;
+        return m_code == other.m_code;
     }
 };
 
 class Person {
-    BloodType blood_type_;
+    BloodType m_blood_type;
 };
 ```
 
@@ -1360,10 +1360,10 @@ class Person {
 ```cpp
 // BEFORE
 class Employee {
-    int type_;
+    int m_type;
 public:
     int bonus() {
-        switch (type_) {
+        switch (m_type) {
             case ENGINEER: return 100;
             case MANAGER: return 500;
             case SALESMAN: return 200;
@@ -1398,13 +1398,13 @@ public:
 ```cpp
 // BEFORE
 class Employee {
-    int type_;
+    int m_type;
 public:
     int pay_amount() {
-        switch (type_) {
-            case ENGINEER: return monthly_salary_;
-            case SALESMAN: return monthly_salary_ + commission_;
-            case MANAGER: return monthly_salary_ + bonus_;
+        switch (m_type) {
+            case ENGINEER: return m_monthly_salary;
+            case SALESMAN: return m_monthly_salary + m_commission;
+            case MANAGER: return m_monthly_salary + m_bonus;
         }
     }
 };
@@ -1423,12 +1423,12 @@ public:
 };
 
 class Employee {
-    std::unique_ptr<EmployeeType> type_;
+    std::unique_ptr<EmployeeType> m_type;
 public:
     void set_type(std::unique_ptr<EmployeeType> t) {
-        type_ = std::move(t);  // Can change at runtime
+        m_type = std::move(t);  // Can change at runtime
     }
-    int pay_amount() { return type_->pay_amount(*this); }
+    int pay_amount() { return m_type->pay_amount(*this); }
 };
 ```
 
@@ -1449,9 +1449,9 @@ public:
 // BEFORE
 double calculate_charge(const Date& date, int quantity) {
     if (date < SUMMER_START || date > SUMMER_END) {
-        return quantity * winter_rate_ + winter_service_charge_;
+        return quantity * m_winter_rate + m_winter_service_charge;
     } else {
-        return quantity * summer_rate_;
+        return quantity * m_summer_rate;
     }
 }
 
@@ -1459,9 +1459,9 @@ double calculate_charge(const Date& date, int quantity) {
 bool is_summer(const Date& date) {
     return date >= SUMMER_START && date <= SUMMER_END;
 }
-double summer_charge(int quantity) { return quantity * summer_rate_; }
+double summer_charge(int quantity) { return quantity * m_summer_rate; }
 double winter_charge(int quantity) {
-    return quantity * winter_rate_ + winter_service_charge_;
+    return quantity * m_winter_rate + m_winter_service_charge;
 }
 double calculate_charge(const Date& date, int quantity) {
     return is_summer(date) ? summer_charge(quantity) : winter_charge(quantity);
@@ -1482,15 +1482,15 @@ double calculate_charge(const Date& date, int quantity) {
 ```cpp
 // BEFORE
 double disability_amount() {
-    if (seniority_ < 2) return 0;
-    if (months_disabled_ > 12) return 0;
-    if (is_part_time_) return 0;
+    if (m_seniority < 2) return 0;
+    if (m_months_disabled > 12) return 0;
+    if (m_is_part_time) return 0;
     return calculate_disability();
 }
 
 // AFTER
 bool is_not_eligible_for_disability() {
-    return seniority_ < 2 || months_disabled_ > 12 || is_part_time_;
+    return m_seniority < 2 || m_months_disabled > 12 || m_is_part_time;
 }
 double disability_amount() {
     if (is_not_eligible_for_disability()) return 0;
@@ -1539,13 +1539,13 @@ send_notification();  // Moved outside
 // BEFORE
 double get_pay_amount() {
     double result;
-    if (is_dead_) {
+    if (m_is_dead) {
         result = dead_amount();
     } else {
-        if (is_separated_) {
+        if (m_is_separated) {
             result = separated_amount();
         } else {
-            if (is_retired_) {
+            if (m_is_retired) {
                 result = retired_amount();
             } else {
                 result = normal_pay_amount();
@@ -1557,9 +1557,9 @@ double get_pay_amount() {
 
 // AFTER
 double get_pay_amount() {
-    if (is_dead_) return dead_amount();
-    if (is_separated_) return separated_amount();
-    if (is_retired_) return retired_amount();
+    if (m_is_dead) return dead_amount();
+    if (m_is_separated) return separated_amount();
+    if (m_is_retired) return retired_amount();
     return normal_pay_amount();
 }
 ```
@@ -1583,15 +1583,15 @@ double get_pay_amount() {
 ```cpp
 // BEFORE
 class Bird {
-    std::string type_;
+    std::string m_type;
 public:
     double get_speed() {
-        switch (type_) {
+        switch (m_type) {
             case "European": return get_base_speed();
             case "African":
-                return get_base_speed() - load_factor_ * num_coconuts_;
+                return get_base_speed() - m_load_factor * m_num_coconuts;
             case "NorwegianBlue":
-                return is_nailed_ ? 0 : get_base_speed(voltage_);
+                return m_is_nailed ? 0 : get_base_speed(m_voltage);
         }
     }
 };
@@ -1608,13 +1608,13 @@ public:
 class African : public Bird {
 public:
     double get_speed() override {
-        return get_base_speed() - load_factor_ * num_coconuts_;
+        return get_base_speed() - m_load_factor * m_num_coconuts;
     }
 };
 class NorwegianBlue : public Bird {
 public:
     double get_speed() override {
-        return is_nailed_ ? 0 : get_base_speed(voltage_);
+        return m_is_nailed ? 0 : get_base_speed(m_voltage);
     }
 };
 ```
@@ -1662,17 +1662,17 @@ plan = customer->plan();
 ```cpp
 // BEFORE
 double get_expense_limit() {
-    return (expense_limit_ != NULL_EXPENSE)
-        ? expense_limit_
-        : primary_project_->member_expense_limit();
+    return (m_expense_limit != k_null_expense)
+        ? m_expense_limit
+        : m_primary_project->member_expense_limit();
 }
 
 // AFTER
 double get_expense_limit() {
-    assert(expense_limit_ != NULL_EXPENSE || primary_project_ != nullptr);
-    return (expense_limit_ != NULL_EXPENSE)
-        ? expense_limit_
-        : primary_project_->member_expense_limit();
+    assert(m_expense_limit != k_null_expense || m_primary_project != nullptr);
+    return (m_expense_limit != k_null_expense)
+        ? m_expense_limit
+        : m_primary_project->member_expense_limit();
 }
 ```
 
@@ -1688,9 +1688,9 @@ double get_expense_limit() {
 
 ```cpp
 // BEFORE
-std::string get_tlp() { return telephone_; }
+std::string get_tlp() { return m_telephone; }
 // AFTER
-std::string get_telephone_number() { return telephone_; }
+std::string get_telephone_number() { return m_telephone; }
 ```
 
 ---
@@ -1704,9 +1704,9 @@ std::string get_telephone_number() { return telephone_; }
 ```cpp
 // Remove Parameter
 // BEFORE
-void set_value(int value, int unused) { value_ = value; }
+void set_value(int value, int unused) { m_value = value; }
 // AFTER
-void set_value(int value) { value_ = value; }
+void set_value(int value) { m_value = value; }
 ```
 
 ---
@@ -1743,11 +1743,11 @@ void clear() { clear_items(); }                       // Modifier
 
 ```cpp
 // BEFORE
-void five_percent_raise() { salary_ *= 1.05; }
-void ten_percent_raise() { salary_ *= 1.10; }
+void five_percent_raise() { m_salary *= 1.05; }
+void ten_percent_raise() { m_salary *= 1.10; }
 
 // AFTER
-void raise(double factor) { salary_ *= (1 + factor); }
+void raise(double factor) { m_salary *= (1 + factor); }
 ```
 
 ---
@@ -1769,10 +1769,10 @@ void amount_overdue(Date start, Date end);
 
 // AFTER
 class DateRange {
-    Date start_, end_;
+    Date m_start, m_end;
 public:
-    DateRange(Date start, Date end) : start_(start), end_(end) {}
-    bool includes(Date d) const { return d >= start_ && d <= end_; }
+    DateRange(Date start, Date end) : m_start(start), m_end(end) {}
+    bool includes(Date d) const { return d >= m_start && d <= m_end; }
 };
 
 void amount_invoiced(DateRange range);
@@ -1834,17 +1834,17 @@ public:
 ```cpp
 // BEFORE
 int withdraw(int amount) {
-    if (amount > balance_) return -1;  // Error code
-    balance_ -= amount;
+    if (amount > m_balance) return -1;  // Error code
+    m_balance -= amount;
     return 0;
 }
 
 // AFTER
 void withdraw(int amount) {
-    if (amount > balance_) {
+    if (amount > m_balance) {
         throw std::runtime_error("Insufficient funds");
     }
-    balance_ -= amount;
+    m_balance -= amount;
 }
 ```
 
@@ -1858,18 +1858,18 @@ void withdraw(int amount) {
 
 ```cpp
 // BEFORE
-double value_for_period(int period) {
+double m_valuefor_period(int period) {
     try {
-        return values_.at(period);
+        return m_values.at(period);
     } catch (std::out_of_range&) {
         return 0;
     }
 }
 
 // AFTER
-double value_for_period(int period) {
-    if (period < 0 || period >= values_.size()) return 0;
-    return values_[period];
+double m_valuefor_period(int period) {
+    if (period < 0 || period >= m_values.size()) return 0;
+    return m_values[period];
 }
 ```
 
@@ -1885,13 +1885,13 @@ double value_for_period(int period) {
 
 ```cpp
 // BEFORE
-class Salesman : public Employee { std::string name_; };  // Duplicated
-class Engineer : public Employee { std::string name_; };  // Duplicated
+class Salesman : public Employee { std::string m_name; };  // Duplicated
+class Engineer : public Employee { std::string m_name; };  // Duplicated
 
 // AFTER
 class Employee {
 protected:
-    std::string name_;  // Moved to parent
+    std::string m_name;  // Moved to parent
 };
 ```
 
@@ -1908,7 +1908,7 @@ protected:
 class Manager : public Employee {
 public:
     Manager(std::string name, std::string id, int grade) {
-        name_ = name; id_ = id; grade_ = grade;
+        m_name = name; m_id = id; m_grade = grade;
     }
 };
 
@@ -1916,12 +1916,12 @@ public:
 class Employee {
 protected:
     Employee(std::string name, std::string id)
-        : name_(name), id_(id) {}
+        : m_name(name), m_id(id) {}
 };
 class Manager : public Employee {
 public:
     Manager(std::string name, std::string id, int grade)
-        : Employee(name, id), grade_(grade) {}
+        : Employee(name, id), m_grade(grade) {}
 };
 ```
 
@@ -1943,7 +1943,7 @@ public:
 // AFTER
 class Salesman : public Employee {
 public:
-    double get_quota() { return quota_; }  // Moved here
+    double get_quota() { return m_quota; }  // Moved here
 };
 ```
 
@@ -1958,12 +1958,12 @@ public:
 ```cpp
 // BEFORE
 class JobItem {
-    double unit_price_;
-    Employee* employee_;  // Only for labor items
-    bool is_labor_;
+    double m_unit_price;
+    Employee* m_employee;  // Only for labor items
+    bool m_is_labor;
 public:
     double unit_price() {
-        return is_labor_ ? employee_->rate() : unit_price_;
+        return m_is_labor ? m_employee->rate() : m_unit_price;
     }
 };
 
@@ -1973,14 +1973,14 @@ public:
     virtual double unit_price() = 0;
 };
 class PartsItem : public JobItem {
-    double unit_price_;
+    double m_unit_price;
 public:
-    double unit_price() override { return unit_price_; }
+    double unit_price() override { return m_unit_price; }
 };
 class LaborItem : public JobItem {
-    Employee* employee_;
+    Employee* m_employee;
 public:
-    double unit_price() override { return employee_->rate(); }
+    double unit_price() override { return m_employee->rate(); }
 };
 ```
 
@@ -1993,14 +1993,14 @@ public:
 | High | Medium | Duplicate Code, similar classes |
 
 ```cpp
-// BEFORE -- Department and Employee both have name_ and annual cost
-class Department { std::string name_; /* ... */ };
-class Employee { std::string name_; /* ... */ };
+// BEFORE -- Department and Employee both have m_name and annual cost
+class Department { std::string m_name; /* ... */ };
+class Employee { std::string m_name; /* ... */ };
 
 // AFTER
 class Party {
 protected:
-    std::string name_;
+    std::string m_name;
 public:
     virtual double annual_cost() = 0;
 };
@@ -2042,11 +2042,11 @@ public:
 
 ```cpp
 // BEFORE
-class Employee { virtual double rate() { return base_rate_; } };
+class Employee { virtual double rate() { return m_base_rate; } };
 class Salesman : public Employee { /* adds nothing */ };
 
 // AFTER -- Salesman class deleted
-class Employee { double rate() { return base_rate_; } };
+class Employee { double rate() { return m_base_rate; } };
 ```
 
 ---
@@ -2071,13 +2071,13 @@ protected:
 
 class ResidentialSite : public Site {
 protected:
-    double get_base_amount() override { return units_ * rate_; }
+    double get_base_amount() override { return m_units * m_rate; }
     double get_tax_amount() override { return get_base_amount() * TAX_RATE; }
 };
 
 class LifelineSite : public Site {
 protected:
-    double get_base_amount() override { return units_ * rate_ * 0.5; }
+    double get_base_amount() override { return m_units * m_rate * 0.5; }
     double get_tax_amount() override { return get_base_amount() * TAX_RATE * 0.2; }
 };
 ```
@@ -2098,15 +2098,15 @@ class Stack : public std::vector<int> {
 
 // AFTER - Composition
 class Stack {
-    std::vector<int> data_;
+    std::vector<int> m_data;
 public:
-    void push(int element) { data_.push_back(element); }
+    void push(int element) { m_data.push_back(element); }
     int pop() {
-        int result = data_.back();
-        data_.pop_back();
+        int result = m_data.back();
+        m_data.pop_back();
         return result;
     }
-    bool empty() const { return data_.empty(); }
+    bool empty() const { return m_data.empty(); }
     // Only exposes stack operations
 };
 ```
@@ -2122,11 +2122,11 @@ public:
 ```cpp
 // BEFORE - Too much delegation
 class Employee {
-    Person person_;
+    Person m_person;
 public:
-    std::string name() { return person_.name(); }
-    void set_name(std::string n) { person_.set_name(n); }
-    std::string address() { return person_.address(); }
+    std::string name() { return m_person.name(); }
+    void set_name(std::string n) { m_person.set_name(n); }
+    std::string address() { return m_person.address(); }
     // ... 10 more delegation methods
 };
 

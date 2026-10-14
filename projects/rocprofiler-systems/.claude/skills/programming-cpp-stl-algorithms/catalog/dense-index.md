@@ -7,27 +7,35 @@ Keys are dense integers 0..N-1: thread ids, device ids, enum values. The index i
 ## Implement this
 
 ```cpp
-class thread_event_store {
+class thread_event_store
+{
 public:
-    explicit thread_event_store(std::size_t thread_count) : per_thread_(thread_count) {}
+    explicit thread_event_store(std::size_t thread_count)
+    : m_per_thread(thread_count)
+    {}
 
-    void add(std::size_t tid, event ev) { per_thread_.at(tid).push_back(ev); }
+    void add(std::size_t tid, event item) { m_per_thread.at(tid).push_back(item); }
 
-    template <typename F>
-    void for_each(F&& fn) const {
-        for (const auto& events : per_thread_) {
-            for (const event& ev : events) { fn(ev); }
+    template <typename Func>
+    void for_each(Func&& callback) const
+    {
+        for(const auto& events : m_per_thread)
+        {
+            for(const event& item : events)
+            {
+                callback(item);
+            }
         }
     }
 
 private:
-    std::vector<std::vector<event>> per_thread_;
+    std::vector<std::vector<event>> m_per_thread;
 };
 ```
 
 ## Switch only if ids are sparse or unbounded
 
-Use `std::unordered_map<id, T>` (see `lookup-table`).
+Use `std::unordered_map<index, Value>` (see `lookup-table`).
 
 ## Pitfalls
 

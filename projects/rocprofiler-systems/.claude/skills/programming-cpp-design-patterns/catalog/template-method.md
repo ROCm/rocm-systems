@@ -8,7 +8,9 @@ The step order is fixed and some steps vary. Pass the varying steps in.
 
 ```cpp
 template <typename Step>
-void run(Step step2) {
+void
+run(Step step2)
+{
     step1();
     step2();
     step3();
@@ -18,19 +20,21 @@ void run(Step step2) {
 ## Pattern only if the skeleton must be inherited and steps overridden
 
 ```cpp
-class abstract_workflow {
+class abstract_workflow_interface
+{
 public:
-    virtual ~abstract_workflow() = default;
+    virtual ~abstract_workflow_interface() = default;
 
-    void run() {
+    void run()
+    {
         step1();
         step2();
         step3();
     }
 
 protected:
-    void step1() {}
+    void         step1() {}
     virtual void step2() = 0;
-    void step3() {}
+    void         step3() {}
 };
 ```

@@ -15,8 +15,8 @@ std::ranges::transform(entries, std::back_inserter(names), &entry::name);
 Same result as a view copied into a container:
 
 ```cpp
-auto ts = samples | std::views::transform(&sample::ts);
-std::vector<std::uint64_t> stamps(ts.begin(), ts.end());
+auto                       timestamps = samples | std::views::transform(&sample::ts);
+std::vector<std::uint64_t> stamps(timestamps.begin(), timestamps.end());
 ```
 
 ## Switch only if the result feeds one more loop
@@ -24,7 +24,10 @@ std::vector<std::uint64_t> stamps(ts.begin(), ts.end());
 Iterate the view directly and skip the container:
 
 ```cpp
-for (std::uint64_t ts : samples | std::views::transform(&sample::ts)) { emit(ts); }
+for(std::uint64_t timestamp : samples | std::views::transform(&sample::ts))
+{
+    emit(timestamp);
+}
 ```
 
 ## Pitfalls

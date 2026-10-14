@@ -7,12 +7,15 @@ Callers want one object reachable from many places. Pass that object. A request 
 ## Implement this
 
 ```cpp
-class logger {
+class logger
+{
 public:
     void info(std::string_view message);
 };
 
-void run_worker(logger& log) {
+void
+run_worker(logger& log)
+{
     log.info("worker started");
 }
 ```
@@ -24,16 +27,18 @@ The owner creates the logger and passes it. Tests pass a different logger.
 All three must be true. Convenient access from every translation unit is not one of them.
 
 ```cpp
-class logger {
+class logger
+{
 public:
-    static logger& instance() {
-        static logger value;
-        return value;
+    [[nodiscard]] static logger& instance()
+    {
+        static logger s_value;
+        return s_value;
     }
 
     void info(std::string_view message);
 
-    logger(const logger&) = delete;
+    logger(const logger&)            = delete;
     logger& operator=(const logger&) = delete;
 
 private:

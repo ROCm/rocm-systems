@@ -7,54 +7,65 @@ Something must run after a change. One known listener is a parameter.
 ## Implement this
 
 ```cpp
-class counter {
+class counter
+{
 public:
-    explicit counter(panel& panel) noexcept : panel_{panel} {}
+    explicit counter(panel& panel) noexcept
+    : m_panel{ panel }
+    {}
 
-    void set_value(int value) {
-        if (value == value_) return;
-        value_ = value;
-        panel_.refresh();
+    void set_value(int value)
+    {
+        if(value == m_value) return;
+        m_value = value;
+        m_panel.refresh();
     }
 
 private:
-    panel& panel_;
-    int value_ = 0;
+    panel& m_panel;
+    int    m_value = 0;
 };
 ```
 
 One listener whose type is not known at the call:
 
 ```cpp
-class counter {
+class counter
+{
 public:
-    explicit counter(std::function<void()> on_change) : on_change_{std::move(on_change)} {}
+    explicit counter(std::function<void()> on_change)
+    : m_on_change{ std::move(on_change) }
+    {}
 
-    void set_value(int value) {
-        if (value == value_) return;
-        value_ = value;
-        on_change_();
+    void set_value(int value)
+    {
+        if(value == m_value) return;
+        m_value = value;
+        m_on_change();
     }
 
 private:
-    std::function<void()> on_change_;
-    int value_ = 0;
+    std::function<void()> m_on_change;
+    int                   m_value = 0;
 };
 ```
 
 ## Pattern only if the listener set is open and changes at runtime
 
 ```cpp
-class subject {
+class subject
+{
 public:
-    void attach(observer& listener) { listeners_.push_back(&listener); }
+    void attach(observer& listener) { m_listeners.push_back(&listener); }
 
-    void notify() {
-        for (observer* listener : listeners_) listener->update();
+    void notify()
+    {
+        for(observer* listener : m_listeners)
+            listener->update();
     }
 
 private:
-    std::vector<observer*> listeners_;
+    std::vector<observer*> m_listeners;
 };
 ```
 
