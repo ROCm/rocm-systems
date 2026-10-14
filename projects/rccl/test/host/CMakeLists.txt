@@ -293,10 +293,10 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNcclDeviceCore -- src/nccl_device/core.cc. Own binary:
+  # rccl-UnitTestsMicroCore -- src/nccl_device/core.cc. Own binary:
   # dev_runtime_micro_fakes.cc and devcomm_fakes.cc fake five of its seven functions.
-  set(TEST_MICRO_NCCL_DEVICE_CORE_SOURCE_FILES
-    nccl-core-test.cc
+  set(TEST_MICRO_CORE_SOURCE_FILES
+    core-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc
@@ -1080,14 +1080,14 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNcclDeviceCore
+# rccl-UnitTestsMicroCore
 # ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNcclDeviceCore
-  SOURCES ${TEST_MICRO_NCCL_DEVICE_CORE_SOURCE_FILES}
+rccl_add_micro_binary(rccl-UnitTestsMicroCore
+  SOURCES ${TEST_MICRO_CORE_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_core.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
