@@ -807,7 +807,7 @@ _VOP1_OP_MAP = {
     'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
     'V_EXP_LEGACY': ('vector_unary', 'exp2'),
-    'V_PRNG': ('true_nop', None),  # PRNG not simulated
+    'V_PRNG': ('vector_unary', 'prng_advance'),
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
     'V_SWAPREL': ('vector_swaprel', None),
