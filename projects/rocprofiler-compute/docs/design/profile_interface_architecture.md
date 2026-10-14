@@ -485,8 +485,10 @@ sequenceDiagram
 Status: implemented, ahead of Phase C.
 
 Phase C has not landed, so profile still converts each pass's rocpd into
-`results_*.csv.gz`. Analyze reads those files directly: `file_io.create_df_pmc`
-concatenates them in memory and pivots them into the PMC DataFrame.
+`results_*.csv.gz` and also keeps the native tool's per-process CSVs.
+`file_io.create_df_pmc` reads the native CSVs when the workload has at least
+one complete set of them, and joins them in memory. Otherwise it reads
+`results_*.csv.gz`. Either way it pivots the rows into the PMC DataFrame.
 `pmc_perf.csv` is no longer written or read. The diagram below is the target
 once Phase C lands.
 
