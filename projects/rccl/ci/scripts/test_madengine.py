@@ -32,6 +32,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -906,10 +907,24 @@ def run_ab_in_one_allocation(
     docker_builds_dir.mkdir(exist_ok=True)
     env["MAD_DOCKER_BUILDS"] = str(docker_builds_dir)
 
+    # Own process group: killing salloc alone leaves run_phases.sh and its
+    # madengine/srun children running on the allocation.
+    proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True)
     try:
-        subprocess.run(cmd, cwd=work_dir, env=env, timeout=timeout_minutes * 60)
+        proc.wait(timeout=timeout_minutes * 60)
     except subprocess.TimeoutExpired:
         log.error("Allocation timed out after %d minutes", timeout_minutes)
+        try:
+            granted_job = alloc_info.read_text().split()[0]
+        except (OSError, IndexError):
+            granted_job = ""  # still queued; killing salloc withdraws it
+        if granted_job:
+            try:
+                subprocess.run(["scancel", granted_job], timeout=60)
+            except (OSError, subprocess.SubprocessError) as exc:
+                log.warning("scancel %s failed: %s", granted_job, exc)
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
 
     exit_codes = {}
     for phase, run_dir in phases:
