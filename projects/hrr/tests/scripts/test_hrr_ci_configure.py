@@ -292,6 +292,15 @@ class DecideTest(unittest.TestCase):
         self.assertTrue(d.run_cpu)
         self.assertTrue(d.run_gpu)
 
+    def test_label_match_ignores_case(self):
+        d = decide("pull_request", ["projects/rocminfo/x.cc"], labels=["CI:HRR-Capture"])
+        self.assertTrue(d.run_gpu)
+
+    def test_capture_only_path_also_runs_cpu(self):
+        d = decide("pull_request", ["projects/clr/hipamd/src/hip_context.cpp"])
+        self.assertTrue(d.run_cpu)
+        self.assertTrue(d.run_gpu)
+
     def test_family_label_adds_family(self):
         d = decide(
             "pull_request",

@@ -348,10 +348,13 @@ def decide(
             "the change touches HRR" if run_cpu else "the change does not touch HRR"
         )
 
-    labelled = event == "pull_request" and config.capture_label in labels
+    labelled = event == "pull_request" and config.capture_label.lower() in {l.strip().lower() for l in labels}
     if labelled and not capture:
         run_cpu, capture, why = True, True, f"the pull request is labelled {config.capture_label}"
 
+    # Capture paths that the CPU list omits (hip_context.cpp, hip_code_object.*)
+    # still need the host unit suite.
+    run_cpu = run_cpu or capture
     if not capture:
         return Decision(run_cpu, False, why)
     if is_fork:
