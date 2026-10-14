@@ -1642,7 +1642,10 @@ hipError_t playback___hipRegisterVar(PlaybackContext& ctx,
     const auto* a = reinterpret_cast<const hrr_args___hipRegisterVar*>(payload);
     if (!a->deviceVar_present || a->deviceVar_bytes[0] == '\0') return hipSuccess;
 
-    const char* name = reinterpret_cast<const char*>(a->deviceVar_bytes);
+    // The record's name field need not end in a NUL: copy it out bounded.
+    const std::string name_str =
+        hrr::bounded_cstr(a->deviceVar_bytes, sizeof(a->deviceVar_bytes));
+    const char* name = name_str.c_str();
     size_t live_size = 0;
     void* live = ctx.resolve_symbol_by_name(name, &live_size);
     if (!live) {
@@ -2059,11 +2062,13 @@ hipError_t playback_hipLinkAddData(PlaybackContext& ctx,
         }
     }
 
+    // The record's name field need not end in a NUL: copy it out bounded.
+    const std::string link_name =
+        hrr::bounded_cstr(a->name_bytes, sizeof(a->name_bytes));
     hipError_t r = hipLinkAddData(
         state, static_cast<hipJitInputType>(a->type), const_cast<void*>(image),
         blob_sz,
-        a->name_present ? reinterpret_cast<const char*>(a->name_bytes)
-                        : nullptr,
+        a->name_present ? link_name.c_str() : nullptr,
         n_opts, n_opts ? options : nullptr, n_opts ? option_values : nullptr);
     if (hrr_replayed_recorded_error(ctx, "hipLinkAddData", a->ret, r))
         return hipSuccess;
@@ -4904,12 +4909,27 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
                                   });
     }
 
-    // D2D / H2H: translate both ends (host ptrs translate to themselves-as-null
-    // and fall through to the recorded value, matching the generated behavior).
+    // ihipMemcpy2D returns success for a zero width or height before it looks at
+    // either pointer, so a zero-extent copy can be recorded with ends that are
+    // null or in no map. It does nothing at replay either.
+    if (width == 0 || height == 0) return hipSuccess;
+    // A host-to-host copy is a no-op, as in the 1D path (replay_memcpy_impl):
+    // plain host memory is in no map, and the copy touches nothing replay tracks.
+    if (kind == hipMemcpyHostToHost) return hipSuccess;
+
+    // D2D / H2H: translate both ends. An end that is in no map is an address
+    // from the capturing process: it is not used as is, since the archive would
+    // be choosing where the copy reads or writes.
     void* dst = ctx.translate_ptr(a->dst);
     void* src = ctx.translate_ptr(a->src);
-    if (!dst) dst = reinterpret_cast<void*>(a->dst);
-    if (!src) src = reinterpret_cast<void*>(a->src);
+    if (!dst || !src) {
+        fprintf(stderr,
+                "[HRR] hipMemcpy2D%s: %s 0x%llx is not mapped at replay, so the copy "
+                "is refused rather than run against a recorded address\n",
+                is_async ? "Async" : "", !dst ? "destination" : "source",
+                (unsigned long long)(!dst ? a->dst : a->src));
+        return hipErrorInvalidValue;
+    }
     if (is_async)
         return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
     return hipMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
@@ -4985,6 +5005,13 @@ hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* p
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipStreamAttrValue val{};
     std::memcpy(&val, a->stream_attr_bytes, sizeof(val));
+    // The access policy window's base_ptr is a device address of the capturing
+    // process; translate it as hipLaunchKernelExC does. CLR only stores the
+    // window, and rejects num_bytes above accessPolicyMaxWindowSize (0 on AMD),
+    // so a recorded window has num_bytes == 0 and replays like any other.
+    if (a->attr == hipStreamAttributeAccessPolicyWindow)
+        val.accessPolicyWindow.base_ptr = ctx.translate_ptr(
+            reinterpret_cast<uint64_t>(val.accessPolicyWindow.base_ptr));
     return hipStreamSetAttribute(stream, static_cast<hipStreamAttrID>(a->attr), &val);
 }
 

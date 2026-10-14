@@ -14,6 +14,7 @@ add_executable(hrr-unit-tests
   hrr_limits_test.cc
   hrr_recovery_test.cc
   hrr_repair_test.cc
+  hrr_slots_test.cc
   hrr_playback_test.cc
 )
 set_target_properties(hrr-unit-tests PROPERTIES
@@ -87,7 +88,9 @@ if(TARGET hrr-playback AND NOT WIN32)
     hrr_query_retry_test.cc
     hrr_host_budget_test.cc
     hrr_graph_deps_test.cc
+    hrr_refusals_test.cc
     hrr_blob_refusal_test.cc
+    hrr_access_policy_window_test.cc
   )
 
   add_executable(hrr-handler-tests
