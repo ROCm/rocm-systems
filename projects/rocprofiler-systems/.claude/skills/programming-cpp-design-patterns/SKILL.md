@@ -56,5 +56,4 @@ run_worker(logger& log);
 | Independent optional fields | [catalog/builder.md](catalog/builder.md) |
 | One known listener | [catalog/observer.md](catalog/observer.md) |
 | Closed enum of algorithms | [catalog/strategy.md](catalog/strategy.md) |
-| Closed set of types | [catalog/type-erasure.md](catalog/type-erasure.md) |
 | Open set, same operation, no shared base | [catalog/type-erasure.md](catalog/type-erasure.md) |
