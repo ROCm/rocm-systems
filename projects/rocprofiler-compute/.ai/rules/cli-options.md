@@ -55,10 +55,10 @@ Every rename also needs these updates:
 
 ## Arguments
 
-A list of values is passed as one comma-separated argument.
+A list of values is passed as separate arguments, separated by spaces.
 
 ```text
---roofline-data-types FP16,FP32,FP64
+--roofline-data-types FP16 FP32 FP64
 ```
 
 ## Help Messages
