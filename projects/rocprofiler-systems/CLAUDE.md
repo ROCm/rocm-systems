@@ -10,7 +10,8 @@ C++20, CMake, part of the `rocm-systems` monorepo
 Read the applicable files in `.claude/rules/` before making changes:
 
 - `cpp-conventions.md` for C++ files.
-- `cmake-conventions.md` for CMake and build work.
+- `cmake-build.md` for configuring and building.
+- `cmake-conventions.md` for writing or editing CMake files.
 - `testing-conventions.md` for tests and coverage.
 
 ## Planning
@@ -25,7 +26,7 @@ Load only skills relevant to the current task. Skills are in
 
 | Task | Skill |
 | --- | --- |
-| General C++ implementation | `programming-cpp` |
+| General C++ implementation | `programming-cpp`, `code-quality` |
 | Create, move, or rename C++ files/types | `programming-cpp-naming-rules` |
 | Containers, algorithms, ranges, or loops | `programming-cpp-stl-algorithms` |
 | Object design or behavioral variation | `programming-cpp-design-patterns` |
@@ -33,7 +34,7 @@ Load only skills relevant to the current task. Skills are in
 | Compile-time computation | `programming-cpp-constexpr` |
 | Python work | `programming-python` |
 | C++ tests | `testing-gtest-gmock` |
-| Code review / smells | `code-quality`, `code-smells` |
+| Smell reference while reviewing existing code | `code-smells` |
 | Refactoring | `refactoring-techniques` |
 
 ## Commands
@@ -48,7 +49,7 @@ Load only skills relevant to the current task. Skills are in
 - English output only, regardless of input language.
 - C++20 only — no C++23+ features (see `cpp-conventions.md`).
 - Never use timemory APIs in new code (see `cpp-conventions.md`).
-- Whole-project builds only — never `--target` (see `cmake-conventions.md`).
+- Whole-project builds only — never `--target` (see `cmake-build.md`).
 
 ## Human contributor process
 
